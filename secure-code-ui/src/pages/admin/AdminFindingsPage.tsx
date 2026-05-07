@@ -182,7 +182,7 @@ const AdminFindingsPage: React.FC = () => {
                           to={`/analysis/results/${item.scan_id}`}
                           style={{ fontSize: 12 }}
                         >
-                          {item.scan_id.slice(0, 8)}…
+                          {item.scan_id.slice(0, 12)}…
                         </Link>
                       </Td>
                     </tr>

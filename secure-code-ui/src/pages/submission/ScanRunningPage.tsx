@@ -649,7 +649,7 @@ const ScanRunningPage: React.FC = () => {
     const notifType = isSuccess ? "success" : isBlocked ? "warning" : "error";
     const notifTitle = projectInfo
       ? `${projectInfo.name} — scan ${isSuccess ? "completed" : isBlocked ? "blocked" : "failed"}`
-      : `Scan ${scanId.slice(0, 8)} — ${isSuccess ? "completed" : isBlocked ? "blocked" : "failed"}`;
+      : `Scan ${scanId.slice(0, 12)} — ${isSuccess ? "completed" : isBlocked ? "blocked" : "failed"}`;
 
     // Always push an in-app notification.
     pushNotification({
@@ -946,7 +946,7 @@ const ScanRunningPage: React.FC = () => {
                 to: fromPath,
                 onClick: !fromPath ? () => navigate(-1) : undefined,
               },
-              { label: `Scan ${scanId?.slice(0, 8) ?? "…"}` },
+              { label: `Scan ${scanId?.slice(0, 12) ?? "…"}` },
             ];
           }
           return [
@@ -959,7 +959,7 @@ const ScanRunningPage: React.FC = () => {
                   },
                 ]
               : []),
-            { label: `Scan ${scanId?.slice(0, 8) ?? "…"}` },
+            { label: `Scan ${scanId?.slice(0, 12) ?? "…"}` },
           ];
         })()}
         chip={
@@ -983,7 +983,7 @@ const ScanRunningPage: React.FC = () => {
             {isError ? <Icon.Alert size={11} /> : null}
             Scan{" "}
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
-              {scanId?.slice(0, 8)}
+              {scanId?.slice(0, 12)}
             </span>{" "}
             · {displayStatus(status)}
           </div>

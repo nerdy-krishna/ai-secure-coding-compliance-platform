@@ -249,7 +249,7 @@ const AgentManagementPage: React.FC = () => {
                       style={{ fontSize: 11, color: "var(--fg-subtle)" }}
                       className="mono"
                     >
-                      {a.id.slice(0, 8)}
+                      {a.id.slice(0, 12)}
                     </div>
                   </div>
                 </div>

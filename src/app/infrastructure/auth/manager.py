@@ -74,8 +74,48 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
                 origin_scheme = parsed.scheme.lower()
                 origin_host = parsed.netloc  # includes port if present
 
-                # Build the set of allowed hosts from settings
+                # Build the set of allowed hosts from BOTH the env-level
+                # ALLOWED_ORIGINS and the DB-stored security.allowed_origins
+                # set at /setup. The latter is what the operator actually
+                # configured — without it, an admin loading the UI from
+                # http://localhost (port 80) would have their Origin
+                # rejected and the link would fall back to the dev-port
+                # http://localhost:5173 from env.
                 allowed_origins: set = set(settings.ALLOWED_ORIGINS)
+                try:
+                    from app.core.config_cache import SystemConfigCache
+
+                    db_origins = SystemConfigCache.get_allowed_origins() or []
+                except Exception:
+                    db_origins = []
+                # Cache might be empty if lifespan hydration failed silently.
+                # Do a fresh DB read as a last-resort fallback so a misconfigured
+                # cache never causes a wrong-host email link.
+                if not db_origins:
+                    try:
+                        from app.infrastructure.database.database import (
+                            AsyncSessionLocal,
+                        )
+                        from app.infrastructure.database.repositories.system_config_repo import (  # noqa: E501
+                            SystemConfigRepository,
+                        )
+
+                        async with AsyncSessionLocal() as _s:
+                            _row = await SystemConfigRepository(_s).get_by_key(
+                                "security.allowed_origins"
+                            )
+                            if (
+                                _row
+                                and isinstance(_row.value, dict)
+                                and isinstance(_row.value.get("origins"), list)
+                            ):
+                                db_origins = list(_row.value["origins"])
+                                # Re-hydrate the cache opportunistically so
+                                # subsequent calls don't repeat the DB hit.
+                                SystemConfigCache.set_allowed_origins(db_origins)
+                    except Exception:
+                        pass
+                allowed_origins.update(db_origins)
                 # Also accept the canonical frontend base URL
                 allowed_origins.add(settings.frontend_base_url)
                 # Normalise: strip trailing slashes for comparison

@@ -284,7 +284,7 @@ const ProjectDetailPage: React.FC = () => {
                         color: "var(--fg)",
                       }}
                     >
-                      {s.id.slice(0, 8)}
+                      {s.id.slice(0, 12)}
                     </div>
                   </td>
                   <td style={{ color: "var(--fg-muted)", fontSize: 12.5 }}>
@@ -379,7 +379,7 @@ const ProjectDetailPage: React.FC = () => {
         }
       >
         <div style={{ color: "var(--fg)", fontSize: 13.5, lineHeight: 1.55 }}>
-          Scan <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{confirmDeleteScanId?.slice(0, 8)}</span> and all its findings, events, and fixes will be permanently removed.
+          Scan <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{confirmDeleteScanId?.slice(0, 12)}</span> and all its findings, events, and fixes will be permanently removed.
         </div>
       </Modal>
     </div>

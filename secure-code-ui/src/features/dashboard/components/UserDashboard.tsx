@@ -325,7 +325,7 @@ export const UserDashboard: React.FC = () => {
                                 fontFamily: "var(--font-mono)",
                               }}
                             >
-                              {s.id.slice(0, 8)}
+                              {s.id.slice(0, 12)}
                             </div>
                           </div>
                         </div>

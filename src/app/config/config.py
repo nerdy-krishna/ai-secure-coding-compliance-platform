@@ -159,11 +159,31 @@ class Settings(BaseSettings):
 
     @property
     def frontend_base_url(self) -> str:
+        """Canonical public URL for the frontend. Resolution order:
+
+        1. ``FRONTEND_BASE_URL`` env var (explicit operator override).
+        2. First entry of ``security.allowed_origins`` from the DB (the value
+           setup persists at first-run; this is what the operator picked at
+           setup time and is the right answer for password-reset links).
+        3. First entry of the env-level ``ALLOWED_ORIGINS`` (back-compat for
+           pre-setup boot — Vite dev server hint).
+        4. ``http://localhost:5173`` for dev/test environments.
+        """
         if self.FRONTEND_BASE_URL:
             return self.FRONTEND_BASE_URL.rstrip("/")
-        origins = self.ALLOWED_ORIGINS
-        if origins and origins[0]:
-            return origins[0].rstrip("/")
+        # Prefer the setup-time-stored origin so email links use the canonical
+        # host the operator entered at /setup, not the dev fallback.
+        try:
+            from app.core.config_cache import SystemConfigCache
+
+            db_origins = SystemConfigCache.get_allowed_origins() or []
+        except Exception:
+            db_origins = []
+        if db_origins and db_origins[0]:
+            return db_origins[0].rstrip("/")
+        env_origins = self.ALLOWED_ORIGINS
+        if env_origins and env_origins[0]:
+            return env_origins[0].rstrip("/")
         if self.ENVIRONMENT not in {"development", "local", "test"}:
             raise RuntimeError(
                 "FRONTEND_BASE_URL is not set and ALLOWED_ORIGINS is empty. "

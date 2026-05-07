@@ -297,7 +297,7 @@ const SubmissionHistoryPage: React.FC = () => {
                         >
                           {scan.scan_type.toUpperCase()} ·{" "}
                           <span style={{ fontFamily: "var(--font-mono)" }}>
-                            {scan.id.slice(0, 8)}
+                            {scan.id.slice(0, 12)}
                           </span>
                         </div>
                       </div>

@@ -347,7 +347,7 @@ const ResultsPage: React.FC = () => {
                 to: fromPath,
                 onClick: !fromPath ? () => navigate(-1) : undefined,
               },
-              { label: scanId?.slice(0, 8) ?? "…" },
+              { label: scanId?.slice(0, 12) ?? "…" },
             ];
           }
           return [
@@ -356,7 +356,7 @@ const ResultsPage: React.FC = () => {
               label: displayProjectName ?? "…",
               onClick: goToProject,
             },
-            { label: scanId?.slice(0, 8) ?? "…" },
+            { label: scanId?.slice(0, 12) ?? "…" },
           ];
         })()}
         title={
