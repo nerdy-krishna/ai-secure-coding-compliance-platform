@@ -18,6 +18,7 @@ Convention:
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import uuid
 from typing import Any, Dict, Optional
@@ -25,6 +26,7 @@ from typing import Any, Dict, Optional
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.config import settings
 from app.infrastructure.database import models as db_models
 
 try:
@@ -42,10 +44,85 @@ def hash_email(email: Optional[str]) -> Optional[str]:
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()[:64]
 
 
+def _peer_is_trusted_proxy(peer_host: Optional[str]) -> bool:
+    """True iff ``peer_host`` (the connecting socket's IP) is inside any
+    CIDR block in ``settings.TRUSTED_PROXY_CIDRS``.
+
+    Empty allowlist → returns False unconditionally (default secure: never
+    honor XFF unless the operator opts in). Malformed entries in the
+    allowlist are skipped silently and logged once on first failure.
+    """
+    if not peer_host:
+        return False
+    try:
+        peer_ip = ipaddress.ip_address(peer_host)
+    except ValueError:
+        return False
+    for cidr in settings.TRUSTED_PROXY_CIDRS:
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+        except ValueError:
+            logger.warning(
+                "auth_audit.bad_trusted_proxy_cidr",
+                extra={"cidr": cidr},
+            )
+            continue
+        if peer_ip in net:
+            return True
+    return False
+
+
+def _client_ip_from_request(request: Request) -> Optional[str]:
+    """Resolve the real client IP, honoring ``X-Forwarded-For`` only when
+    the connecting peer is a trusted proxy.
+
+    Walks XFF *right-to-left*, dropping each address that is itself in the
+    trusted-proxy allowlist; returns the first non-trusted hop. Each hop is
+    validated as a parseable IP literal — non-IP garbage in the header is
+    skipped (the audit table is ``String(45)`` and operators downstream pivot
+    on this field). If every XFF entry is trusted or unparseable, falls back
+    to the connecting peer.
+
+    Note (operator caveat): some reverse proxies emit the client address as
+    IPv4-mapped IPv6 (e.g. ``::ffff:10.0.0.5``). ``ipaddress.ip_address`` will
+    parse this as an IPv6 address, which won't match a plain ``10.0.0.0/8``
+    CIDR; either configure the proxy to emit native IPv4 or add the IPv6 form
+    to ``TRUSTED_PROXY_CIDRS`` (e.g. ``::ffff:10.0.0.0/104``).
+
+    See SOC 2 / ISO 27001 evidence: audit rows must carry the actual
+    end-user IP, not the proxy / load-balancer.
+    """
+    peer = request.client.host if request.client else None
+    if not _peer_is_trusted_proxy(peer):
+        return peer
+    xff_raw = request.headers.get("x-forwarded-for")
+    if not xff_raw:
+        return peer
+    # Right-most non-trusted, *parseable-IP* entry wins. Non-IP strings are
+    # skipped (a malicious or buggy proxy must not poison the audit row's
+    # ip column with arbitrary text).
+    hops = [h.strip() for h in xff_raw.split(",") if h.strip()]
+    fallback_origin: Optional[str] = None
+    for hop in reversed(hops):
+        try:
+            ipaddress.ip_address(hop)
+        except ValueError:
+            continue
+        if not _peer_is_trusted_proxy(hop):
+            return hop
+        # First parseable+trusted hop — keep it as a fallback (the leftmost
+        # parseable entry would normally be the origin in a multi-proxy chain).
+        fallback_origin = fallback_origin or hop
+    # All parseable hops were trusted proxies — return the rightmost trusted
+    # one (closest to a real client we have visibility on); else fall back to
+    # the connecting peer.
+    return fallback_origin or peer
+
+
 def _request_extras(request: Optional[Request]) -> Dict[str, Optional[str]]:
     if request is None:
         return {"ip": None, "user_agent": None}
-    ip = request.client.host if request.client else None
+    ip = _client_ip_from_request(request)
     ua_full = request.headers.get("user-agent")
     ua = ua_full[:512] if ua_full else None
     return {"ip": ip, "user_agent": ua}
@@ -122,9 +199,17 @@ async def record_in_new_session(
             )
             await session.commit()
     except Exception:
-        logger.warning(
+        # F10: dropped audit rows are observable — Loki picks up
+        # `metric_name` and the WARN→ERROR bump surfaces in oncall paging.
+        logger.error(
             "auth_audit.record_in_new_session_failed",
-            extra={"event": event, "user_id": user_id},
+            extra={
+                "event": event,
+                "user_id": user_id,
+                "metric_name": "auth.audit.write_failed",
+                "metric_kind": "counter",
+                "fail_path": "new_session",
+            },
             exc_info=True,
         )
 
@@ -178,8 +263,16 @@ async def record_event(
             details=details,
         )
     except Exception:
-        logger.warning(
+        # F10: same metric as record_in_new_session — Loki / Grafana can
+        # alert on a non-zero rate of `auth.audit.write_failed`.
+        logger.error(
             "auth_audit.record_failed",
-            extra={"event": event, "user_id": user_id},
+            extra={
+                "event": event,
+                "user_id": user_id,
+                "metric_name": "auth.audit.write_failed",
+                "metric_kind": "counter",
+                "fail_path": "in_session",
+            },
             exc_info=True,
         )

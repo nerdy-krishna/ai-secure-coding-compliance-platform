@@ -83,6 +83,20 @@ def _frontend_complete_url() -> str:
     return f"{settings.frontend_base_url.rstrip('/')}/auth/sso/complete"
 
 
+def _api_callback_url(provider_name: str, suffix: str = "callback") -> str:
+    """Build an absolute API URL the IdP must redirect / POST to.
+
+    F12: when the deployment runs the API on a different origin than the
+    frontend (e.g. ``api.x.com`` + ``ui.x.com``), ``API_BASE_URL`` overrides
+    ``FRONTEND_BASE_URL`` for these paths. ``settings.api_base_url`` falls
+    back to ``frontend_base_url`` for single-origin deploys.
+    """
+    return (
+        f"{settings.api_base_url.rstrip('/')}/api/v1/auth/sso/"
+        f"{provider_name}/{suffix}"
+    )
+
+
 def _redirect_to_frontend(
     *, access_token: str, response_extras: Optional[Response] = None
 ) -> RedirectResponse:
@@ -228,10 +242,7 @@ async def initiate_login(
             return_to=return_to,
             code_verifier=verifier,
         )
-        redirect_uri = (
-            f"{settings.frontend_base_url.rstrip('/')}/api/v1/auth/sso/"
-            f"{provider.name}/callback"
-        )
+        redirect_uri = _api_callback_url(provider.name, "callback")
         url = await oidc.build_authorize_url(
             cfg,
             redirect_uri=redirect_uri,
@@ -314,7 +325,7 @@ async def oidc_callback(
         return _redirect_to_frontend_with_error("provider_config_unavailable")
     cfg = bundle.config  # type: OidcConfig
 
-    redirect_uri = f"{settings.frontend_base_url.rstrip('/')}/api/v1/auth/sso/{provider.name}/callback"
+    redirect_uri = _api_callback_url(provider.name, "callback")
     try:
         userinfo = await oidc.exchange_code(
             cfg,

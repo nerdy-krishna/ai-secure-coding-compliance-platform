@@ -118,6 +118,15 @@ async def _create_jit_user(
         active. We need the JIT-policy ``approve`` flow to actually
         produce inactive users awaiting admin approval, so we hash the
         password directly and INSERT via the user repo.
+      * **F9 (CLOSED)** Side-effects from ``manager.on_after_register``
+        cannot fire on this path because we go through ``user_db.create``
+        directly — ``UserManager.create()``'s ``await self.on_after_register
+        (...)`` is never called. The user is committed by the caller's
+        transaction; no welcome email or post-register hook executes
+        before the audit row + commit. If a future change reintroduces
+        ``manager.create()`` here, F9 must be re-evaluated (the hook
+        would fire pre-commit and could leak a user before the audit row
+        is durable).
 
     The password is a random 64-char URL-safe token — the user cannot
     accidentally auth via password until an admin issues a reset. This

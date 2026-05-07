@@ -35,6 +35,7 @@ from app.infrastructure.auth.sso import audit, oidc, saml
 from app.infrastructure.auth.sso.models import (
     OidcConfig,
     SamlConfig,
+    SsoProtocol,
     parse_provider_config,
 )
 from app.infrastructure.auth.sso.repository import SsoProviderRepository
@@ -73,7 +74,10 @@ class ProviderRead(BaseModel):
     id: uuid.UUID
     name: str
     display_name: str
-    protocol: str
+    # F11: Pydantic ``Literal`` on the read shape. Even if a future migration
+    # loosens the DB CHECK constraint, this catches an unknown ``protocol``
+    # value at the wire boundary instead of silently accepting it.
+    protocol: SsoProtocol
     enabled: bool
     allowed_email_domains: Optional[List[str]] = None
     force_for_domains: Optional[List[str]] = None
@@ -90,7 +94,7 @@ class ProviderCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
     display_name: str = Field(..., min_length=1, max_length=128)
-    protocol: str = Field(..., pattern=r"^(oidc|saml)$")
+    protocol: SsoProtocol
     config: Dict[str, Any]
     enabled: bool = True
     allowed_email_domains: Optional[List[str]] = None

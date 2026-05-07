@@ -694,6 +694,9 @@ const SsoProvidersPage: React.FC = () => {
                   <div className="mono" style={{ marginTop: 4 }}>
                     {callbackUrlFor(provName, "callback")}
                   </div>
+                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--fg-subtle)" }}>
+                    Split-origin deploys: ensure backend <code>API_BASE_URL</code> matches the host above.
+                  </div>
                 </div>
               </div>
             ) : (
@@ -793,6 +796,9 @@ const SsoProvidersPage: React.FC = () => {
                     Metadata: {callbackUrlFor(provName, "metadata")}
                     <br />
                     SLO: {callbackUrlFor(provName, "slo")}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--fg-subtle)" }}>
+                    Split-origin deploys: ensure backend <code>API_BASE_URL</code> matches the host above.
                   </div>
                 </div>
               </div>

@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.config.config import settings
 from app.core.config_cache import SystemConfigCache
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.auth.sso.repository import SsoProviderRepository
@@ -162,12 +163,13 @@ class ForceSsoMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Buffer the body. Cap at 64 KiB — login bodies are tiny; anything
-        # larger is suspicious (DoS / oversize-body) and we let the inner
-        # app handle it as 413 / 422.
+        # Buffer the body. Default cap 64 KiB — login bodies are tiny;
+        # anything larger is suspicious (DoS / oversize-body) and we let
+        # the inner app handle it as 413 / 422. Operators can tune via
+        # ``LOGIN_BODY_MAX_BYTES`` (Polish-2).
         body_bytes = b""
         more_body = True
-        max_body = 64 * 1024
+        max_body = settings.LOGIN_BODY_MAX_BYTES
         while more_body:
             message = await receive()
             if message["type"] == "http.disconnect":

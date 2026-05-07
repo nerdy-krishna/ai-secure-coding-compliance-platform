@@ -125,6 +125,38 @@ class Settings(BaseSettings):
     # in ALLOWED_ORIGINS if unset; fail-fast in production if neither is usable.
     FRONTEND_BASE_URL: Optional[str] = None
 
+    # Canonical public URL for the API (split-origin deployments). When the
+    # frontend and API live on different origins (e.g. ui.x.com + api.x.com),
+    # SSO callback / ACS URIs must be built from this — registering them at
+    # the IdP otherwise points back at the frontend host. Defaults to None →
+    # SSO callbacks are built from `frontend_base_url` (single-origin deploys).
+    API_BASE_URL: Optional[str] = None
+
+    # Hard cap on the body size of POST /api/v1/auth/login (force-SSO
+    # middleware buffers the body to replay it; cap at 64 KiB by default —
+    # login bodies are tiny). Bumped via env for installs with non-standard
+    # form sizes.
+    LOGIN_BODY_MAX_BYTES: int = Field(default=64 * 1024, ge=1024, le=1_048_576)
+
+    # Comma-separated list of CIDR blocks for trusted reverse proxies.
+    # When the connecting peer (`request.client.host`) is in one of these
+    # CIDRs, the SSO audit recorder honors `X-Forwarded-For` (rightmost-untrusted)
+    # so audit rows carry the real client IP rather than the load balancer.
+    # Default empty → never trust XFF (single-host deploys).
+    TRUSTED_PROXY_CIDRS_STR: str = Field(default="", alias="TRUSTED_PROXY_CIDRS")
+
+    @property
+    def TRUSTED_PROXY_CIDRS(self) -> List[str]:
+        return [c.strip() for c in self.TRUSTED_PROXY_CIDRS_STR.split(",") if c.strip()]
+
+    @property
+    def api_base_url(self) -> str:
+        """Canonical API base URL. Falls back to ``frontend_base_url`` when
+        ``API_BASE_URL`` is unset (single-origin deploys)."""
+        if self.API_BASE_URL:
+            return self.API_BASE_URL.rstrip("/")
+        return self.frontend_base_url
+
     @property
     def frontend_base_url(self) -> str:
         if self.FRONTEND_BASE_URL:
@@ -286,6 +318,20 @@ class Settings(BaseSettings):
             raise ValueError(
                 "FRONTEND_BASE_URL must use https:// in all environments to prevent "
                 "insecure email links."
+            )
+        return v
+
+    @field_validator("API_BASE_URL")
+    def _validate_api_base_url(cls, v: Optional[str]) -> Optional[str]:
+        # Mirror FRONTEND_BASE_URL: https-only when set. SSO callbacks are
+        # registered at IdPs with this URL — http would let any IdP-issued
+        # token / authorization-code reach SCCAP over an interceptable
+        # channel. Most IdPs reject http redirect_uri anyway; this surfaces
+        # the misconfiguration at startup instead of at first IdP call.
+        if v and not v.startswith("https://"):
+            raise ValueError(
+                "API_BASE_URL must use https:// in all environments to prevent "
+                "interception of SSO callback tokens."
             )
         return v
 

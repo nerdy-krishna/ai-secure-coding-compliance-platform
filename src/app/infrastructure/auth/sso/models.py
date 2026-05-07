@@ -20,10 +20,67 @@ Threat-model mitigations baked in here:
 from __future__ import annotations
 
 import ipaddress
+import logging
 from typing import Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_pem_cert(pem: str, *, field_name: str) -> str:
+    """Parse a PEM-encoded X.509 cert via ``cryptography.x509``. Returns the
+    stripped PEM if parseable; raises ``ValueError`` with a sanitized message
+    on any failure (DER junk, mismatched markers, expired/garbled body).
+
+    Catches the failure at admin write time so the operator sees it on Save
+    instead of at first IdP login. The Polish-1 follow-up.
+    """
+    s = pem.strip()
+    if "-----BEGIN CERTIFICATE-----" not in s or "-----END CERTIFICATE-----" not in s:
+        raise ValueError(
+            f"{field_name} must be a PEM-formatted X.509 certificate "
+            "(missing BEGIN/END CERTIFICATE markers)"
+        )
+    try:
+        x509.load_pem_x509_certificate(s.encode("utf-8"))
+    except Exception as exc:
+        # NEVER include the cert body in the error (could leak details);
+        # only the exception class + sanitized message.
+        raise ValueError(
+            f"{field_name} could not be parsed as a PEM X.509 certificate: "
+            f"{type(exc).__name__}"
+        ) from exc
+    return s
+
+
+def _parse_pem_private_key(pem: str, *, field_name: str) -> str:
+    """Parse a PEM-encoded private key (RSA / EC / Ed25519). Used for the
+    SP signing key; keys can optionally be passphrase-protected, but our
+    config doesn't carry a passphrase, so we accept only unencrypted keys
+    here and raise a clear error otherwise."""
+    s = pem.strip()
+    if "-----BEGIN" not in s or "-----END" not in s:
+        raise ValueError(
+            f"{field_name} must be a PEM-formatted private key "
+            "(missing BEGIN/END markers)"
+        )
+    try:
+        load_pem_private_key(s.encode("utf-8"), password=None)
+    except TypeError as exc:
+        raise ValueError(
+            f"{field_name}: encrypted private keys are not supported "
+            "(decrypt the key before pasting it in)"
+        ) from exc
+    except Exception as exc:
+        raise ValueError(
+            f"{field_name} could not be parsed as a PEM private key: "
+            f"{type(exc).__name__}"
+        ) from exc
+    return s
 
 
 _BLOCKED_HOSTS = {
@@ -156,15 +213,25 @@ class SamlConfig(BaseModel):
     @field_validator("idp_x509_cert")
     @classmethod
     def _idp_cert_pem_check(cls, v: str) -> str:
-        v = v.strip()
-        if (
-            "-----BEGIN CERTIFICATE-----" not in v
-            or "-----END CERTIFICATE-----" not in v
-        ):
-            raise ValueError(
-                "idp_x509_cert must be a PEM-formatted X.509 certificate "
-                "(missing BEGIN/END CERTIFICATE markers)"
-            )
+        # Polish-1: cryptography.x509 parse — fail at admin Save, not first login.
+        return _parse_pem_cert(v, field_name="idp_x509_cert")
+
+    @field_validator("sp_x509_cert")
+    @classmethod
+    def _sp_cert_pem_check(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        return _parse_pem_cert(v, field_name="sp_x509_cert")
+
+    @field_validator("sp_private_key")
+    @classmethod
+    def _sp_private_key_pem_check(cls, v: Optional[SecretStr]) -> Optional[SecretStr]:
+        if v is None:
+            return v
+        raw = v.get_secret_value()
+        if not raw or not raw.strip():
+            return v
+        _parse_pem_private_key(raw, field_name="sp_private_key")
         return v
 
 
