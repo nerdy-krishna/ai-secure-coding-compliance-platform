@@ -35,6 +35,16 @@ class User(SQLAlchemyBaseUserTable[int], Base):
         String(length=320), unique=True, index=True, nullable=False
     )
 
+    # Tenant scoping (Chunk 7 — foundation only). Nullable; existing
+    # rows backfill to the seeded `default` tenant. No enforcement yet —
+    # `visible_user_ids` is still the only scope check today. Future
+    # phases will widen scope checks to filter by tenant.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     projects: Mapped[List["Project"]] = relationship("Project", back_populates="user")
     scans: Mapped[List["Scan"]] = relationship("Scan", back_populates="user")
     chat_sessions: Mapped[List["ChatSession"]] = relationship(
@@ -559,6 +569,12 @@ class UserGroup(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     # V02.3.4 — optimistic-locking version counter; bumped on every UPDATE.
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    # Tenant scoping foundation (Chunk 7). Nullable; backfilled.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -765,6 +781,31 @@ class SemgrepSyncRun(Base):
     )
 
 
+class Tenant(Base):
+    """Tenant scoping unit (Chunk 7 — foundation).
+
+    Future phases will namespace SSO providers, user_groups, and audit
+    events by tenant. For now this is structural scaffolding only —
+    every existing row backfills to the seeded ``default`` tenant
+    (uuid ``00000000-0000-0000-0000-000000000001``) and there's no
+    behavior change for single-tenant deployments.
+    """
+
+    __tablename__ = "tenants"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 # --- Enterprise SSO -----------------------------------------------------------
 # `sso_providers` is the row-per-IdP table. The SP can have multiple OIDC and
 # SAML providers active simultaneously; the `protocol` discriminator selects
@@ -800,6 +841,12 @@ class SsoProvider(Base):
     # "auto" | "approve" | "deny" — what happens on first login of an unknown email.
     jit_policy: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="auto"
+    )
+    # Tenant scoping foundation (Chunk 7). Nullable; backfilled.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -843,6 +890,12 @@ class OAuthAccount(Base):
     # Email at the IdP (verified before storage; M4). Mirrors `users.email`
     # but is the IdP's source of truth, not necessarily what we have locally.
     account_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    # Tenant scoping foundation (Chunk 7). Nullable; backfilled.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -887,6 +940,12 @@ class SamlSubject(Base):
     name_id: Mapped[str] = mapped_column(String(512), nullable=False)
     name_id_format: Mapped[str] = mapped_column(String(128), nullable=False)
     session_index: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    # Tenant scoping foundation (Chunk 7). Nullable; backfilled.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -1015,3 +1074,9 @@ class AuthAuditEvent(Base):
     # Event-specific JSONB. Always includes `correlation_id` so an audit
     # row can be stitched to Loki logs by the same X-Correlation-ID.
     details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    # Tenant scoping foundation (Chunk 7). Nullable; backfilled.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
