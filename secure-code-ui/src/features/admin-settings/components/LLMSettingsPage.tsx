@@ -504,6 +504,7 @@ const LLMSettingsPage: React.FC = () => {
                       <button
                         className="sccap-btn sccap-btn-icon sccap-btn-ghost"
                         aria-label="Delete"
+                        style={{ color: "var(--critical)" }}
                         onClick={() => setConfirmDeleteId(cfg.id)}
                         disabled={deleteMutation.isPending || updateMutation.isPending}
                       >

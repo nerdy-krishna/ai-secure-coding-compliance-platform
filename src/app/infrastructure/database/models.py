@@ -15,6 +15,8 @@ from sqlalchemy import (
     DECIMAL,
     BIGINT,
     ARRAY,
+    LargeBinary,
+    Boolean,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB, ARRAY as PG_ARRAY
 from sqlalchemy.orm import relationship, Mapped, mapped_column
@@ -37,6 +39,12 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     scans: Mapped[List["Scan"]] = relationship("Scan", back_populates="user")
     chat_sessions: Mapped[List["ChatSession"]] = relationship(
         "ChatSession", back_populates="user"
+    )
+    oauth_accounts: Mapped[List["OAuthAccount"]] = relationship(
+        "OAuthAccount", back_populates="user", cascade="all, delete-orphan"
+    )
+    saml_subjects: Mapped[List["SamlSubject"]] = relationship(
+        "SamlSubject", back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -752,3 +760,172 @@ class SemgrepSyncRun(Base):
     source: Mapped["SemgrepRuleSource"] = relationship(
         "SemgrepRuleSource", back_populates="sync_runs"
     )
+
+
+# --- Enterprise SSO -----------------------------------------------------------
+# `sso_providers` is the row-per-IdP table. The SP can have multiple OIDC and
+# SAML providers active simultaneously; the `protocol` discriminator selects
+# the codepath. `config_encrypted` is a Fernet-encrypted JSON blob — protocol-
+# specific fields (issuer URL, client_id/secret for OIDC; IdP entity ID, X.509
+# cert, attribute map for SAML) live inside the blob so the schema stays
+# protocol-agnostic.
+
+
+class SsoProvider(Base):
+    __tablename__ = "sso_providers"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    # internal slug (URL-safe, used in /auth/sso/{name}/...). Unique.
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # human-readable label shown on the login button.
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # "oidc" | "saml"
+    protocol: Mapped[str] = mapped_column(String(8), nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+    # Fernet(JSON(OidcConfig | SamlConfig)). Never returned plaintext over
+    # the wire (M13). Decrypted by the SSO repository for in-process use only.
+    config_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # null = any domain may use this provider; ["company.com"] = restrict.
+    allowed_email_domains: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+    # ["company.com"] = users in that domain MUST use SSO; password login 403s.
+    # Master admin (security.master_admin_user_id) is always exempt (M6).
+    force_for_domains: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+    # "auto" | "approve" | "deny" — what happens on first login of an unknown email.
+    jit_policy: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="auto"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    oauth_accounts: Mapped[List["OAuthAccount"]] = relationship(
+        "OAuthAccount", back_populates="provider", cascade="all, delete-orphan"
+    )
+    saml_subjects: Mapped[List["SamlSubject"]] = relationship(
+        "SamlSubject", back_populates="provider", cascade="all, delete-orphan"
+    )
+
+
+class OAuthAccount(Base):
+    """Link table between a User and an OIDC provider+remote-user-id pair.
+
+    Mirrors fastapi-users' `SQLAlchemyBaseOAuthAccountTable` shape but adds
+    `provider_id` so we can support multiple OIDC IdPs concurrently. The
+    `(provider_id, account_id)` pair is unique — one IdP user maps to one
+    SCCAP user.
+    """
+
+    __tablename__ = "oauth_accounts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sso_providers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # OIDC `sub` claim — opaque, IdP-assigned identifier for this user.
+    account_id: Mapped[str] = mapped_column(String(320), nullable=False)
+    # Email at the IdP (verified before storage; M4). Mirrors `users.email`
+    # but is the IdP's source of truth, not necessarily what we have locally.
+    account_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="oauth_accounts")
+    provider: Mapped["SsoProvider"] = relationship(back_populates="oauth_accounts")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id", "account_id", name="uq_oauth_accounts_provider_account"
+        ),
+    )
+
+
+class SamlSubject(Base):
+    """Link table between a User and a SAML provider+NameID pair.
+
+    `(provider_id, name_id)` is unique. `session_index` is the IdP-supplied
+    session correlator used for SLO LogoutRequest construction (RFC 3.7.3).
+    """
+
+    __tablename__ = "saml_subjects"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sso_providers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    name_id_format: Mapped[str] = mapped_column(String(128), nullable=False)
+    session_index: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="saml_subjects")
+    provider: Mapped["SsoProvider"] = relationship(back_populates="saml_subjects")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id", "name_id", name="uq_saml_subjects_provider_name_id"
+        ),
+    )
+
+
+class AuthAuditEvent(Base):
+    """Append-only audit log for authentication events (M7, M8).
+
+    Postgres trigger `auth_audit_immutable` rejects UPDATE/DELETE on this
+    table — see the SSO migration (`auth_audit_events_immutable_trigger`).
+    Every SSO success / failure / provisioning, force-SSO 403, and
+    session-lifetime-exceeded forced logout writes one row here.
+    """
+
+    __tablename__ = "auth_audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # e.g. "sso.login.success", "sso.login.failure", "sso.provisioned",
+    # "sso.linked", "sso.logout", "session.absolute_lifetime_exceeded",
+    # "auth.password_login.blocked_by_force_sso",
+    # "auth.provider.created", "auth.provider.updated", "auth.provider.deleted".
+    event: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # FK with ON DELETE SET NULL so audit history survives user/provider deletes.
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    provider_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("sso_providers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # sha256(email.lower())[:64] — never plaintext (gate: no email in logs).
+    email_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    ip: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # IPv6 max
+    user_agent: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    # Event-specific JSONB. Always includes `correlation_id` so an audit
+    # row can be stitched to Loki logs by the same X-Correlation-ID.
+    details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)

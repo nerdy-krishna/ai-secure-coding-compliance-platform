@@ -11,6 +11,7 @@ import apiClient from "../../shared/api/apiClient";
 import { logService } from "../../shared/api/logService";
 import { systemConfigService } from "../../shared/api/systemConfigService";
 import type { JsonValue } from "../../shared/types/api";
+import { useNotificationPermission } from "../../shared/hooks/useNotificationPermission";
 import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import { useToast } from "../../shared/ui/Toast";
@@ -52,9 +53,12 @@ type FormState = typeof emptyForm;
 const SystemConfigTab: React.FC = () => {
   const toast = useToast();
   const queryClient = useQueryClient();
+  const notif = useNotificationPermission();
 
   const [logLevel, setLogLevel] = useState<LogLevel>("INFO");
+  const [pendingLogLevel, setPendingLogLevel] = useState<LogLevel>("INFO");
   const [llmMode, setLlmMode] = useState<LlmMode>("multi_provider");
+  const [pendingLlmMode, setPendingLlmMode] = useState<LlmMode>("multi_provider");
   const [corsEnabled, setCorsEnabled] = useState(false);
   const [allowedOrigins, setAllowedOrigins] = useState<string[]>([]);
   const [originInput, setOriginInput] = useState("");
@@ -63,6 +67,11 @@ const SystemConfigTab: React.FC = () => {
   const [savingLog, setSavingLog] = useState(false);
   const [savingMode, setSavingMode] = useState(false);
   const [savingCors, setSavingCors] = useState(false);
+
+  // Session lifetime (M11: 1..168 hours, default 24h). null = use settings default.
+  const [sessionHours, setSessionHours] = useState<number | null>(null);
+  const [pendingSessionHours, setPendingSessionHours] = useState<string>("24");
+  const [savingSession, setSavingSession] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -112,7 +121,10 @@ const SystemConfigTab: React.FC = () => {
         logService.getLogLevel().catch(() => null),
         systemConfigService.getAll().catch(() => []),
       ]);
-      if (logRes?.level) setLogLevel(logRes.level as LogLevel);
+      if (logRes?.level) {
+        setLogLevel(logRes.level as LogLevel);
+        setPendingLogLevel(logRes.level as LogLevel);
+      }
 
       const corsCfg = all.find((c) => c.key === "security.cors_enabled");
       if (corsCfg?.value !== undefined)
@@ -137,7 +149,22 @@ const SystemConfigTab: React.FC = () => {
           typeof raw === "string" ? raw : (raw as { mode?: string }).mode;
         if (mode === "anthropic_optimized" || mode === "multi_provider") {
           setLlmMode(mode);
+          setPendingLlmMode(mode);
         }
+      }
+
+      const slhCfg = all.find(
+        (c) => c.key === "security.session_lifetime_hours",
+      );
+      if (
+        slhCfg?.value &&
+        typeof slhCfg.value === "object" &&
+        !Array.isArray(slhCfg.value) &&
+        typeof (slhCfg.value as { hours?: unknown }).hours === "number"
+      ) {
+        const h = (slhCfg.value as { hours: number }).hours;
+        setSessionHours(h);
+        setPendingSessionHours(String(h));
       }
     } finally {
       setLoadingMeta(false);
@@ -148,47 +175,70 @@ const SystemConfigTab: React.FC = () => {
     loadMeta();
   }, []);
 
-  const handleLogLevelChange = async (value: LogLevel) => {
+  const handleSaveLogLevel = async () => {
     if (
-      value === "DEBUG" &&
+      pendingLogLevel === "DEBUG" &&
       !window.confirm(
         "DEBUG logs include full LLM prompts which can contain secrets and PII. Continue?",
       )
     ) {
+      setPendingLogLevel(logLevel);
       return;
     }
     setSavingLog(true);
     try {
-      await logService.setLogLevel(value);
-      setLogLevel(value);
-      toast.success(`Log level set to ${value}.`);
+      await logService.setLogLevel(pendingLogLevel);
+      setLogLevel(pendingLogLevel);
+      toast.success(`Log level set to ${pendingLogLevel}.`);
     } catch {
       toast.error("Failed to update log level.");
+      setPendingLogLevel(logLevel);
     } finally {
       setSavingLog(false);
     }
   };
 
-  const handleLlmModeChange = async (mode: LlmMode) => {
-    if (mode === llmMode) return;
-    const prev = llmMode;
+  const handleSaveLlmMode = async () => {
     setSavingMode(true);
-    setLlmMode(mode);
     try {
       await systemConfigService.update("llm.optimization_mode", {
-        value: { mode },
+        value: { mode: pendingLlmMode },
       });
+      setLlmMode(pendingLlmMode);
       toast.success(
-        mode === "anthropic_optimized"
+        pendingLlmMode === "anthropic_optimized"
           ? "Switched to Anthropic-optimized. Prompt caches invalidate on next scan."
           : "Switched to multi-provider generic mode.",
       );
       queryClient.invalidateQueries({ queryKey: ["system-configs"] });
     } catch {
-      setLlmMode(prev);
       toast.error("Failed to update LLM optimization mode.");
+      setPendingLlmMode(llmMode);
     } finally {
       setSavingMode(false);
+    }
+  };
+
+  const handleSaveSessionHours = async () => {
+    const parsed = parseInt(pendingSessionHours, 10);
+    if (Number.isNaN(parsed) || parsed < 1 || parsed > 168) {
+      toast.error("Session lifetime must be between 1 and 168 hours.");
+      return;
+    }
+    setSavingSession(true);
+    try {
+      await systemConfigService.update("security.session_lifetime_hours", {
+        value: { hours: parsed },
+      });
+      setSessionHours(parsed);
+      toast.success(
+        `Session lifetime set to ${parsed} hour${parsed === 1 ? "" : "s"}.`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["system-configs"] });
+    } catch {
+      toast.error("Failed to update session lifetime.");
+    } finally {
+      setSavingSession(false);
     }
   };
 
@@ -361,8 +411,8 @@ const SystemConfigTab: React.FC = () => {
         >
           <select
             className="sccap-input"
-            value={logLevel}
-            onChange={(e) => handleLogLevelChange(e.target.value as LogLevel)}
+            value={pendingLogLevel}
+            onChange={(e) => setPendingLogLevel(e.target.value as LogLevel)}
             disabled={savingLog || loadingMeta}
             style={{ maxWidth: 380 }}
           >
@@ -372,6 +422,24 @@ const SystemConfigTab: React.FC = () => {
               </option>
             ))}
           </select>
+          {pendingLogLevel !== logLevel && (
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button
+                className="sccap-btn sccap-btn-primary sccap-btn-sm"
+                onClick={handleSaveLogLevel}
+                disabled={savingLog}
+              >
+                {savingLog ? "Saving…" : "Save"}
+              </button>
+              <button
+                className="sccap-btn sccap-btn-sm"
+                onClick={() => setPendingLogLevel(logLevel)}
+                disabled={savingLog}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </SettingsCard>
 
         <SettingsCard
@@ -380,8 +448,8 @@ const SystemConfigTab: React.FC = () => {
         >
           <select
             className="sccap-input"
-            value={llmMode}
-            onChange={(e) => handleLlmModeChange(e.target.value as LlmMode)}
+            value={pendingLlmMode}
+            onChange={(e) => setPendingLlmMode(e.target.value as LlmMode)}
             disabled={savingMode || loadingMeta}
             style={{ maxWidth: 380 }}
           >
@@ -391,17 +459,75 @@ const SystemConfigTab: React.FC = () => {
               </option>
             ))}
           </select>
-          <div
-            style={{
-              marginTop: 8,
-              fontSize: 11.5,
-              color: "var(--fg-subtle)",
-            }}
-          >
+          <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--fg-subtle)" }}>
             Switching invalidates Anthropic prompt caches on the next scan.
           </div>
+          {pendingLlmMode !== llmMode && (
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button
+                className="sccap-btn sccap-btn-primary sccap-btn-sm"
+                onClick={handleSaveLlmMode}
+                disabled={savingMode}
+              >
+                {savingMode ? "Saving…" : "Save"}
+              </button>
+              <button
+                className="sccap-btn sccap-btn-sm"
+                onClick={() => setPendingLlmMode(llmMode)}
+                disabled={savingMode}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </SettingsCard>
       </div>
+
+      <SettingsCard
+        title="Session lifetime"
+        description="Hard ceiling on how long a single login session lives before requiring re-authentication. Refresh-token rotation cannot extend a session past this absolute limit. Capped at 168 hours (7 days)."
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <input
+            type="number"
+            className="sccap-input"
+            min={1}
+            max={168}
+            step={1}
+            value={pendingSessionHours}
+            onChange={(e) => setPendingSessionHours(e.target.value)}
+            disabled={savingSession || loadingMeta}
+            style={{ maxWidth: 120 }}
+          />
+          <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>hours</span>
+          <button
+            className="sccap-btn sccap-btn-primary sccap-btn-sm"
+            onClick={handleSaveSessionHours}
+            disabled={
+              savingSession ||
+              loadingMeta ||
+              parseInt(pendingSessionHours, 10) === sessionHours
+            }
+          >
+            {savingSession ? "Saving…" : "Save"}
+          </button>
+          {sessionHours !== null && (
+            <span style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}>
+              currently {sessionHours} h
+            </span>
+          )}
+        </div>
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: 11.5,
+            color: "var(--fg-subtle)",
+          }}
+        >
+          Default 24 h. Lower = stronger compliance posture; higher = fewer
+          re-logins.
+        </div>
+      </SettingsCard>
 
       <SettingsCard
         title="CORS configuration"
@@ -518,6 +644,43 @@ const SystemConfigTab: React.FC = () => {
         )}
       </SettingsCard>
 
+      <SettingsCard
+        title="Desktop notifications"
+        description="Receive a browser notification when a scan finishes, even if you've navigated away. Stored per browser."
+      >
+        {!notif.supported ? (
+          <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+            Desktop notifications are not supported in this browser.
+          </div>
+        ) : notif.permission === "denied" ? (
+          <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+            Notifications are <strong>blocked</strong> by your browser. Click the lock icon in the
+            address bar and allow notifications for this site to re-enable.
+          </div>
+        ) : notif.permission === "granted" ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ fontSize: 13, color: "var(--fg)", fontWeight: 500 }}>Desktop notifications enabled</div>
+            <button className="sccap-btn sccap-btn-sm" onClick={() => { notif.dismiss(); toast.info("Desktop notifications turned off."); }}>
+              Disable
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ fontSize: 13, color: "var(--fg)", fontWeight: 500 }}>Desktop notifications off</div>
+            <button
+              className="sccap-btn sccap-btn-primary sccap-btn-sm"
+              onClick={async () => {
+                const result = await notif.request();
+                if (result === "granted") toast.success("Desktop notifications enabled.");
+                else if (result === "denied") toast.warn("Blocked by browser — re-enable in site settings.");
+              }}
+            >
+              <Icon.Bell size={12} /> Enable
+            </button>
+          </div>
+        )}
+      </SettingsCard>
+
       <div className="surface" style={{ padding: 0 }}>
         <div
           className="section-head"
@@ -612,6 +775,7 @@ const SystemConfigTab: React.FC = () => {
                       <button
                         className="sccap-btn sccap-btn-icon sccap-btn-ghost"
                         aria-label="Delete"
+                        style={{ color: "var(--critical)" }}
                         onClick={() => setConfirmDeleteKey(cfg.key)}
                       >
                         <Icon.Trash size={12} />

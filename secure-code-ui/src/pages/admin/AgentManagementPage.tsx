@@ -264,6 +264,7 @@ const AgentManagementPage: React.FC = () => {
                   <button
                     className="sccap-btn sccap-btn-icon sccap-btn-ghost"
                     aria-label="Delete"
+                    style={{ color: "var(--critical)" }}
                     onClick={() => setConfirmDeleteId(a.id)}
                   >
                     <Icon.Trash size={13} />

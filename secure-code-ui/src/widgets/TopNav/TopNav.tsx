@@ -21,8 +21,7 @@ interface NavItem {
   to: string;
 }
 
-// Order matches the design's center nav. Compliance routes to /compliance
-// which doesn't exist yet — G.5 builds that page; the link is ready.
+// Order matches the design's center nav.
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", match: "/account/dashboard", to: "/account/dashboard" },
   { id: "submit", label: "Submit", match: "/submission", to: "/submission/submit" },
@@ -32,25 +31,14 @@ const NAV_ITEMS: NavItem[] = [
   { id: "history", label: "History", match: "/account/history", to: "/account/history" },
 ];
 
-// Admin item appears only for superusers; shown after the main nav.
-const ADMIN_ITEM: NavItem = {
-  id: "admin",
-  label: "Admin",
-  match: "/admin",
-  to: "/admin/system",
-};
-
 export const TopNav: React.FC = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
   const isSuperuser = !!user?.is_superuser;
 
-  // Effective nav: append Admin item when the user is actually a superuser.
-  const items = isSuperuser ? [...NAV_ITEMS, ADMIN_ITEM] : NAV_ITEMS;
-
   const activeId =
-    items.find((it) => location.pathname.startsWith(it.match))?.id ?? null;
+    NAV_ITEMS.find((it) => location.pathname.startsWith(it.match))?.id ?? null;
 
   return (
     <header
@@ -89,7 +77,7 @@ export const TopNav: React.FC = () => {
             border: "1px solid var(--border)",
           }}
         >
-          {items.map((it) => {
+          {NAV_ITEMS.map((it) => {
             const isActive = activeId === it.id;
             return (
               <Link
@@ -110,7 +98,6 @@ export const TopNav: React.FC = () => {
                   transition: "all .15s var(--ease)",
                 }}
               >
-                {it.id === "admin" && <Icon.Settings size={12} />}
                 {it.label}
               </Link>
             );
@@ -222,9 +209,9 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
     navigate("/login", { replace: true });
   };
 
-  const goAppearance = () => {
+  const goSettings = () => {
     setOpen(false);
-    navigate("/account/settings/appearance");
+    navigate(isSuperuser ? "/admin/system" : "/account/settings/appearance");
   };
 
   const label = isSuperuser ? "Admin" : "User";
@@ -280,7 +267,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
         >
           <button
             role="menuitem"
-            onClick={goAppearance}
+            onClick={goSettings}
             style={{
               display: "flex",
               width: "100%",
@@ -297,7 +284,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
               textAlign: "left",
             }}
           >
-            <Icon.Settings size={14} /> <span>Appearance</span>
+            <Icon.Settings size={14} /> <span>Settings</span>
           </button>
           <div
             style={{ height: 1, background: "var(--border)", margin: "6px 0" }}

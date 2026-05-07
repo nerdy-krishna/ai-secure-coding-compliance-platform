@@ -124,7 +124,7 @@ async def perform_setup(
         is_verified=True,
     )
     try:
-        await user_manager.create(user_create, safe=False)
+        created_user = await user_manager.create(user_create, safe=False)
     except HTTPException:
         # fastapi-users raises HTTPException on duplicate / weak password;
         # let it propagate but record the bypass-attempt signal.
@@ -147,6 +147,36 @@ async def perform_setup(
         "setup: initial superuser created",
         extra={"email": request.admin_email, "is_superuser": True},
     )
+
+    # M6: persist the master-admin user id immediately so the force-SSO
+    # escape hatch reads a stable constant (never recomputes MIN(users.id)
+    # per request — that would silently transfer the escape hatch on master-
+    # admin deletion).
+    try:
+        sys_conf_repo_master = SystemConfigRepository(db)
+        await sys_conf_repo_master.set_value(
+            api_models.SystemConfigurationCreate(
+                key="security.master_admin_user_id",
+                value={"user_id": int(created_user.id)},
+                description=(
+                    "Master admin user id. This user is the local-admin "
+                    "escape hatch — they can always password-login even "
+                    "when force-SSO is configured for their domain. "
+                    "Deletion of this user is refused by admin_users."
+                ),
+                is_secret=False,
+                encrypted=False,
+            )
+        )
+        from app.core.config_cache import SystemConfigCache as _SCC
+
+        _SCC.set_master_admin_user_id(int(created_user.id))
+    except Exception:
+        logger.error(
+            "setup: failed to persist master_admin_user_id",
+            extra={"user_id": getattr(created_user, "id", None)},
+            exc_info=True,
+        )
 
     # 2. Validate mode/provider compatibility and configure LLM.
     if (

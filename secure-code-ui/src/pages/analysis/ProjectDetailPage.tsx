@@ -6,7 +6,7 @@
 // in-progress / pending-approval scan opens on ScanRunningPage and a
 // terminal scan opens on ResultsPage.
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { scanService } from "../../shared/api/scanService";
@@ -91,6 +91,7 @@ const ProjectDetailPage: React.FC = () => {
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["project-scans", projectId],
@@ -133,6 +134,18 @@ const ProjectDetailPage: React.FC = () => {
     }
   }, [projectId, navigate, queryClient, toast]);
 
+  const deleteScanMutation = useMutation({
+    mutationFn: (scanId: string) => scanService.deleteScan(scanId),
+    onSuccess: () => {
+      toast.info("Scan deleted.");
+      queryClient.invalidateQueries({ queryKey: ["project-scans", projectId] });
+      setConfirmDeleteScanId(null);
+    },
+    onError: () => {
+      toast.error("Failed to delete scan.");
+    },
+  });
+
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
       <PageHeader
@@ -163,7 +176,7 @@ const ProjectDetailPage: React.FC = () => {
                 disabled={deleting}
                 style={{ color: "var(--critical)" }}
               >
-                <Icon.Alert size={13} />{" "}
+                <Icon.Trash size={13} />{" "}
                 {deleting ? "Deleting…" : "Delete project"}
               </button>
             )}
@@ -282,12 +295,23 @@ const ProjectDetailPage: React.FC = () => {
                     {relativeTime(s.created_at)}
                   </td>
                   <td
-                    style={{
-                      textAlign: "right",
-                      color: "var(--fg-subtle)",
-                    }}
+                    style={{ textAlign: "right" }}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <Icon.ChevronR size={14} />
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                      <button
+                        className="sccap-btn sccap-btn-icon sccap-btn-ghost"
+                        aria-label="Delete scan"
+                        style={{ color: "var(--critical)" }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteScanId(s.id);
+                        }}
+                      >
+                        <Icon.Trash size={13} />
+                      </button>
+                      <Icon.ChevronR size={14} style={{ color: "var(--fg-subtle)" }} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -328,6 +352,34 @@ const ProjectDetailPage: React.FC = () => {
           </b>{" "}
           (with all findings, fixes, and stage events) will be removed. This
           cannot be undone.
+        </div>
+      </Modal>
+      <Modal
+        open={confirmDeleteScanId !== null}
+        onClose={() => !deleteScanMutation.isPending && setConfirmDeleteScanId(null)}
+        title="Delete this scan?"
+        footer={
+          <>
+            <button
+              className="sccap-btn"
+              onClick={() => setConfirmDeleteScanId(null)}
+              disabled={deleteScanMutation.isPending}
+            >
+              Cancel
+            </button>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              style={{ background: "var(--critical)", color: "#fff", border: "none" }}
+              onClick={() => confirmDeleteScanId && deleteScanMutation.mutate(confirmDeleteScanId)}
+              disabled={deleteScanMutation.isPending}
+            >
+              {deleteScanMutation.isPending ? "Deleting…" : "Delete scan"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ color: "var(--fg)", fontSize: 13.5, lineHeight: 1.55 }}>
+          Scan <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{confirmDeleteScanId?.slice(0, 8)}</span> and all its findings, events, and fixes will be permanently removed.
         </div>
       </Modal>
     </div>

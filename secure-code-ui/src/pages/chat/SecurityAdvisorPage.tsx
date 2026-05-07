@@ -360,7 +360,7 @@ const SecurityAdvisorPage: React.FC = () => {
                           className="sccap-btn sccap-btn-icon sccap-btn-ghost"
                           onClick={() => deleteMutation.mutate(s.id)}
                           title="Delete session"
-                          style={{ padding: 4 }}
+                          style={{ padding: 4, color: "var(--critical)" }}
                           aria-label="Delete session"
                         >
                           <Icon.Trash size={12} />

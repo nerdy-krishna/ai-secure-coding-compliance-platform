@@ -41,6 +41,51 @@ let refreshInFlight: Promise<string> | null = null;
 let refreshFailureCount = 0;
 let refreshOpenUntil = 0;
 
+// Proactive refresh: schedule a silent refresh ~5 minutes before the access
+// token expires so users don't experience a 401-flash near the boundary.
+// The reactive 401 path remains as last-resort fallback (e.g. clock skew).
+let proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+const PROACTIVE_LEAD_MS = 5 * 60 * 1000; // 5 min before expiry
+
+function decodeJwtExpMs(token: string): number | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    // base64url → base64 → JSON
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const payload = JSON.parse(atob(padded)) as { exp?: number };
+    if (typeof payload.exp !== "number") return null;
+    return payload.exp * 1000;
+  } catch {
+    return null;
+  }
+}
+
+export function cancelProactiveRefresh(): void {
+  if (proactiveRefreshTimer !== null) {
+    clearTimeout(proactiveRefreshTimer);
+    proactiveRefreshTimer = null;
+  }
+}
+
+export function scheduleProactiveRefresh(token: string | null | undefined): void {
+  cancelProactiveRefresh();
+  if (!token) return;
+  const expMs = decodeJwtExpMs(token);
+  if (expMs === null) return;
+  const fireIn = expMs - Date.now() - PROACTIVE_LEAD_MS;
+  // If the token is already past the lead window (or nearly expired), let the
+  // 401 interceptor handle it. Don't fire a refresh from a stale schedule.
+  if (fireIn <= 0) return;
+  proactiveRefreshTimer = setTimeout(() => {
+    refreshAccessToken().catch(() => {
+      // Swallow: the 401 interceptor will retry the next real request,
+      // and if refresh truly fails the user is bounced to /login there.
+    });
+  }, fireIn);
+}
+
 function refreshAccessToken(): Promise<string> {
   // Circuit breaker: reject immediately if the breaker is open
   if (Date.now() < refreshOpenUntil) {
@@ -55,6 +100,8 @@ function refreshAccessToken(): Promise<string> {
       refreshFailureCount = 0;
       localStorage.setItem("accessToken", access_token);
       apiClient.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
+      // Re-arm the proactive refresh timer for the new token's expiry.
+      scheduleProactiveRefresh(access_token);
       return access_token;
     })
     .catch((err) => {

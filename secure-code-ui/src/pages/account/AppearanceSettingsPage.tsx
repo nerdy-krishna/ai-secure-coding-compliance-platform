@@ -8,10 +8,8 @@
 
 import React from "react";
 import { useTheme } from "../../app/providers/ThemeProvider";
-import { useNotificationPermission } from "../../shared/hooks/useNotificationPermission";
 import { Icon } from "../../shared/ui/Icon";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
-import { useToast } from "../../shared/ui/Toast";
 
 interface Accent {
   id: string;
@@ -64,8 +62,6 @@ const Hint: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 const AppearanceSettingsPage: React.FC = () => {
   const { theme, variant, accent, setTheme, setVariant, setAccent } =
     useTheme();
-  const toast = useToast();
-  const notif = useNotificationPermission();
 
   const resetAll = () => {
     setTheme("light");
@@ -187,52 +183,6 @@ const AppearanceSettingsPage: React.FC = () => {
         </Hint>
       </div>
 
-      <div className="sccap-card">
-        <SubLabel>Desktop notifications</SubLabel>
-        {!notif.supported ? (
-          <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-            Desktop notifications are not supported in this browser.
-          </div>
-        ) : notif.permission === "denied" ? (
-          <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-            Notifications are <strong>blocked</strong> by your browser. To re-enable, click the lock
-            icon in the address bar and allow notifications for this site.
-          </div>
-        ) : notif.permission === "granted" ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 13, color: "var(--fg)", fontWeight: 500 }}>Desktop notifications enabled</div>
-              <Hint>You'll receive a browser notification when a scan reaches a terminal state.</Hint>
-            </div>
-            <button
-              className="sccap-btn sccap-btn-sm"
-              onClick={() => {
-                notif.dismiss();
-                toast.info("Desktop notifications turned off.");
-              }}
-            >
-              Disable
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 13, color: "var(--fg)", fontWeight: 500 }}>Desktop notifications off</div>
-              <Hint>Enable to get a browser notification when scans finish, even if you've navigated away.</Hint>
-            </div>
-            <button
-              className="sccap-btn sccap-btn-primary sccap-btn-sm"
-              onClick={async () => {
-                const result = await notif.request();
-                if (result === "granted") toast.success("Desktop notifications enabled.");
-                else if (result === "denied") toast.warn("Blocked by browser — re-enable in site settings.");
-              }}
-            >
-              <Icon.Bell size={12} /> Enable
-            </button>
-          </div>
-        )}
-      </div>
     </div>
   );
 };

@@ -1,12 +1,13 @@
 // secure-code-ui/src/pages/admin/UserManagement.tsx
 //
-// Admin user management — port of the design bundle's AdminUsers card
-// (Misc.jsx). Keeps the existing CRUD wiring to /admin/users; swaps the
-// antd Table + Modal + Form for SCCAP primitives.
+// Admin user management — create, edit (active/verified/superuser flags), delete.
+// Rows are clickable to open an edit drawer. The master admin (lowest user id =
+// setup admin) has a deletion lock; only their own actions are blocked — other
+// admins cannot delete them either.
 
 import React, { useEffect, useState } from "react";
-import { authService } from "../../shared/api/authService";
-import type { UserRead } from "../../shared/types/api";
+import { authService, type AdminUserRead } from "../../shared/api/authService";
+import { useAuth } from "../../shared/hooks/useAuth";
 import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import { useToast } from "../../shared/ui/Toast";
@@ -31,6 +32,13 @@ const INITIAL_FORM: CreateForm = {
   is_verified: false,
 };
 
+interface EditState {
+  user: AdminUserRead;
+  is_active: boolean;
+  is_superuser: boolean;
+  is_verified: boolean;
+}
+
 function initials(email: string): string {
   return email
     .split("@")[0]
@@ -43,7 +51,8 @@ function initials(email: string): string {
 
 const UserManagementTab: React.FC = () => {
   const toast = useToast();
-  const [users, setUsers] = useState<UserRead[]>([]);
+  const { user: currentUser } = useAuth();
+  const [users, setUsers] = useState<AdminUserRead[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -52,6 +61,14 @@ const UserManagementTab: React.FC = () => {
   // V08.4.2: track whether the step-up confirmation modal is open
   const [superuserConfirm, setSuperuserConfirm] = useState<SuperuserConfirmState>({ open: false, pendingForm: null });
   const [stepUpLoading, setStepUpLoading] = useState(false);
+
+  // Edit modal state
+  const [editState, setEditState] = useState<EditState | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Escalation confirm for edit modal superuser toggle
+  const [editSuperuserConfirm, setEditSuperuserConfirm] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -68,6 +85,9 @@ const UserManagementTab: React.FC = () => {
     fetchUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The master admin is the user with the lowest id (created during setup).
+  const masterAdminId = users.length > 0 ? Math.min(...users.map((u) => u.id)) : null;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,9 +119,6 @@ const UserManagementTab: React.FC = () => {
   };
 
   // V08.4.2: called after the operator confirms the privilege-escalation modal.
-  // True step-up re-authentication is a deferred follow-up — backend
-  // /auth/step-up endpoint and authService.requireRecentAuth helper are not yet
-  // implemented; the confirmation modal currently provides UX-level friction only.
   const handleSuperuserConfirmed = async () => {
     if (!superuserConfirm.pendingForm) return;
     setStepUpLoading(true);
@@ -125,9 +142,81 @@ const UserManagementTab: React.FC = () => {
     }
   };
 
+  const openEdit = (u: AdminUserRead) => {
+    setEditState({
+      user: u,
+      is_active: u.is_active,
+      is_superuser: u.is_superuser,
+      is_verified: u.is_verified,
+    });
+    setDeleteConfirmOpen(false);
+    setEditSuperuserConfirm(false);
+  };
+
+  const closeEdit = () => {
+    setEditState(null);
+    setDeleteConfirmOpen(false);
+    setEditSuperuserConfirm(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editState) return;
+
+    // Ask for escalation confirmation if superuser is being granted
+    if (editState.is_superuser && !editState.user.is_superuser && !editSuperuserConfirm) {
+      setEditSuperuserConfirm(true);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updated = await authService.adminUpdateUser(editState.user.id, {
+        is_active: editState.is_active,
+        is_superuser: editState.is_superuser,
+        is_verified: editState.is_verified,
+      });
+      toast.success("User updated.");
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      closeEdit();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg ?? "Failed to update user.");
+    } finally {
+      setSaving(false);
+      setEditSuperuserConfirm(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!editState) return;
+    setDeleting(true);
+    try {
+      await authService.adminDeleteUser(editState.user.id);
+      toast.success("User deleted.");
+      setUsers((prev) => prev.filter((u) => u.id !== editState.user.id));
+      closeEdit();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(msg ?? "Failed to delete user.");
+    } finally {
+      setDeleting(false);
+      setDeleteConfirmOpen(false);
+    }
+  };
+
   const filtered = users.filter((u) =>
     search ? u.email.toLowerCase().includes(search.toLowerCase()) : true,
   );
+
+  // Dirty check for the edit modal save button
+  const editDirty = editState
+    ? editState.is_active !== editState.user.is_active ||
+      editState.is_superuser !== editState.user.is_superuser ||
+      editState.is_verified !== editState.user.is_verified
+    : false;
+
+  const isMasterAdmin = (u: AdminUserRead) => u.id === masterAdminId;
+  const isSelf = (u: AdminUserRead) => u.id === currentUser?.id;
 
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
@@ -194,11 +283,16 @@ const UserManagementTab: React.FC = () => {
                 <th>Active</th>
                 <th>Verified</th>
                 <th>Role</th>
+                <th style={{ width: 80, textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((u) => (
-                <tr key={u.id} style={{ cursor: "default" }}>
+                <tr
+                  key={u.id}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => openEdit(u)}
+                >
                   <td>
                     <div
                       style={{
@@ -212,23 +306,53 @@ const UserManagementTab: React.FC = () => {
                           width: 28,
                           height: 28,
                           borderRadius: 8,
-                          background: "var(--primary-weak)",
-                          color: "var(--primary)",
+                          background: u.is_superuser
+                            ? "var(--primary-weak)"
+                            : "var(--bg-soft)",
+                          color: u.is_superuser
+                            ? "var(--primary)"
+                            : "var(--fg-muted)",
                           display: "grid",
                           placeItems: "center",
                           fontSize: 11,
                           fontWeight: 600,
+                          flexShrink: 0,
                         }}
                       >
                         {initials(u.email)}
                       </div>
-                      <div
-                        style={{
-                          fontFamily: "var(--font-mono)",
-                          color: "var(--fg)",
-                        }}
-                      >
-                        {u.email}
+                      <div style={{ lineHeight: 1.3 }}>
+                        <div
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            color: "var(--fg)",
+                            fontSize: 13,
+                          }}
+                        >
+                          {u.email}
+                        </div>
+                        {isMasterAdmin(u) && (
+                          <div
+                            style={{
+                              fontSize: 10.5,
+                              color: "var(--fg-subtle)",
+                              marginTop: 1,
+                            }}
+                          >
+                            Master admin · cannot be deleted
+                          </div>
+                        )}
+                        {isSelf(u) && !isMasterAdmin(u) && (
+                          <div
+                            style={{
+                              fontSize: 10.5,
+                              color: "var(--fg-subtle)",
+                              marginTop: 1,
+                            }}
+                          >
+                            You
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -258,6 +382,44 @@ const UserManagementTab: React.FC = () => {
                       <span className="chip">User</span>
                     )}
                   </td>
+                  <td style={{ textAlign: "right" }}>
+                    <div
+                      style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        className="sccap-btn sccap-btn-icon sccap-btn-ghost sccap-btn-sm"
+                        title="Edit user"
+                        onClick={(e) => { e.stopPropagation(); openEdit(u); }}
+                      >
+                        <Icon.Edit size={13} />
+                      </button>
+                      <button
+                        className="sccap-btn sccap-btn-icon sccap-btn-ghost sccap-btn-sm"
+                        title={
+                          isMasterAdmin(u)
+                            ? "Master admin cannot be deleted"
+                            : isSelf(u)
+                            ? "Cannot delete your own account"
+                            : "Delete user"
+                        }
+                        disabled={isMasterAdmin(u) || isSelf(u)}
+                        style={
+                          !isMasterAdmin(u) && !isSelf(u)
+                            ? { color: "var(--critical)" }
+                            : undefined
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEdit(u);
+                          // Small delay so edit modal mounts first
+                          setTimeout(() => setDeleteConfirmOpen(true), 50);
+                        }}
+                      >
+                        <Icon.Trash size={13} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -265,6 +427,199 @@ const UserManagementTab: React.FC = () => {
         )}
       </div>
 
+      {/* ── Edit user modal ───────────────────────────────────────────── */}
+      <Modal
+        open={!!editState && !deleteConfirmOpen && !editSuperuserConfirm}
+        onClose={closeEdit}
+        title={`Edit user`}
+        footer={
+          <>
+            <div style={{ flex: 1 }}>
+              {editState && !isMasterAdmin(editState.user) && !isSelf(editState.user) && (
+                <button
+                  className="sccap-btn sccap-btn-sm"
+                  style={{ color: "var(--critical)" }}
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  disabled={saving}
+                >
+                  <Icon.Trash size={12} /> Delete user
+                </button>
+              )}
+            </div>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              onClick={closeEdit}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              className="sccap-btn sccap-btn-primary sccap-btn-sm"
+              onClick={handleSaveEdit}
+              disabled={saving || !editDirty}
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </>
+        }
+      >
+        {editState && (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 12px",
+                borderRadius: 8,
+                background: "var(--bg-soft)",
+                border: "1px solid var(--border)",
+              }}
+            >
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  background: editState.user.is_superuser
+                    ? "var(--primary-weak)"
+                    : "var(--bg-inset)",
+                  color: editState.user.is_superuser
+                    ? "var(--primary)"
+                    : "var(--fg-muted)",
+                  display: "grid",
+                  placeItems: "center",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                }}
+              >
+                {initials(editState.user.email)}
+              </div>
+              <div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 13,
+                    color: "var(--fg)",
+                  }}
+                >
+                  {editState.user.email}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--fg-subtle)", marginTop: 2 }}>
+                  {isMasterAdmin(editState.user)
+                    ? "Master admin · deletion locked"
+                    : isSelf(editState.user)
+                    ? "Your account"
+                    : `ID ${editState.user.id}`}
+                </div>
+              </div>
+            </div>
+
+            <ToggleRow
+              label="Active"
+              hint="User can sign in. Disable to suspend without deleting."
+              value={editState.is_active}
+              onChange={(v) => setEditState({ ...editState, is_active: v })}
+              disabled={isSelf(editState.user)}
+            />
+            <ToggleRow
+              label="Verified"
+              hint="Email address has been confirmed."
+              value={editState.is_verified}
+              onChange={(v) => setEditState({ ...editState, is_verified: v })}
+            />
+            <ToggleRow
+              label="Superuser"
+              hint="Grants full access to all admin surfaces."
+              value={editState.is_superuser}
+              onChange={(v) => setEditState({ ...editState, is_superuser: v })}
+              disabled={isSelf(editState.user)}
+            />
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Superuser escalation confirmation (edit) ─────────────────── */}
+      <Modal
+        open={editSuperuserConfirm}
+        onClose={() => !saving && setEditSuperuserConfirm(false)}
+        title="Confirm privilege escalation"
+        footer={
+          <>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              onClick={() => setEditSuperuserConfirm(false)}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              className="sccap-btn sccap-btn-danger sccap-btn-sm"
+              onClick={handleSaveEdit}
+              disabled={saving}
+            >
+              {saving ? "Saving…" : "Confirm & save"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "grid", gap: 12 }}>
+          <p style={{ color: "var(--fg)", margin: 0 }}>
+            <strong>This grants full administrative powers</strong> to{" "}
+            <code style={{ fontFamily: "var(--font-mono)" }}>
+              {editState?.user.email}
+            </code>
+            .
+          </p>
+          <p style={{ color: "var(--fg-muted)", fontSize: 13, margin: 0 }}>
+            The user will be able to access all admin surfaces, manage other
+            users, and modify system settings. This action is logged.
+          </p>
+        </div>
+      </Modal>
+
+      {/* ── Delete confirmation ───────────────────────────────────────── */}
+      <Modal
+        open={deleteConfirmOpen}
+        onClose={() => !deleting && setDeleteConfirmOpen(false)}
+        title="Delete user"
+        footer={
+          <>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              className="sccap-btn sccap-btn-danger sccap-btn-sm"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting…" : "Delete permanently"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "grid", gap: 12 }}>
+          <p style={{ color: "var(--fg)", margin: 0 }}>
+            Permanently delete{" "}
+            <code style={{ fontFamily: "var(--font-mono)" }}>
+              {editState?.user.email}
+            </code>
+            ?
+          </p>
+          <p style={{ color: "var(--fg-muted)", fontSize: 13, margin: 0 }}>
+            This removes the account and all associated sessions. Their
+            projects and scans will remain in the system. This action cannot
+            be undone.
+          </p>
+        </div>
+      </Modal>
+
+      {/* ── Create user modal ─────────────────────────────────────────── */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -327,10 +682,7 @@ const UserManagementTab: React.FC = () => {
         </form>
       </Modal>
 
-      {/* V08.4.2 — Privilege-escalation confirmation + step-up re-auth gate.
-          Shown only when the admin attempts to create an account with is_superuser=true.
-          authService.requireRecentAuth() must validate that the current JWT auth_time
-          is within an acceptable window (backend also enforces this claim). */}
+      {/* V08.4.2 — Privilege-escalation confirmation + step-up re-auth gate (create flow). */}
       <Modal
         open={superuserConfirm.open}
         onClose={() => !stepUpLoading && setSuperuserConfirm({ open: false, pendingForm: null })}
@@ -377,13 +729,15 @@ const ToggleRow: React.FC<{
   hint?: string;
   value: boolean;
   onChange: (v: boolean) => void;
-}> = ({ label, hint, value, onChange }) => (
+  disabled?: boolean;
+}> = ({ label, hint, value, onChange, disabled }) => (
   <div
     style={{
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
       gap: 14,
+      opacity: disabled ? 0.5 : 1,
     }}
   >
     <div>
@@ -400,14 +754,15 @@ const ToggleRow: React.FC<{
       className={`sccap-switch ${value ? "on" : ""}`}
       role="switch"
       aria-checked={value}
-      tabIndex={0}
-      onClick={() => onChange(!value)}
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => !disabled && onChange(!value)}
       onKeyDown={(e) => {
-        if (e.key === " " || e.key === "Enter") {
+        if (!disabled && (e.key === " " || e.key === "Enter")) {
           e.preventDefault();
           onChange(!value);
         }
       }}
+      style={disabled ? { pointerEvents: "none" } : undefined}
     />
   </div>
 );

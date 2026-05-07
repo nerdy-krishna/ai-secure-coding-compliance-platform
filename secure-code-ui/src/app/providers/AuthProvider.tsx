@@ -1,7 +1,10 @@
 // secure-code-ui/src/app/providers/AuthProvider.tsx
 import { AxiosError } from "axios";
 import React, { useCallback, useEffect, useState, type ReactNode } from "react";
-import apiClient from "../../shared/api/apiClient";
+import apiClient, {
+  cancelProactiveRefresh,
+  scheduleProactiveRefresh,
+} from "../../shared/api/apiClient";
 import { authService } from "../../shared/api/authService";
 import {
   type TokenResponse,
@@ -128,6 +131,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       await checkSetupStatus();
 
       if (accessToken) {
+        // Arm the proactive refresh timer on app boot so a tab that
+        // already has a valid token (resumed session) keeps it warm.
+        scheduleProactiveRefresh(accessToken);
         await fetchAndSetUser();
       }
       setInitialAuthChecked(true);
@@ -164,6 +170,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       const response: TokenResponse = await authService.loginUser(credentials);
       localStorage.setItem("accessToken", response.access_token);
       setAccessToken(response.access_token);
+      // Arm proactive refresh so the user doesn't see a 401 flash near
+      // access-token expiry.
+      scheduleProactiveRefresh(response.access_token);
     } catch (err: unknown) {
       // V16.2.5: Never log the raw axios error — it contains the Bearer token in request headers.
       console.error("AuthProvider: Login failed:", {
@@ -236,6 +245,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
         },
       );
     } finally {
+      cancelProactiveRefresh();
       setAccessToken(null);
       setUser(null);
       setIsLoading(false);

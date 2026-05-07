@@ -123,14 +123,43 @@ async def refresh_access_token(
 
     # Enforce absolute session lifetime (V07.3.2): propagate original_iat from
     # the inbound token so the session cannot be extended indefinitely by rotation.
+    # Read admin override first (system_config[security.session_lifetime_hours]);
+    # fall back to settings default (validated 5 min – 7 d).
     original_iat = payload.get("original_iat", datetime.now(timezone.utc).timestamp())
-    absolute_lifetime = getattr(
-        settings, "SESSION_ABSOLUTE_LIFETIME_SECONDS", 43200
-    )  # default 12 h
+    from app.core.config_cache import SystemConfigCache
+
+    cache_hours = SystemConfigCache.get_session_lifetime_hours()
+    absolute_lifetime = (
+        cache_hours * 3600
+        if cache_hours is not None
+        else settings.SESSION_ABSOLUTE_LIFETIME_SECONDS
+    )
     if datetime.now(timezone.utc).timestamp() - original_iat > absolute_lifetime:
         logger.warning(
-            "auth.refresh.session_lifetime_exceeded", extra={"user_id": user.id}
+            "auth.refresh.session_lifetime_exceeded",
+            extra={"event": "session.absolute_lifetime_exceeded", "user_id": user.id},
         )
+        # M8: emit auth audit event so SOC 2 trace shows the forced logout.
+        try:
+            from app.infrastructure.auth.sso.audit import (
+                EVENT_SESSION_LIFETIME_EXCEEDED,
+                record_event,
+            )
+
+            await record_event(
+                db=None,
+                event=EVENT_SESSION_LIFETIME_EXCEEDED,
+                user_id=user.id,
+                provider_id=None,
+                request=request,
+                details={
+                    "original_iat": original_iat,
+                    "ceiling_seconds": absolute_lifetime,
+                },
+            )
+        except Exception:
+            # Audit failure must never block the rejection path.
+            pass
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session lifetime exceeded; please log in again.",
@@ -154,7 +183,14 @@ async def refresh_access_token(
     )
     await strategy.write_refresh_token(response, new_refresh_token)
 
-    logger.info("auth.refresh.success", extra={"user_id": user.id, "email": user.email})
+    # M12: never log plaintext email — hash for correlation.
+    import hashlib as _hashlib
+
+    _email_hash = _hashlib.sha256(user.email.lower().encode()).hexdigest()[:12]
+    logger.info(
+        "auth.refresh.success",
+        extra={"user_id": user.id, "email_hash": _email_hash},
+    )
 
     return {
         "access_token": new_access_token,

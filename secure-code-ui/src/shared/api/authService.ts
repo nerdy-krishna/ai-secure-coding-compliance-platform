@@ -10,6 +10,14 @@ import {
 
 type AdminUserCreate = components["schemas"]["AdminUserCreate"];
 
+export interface AdminUserRead {
+  id: number;
+  email: string;
+  is_active: boolean;
+  is_superuser: boolean;
+  is_verified: boolean;
+}
+
 export const authService = {
   // Login
   // FastAPI Users' /auth/login endpoint expects form data (username, password)
@@ -104,8 +112,20 @@ export const authService = {
     return response.data;
   },
 
-  adminListUsers: async (): Promise<UserRead[]> => {
-    const response = await apiClient.get<UserRead[]>("/admin/users");
+  adminListUsers: async (): Promise<AdminUserRead[]> => {
+    const response = await apiClient.get<AdminUserRead[]>("/admin/users");
     return response.data;
+  },
+
+  adminUpdateUser: async (
+    userId: number,
+    data: { is_active?: boolean; is_superuser?: boolean; is_verified?: boolean },
+  ): Promise<AdminUserRead> => {
+    const response = await apiClient.patch<AdminUserRead>(`/admin/users/${userId}`, data);
+    return response.data;
+  },
+
+  adminDeleteUser: async (userId: number): Promise<void> => {
+    await apiClient.delete(`/admin/users/${userId}`);
   },
 };

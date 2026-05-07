@@ -262,6 +262,7 @@ const UserGroupsPage: React.FC = () => {
                   <button
                     className="sccap-btn sccap-btn-icon sccap-btn-ghost"
                     aria-label="Delete"
+                    style={{ color: "var(--critical)" }}
                     onClick={() => setConfirmDeleteId(g.id)}
                   >
                     <Icon.Trash size={13} />

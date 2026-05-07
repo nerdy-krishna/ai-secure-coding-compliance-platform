@@ -23,6 +23,7 @@ from app.api.v1.routers.compliance import router as compliance_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.setup import router as setup_router
 from app.api.v1.routers.admin_config import router as admin_config_router
+from app.api.v1.routers.admin_smtp import router as admin_smtp_router
 from app.api.v1.routers.admin_findings import router as admin_findings_router
 from app.api.v1.routers.admin_groups import router as admin_groups_router
 from app.api.v1.routers.admin_seed import router as admin_seed_router
@@ -150,14 +151,27 @@ async def lifespan(app: FastAPI):
                     ]
                     SystemConfigCache.set_allowed_origins(origins)
                     logger.info(f"Loaded allowed origins from ENV: {origins}")
-                # Load SMTP Configuration from DB
-                smtp_config = await repo.get_by_key("system.smtp")
-                if smtp_config and isinstance(smtp_config.value, dict):
-                    SystemConfigCache.set_smtp_config(smtp_config.value)
-                    logger.info("Loaded SMTP configuration from DB.")
-                else:
-                    SystemConfigCache.set_smtp_config(None)
-                    logger.info("No SMTP configuration found in DB.")
+                # Load SMTP configuration — try new multi-profile format first,
+                # fall back to legacy system.smtp encrypted blob.
+                smtp_loaded = False
+                smtp_profiles_row = await repo.get_by_key("smtp.profiles")
+                if smtp_profiles_row and isinstance(smtp_profiles_row.value, dict):
+                    from app.api.v1.routers.admin_smtp import _reload_smtp_cache
+
+                    active_id = smtp_profiles_row.value.get("active_id")
+                    await _reload_smtp_cache(repo, active_id)
+                    smtp_loaded = True
+                    logger.info("Loaded SMTP configuration from smtp.profiles.")
+                if not smtp_loaded:
+                    smtp_config = await repo.get_by_key("system.smtp")
+                    if smtp_config and isinstance(smtp_config.value, dict):
+                        SystemConfigCache.set_smtp_config(smtp_config.value)
+                        logger.info(
+                            "Loaded SMTP configuration from legacy system.smtp key."
+                        )
+                    else:
+                        SystemConfigCache.set_smtp_config(None)
+                        logger.info("No SMTP configuration found in DB.")
 
                 # Load LLM optimization mode from DB
                 llm_mode_config = await repo.get_by_key("llm.optimization_mode")
@@ -220,6 +234,64 @@ async def lifespan(app: FastAPI):
                     SystemConfigCache.get_retention_days(RETENTION_KIND_CHAT_MESSAGE),
                     SystemConfigCache.get_retention_days(RETENTION_KIND_RAG_JOB),
                 )
+
+                # Session lifetime (admin override). Stored as
+                # system_config["security.session_lifetime_hours"] = {"hours": N}.
+                slh_cfg = await repo.get_by_key("security.session_lifetime_hours")
+                if (
+                    slh_cfg
+                    and isinstance(slh_cfg.value, dict)
+                    and "hours" in slh_cfg.value
+                ):
+                    try:
+                        SystemConfigCache.set_session_lifetime_hours(
+                            int(slh_cfg.value["hours"])
+                        )
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Invalid security.session_lifetime_hours in DB; using settings default.",
+                        )
+
+                # M6: master-admin user id (escape hatch for force-SSO).
+                ma_cfg = await repo.get_by_key("security.master_admin_user_id")
+                if (
+                    ma_cfg
+                    and isinstance(ma_cfg.value, dict)
+                    and "user_id" in ma_cfg.value
+                ):
+                    try:
+                        SystemConfigCache.set_master_admin_user_id(
+                            int(ma_cfg.value["user_id"])
+                        )
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "Invalid security.master_admin_user_id in DB; ignoring.",
+                        )
+                else:
+                    # Backfill: if setup is done but master_admin_user_id is unset
+                    # (e.g. the first user pre-dates this code), persist MIN(id) now.
+                    from sqlalchemy import select, func
+                    from app.infrastructure.database.models import User as _UserModel
+
+                    res = await session.execute(select(func.min(_UserModel.id)))
+                    min_id = res.scalar()
+                    if min_id is not None:
+                        from app.api.v1 import models as _api_models
+
+                        await repo.set_value(
+                            _api_models.SystemConfigurationCreate(
+                                key="security.master_admin_user_id",
+                                value={"user_id": int(min_id)},
+                                description="Master admin user id (force-SSO escape hatch).",
+                                is_secret=False,
+                                encrypted=False,
+                            )
+                        )
+                        SystemConfigCache.set_master_admin_user_id(int(min_id))
+                        logger.info(
+                            "Master-admin id backfilled from MIN(users.id) = %d",
+                            int(min_id),
+                        )
 
             else:
                 logger.info("Setup not completed. Allowing all origins for setup mode.")
@@ -780,6 +852,19 @@ app.include_router(
     tags=["Authentication"],
 )
 
+# Enterprise SSO — public + admin routers + force-SSO login guard.
+from app.api.v1.routers.sso import router as sso_router  # noqa: E402
+from app.api.v1.routers.admin_sso import router as admin_sso_router  # noqa: E402
+from app.api.v1.routers.auth_login_guard import (  # noqa: E402
+    router as login_guard_router,
+    ForceSsoMiddleware,
+)
+
+app.include_router(sso_router, prefix="/api/v1")
+app.include_router(admin_sso_router, prefix="/api/v1")
+app.include_router(login_guard_router, prefix="/api/v1")
+app.add_middleware(ForceSsoMiddleware)
+
 app.include_router(
     fastapi_users.get_reset_password_router(),
     prefix="/api/v1/auth",
@@ -804,6 +889,9 @@ app.include_router(
     admin_config_router,
     prefix="/api/v1",  # Prefix is defined in the router itself as /admin/system-config
 )
+
+# Router for SMTP profile management (multi-profile, separate from generic system-config)
+app.include_router(admin_smtp_router, prefix="/api/v1")
 
 
 # --- Root Endpoint ---

@@ -40,6 +40,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         libpq5 \
+        # Runtime libraries required by python3-saml (lxml + xmlsec1 bindings).
+        # python3-saml needs libxmlsec1 + libxmlsec1-openssl for canonicalization
+        # and signature validation; without these the SAML SP layer fails on
+        # import. See threat-model M3 (SAML hardening).
+        libxmlsec1 \
+        libxmlsec1-openssl \
+        libxml2 \
     && rm -rf /var/lib/apt/lists/*
 
 ARG APP_USER=appuser
@@ -66,6 +73,14 @@ ENV POETRY_VERSION=1.8.3 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        # Build deps for python3-saml + lxml: pkg-config + headers for
+        # libxmlsec1 / libxml2 are required when building the xmlsec
+        # Python bindings against the runtime libraries pulled in by
+        # the base stage.
+        pkg-config \
+        libxmlsec1-dev \
+        libxml2-dev \
+        libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN --mount=type=cache,target=/root/.cache/pip \

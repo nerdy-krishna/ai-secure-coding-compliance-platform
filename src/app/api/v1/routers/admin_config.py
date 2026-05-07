@@ -63,6 +63,13 @@ class _CorsEnabledValue(BaseModel):
     enabled: bool
 
 
+class _SessionLifetimeValue(BaseModel):
+    """Strict shape for ``security.session_lifetime_hours`` (1..168 — capped
+    at 7 days to match REFRESH_TOKEN_LIFETIME_SECONDS; M11)."""
+
+    hours: int = Field(..., ge=1, le=168)
+
+
 async def get_admin_user(current_user: db_models.User = Depends(current_active_user)):
     if not current_user.is_superuser:
         logger.warning(
@@ -186,6 +193,16 @@ async def set_system_config(
                 status_code=400,
                 detail=f"Invalid cors_enabled payload: {exc}",
             )
+    elif key == "security.session_lifetime_hours" and isinstance(
+        system_config.value, dict
+    ):
+        try:
+            _SessionLifetimeValue.model_validate(system_config.value)
+        except ValidationError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid session_lifetime_hours payload: {exc}",
+            )
 
     # Dynamic updates to cache. If a cache update raises, roll back the DB
     # write so cache and DB cannot drift out of sync (V02.3.3).
@@ -217,6 +234,14 @@ async def set_system_config(
                 "admin.system_config.cache_updated",
                 extra={"actor_id": current_user.id, "key": key},
             )
+        elif key == "security.session_lifetime_hours":
+            val = system_config.value
+            if isinstance(val, dict) and "hours" in val:
+                SystemConfigCache.set_session_lifetime_hours(int(val["hours"]))
+                logger.warning(
+                    "admin.system_config.cache_updated",
+                    extra={"actor_id": current_user.id, "key": key},
+                )
     except Exception:
         # Roll back the DB write so cache and DB stay consistent (V02.3.3).
         try:

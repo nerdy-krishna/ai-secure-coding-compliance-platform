@@ -10,6 +10,14 @@ import { useAuth } from "../../../shared/hooks/useAuth";
 import { type UserLoginData } from "../../../shared/types/api";
 import { Icon } from "../../../shared/ui/Icon";
 import { useToast } from "../../../shared/ui/Toast";
+import {
+  ssoService,
+  type LoginGuardResponse,
+  type SsoProviderPublic,
+} from "../../../shared/api/ssoService";
+
+const SSO_LOGIN_URL = (providerName: string) =>
+  `/api/v1/auth/sso/${providerName}/login`;
 
 const LoginPageContent: React.FC = () => {
   const {
@@ -28,12 +36,61 @@ const LoginPageContent: React.FC = () => {
     remember: true,
   });
 
+  const [providers, setProviders] = useState<SsoProviderPublic[]>([]);
+  const [forcedSso, setForcedSso] = useState<LoginGuardResponse | null>(null);
+  const [providersLoaded, setProvidersLoaded] = useState(false);
+
   useEffect(() => {
     if (authError) {
       toast.error(authError);
       clearError();
     }
   }, [authError, clearError, toast]);
+
+  // Load enabled SSO providers on mount.
+  useEffect(() => {
+    let cancelled = false;
+    ssoService
+      .listEnabledProviders()
+      .then((res) => {
+        if (!cancelled) setProviders(res.providers);
+      })
+      .catch(() => {
+        // Silently fall through to password-only — SSO is optional.
+      })
+      .finally(() => {
+        if (!cancelled) setProvidersLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Force-SSO preflight: when the user types an email and tabs out, ask
+  // the backend whether their domain requires SSO. If yes, hide the
+  // password field and surface the matching SSO button.
+  useEffect(() => {
+    const trimmed = form.username.trim();
+    if (!trimmed.includes("@") || trimmed.length < 5) {
+      setForcedSso(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      ssoService
+        .loginGuard(trimmed)
+        .then((res) => {
+          if (!cancelled) setForcedSso(res);
+        })
+        .catch(() => {
+          if (!cancelled) setForcedSso(null);
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.username]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,12 +264,78 @@ const LoginPageContent: React.FC = () => {
       <button
         type="submit"
         className="sccap-btn sccap-btn-primary sccap-btn-lg"
-        disabled={authLoading}
+        disabled={authLoading || (forcedSso?.forced ?? false)}
         style={{ width: "100%" }}
+        title={
+          forcedSso?.forced
+            ? `Use ${forcedSso.provider?.display_name ?? "SSO"} for ${form.username}`
+            : undefined
+        }
       >
         {authLoading ? "Signing in…" : "Log in"}
         {!authLoading && <Icon.ArrowR size={14} />}
       </button>
+
+      {/* SSO row — buttons appear when at least one provider is enabled.
+          Force-SSO mode pins the active button to the matched provider. */}
+      {providersLoaded && (providers.length > 0 || forcedSso?.forced) && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              color: "var(--fg-subtle)",
+              fontSize: 11,
+              textTransform: "uppercase",
+              letterSpacing: ".08em",
+              marginTop: 4,
+            }}
+          >
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            or
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+
+          {forcedSso?.forced && forcedSso.provider ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <a
+                className="sccap-btn sccap-btn-lg"
+                href={SSO_LOGIN_URL(forcedSso.provider.name)}
+                style={{ width: "100%", justifyContent: "center" }}
+              >
+                <Icon.Shield size={14} />
+                Sign in with {forcedSso.provider.display_name}
+              </a>
+              <div
+                style={{
+                  fontSize: 11.5,
+                  color: "var(--fg-subtle)",
+                  textAlign: "center",
+                }}
+              >
+                Your organization requires SSO for {form.username
+                  .split("@")[1]
+                  ?.toLowerCase() || "this domain"}.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {providers.map((p) => (
+                <a
+                  key={p.id}
+                  className="sccap-btn sccap-btn-lg"
+                  href={SSO_LOGIN_URL(p.name)}
+                  style={{ width: "100%", justifyContent: "center" }}
+                >
+                  <Icon.Shield size={14} />
+                  Sign in with {p.display_name}
+                </a>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </form>
   );
 };

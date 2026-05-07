@@ -102,6 +102,17 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     ACCESS_TOKEN_LIFETIME_SECONDS: int = 60 * 60  # 60 minutes
     REFRESH_TOKEN_LIFETIME_SECONDS: int = 60 * 60 * 24 * 7  # 7 days
+    # Absolute session lifetime: hard ceiling on how long a single login
+    # session can be extended via refresh-token rotation. Default 24 h.
+    # Ceiling 7 d (matches REFRESH_TOKEN_LIFETIME_SECONDS — anything longer
+    # would be meaningless because the refresh token itself has expired).
+    # Admin can override at runtime via system_config["security.session_lifetime_hours"]
+    # (see SystemConfigCache.session_lifetime_hours).
+    SESSION_ABSOLUTE_LIFETIME_SECONDS: int = Field(
+        default=60 * 60 * 24,
+        ge=300,
+        le=60 * 60 * 24 * 7,
+    )
 
     ALLOWED_ORIGINS_STR: str = Field(alias="ALLOWED_ORIGINS")
 

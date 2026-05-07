@@ -28,6 +28,9 @@ import ProjectDetailPage from "../pages/analysis/ProjectDetailPage";
 import ProjectsPage from "../pages/analysis/ProjectsPage";
 import ResultsPage from "../pages/analysis/ResultsPage";
 import LoginPage from "../pages/auth/LoginPage";
+import SsoCallbackPage from "../pages/auth/SsoCallbackPage";
+import SsoProvidersPage from "../pages/admin/SsoProvidersPage";
+import SsoAuditPage from "../pages/admin/SsoAuditPage";
 import SecurityAdvisorPage from "../pages/chat/SecurityAdvisorPage";
 import CompliancePage from "../pages/compliance/CompliancePage";
 import SubmitPage from "../pages/submission/SubmitPage";
@@ -137,6 +140,11 @@ function AppContent() {
         <Route element={<RouteGuard requires="unauth" />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          {/* SSO callback landing — gated as "unauth" so the user lands here
+              after the IdP redirect (no token in localStorage yet); the
+              page itself stores the token from the URL fragment, then
+              navigates to /analysis/results. */}
+          <Route path="/auth/sso/complete" element={<SsoCallbackPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
         </Route>
 
@@ -174,7 +182,10 @@ function AppContent() {
           <Route path="/admin/users" element={<UserManagementTab />} />
           <Route path="/admin/user-groups" element={<UserGroupsPage />} />
           <Route path="/admin/findings" element={<AdminFindingsPage />} />
+          <Route path="/admin/appearance" element={<AppearanceSettingsPage />} />
           <Route path="/admin/smtp" element={<SMTPSettingsTab />} />
+          <Route path="/admin/sso/providers" element={<SsoProvidersPage />} />
+          <Route path="/admin/sso/audit" element={<SsoAuditPage />} />
           <Route path="/account/settings/llm" element={<LLMSettingsPage />} />
           <Route path="/admin/agents" element={<AgentManagementPage />} />
           <Route

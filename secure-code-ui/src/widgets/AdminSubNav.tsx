@@ -22,9 +22,11 @@ const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/agents", label: "Agents" },
   { to: "/admin/frameworks", label: "Frameworks" },
   { to: "/admin/prompts", label: "Prompts" },
-  { to: "/admin/findings", label: "Findings" },
   { to: "/admin/smtp", label: "SMTP" },
+  { to: "/admin/sso/providers", label: "SSO" },
+  { to: "/admin/sso/audit", label: "Auth audit" },
   { to: "/account/settings/llm", label: "LLM configs" },
+  { to: "/admin/appearance", label: "Appearance" },
 ];
 
 const LANGFUSE_HOST = (import.meta.env.VITE_LANGFUSE_HOST as string | undefined) ?? "";

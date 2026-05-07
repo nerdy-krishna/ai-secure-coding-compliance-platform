@@ -22,7 +22,7 @@ email-validator = ">=2.2.0,<3.0.0" # Useful for FastAPI Users
 # fixes — GHSA-2c2j-9gv5-cj73 / GHSA-7f5h-v6xp-fcq8). FastAPI 0.115
 # pinned starlette `<0.47.0`; 0.116+ relaxes that.
 fastapi = ">=0.115.9,<0.121.0"
-fastapi-mail = "^1.4.1"
+fastapi-mail = ">=1.5.9,<1.6.0"
 # Bumped 14.x → 15.x for GHSA-5j53-63w8-8625 (the 14.x line pins
 # pyjwt = 2.10.1 and python-multipart = 0.0.20 as exact versions,
 # blocking three more transitive CVE fixes; 15.x relaxes both).
@@ -90,6 +90,16 @@ cvss = "^3.4"
 # `/app/.venv/bin/bandit` as a subprocess in the worker.
 bandit = "^1.7"
 croniter = "^5.0"
+# Enterprise SSO. httpx-oauth provides the OIDC client used in
+# infrastructure/auth/sso/oidc.py (PKCE + state + nonce). pyjwt[crypto]
+# is needed to validate the IdP-signed id_token against the JWKS
+# (httpx-oauth returns the raw token but does NOT verify the signature
+# — see threat-model M1).
+# python3-saml is OneLogin's SAML 2.0 SP library; it requires libxmlsec1
+# system packages (added to Dockerfile in the same change).
+httpx-oauth = ">=0.16,<1.0"
+pyjwt = {extras = ["crypto"], version = ">=2.10,<3.0"}
+python3-saml = ">=1.16,<2.0"
 
 
 # Worker-only deps: AST parsing (tree-sitter). The embedder was

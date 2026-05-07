@@ -116,3 +116,36 @@ class SystemConfigCache:
         the in-code default if the admin hasn't set a system_config row."""
         with cls._lock:
             return cls._retention_days.get(kind, DEFAULT_RETENTION_DAYS.get(kind, 0))
+
+    # --- Session lifetime override (admin-tunable from System Config) ----------
+    _session_lifetime_hours: int | None = None
+
+    @classmethod
+    def set_session_lifetime_hours(cls, hours: int | None) -> None:
+        with cls._lock:
+            if hours is None:
+                cls._session_lifetime_hours = None
+            else:
+                cls._session_lifetime_hours = max(1, min(int(hours), 168))
+
+    @classmethod
+    def get_session_lifetime_hours(cls) -> int | None:
+        with cls._lock:
+            return cls._session_lifetime_hours
+
+    # --- Master-admin user id (M6: persisted, not recomputed) -----------------
+    # The user with this id is the local-admin escape hatch — they can
+    # always password-login even when force-SSO would otherwise block their
+    # domain. The id is written once at first-user bootstrap (setup.py) and
+    # never changes; deletion of that user is refused (admin_users router).
+    _master_admin_user_id: int | None = None
+
+    @classmethod
+    def set_master_admin_user_id(cls, user_id: int | None) -> None:
+        with cls._lock:
+            cls._master_admin_user_id = int(user_id) if user_id is not None else None
+
+    @classmethod
+    def get_master_admin_user_id(cls) -> int | None:
+        with cls._lock:
+            return cls._master_admin_user_id
