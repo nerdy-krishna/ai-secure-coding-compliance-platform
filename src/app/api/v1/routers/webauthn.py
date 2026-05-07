@@ -197,11 +197,22 @@ async def register_begin(
             PublicKeyCredentialDescriptor(id=c.credential_id) for c in existing
         ],
         authenticator_selection=AuthenticatorSelectionCriteria(
-            user_verification=UserVerificationRequirement.PREFERRED,
+            # User Verification REQUIRED on register: binding a passkey
+            # to this account is a high-value action — we want the
+            # authenticator's biometric / PIN / built-in factor to fire.
+            # The login path also enforces REQUIRED so an attacker with
+            # the device alone (without the UV factor) cannot use it.
+            user_verification=UserVerificationRequirement.REQUIRED,
+            # Resident keys (a.k.a. discoverable credentials / passkeys
+            # in modern parlance) are preferred so users can pick their
+            # account from the browser/OS picker without typing email.
             resident_key=ResidentKeyRequirement.PREFERRED,
         ),
-        # Restrict to algorithms widely supported by Apple/Google/Yubico/MS
-        # authenticators. RSA-PSS-256 included for older corporate keys.
+        # Algorithm allowlist: ECDSA-SHA256 (-7) and EdDSA (-8) cover
+        # every modern Apple / Google / Microsoft / Yubico authenticator.
+        # RSASSA-PSS-SHA256 (-37) retained for older corporate keys
+        # that haven't been refreshed; the deprecated PKCS1v1.5 padding
+        # (algorithm -257) is intentionally NOT included.
         supported_pub_key_algs=[
             COSEAlgorithmIdentifier.ECDSA_SHA_256,
             COSEAlgorithmIdentifier.EDDSA,
@@ -245,7 +256,10 @@ async def register_finish(
             expected_challenge=expected_challenge,
             expected_origin=origin,
             expected_rp_id=rp_id,
-            require_user_verification=False,
+            # Match the UV REQUIRED set in register/begin's
+            # authenticator_selection. py_webauthn cross-checks the
+            # asserted UV flag against this expectation.
+            require_user_verification=True,
         )
     except Exception as exc:
         await _audit_safe(
@@ -326,7 +340,13 @@ async def login_begin(
             )
             for c in creds
         ],
-        user_verification=UserVerificationRequirement.PREFERRED,
+        # UV REQUIRED on login: passkeys were registered with UV REQUIRED,
+        # so requiring it on login closes the attack of a stolen device
+        # without the UV factor (biometric / PIN). Hardware-only keys
+        # without UV (rare, mostly old YubiKey 4) can't be used for
+        # passkey login here — the org should issue a UV-capable key
+        # if it needs hardware passkeys.
+        user_verification=UserVerificationRequirement.REQUIRED,
     )
     set_challenge_cookie(response, cookie_value)
     response.headers["Cache-Control"] = "no-store"
@@ -382,7 +402,10 @@ async def login_finish(
             expected_rp_id=rp_id,
             credential_public_key=stored.public_key,
             credential_current_sign_count=stored.sign_count,
-            require_user_verification=False,
+            # Match the UV REQUIRED set in login/begin. The
+            # authenticator MUST assert the UV bit; py_webauthn
+            # raises if it's missing.
+            require_user_verification=True,
         )
     except Exception as exc:
         # py_webauthn raises on sign-count regression. We surface that as

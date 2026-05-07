@@ -46,6 +46,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.auth.scim.auth import require_scope
 from app.infrastructure.auth.scim.filter import (
     ScimFilterClause,
+    ScimFilterGroup,
+    ScimFilterNode,
     UnsupportedScimFilter,
     parse_filter,
 )
@@ -99,16 +101,83 @@ def _user_to_scim(user: db_models.User) -> ScimUser:
     )
 
 
-def _apply_clause_to_query(query, clause: Optional[ScimFilterClause]):
-    if clause is None:
+def _user_clause_to_sql(clause: ScimFilterClause):
+    """Convert a single SCIM comparison on the User resource to a
+    SQLAlchemy predicate. Each attribute defines its own column-binding
+    plus the ops it actually supports; anything outside that vocabulary
+    raises ``UnsupportedScimFilter`` (mapped to HTTP 400)."""
+    attr = clause.attribute
+    op = clause.op
+    val = clause.value
+
+    if attr in ("userName", "emails.value"):
+        # Email comparisons are case-folded at both sides.
+        col = func.lower(db_models.User.email)
+        if op == "pr":
+            return col.is_not(None)
+        if not isinstance(val, str):
+            raise UnsupportedScimFilter(
+                f"expected string for {attr!r}, got {type(val).__name__}"
+            )
+        v = val.strip().lower()
+        if op == "eq":
+            return col == v
+        if op == "ne":
+            return col != v
+        if op == "co":
+            return col.contains(v)
+        if op == "sw":
+            return col.startswith(v)
+        if op == "ew":
+            return col.endswith(v)
+        raise UnsupportedScimFilter(f"op {op!r} not supported on {attr!r}")
+
+    if attr == "active":
+        col = db_models.User.is_active
+        if op == "pr":
+            return col.is_not(None)
+        if not isinstance(val, bool):
+            raise UnsupportedScimFilter("expected bool for active")
+        if op == "eq":
+            return col == val
+        if op == "ne":
+            return col != val
+        raise UnsupportedScimFilter(f"op {op!r} not supported on active")
+
+    raise UnsupportedScimFilter(f"unsupported User attribute: {attr}")
+
+
+def _node_to_sql(node: Optional[ScimFilterNode], clause_to_sql):
+    """Translate a parsed SCIM filter tree into a SQLAlchemy boolean
+    expression. ``clause_to_sql`` is the per-resource binding (so
+    Users + Groups can share this walker)."""
+    from sqlalchemy import and_, not_, or_
+
+    if node is None:
+        return None
+    if isinstance(node, ScimFilterClause):
+        return clause_to_sql(node)
+    if isinstance(node, ScimFilterGroup):
+        children = [_node_to_sql(c, clause_to_sql) for c in node.children]
+        if any(c is None for c in children):
+            raise UnsupportedScimFilter("logical group contained empty branch")
+        if node.op == "and":
+            return and_(*children)
+        if node.op == "or":
+            return or_(*children)
+        if node.op == "not":
+            if len(children) != 1:
+                raise UnsupportedScimFilter("`not` takes exactly one operand")
+            return not_(children[0])
+        raise UnsupportedScimFilter(f"unsupported logical op: {node.op}")
+    raise UnsupportedScimFilter(f"unrecognised filter node: {type(node).__name__}")
+
+
+def _apply_clause_to_query(query, node: Optional[ScimFilterNode]):
+    """Compose a SCIM User-resource filter onto a query's WHERE clause."""
+    if node is None:
         return query
-    if clause.attribute in ("userName", "emails.value"):
-        if not isinstance(clause.value, str):
-            raise UnsupportedScimFilter("expected string for userName / emails.value")
-        return query.where(db_models.User.email == clause.value.strip().lower())
-    if clause.attribute == "active":
-        return query.where(db_models.User.is_active == bool(clause.value))
-    raise UnsupportedScimFilter(f"unsupported attribute: {clause.attribute}")
+    return query.where(_node_to_sql(node, _user_clause_to_sql))
 
 
 # ----- Discovery endpoints (RFC 7644 §4) -------------------------------------
