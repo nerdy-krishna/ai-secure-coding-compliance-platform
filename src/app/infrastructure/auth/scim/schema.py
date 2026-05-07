@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 SCHEMA_USER = "urn:ietf:params:scim:schemas:core:2.0:User"
+SCHEMA_GROUP = "urn:ietf:params:scim:schemas:core:2.0:Group"
 SCHEMA_LIST = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 SCHEMA_ERROR = "urn:ietf:params:scim:api:messages:2.0:Error"
 SCHEMA_PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
@@ -57,12 +58,42 @@ class ScimUser(BaseModel):
     meta: Optional[ScimMeta] = None
 
 
+class ScimGroupMember(BaseModel):
+    """SCIM Group member reference (RFC 7643 §4.2)."""
+
+    # populate_by_name=True so callers can construct with `ref=...` while
+    # IdP wire payloads carrying the spec-mandated `$ref` key still parse.
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    value: str  # the member's resource id (typically a User id as string)
+    ref: Optional[str] = Field(default=None, alias="$ref")
+    display: Optional[str] = None
+    type: Optional[str] = "User"
+
+
+class ScimGroup(BaseModel):
+    """SCIM Group resource (RFC 7643 §4.2).
+
+    SCCAP maps `displayName` ↔ user_groups.name, `members[].value` ↔
+    user.id (string-encoded) via user_group_memberships.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    schemas: List[str] = Field(default_factory=lambda: [SCHEMA_GROUP])
+    id: Optional[str] = None
+    externalId: Optional[str] = None
+    displayName: str
+    members: Optional[List[ScimGroupMember]] = None
+    meta: Optional[ScimMeta] = None
+
+
 class ScimListResponse(BaseModel):
     schemas: List[str] = Field(default_factory=lambda: [SCHEMA_LIST])
     totalResults: int
     startIndex: int = 1
     itemsPerPage: int
-    Resources: List[ScimUser]  # noqa: N815 — SCIM spec naming
+    # SCIM ListResponse can carry either Users or Groups; the wider type
+    # keeps the response model honest.
+    Resources: List[object]  # noqa: N815 — SCIM spec naming
 
 
 class ScimError(BaseModel):

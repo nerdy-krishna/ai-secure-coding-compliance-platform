@@ -36,7 +36,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/scim", tags=["Admin: SCIM"])
 
 
-_VALID_SCOPES = {"users:read", "users:write"}
+_VALID_SCOPES = {
+    "users:read",
+    "users:write",
+    "groups:read",
+    "groups:write",
+}
 
 
 class ScimTokenCreate(BaseModel):
