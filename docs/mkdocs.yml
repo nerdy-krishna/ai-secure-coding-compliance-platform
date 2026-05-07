@@ -72,6 +72,9 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform
 
+extra_css:
+  - extra.css
+
 # Material's default markdown extensions, plus PyMdown to cover the
 # Docusaurus features we used (admonitions, tabs, code fences, mermaid).
 markdown_extensions:
@@ -109,6 +112,24 @@ markdown_extensions:
 
 plugins:
   - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          # Walk the SCCAP source tree at build time so any module can be
+          # cross-referenced via `:::` in markdown. Path is relative to
+          # docs/, which is the working directory when mkdocs is invoked.
+          paths:
+            - ../src
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_root_toc_entry: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            heading_level: 2
 
 # Navigation ports the Docusaurus sidebars.js tree 1:1.
 nav:
@@ -154,6 +175,7 @@ nav:
       - Semgrep Rule Ingestion: development/rule-source-ingestion.md
   - API Reference:
       - api-reference/index.md
+      - Python API Reference: api-reference/python-api.md
       - Authentication: api-reference/authentication.md
       - LLM Configuration: api-reference/llm-configuration.md
       - Code Analysis Endpoints: api-reference/code-analysis-endpoints.md

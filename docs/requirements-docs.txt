@@ -7,3 +7,7 @@
 mkdocs>=1.6,<2.0
 mkdocs-material>=9.5,<10.0
 pymdown-extensions>=10.7,<11.0
+# Auto-generated Python API reference. The `[python]` extra brings in
+# `griffe` (the static analyser that walks src/app/) and the Python
+# handler that renders the docstrings into the site.
+mkdocstrings[python]>=0.27,<0.30

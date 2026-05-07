@@ -1,0 +1,38 @@
+/* SCCAP brand palette overrides for Material for MkDocs.
+ *
+ * The Material `palette: primary: green, accent: teal` settings get us
+ * close, but the previous Docusaurus theme used specific brand-green
+ * shades that don't map exactly to Material's named colours. This file
+ * pins the exact #2e8555 / #25c2a0 values across both light and dark
+ * schemes.
+ */
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #2e8555;
+  --md-primary-fg-color--light: #4ca675;
+  --md-primary-fg-color--dark: #205c3b;
+  --md-accent-fg-color: #25c2a0;
+  --md-accent-fg-color--transparent: rgba(37, 194, 160, 0.1);
+  --md-typeset-a-color: #2e8555;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #4ca675;
+  --md-primary-fg-color--light: #6dba8d;
+  --md-primary-fg-color--dark: #2e8555;
+  --md-accent-fg-color: #25c2a0;
+  --md-accent-fg-color--transparent: rgba(37, 194, 160, 0.15);
+  --md-typeset-a-color: #4ca675;
+}
+
+/* Slightly tighten code-block typography in the body — the default Material
+ * fence is generous; SCCAP docs are technical-density. */
+.md-typeset code {
+  font-size: 0.84em;
+}
+
+/* Brand the top-of-page section labels to use accent teal so the section
+ * tabs feel like part of the SCCAP visual language. */
+.md-tabs__link--active {
+  color: var(--md-accent-fg-color);
+}
