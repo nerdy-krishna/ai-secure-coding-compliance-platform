@@ -938,6 +938,15 @@ from app.api.v1.routers.webauthn import router as webauthn_router  # noqa: E402
 
 app.include_router(webauthn_router, prefix="/api/v1")
 
+# SCIM 2.0 (Chunk 6). Public SCIM endpoints under /scim/v2 (NOT /api/v1)
+# because SCIM clients expect a spec-conformant URL hierarchy. Admin
+# endpoints for token issuance live under /api/v1/admin/scim/tokens.
+from app.api.v1.routers.scim import router as scim_router  # noqa: E402
+from app.api.v1.routers.admin_scim import router as admin_scim_router  # noqa: E402
+
+app.include_router(scim_router)
+app.include_router(admin_scim_router, prefix="/api/v1")
+
 app.include_router(
     fastapi_users.get_reset_password_router(),
     prefix="/api/v1/auth",

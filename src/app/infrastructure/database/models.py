@@ -941,6 +941,42 @@ class WebAuthnCredential(Base):
     )
 
 
+class ScimToken(Base):
+    """Admin-issued bearer token for upstream SCIM provisioning.
+
+    Plaintext is shown once at creation; the DB stores only ``sha256(token)``
+    so an operator with read access to ``system_config`` cannot impersonate
+    the IdP. Rotation is supported by issuing a new token + setting
+    ``expires_at`` (or DELETE) on the old one.
+    """
+
+    __tablename__ = "scim_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # JSONB list of scope strings — initial vocab: "users:read", "users:write".
+    scopes: Mapped[List[str]] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (UniqueConstraint("token_hash", name="uq_scim_tokens_token_hash"),)
+
+
 class AuthAuditEvent(Base):
     """Append-only audit log for authentication events (M7, M8).
 
