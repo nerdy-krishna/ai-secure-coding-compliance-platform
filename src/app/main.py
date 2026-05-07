@@ -32,6 +32,8 @@ from app.api.v1.routers.search import router as search_router
 from app.infrastructure.auth.backend import auth_backend
 from app.infrastructure.auth.core import fastapi_users
 from app.infrastructure.auth.schemas import UserRead, UserUpdate
+from typing import Optional
+
 from app.config.config import settings
 from app.infrastructure.llm_client_rate_limiter import initialize_rate_limiters
 from app.config.logging_config import LOGGING_CONFIG, correlation_id_var
@@ -84,6 +86,15 @@ async def lifespan(app: FastAPI):
     from app.api.v1.routers.setup import is_setup_completed
     from app.config.logging_config import update_logging_level
 
+    # Lifespan-health observability (V14.1.2): announce hydration entry at
+    # WARNING so the line survives even when admins set system.log_level to
+    # ERROR (silencing INFO chatter). A matching WARNING summary fires after
+    # the block completes, giving operators a guaranteed before/after pair.
+    logger.warning("lifespan.cache_hydration.starting")
+    # Defensive defaults — if the cache hydration block raises before
+    # assigning these, the deferred-log-level apply path below stays sane.
+    target_log_level: Optional[str] = "INFO"
+    log_level_source = "fallback"
     try:
         async with AsyncSessionLocal() as session:
             # Check if setup is completed
@@ -92,28 +103,38 @@ async def lifespan(app: FastAPI):
 
             repo = SystemConfigRepository(session)
 
-            # --- Initialize Log Level ---
+            # --- Resolve log level (apply LATER, after the lifespan summary) ---
+            # The operator-configured log level is intentionally NOT applied
+            # here. If we applied it now and the operator set ERROR, every
+            # subsequent INFO/WARNING log line in the lifespan would be
+            # filtered out — operators end up unable to confirm the cache
+            # hydrated. We compute the target level here, finish the rest
+            # of the lifespan at the default level, emit the
+            # `lifespan.cache_hydration.done` health summary, and only THEN
+            # call `update_logging_level(...)` (see end of this block).
             log_level_config = await repo.get_by_key("system.log_level")
+            target_log_level: Optional[str] = None
+            log_level_source = "default"
             if log_level_config and log_level_config.value:
-                # Extract level from dict or fallback to string (backward compatibility)
                 val = log_level_config.value
                 if isinstance(val, dict) and "level" in val:
-                    level_str = str(val["level"]).upper()
+                    target_log_level = str(val["level"]).upper()
                 else:
-                    level_str = str(val).upper()
-
-                update_logging_level(level_str)
-                logger.info(f"Initialized log level from DB: {level_str}")
+                    target_log_level = str(val).upper()
+                log_level_source = "db"
+            elif getattr(settings, "DEBUG", False):
+                # V13.4.2: never auto-force DEBUG; DEBUG must be opt-in via
+                # an explicit env/settings flag so a partially provisioned
+                # host cannot leak request payloads / stack traces.
+                target_log_level = "DEBUG"
+                log_level_source = "settings.DEBUG"
             else:
-                # V13.4.2: never auto-force DEBUG; DEBUG must be opt-in via an
-                # explicit env/settings flag so a partially provisioned host
-                # cannot leak request payloads / stack traces.
-                if getattr(settings, "DEBUG", False):
-                    update_logging_level("DEBUG")
-                    logger.info("DEBUG flag set; using DEBUG log level.")
-                else:
-                    update_logging_level("INFO")
-                    logger.info("No log level config found. Defaulting to INFO.")
+                target_log_level = "INFO"
+                log_level_source = "fallback"
+            logger.info(
+                "lifespan.log_level.resolved",
+                extra={"level": target_log_level, "source": log_level_source},
+            )
 
             if setup_done:
                 # Load allowed origins from DB
@@ -306,7 +327,54 @@ async def lifespan(app: FastAPI):
                 logger.warning("CORS enabled but allow-list empty; disabling CORS.")
                 SystemConfigCache.set_cors_enabled(False)
     except Exception as e:
-        logger.error(f"Failed to initialize system config cache: {e}")
+        # exc_info so the stack trace lands in Loki regardless of level
+        # filtering downstream.
+        logger.error(
+            "lifespan.cache_hydration.failed", extra={"error": str(e)}, exc_info=True
+        )
+    # Final health summary at WARNING. Emitted before the operator-chosen
+    # log level kicks in, so the line is always visible regardless of the
+    # configured log level downstream.
+    try:
+        cors_state = "enabled" if SystemConfigCache.is_cors_enabled() else "disabled"
+        origin_count = len(SystemConfigCache.get_allowed_origins() or [])
+        smtp_loaded = SystemConfigCache.get_smtp_config() is not None
+        master_id = SystemConfigCache.get_master_admin_user_id()
+        slh = SystemConfigCache.get_session_lifetime_hours()
+        logger.warning(
+            "lifespan.cache_hydration.done",
+            extra={
+                "setup_completed": SystemConfigCache.is_setup_completed(),
+                "cors": cors_state,
+                "allowed_origin_count": origin_count,
+                "smtp_loaded": smtp_loaded,
+                "master_admin_user_id": master_id,
+                "session_lifetime_hours": slh,
+            },
+        )
+    except Exception:
+        # Summary must NEVER fail the lifespan — observability shouldn't
+        # block startup.
+        logger.error("lifespan.cache_hydration.summary_failed", exc_info=True)
+
+    # Now apply the operator-chosen log level — runtime traffic logs respect
+    # it, but the lifespan health log lines above are guaranteed to have
+    # been emitted at the default level first. Log BEFORE applying so the
+    # message survives even when target_log_level == ERROR (otherwise the
+    # WARNING is filtered immediately by the level change).
+    try:
+        if target_log_level:
+            logger.warning(
+                "lifespan.log_level.applying",
+                extra={"level": target_log_level, "source": log_level_source},
+            )
+            update_logging_level(target_log_level)
+    except Exception:
+        logger.error(
+            "lifespan.log_level.apply_failed",
+            extra={"target": target_log_level},
+            exc_info=True,
+        )
 
     # --- Auto-seed defaults on empty DB ---
     # Single source of truth lives in default_seed_service. If the DB has
