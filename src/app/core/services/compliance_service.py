@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,12 +122,16 @@ class ComplianceService:
         self.rag_service = rag_service
 
     async def get_stats(
-        self, visible_user_ids: Optional[List[int]]
+        self,
+        visible_user_ids: Optional[List[int]],
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[Dict[str, object]]:
         """Return per-framework stats.
 
-        `visible_user_ids=None` means no user filter (admin view). An empty
+        ``visible_user_ids=None`` means no user filter (admin view). An empty
         list returns zeros everywhere — reflects a user with no scans.
+        ``tenant_id=None`` is the admin-passthrough path (no tenant filter);
+        a UUID restricts to rows whose ``Scan.tenant_id`` matches OR is NULL.
         """
         # 1. Doc counts per default framework from RAG.
         doc_counts: Dict[str, int] = {
@@ -145,7 +151,7 @@ class ComplianceService:
 
         # 2. Findings aggregates per framework in scope.
         matched, open_counts, last_seen, per_fw_rows = await self._aggregate_findings(
-            visible_user_ids
+            visible_user_ids, tenant_id
         )
 
         # 3. Per-framework CVSS aggregates. Off-thread so a tenant with
@@ -197,7 +203,11 @@ class ComplianceService:
 
         return [item.to_dict() for item in out]
 
-    async def _aggregate_findings(self, visible_user_ids: Optional[List[int]]) -> tuple[
+    async def _aggregate_findings(
+        self,
+        visible_user_ids: Optional[List[int]],
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> tuple[
         Dict[str, int],
         Dict[str, int],
         Dict[str, datetime],
@@ -230,6 +240,13 @@ class ComplianceService:
         )
         if visible_user_ids is not None:
             stmt = stmt.where(db_models.Scan.user_id.in_(visible_user_ids))
+        if tenant_id is not None:
+            stmt = stmt.where(
+                sa.or_(
+                    db_models.Scan.tenant_id == tenant_id,
+                    db_models.Scan.tenant_id.is_(None),
+                )
+            )
 
         result = await self.db.execute(stmt)
         matched: Dict[str, int] = {}

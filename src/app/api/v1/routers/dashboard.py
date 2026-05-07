@@ -16,7 +16,7 @@ from typing import Deque, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_visible_user_ids
+from app.api.v1.dependencies import get_current_user_tenant_id, get_visible_user_ids
 from app.core.services.dashboard_service import DashboardService
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.database import models as db_models
@@ -63,8 +63,9 @@ def _service(db: AsyncSession = Depends(get_db)) -> DashboardService:
 async def get_dashboard_stats(
     _user: db_models.User = Depends(current_active_user),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
     service: DashboardService = Depends(_service),
     _rate_limit: None = Depends(_check_dashboard_rate_limit),
 ):
-    stats = await service.get_stats(visible_user_ids)
+    stats = await service.get_stats(visible_user_ids, tenant_id=tenant_id)
     return stats.to_dict()

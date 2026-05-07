@@ -14,7 +14,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_visible_user_ids
+from app.api.v1.dependencies import get_current_user_tenant_id, get_visible_user_ids
 from app.core.services.compliance_service import (
     ComplianceService,
     get_compliance_service,
@@ -39,6 +39,7 @@ def _service(
 async def list_framework_stats(
     _user: db_models.User = Depends(current_active_user),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
     service: ComplianceService = Depends(_service),
 ):
     """Per-framework doc/findings/score rollup.
@@ -46,9 +47,10 @@ async def list_framework_stats(
     Always returns the 3 default frameworks (asvs, proactive_controls,
     cheatsheets) even when no documents are ingested. Custom frameworks
     from the `frameworks` table follow. Scope (own-scans vs group peers
-    vs admin-everything) comes from H.2's `visible_user_ids` helper.
+    vs admin-everything) comes from H.2's `visible_user_ids` helper;
+    F13 layers per-tenant scoping on top.
     """
-    return await service.get_stats(visible_user_ids)
+    return await service.get_stats(visible_user_ids, tenant_id=tenant_id)
 
 
 @router.get("/frameworks/{framework_name}/controls")

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import func, select, update, delete
+from sqlalchemy import func, or_, select, update, delete
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -85,13 +85,26 @@ class ChatRepository:
             )
         return row
 
-    async def get_sessions_for_user(self, user_id: int) -> List[db_models.ChatSession]:
-        """Retrieves all chat sessions for a given user."""
-        stmt = (
-            select(db_models.ChatSession)
-            .filter_by(user_id=user_id)
-            .order_by(db_models.ChatSession.created_at.desc())
-        )
+    async def get_sessions_for_user(
+        self,
+        user_id: int,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> List[db_models.ChatSession]:
+        """Retrieves all chat sessions for a given user.
+
+        ``tenant_id`` (Chunk 9 follow-up F13): when set, restricts to sessions
+        whose ``tenant_id`` matches OR is NULL (legacy / orphaned). ``None`` is
+        the admin / superuser passthrough — no tenant filter applied.
+        """
+        stmt = select(db_models.ChatSession).filter_by(user_id=user_id)
+        if tenant_id is not None:
+            stmt = stmt.where(
+                or_(
+                    db_models.ChatSession.tenant_id == tenant_id,
+                    db_models.ChatSession.tenant_id.is_(None),
+                )
+            )
+        stmt = stmt.order_by(db_models.ChatSession.created_at.desc())
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 

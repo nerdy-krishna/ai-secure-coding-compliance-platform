@@ -94,11 +94,21 @@ COPY --chown=appuser:appuser pyproject.toml poetry.lock ./
 # The worker group is `optional = true` in pyproject.toml so plain
 # `poetry install` skips it by default; `--without dev` just drops the
 # dev tools.
+#
+# `INSTALL_DEV_DEPS` (F15b follow-up): set to `true` at build time to
+# include dev deps (pytest, pytest-asyncio, etc.) in the venv. Useful
+# for CI / local pytest runs inside the container; the production
+# image stays slim by leaving the default `false`.
 FROM poetry-base AS api-builder
+ARG INSTALL_DEV_DEPS=false
 
 RUN --mount=type=cache,target=/home/appuser/.cache/pypoetry,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/appuser/.cache/pip,uid=1001,gid=1001 \
-    poetry install --no-interaction --no-ansi --no-root --without dev
+    if [ "${INSTALL_DEV_DEPS}" = "true" ]; then \
+        poetry install --no-interaction --no-ansi --no-root --with test ; \
+    else \
+        poetry install --no-interaction --no-ansi --no-root --without dev ; \
+    fi
 
 # ---------- worker-builder -----------------------------------------------
 # Installs core + the worker group (torch, sentence-transformers, tree-sitter).

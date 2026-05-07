@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
@@ -87,9 +88,13 @@ class DashboardService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_stats(self, visible_user_ids: Optional[List[int]]) -> DashboardStats:
+    async def get_stats(
+        self,
+        visible_user_ids: Optional[List[int]],
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> DashboardStats:
         try:
-            scope_filter = self._scope_filter(visible_user_ids)
+            scope_filter = self._scope_filter(visible_user_ids, tenant_id)
 
             open_findings = await self._open_findings_by_severity(scope_filter)
             fixes_ready = await self._fixes_ready(scope_filter)
@@ -113,7 +118,10 @@ class DashboardService:
         except Exception:
             logger.error(
                 "dashboard: aggregate stats failed",
-                extra={"visible_user_ids": visible_user_ids},
+                extra={
+                    "visible_user_ids": visible_user_ids,
+                    "tenant_id": str(tenant_id) if tenant_id else None,
+                },
                 exc_info=True,
             )
             raise
@@ -121,15 +129,35 @@ class DashboardService:
     # --- internals -----------------------------------------------------
 
     @staticmethod
-    def _scope_filter(visible_user_ids: Optional[List[int]]) -> sa.ColumnElement[bool]:
-        """Translate a scope list into a SQL predicate on `scans.user_id`."""
+    def _scope_filter(
+        visible_user_ids: Optional[List[int]],
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> sa.ColumnElement[bool]:
+        """Translate a (visible_user_ids, tenant_id) pair into a SQL predicate
+        anchored on the ``scans`` table.
+
+        Tenant filtering follows the project-wide convention from
+        ``shared.lib.tenant_scope``: ``None`` means "no filter" (admin
+        passthrough), a UUID means "rows in this tenant OR rows whose
+        tenant is NULL" (legacy / orphaned).
+        """
         if visible_user_ids is None:
-            return sa.true()
-        if not visible_user_ids:
+            user_pred: sa.ColumnElement[bool] = sa.true()
+        elif not visible_user_ids:
             # Empty list shouldn't happen in practice (the caller always
             # prepends the requester's id) but is harmless: match nothing.
-            return sa.false()
-        return db_models.Scan.user_id.in_(visible_user_ids)
+            user_pred = sa.false()
+        else:
+            user_pred = db_models.Scan.user_id.in_(visible_user_ids)
+
+        if tenant_id is None:
+            tenant_pred: sa.ColumnElement[bool] = sa.true()
+        else:
+            tenant_pred = sa.or_(
+                db_models.Scan.tenant_id == tenant_id,
+                db_models.Scan.tenant_id.is_(None),
+            )
+        return sa.and_(user_pred, tenant_pred)
 
     async def _open_findings_by_severity(
         self, scope_filter: sa.ColumnElement[bool]

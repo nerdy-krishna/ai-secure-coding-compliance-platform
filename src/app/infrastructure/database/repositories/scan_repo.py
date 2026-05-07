@@ -589,6 +589,7 @@ class ScanRepository:
         source_filter: Optional[str] = None,
         limit: int = 50,
         cursor: Optional[int] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[db_models.Finding]:
         """List findings across scans with admin-scope filtering.
 
@@ -622,6 +623,11 @@ class ScanRepository:
         )
         if visible_user_ids is not None:
             stmt = stmt.where(db_models.Scan.user_id.in_(visible_user_ids))
+        # F13 — defense-in-depth tenant scope. Today the only call site
+        # is the superuser /admin/findings endpoint (tenant_id=None →
+        # passthrough); the kwarg is kept here so a future non-admin
+        # caller cannot accidentally read across tenants.
+        stmt = stmt.where(self._scope_tenant(db_models.Finding.tenant_id, tenant_id))
         if source_filter is not None:
             stmt = stmt.where(db_models.Finding.source == source_filter)
         if cursor is not None:
@@ -634,6 +640,7 @@ class ScanRepository:
         scan_id: uuid.UUID,
         *,
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> Dict[str, int]:
         """Per-source finding counts for a single scan.
 
@@ -665,6 +672,10 @@ class ScanRepository:
             stmt = stmt.join(
                 db_models.Scan, db_models.Scan.id == db_models.Finding.scan_id
             ).where(db_models.Scan.user_id.in_(visible_user_ids))
+        # F13 — defense-in-depth tenant scope on the Finding side. ANDed
+        # with the existing scope so single-scan callers can't accidentally
+        # leak findings whose scan belongs to another tenant.
+        stmt = stmt.where(self._scope_tenant(db_models.Finding.tenant_id, tenant_id))
         rows = (await self.db.execute(stmt)).all()
         return {str(source): int(count) for source, count in rows}
 
@@ -768,16 +779,33 @@ class ScanRepository:
         )
         return result.scalars().first()
 
-    async def get_scans_count_for_project(self, project_id: uuid.UUID) -> int:
-        """Counts the total number of scans for a specific project."""
-        stmt = select(func.count(db_models.Scan.id)).where(
-            db_models.Scan.project_id == project_id
+    async def get_scans_count_for_project(
+        self,
+        project_id: uuid.UUID,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> int:
+        """Counts the total number of scans for a specific project.
+
+        ``tenant_id`` (F13): defense-in-depth tenant scope. The project
+        ownership check upstream already gates access, but if a project
+        ever changes tenants mid-flight (e.g. an admin moves the owner),
+        the scan-level tenant filter still keeps cross-tenant scans
+        invisible.
+        """
+        stmt = (
+            select(func.count(db_models.Scan.id))
+            .where(db_models.Scan.project_id == project_id)
+            .where(self._scope_tenant(db_models.Scan.tenant_id, tenant_id))
         )
         result = await self.db.execute(stmt)
         return result.scalar_one() or 0
 
     async def get_paginated_scans_for_project(
-        self, project_id: uuid.UUID, skip: int, limit: int
+        self,
+        project_id: uuid.UUID,
+        skip: int,
+        limit: int,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[db_models.Scan]:
         """Retrieves a paginated list of scans for a specific project."""
         limit = max(1, min(int(limit), _MAX_PAGE_LIMIT))
@@ -788,6 +816,7 @@ class ScanRepository:
                 selectinload(db_models.Scan.project),
             )
             .where(db_models.Scan.project_id == project_id)
+            .where(self._scope_tenant(db_models.Scan.tenant_id, tenant_id))
             .order_by(db_models.Scan.created_at.desc())
             .offset(skip)
             .limit(limit)

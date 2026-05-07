@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.v1.dependencies import get_chat_service
+from app.api.v1.dependencies import get_chat_service, get_current_user_tenant_id
 from app.core.services.chat_service import ChatService
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.database import models as db_models
@@ -121,9 +121,10 @@ async def create_chat_session(
 async def get_chat_sessions(
     user: db_models.User = Depends(current_active_user),
     chat_service: ChatService = Depends(get_chat_service),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Lists all of a user's past chat sessions."""
-    sessions = await chat_service.get_user_sessions(user)
+    sessions = await chat_service.get_user_sessions(user, tenant_id=tenant_id)
     return [
         ChatSessionResponse(
             id=s.id,

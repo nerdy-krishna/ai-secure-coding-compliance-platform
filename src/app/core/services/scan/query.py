@@ -257,6 +257,7 @@ class ScanQueryService:
         skip: int,
         limit: int,
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> api_models.PaginatedScanHistoryResponse:
         """Retrieves a paginated list of scan history for a project.
 
@@ -288,9 +289,11 @@ class ScanQueryService:
                 status_code=404, detail="Project not found or not authorized."
             )
 
-        total = await self.repo.get_scans_count_for_project(project_id)
+        total = await self.repo.get_scans_count_for_project(
+            project_id, tenant_id=tenant_id
+        )
         scans_raw = await self.repo.get_paginated_scans_for_project(
-            project_id, skip, limit
+            project_id, skip, limit, tenant_id=tenant_id
         )
 
         # Build ScanHistoryItem explicitly — `project_name` lives on the

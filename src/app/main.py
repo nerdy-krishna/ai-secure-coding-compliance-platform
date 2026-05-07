@@ -951,8 +951,12 @@ app.include_router(admin_scim_router, prefix="/api/v1")
 from app.api.v1.routers.admin_tenants import (  # noqa: E402
     router as admin_tenants_router,
 )
+from app.api.v1.routers.admin_users_tenant import (  # noqa: E402
+    router as admin_users_tenant_router,
+)
 
 app.include_router(admin_tenants_router, prefix="/api/v1")
+app.include_router(admin_users_tenant_router, prefix="/api/v1")
 
 app.include_router(
     fastapi_users.get_reset_password_router(),

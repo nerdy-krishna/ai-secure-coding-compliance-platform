@@ -83,6 +83,7 @@ class SearchService:
         visible_user_ids: Optional[List[int]],
         limit: int,
         verbose: bool = False,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> SearchResults:
         query = query.strip()
         if not query:
@@ -102,10 +103,22 @@ class SearchService:
             scope_scan_col = self._scope(db_models.Scan.user_id, visible_user_ids)
             scope_project_col = self._scope(db_models.Project.user_id, visible_user_ids)
 
-            projects = await self._search_projects(pattern, scope_project_col, limit)
-            scans = await self._search_scans(pattern, scope_scan_col, limit)
+            # Per-tenant scope predicates anchored on the table the search
+            # subquery pulls from. Tenant filter follows the same NULL-or-
+            # match convention as ``shared.lib.tenant_scope``.
+            tenant_scan_col = self._tenant_scope(db_models.Scan.tenant_id, tenant_id)
+            tenant_project_col = self._tenant_scope(
+                db_models.Project.tenant_id, tenant_id
+            )
+
+            projects = await self._search_projects(
+                pattern, scope_project_col, tenant_project_col, limit
+            )
+            scans = await self._search_scans(
+                pattern, scope_scan_col, tenant_scan_col, limit
+            )
             findings = await self._search_findings(
-                pattern, scope_scan_col, limit, verbose=verbose
+                pattern, scope_scan_col, tenant_scan_col, limit, verbose=verbose
             )
             return SearchResults(projects=projects, scans=scans, findings=findings)
         except ValueError:
@@ -134,12 +147,31 @@ class SearchService:
             return sa.false()
         return column.in_(visible_user_ids)
 
+    @staticmethod
+    def _tenant_scope(
+        tenant_column: sa.ColumnElement, tenant_id: Optional[uuid.UUID]
+    ) -> sa.ColumnElement[bool]:
+        """Per-tenant scope predicate matching the project-wide convention.
+
+        ``tenant_id is None`` is the admin path (no filter). A UUID
+        restricts to rows whose tenant matches OR is NULL (legacy /
+        orphaned rows).
+        """
+        if tenant_id is None:
+            return sa.true()
+        return sa.or_(tenant_column == tenant_id, tenant_column.is_(None))
+
     async def _search_projects(
-        self, pattern: str, scope: sa.ColumnElement[bool], limit: int
+        self,
+        pattern: str,
+        scope: sa.ColumnElement[bool],
+        tenant_scope: sa.ColumnElement[bool],
+        limit: int,
     ) -> List[ProjectHit]:
         stmt = (
             select(db_models.Project.id, db_models.Project.name)
             .where(scope)
+            .where(tenant_scope)
             .where(db_models.Project.name.ilike(pattern, escape="\\"))
             .order_by(db_models.Project.updated_at.desc())
             .limit(limit)
@@ -148,7 +180,11 @@ class SearchService:
         return [ProjectHit(id=r[0], name=r[1]) for r in rows]
 
     async def _search_scans(
-        self, pattern: str, scope: sa.ColumnElement[bool], limit: int
+        self,
+        pattern: str,
+        scope: sa.ColumnElement[bool],
+        tenant_scope: sa.ColumnElement[bool],
+        limit: int,
     ) -> List[ScanHit]:
         # Scan IDs are UUIDs; users usually paste a prefix. Cast to text and
         # ILIKE so both full and prefix matches work.
@@ -160,6 +196,7 @@ class SearchService:
             )
             .join(db_models.Project, db_models.Project.id == db_models.Scan.project_id)
             .where(scope)
+            .where(tenant_scope)
             .where(cast(db_models.Scan.id, String).ilike(pattern, escape="\\"))
             .order_by(db_models.Scan.created_at.desc())
             .limit(limit)
@@ -171,6 +208,7 @@ class SearchService:
         self,
         pattern: str,
         scope: sa.ColumnElement[bool],
+        tenant_scope: sa.ColumnElement[bool],
         limit: int,
         verbose: bool = False,
     ) -> List[FindingHit]:
@@ -196,6 +234,7 @@ class SearchService:
             select(*columns)
             .join(db_models.Scan, db_models.Scan.id == db_models.Finding.scan_id)
             .where(scope)
+            .where(tenant_scope)
             .where(or_(title_match, path_match))
             .order_by(db_models.Finding.id.desc())
             .limit(limit)

@@ -77,10 +77,20 @@ class ChatService:
         )
 
     async def get_user_sessions(
-        self, user: db_models.User
+        self,
+        user: db_models.User,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[db_models.ChatSession]:
-        """Retrieves all chat sessions for a user."""
-        return await self.chat_repo.get_sessions_for_user(user.id)
+        """Retrieves all chat sessions for a user.
+
+        Per-tenant enforcement (F13): callers MUST pass ``tenant_id``
+        from the ``get_current_user_tenant_id`` dependency. The dep
+        owns the ``NULL → DEFAULT_TENANT_ID`` fallback for non-admins;
+        deriving tenant locally (e.g. ``user.tenant_id``) would skip
+        that fallback and let an orphan-row user accidentally hit the
+        admin passthrough → cross-tenant leak.
+        """
+        return await self.chat_repo.get_sessions_for_user(user.id, tenant_id=tenant_id)
 
     async def get_session_messages(
         self, session_id: uuid.UUID, user: db_models.User

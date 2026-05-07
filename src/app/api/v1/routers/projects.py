@@ -769,11 +769,17 @@ async def get_scan_history_for_project(
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
 ):
     return await service.get_paginated_scans_for_project(
-        project_id, user, skip, limit, visible_user_ids=visible_user_ids
+        project_id,
+        user,
+        skip,
+        limit,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 

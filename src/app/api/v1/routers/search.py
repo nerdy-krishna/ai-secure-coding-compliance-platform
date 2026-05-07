@@ -15,7 +15,7 @@ from typing import Deque, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_visible_user_ids
+from app.api.v1.dependencies import get_current_user_tenant_id, get_visible_user_ids
 from app.core.services.search_service import SearchService
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.database import models as db_models
@@ -63,8 +63,11 @@ async def global_search(
     limit: int = Query(10, ge=1, le=50),
     _user: db_models.User = Depends(current_active_user),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
     service: SearchService = Depends(_service),
     _rate_limit: None = Depends(_check_search_rate_limit),
 ):
-    results = await service.search(q, visible_user_ids, limit=limit)
+    results = await service.search(
+        q, visible_user_ids, limit=limit, tenant_id=tenant_id
+    )
     return results.to_dict()
