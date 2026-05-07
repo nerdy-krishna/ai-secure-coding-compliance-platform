@@ -37,17 +37,33 @@ class ScanRepository:
         self.db = db_session
 
     async def get_or_create_project(
-        self, name: str, user_id: int, repo_url: Optional[str] = None
+        self,
+        name: str,
+        user_id: int,
+        repo_url: Optional[str] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Project:
         """Retrieves a project by name for a user, or creates it if it doesn't exist.
 
         Uses an atomic INSERT ... ON CONFLICT DO NOTHING to avoid the TOCTOU
         race where two concurrent callers both miss the existence check and
         both attempt INSERT, causing an IntegrityError (V15.4.2).
+
+        ``tenant_id`` (Chunk 9) is the caller's tenant. Stamped on
+        creation so per-tenant enforcement filters are correct from
+        the first row. Existing rows keep whatever the backfill set;
+        the ON CONFLICT path doesn't overwrite.
         """
+        values: Dict[str, Any] = {
+            "name": name,
+            "user_id": user_id,
+            "repository_url": repo_url,
+        }
+        if tenant_id is not None:
+            values["tenant_id"] = tenant_id
         insert_stmt = (
             pg_insert(db_models.Project)
-            .values(name=name, user_id=user_id, repository_url=repo_url)
+            .values(**values)
             .on_conflict_do_nothing(index_elements=["name", "user_id"])
         )
         try:
@@ -85,8 +101,11 @@ class ScanRepository:
         scan_type: str,
         reasoning_llm_config_id: uuid.UUID,
         frameworks: List[str],
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Scan:
-        """Creates a new Scan record."""
+        """Creates a new Scan record. ``tenant_id`` is stamped from the
+        submitter so the per-tenant scope filter (Chunk 9) is correct
+        for newly-created scans."""
         logger.info(
             "scan_repo.scan.created",
             extra={"project_id": str(project_id), "scan_type": scan_type},
@@ -98,6 +117,7 @@ class ScanRepository:
             status=STATUS_QUEUED,
             reasoning_llm_config_id=reasoning_llm_config_id,
             frameworks=frameworks,
+            tenant_id=tenant_id,
         )
         self.db.add(scan)
         try:
@@ -451,6 +471,15 @@ class ScanRepository:
         if not new_findings:
             return
 
+        # Resolve the parent scan's tenant once (Chunk 9). Stamped on every
+        # inserted Finding so per-tenant filters on /admin/findings + the
+        # dashboard work without joining back to scans.
+        scan_tenant_id = (
+            await self.db.execute(
+                select(db_models.Scan.tenant_id).where(db_models.Scan.id == scan_id)
+            )
+        ).scalar_one_or_none()
+
         db_findings: List[db_models.Finding] = []
         for f in new_findings:
             # For new findings, ensure ID is not set
@@ -461,7 +490,11 @@ class ScanRepository:
             if agent_name and not finding_dict.get("corroborating_agents"):
                 finding_dict["corroborating_agents"] = [agent_name]
 
-            db_findings.append(db_models.Finding(scan_id=scan_id, **finding_dict))
+            db_findings.append(
+                db_models.Finding(
+                    scan_id=scan_id, tenant_id=scan_tenant_id, **finding_dict
+                )
+            )
 
         self.db.add_all(db_findings)
         try:
@@ -785,11 +818,31 @@ class ScanRepository:
             return column == user_id
         return column.in_(visible_user_ids)
 
+    @staticmethod
+    def _scope_tenant(
+        tenant_column: Any,
+        tenant_id: Optional[uuid.UUID],
+    ) -> Any:
+        """Build a WHERE clause for a tenant_id-scoped column (Chunk 9).
+
+        ``tenant_id is None`` → admin / no scope; returns ``sa.true()``
+        so callers can ``.where()`` it unconditionally.
+
+        ``tenant_id is set`` → restrict to rows whose tenant matches
+        OR whose tenant is NULL. The NULL allowance keeps legacy /
+        orphaned rows visible — see ``shared.lib.tenant_scope`` for
+        the rationale.
+        """
+        if tenant_id is None:
+            return sa.true()
+        return sa.or_(tenant_column == tenant_id, tenant_column.is_(None))
+
     async def search_projects_by_name(
         self,
         user_id: int,
         name_query: str,
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[db_models.Project]:
         """Searches for projects by name within the caller's visibility."""
         stmt = (
@@ -797,6 +850,7 @@ class ScanRepository:
             .where(
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
+            .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
             .where(db_models.Project.name.ilike(f"%{name_query}%"))
             .order_by(db_models.Project.name)
             .limit(10)
@@ -810,6 +864,7 @@ class ScanRepository:
         search: Optional[str],
         statuses: Optional[List[str]] = None,
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> int:
         """Counts the total number of scans the caller can see."""
         stmt = (
@@ -818,6 +873,7 @@ class ScanRepository:
             .where(
                 self._scope_column(db_models.Scan.user_id, user_id, visible_user_ids)
             )
+            .where(self._scope_tenant(db_models.Scan.tenant_id, tenant_id))
         )
         if search:
             search_term = f"%{search}%"
@@ -844,6 +900,7 @@ class ScanRepository:
         sort_order: str,
         statuses: Optional[List[str]] = None,
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[db_models.Scan]:
         """Retrieves a paginated list of scans the caller can see."""
         limit = max(1, min(int(limit), _MAX_PAGE_LIMIT))
@@ -857,6 +914,7 @@ class ScanRepository:
             .where(
                 self._scope_column(db_models.Scan.user_id, user_id, visible_user_ids)
             )
+            .where(self._scope_tenant(db_models.Scan.tenant_id, tenant_id))
         )
         if search:
             search_term = f"%{search}%"
@@ -889,6 +947,7 @@ class ScanRepository:
         limit: int,
         search: Optional[str],
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[db_models.Project]:
         """Retrieves a paginated list of projects the caller can see."""
         limit = max(1, min(int(limit), _MAX_PAGE_LIMIT))
@@ -900,6 +959,7 @@ class ScanRepository:
             .where(
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
+            .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
         )
         if search:
             stmt = stmt.filter(db_models.Project.name.ilike(f"%{search}%"))
@@ -914,10 +974,15 @@ class ScanRepository:
         user_id: int,
         search: Optional[str],
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> int:
         """Counts the total number of projects the caller can see."""
-        stmt = select(func.count(db_models.Project.id)).where(
-            self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
+        stmt = (
+            select(func.count(db_models.Project.id))
+            .where(
+                self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
+            )
+            .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
         )
         if search:
             stmt = stmt.filter(db_models.Project.name.ilike(f"%{search}%"))

@@ -323,6 +323,7 @@ class ScanQueryService:
         sort_order: str,
         status: Optional[str],
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> api_models.PaginatedScanHistoryResponse:
         """Retrieves a paginated list of all scans visible to the caller."""
         skip = max(int(skip), 0)
@@ -350,7 +351,11 @@ class ScanQueryService:
 
         try:
             total = await self.repo.get_scans_count_for_user(
-                user_id, search, status_filters, visible_user_ids=visible_user_ids
+                user_id,
+                search,
+                status_filters,
+                visible_user_ids=visible_user_ids,
+                tenant_id=tenant_id,
             )
             scans_raw = await self.repo.get_paginated_scans_for_user(
                 user_id,
@@ -360,6 +365,7 @@ class ScanQueryService:
                 sort_order,
                 status_filters,
                 visible_user_ids=visible_user_ids,
+                tenant_id=tenant_id,
             )
         except Exception:
             logger.error(
@@ -390,12 +396,14 @@ class ScanQueryService:
         user_id: int,
         query: str,
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[str]:
         """Searches project names for autocomplete (scoped to caller)."""
         projects = await self.repo.search_projects_by_name(
             user_id=user_id,
             name_query=query,
             visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
         )
         return [project.name for project in projects]
 
@@ -432,6 +440,7 @@ class ScanQueryService:
         limit: int,
         search: Optional[str],
         visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> api_models.PaginatedProjectHistoryResponse:
         """Retrieves a paginated list of projects visible to the caller."""
         skip = max(int(skip), 0)
@@ -440,10 +449,18 @@ class ScanQueryService:
             raise HTTPException(status_code=400, detail="search too long")
         try:
             total = await self.repo.get_projects_count(
-                user_id, search, visible_user_ids=visible_user_ids
+                user_id,
+                search,
+                visible_user_ids=visible_user_ids,
+                tenant_id=tenant_id,
             )
             projects = await self.repo.get_paginated_projects(
-                user_id, skip, limit, search, visible_user_ids=visible_user_ids
+                user_id,
+                skip,
+                limit,
+                search,
+                visible_user_ids=visible_user_ids,
+                tenant_id=tenant_id,
             )
         except Exception:
             logger.error(

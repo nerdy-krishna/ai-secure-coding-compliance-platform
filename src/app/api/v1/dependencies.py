@@ -1,3 +1,4 @@
+import uuid
 from typing import List, Optional
 
 from fastapi import Depends
@@ -137,6 +138,50 @@ async def get_visible_user_ids(
     scan_repo methods that support scoped listing.
     """
     return await scan_scope.visible_user_ids(user, repo)
+
+
+async def get_current_user_tenant_id(
+    user: db_models.User = Depends(current_active_user),
+) -> Optional[uuid.UUID]:
+    """Compute the tenant scope for the caller (Chunk 9).
+
+    Mirrors :func:`get_visible_user_ids`'s admin-passthrough convention:
+
+    - ``None``     → caller is a superuser; queries skip the tenant filter
+                     (and therefore see every tenant).
+    - ``UUID``     → caller's tenant id; queries restrict to rows whose
+                     ``tenant_id`` matches OR is NULL.
+    - Edge case: a non-admin user with no tenant_id (NULL on the user
+      row) gets the seeded default tenant treatment — they only see
+      rows in the default tenant. We guard against the orphan case
+      explicitly so a misconfigured row can't leak across tenants.
+    """
+    if user.is_superuser:
+        return None
+    user_tenant = getattr(user, "tenant_id", None)
+    if user_tenant is None:
+        # Orphan user → treat as default tenant. The single-tenant
+        # bootstrap path also lands here.
+        from app.api.v1.routers.admin_tenants import DEFAULT_TENANT_ID
+
+        return DEFAULT_TENANT_ID
+    return user_tenant
+
+
+async def get_current_user_tenant_id_sse(
+    user: db_models.User = Depends(current_active_user_sse),
+) -> Optional[uuid.UUID]:
+    """SSE variant — same logic as :func:`get_current_user_tenant_id`
+    against the SSE-aware auth dep so both share FastAPI's per-request
+    cache."""
+    if user.is_superuser:
+        return None
+    user_tenant = getattr(user, "tenant_id", None)
+    if user_tenant is None:
+        from app.api.v1.routers.admin_tenants import DEFAULT_TENANT_ID
+
+        return DEFAULT_TENANT_ID
+    return user_tenant
 
 
 async def get_visible_user_ids_sse(

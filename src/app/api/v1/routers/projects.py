@@ -54,6 +54,7 @@ from app.core.services.scan import (
     ScanSubmissionService,
 )
 from app.api.v1.dependencies import (
+    get_current_user_tenant_id,
     get_scan_lifecycle_service,
     get_scan_query_service,
     get_scan_submission_service,
@@ -125,12 +126,18 @@ async def get_all_projects(
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     search: Optional[str] = Query(None, min_length=1, max_length=100),
 ):
     return await service.get_paginated_projects(
-        user.id, skip, limit, search, visible_user_ids=visible_user_ids
+        user.id,
+        skip,
+        limit,
+        search,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 
@@ -168,10 +175,14 @@ async def search_projects_for_user(
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Searches for projects by name visible to the caller (for autocomplete)."""
     return await service.search_projects(
-        user_id=user.id, query=q, visible_user_ids=visible_user_ids
+        user_id=user.id,
+        query=q,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 
@@ -180,6 +191,7 @@ async def get_user_scan_history(
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     search: Optional[str] = Query(None, min_length=1, max_length=100),
@@ -195,6 +207,7 @@ async def get_user_scan_history(
         sort_order=sort_order,
         status=status,
         visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 

@@ -71,6 +71,9 @@ class ChatService:
             project_id=project_id,
             llm_config_id=llm_config_id,
             frameworks=frameworks,
+            # Per-tenant enforcement (Chunk 9): chat sessions inherit
+            # the user's tenant so list queries can filter on it.
+            tenant_id=getattr(user, "tenant_id", None),
         )
 
     async def get_user_sessions(

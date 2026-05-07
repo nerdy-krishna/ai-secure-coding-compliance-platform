@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
 
 from app.config.config import settings
 from app.infrastructure.database import models as db_models
@@ -108,6 +109,16 @@ class ScanSubmissionService:
     def __init__(self, repo: ScanRepository):
         self.repo = repo
         self.outbox = ScanOutboxRepository(repo.db)
+
+    async def _resolve_user_tenant_id(self, user_id: int) -> Optional[uuid.UUID]:
+        """Look up the submitter's tenant for stamping on Project + Scan.
+
+        Returns ``None`` when the user has no tenant (orphan / pre-Chunk-7);
+        the repo helpers treat ``None`` as "leave whatever's there"."""
+        result = await self.repo.db.execute(
+            select(db_models.User.tenant_id).where(db_models.User.id == user_id)
+        )
+        return result.scalar_one_or_none()
 
     async def _process_and_launch_scan(
         self,
@@ -198,10 +209,18 @@ class ScanSubmissionService:
             )
 
         # --- DB write chain (V16.3.4: wrap for structured error logging) -----
+        # Resolve the submitter's tenant up-front so both Project and Scan
+        # land in the same tenant. None is acceptable (orphan / pre-Chunk-7)
+        # — repo helpers ignore it and the row keeps its existing tenant_id
+        # via ON CONFLICT DO NOTHING.
+        tenant_id = await self._resolve_user_tenant_id(user_id)
         try:
             # 1. Get or create the project
             project = await self.repo.get_or_create_project(
-                name=project_name, user_id=user_id, repo_url=repo_url
+                name=project_name,
+                user_id=user_id,
+                repo_url=repo_url,
+                tenant_id=tenant_id,
             )
 
             # 2. Get or create deduplicated source code files
@@ -220,6 +239,7 @@ class ScanSubmissionService:
                 scan_type=scan_type,
                 reasoning_llm_config_id=reasoning_llm_config_id,
                 frameworks=frameworks,
+                tenant_id=tenant_id,
             )
 
             # 5. Create the Code Snapshot linked to the scan

@@ -31,6 +31,7 @@ class ChatRepository:
         llm_config_id: uuid.UUID,
         frameworks: List[str],
         project_id: Optional[uuid.UUID] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.ChatSession:
         """Creates a new chat session."""
         # V02.2.1 — validate title and frameworks before persisting
@@ -50,6 +51,7 @@ class ChatRepository:
             title=title,
             llm_config_id=llm_config_id,
             frameworks=frameworks,
+            tenant_id=tenant_id,
         )
         self.db.add(session)
         try:
