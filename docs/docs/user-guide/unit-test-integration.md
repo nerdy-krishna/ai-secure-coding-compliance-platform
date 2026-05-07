@@ -5,12 +5,12 @@ title: Unit Test Integration
 
 # Unit Test Integration
 
-:::info Roadmap item
-**This feature is not yet available.** It's on the
-[roadmap](../roadmap.md) as "Test-Validated Remediation" — the goal
-is to run the project's existing test suite against an AI-generated
-fix before SCCAP applies it, rejecting fixes that break tests.
-:::
+!!! info "Roadmap item"
+
+    **This feature is not yet available.** It's on the
+    [roadmap](../roadmap.md) as "Test-Validated Remediation" — the goal
+    is to run the project's existing test suite against an AI-generated
+    fix before SCCAP applies it, rejecting fixes that break tests.
 
 ## What's planned
 

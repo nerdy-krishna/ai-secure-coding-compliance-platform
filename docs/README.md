@@ -1,41 +1,74 @@
-# Website
+# SCCAP Documentation
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+Built with [MkDocs](https://www.mkdocs.org/) + [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
 
-### Installation
+## Local preview
 
-```
-$ yarn
-```
-
-### Local Development
-
-```
-$ yarn start
+```bash
+cd docs
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements-docs.txt
+mkdocs serve
 ```
 
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
+Open http://127.0.0.1:8000/ — pages reload on save.
 
-### Build
+## Production build
 
-```
-$ yarn build
-```
-
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
-
-### Deployment
-
-Using SSH:
-
-```
-$ USE_SSH=true yarn deploy
+```bash
+cd docs
+mkdocs build --strict
 ```
 
-Not using SSH:
+Static output is written to `docs/site/` (gitignored). Deploy that directory to any static host (GitHub Pages, S3, CloudFront, Netlify, …). For GitHub Pages auto-publish:
 
-```
-$ GIT_USER=<Your GitHub username> yarn deploy
+```bash
+mkdocs gh-deploy --strict
 ```
 
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+## Authoring
+
+- Prose lives under `docs/docs/`. Each file becomes a page; the URL is the path with `.md` stripped.
+- Navigation order is set in `mkdocs.yml` under `nav:`. Rearrange there, not via filename prefixes.
+- Admonitions use Material's syntax (note the 4-space indent on body lines):
+
+  ```markdown
+  !!! info "Optional title"
+
+      Body of the admonition. Indented with four spaces.
+  ```
+
+  Supported types: `note`, `tip`, `info`, `warning`, `danger`, `success`, `question`, `quote`, `example`, `bug`, `failure`, `abstract`.
+
+- Code fences with language identifiers get syntax highlighting via Pygments. Mermaid diagrams work via PyMdown's superfences:
+
+  ````markdown
+  ```mermaid
+  graph LR
+    A --> B
+  ```
+  ````
+
+- Tabs (PyMdown `pymdownx.tabbed`):
+
+  ```markdown
+  === "Linux"
+
+      ```bash
+      ./setup.sh
+      ```
+
+  === "Windows"
+
+      ```powershell
+      .\setup.ps1
+      ```
+  ```
+
+## Configuration reference
+
+- `mkdocs.yml` — site config, theme, navigation, markdown extensions.
+- `requirements-docs.txt` — pinned Python deps for the docs build.
+
+For the full theme reference see <https://squidfunk.github.io/mkdocs-material/>.

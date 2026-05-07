@@ -142,12 +142,10 @@ secure-code-ui/.vite
 secure-code-ui/.svelte-kit
 secure-code-ui/.next
 
-# Docusaurus (docs directory)
-docs/.docusaurus/
-docs/build/
+# MkDocs (docs directory)
+docs/site/
+docs/.venv/
 docs/.cache-loader/
-docs/node_modules/ # If you install any plugins directly in docs
-docs/yarn.lock # Or package-lock.json if docusaurus uses npm
 
 # OS generated files
 .DS_Store
@@ -200,3 +198,6 @@ evals/.promptfoo/
 # Whitelist the extracted prompt files even though `*.txt` is globally
 # ignored above (line ~174). These are committed and CI checks them.
 !evals/agents/**/prompts/*.txt
+# Whitelist docs build dependency manifest (the global *.txt rule above
+# catches recovery dumps; pinned-dep manifests must ship).
+!docs/requirements-docs.txt

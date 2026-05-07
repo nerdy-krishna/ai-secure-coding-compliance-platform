@@ -62,7 +62,7 @@ knowledge bases. The platform is organized around three surfaces:
 This documentation will guide you through every aspect of the SCCAP.
 
 * **New to the platform?** Start with our [**Installation Guide**](./getting-started/installation.md) to get your local instance up and running.
-* **Want to see it in action?** Check out the [**User Guide**](./user-guide/) for tutorials on our key features.
+* **Want to see it in action?** Check out the [**User Guide**](./user-guide/index.md) for tutorials on our key features.
 * **Interested in contributing?** Head over to our [**Development Guide**](./development/contributing.md).
 
 We're excited to have you join us on this journey to make software more secure!

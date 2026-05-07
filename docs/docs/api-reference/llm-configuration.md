@@ -11,11 +11,11 @@ installation's `ENCRYPTION_KEY`.
 
 **Base URL:** `/api/v1/admin/llm-configs`
 
-:::danger Permissions
-Create / delete endpoints require **Superuser** authentication. The
-list endpoint is open to any authenticated user (so the submit UI can
-offer a slot picker).
-:::
+!!! danger "Permissions"
+
+    Create / delete endpoints require **Superuser** authentication. The
+    list endpoint is open to any authenticated user (so the submit UI can
+    offer a slot picker).
 
 ## Pricing: LiteLLM + admin override
 

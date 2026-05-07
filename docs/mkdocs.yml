@@ -1,0 +1,162 @@
+# SCCAP documentation — built with MkDocs + Material.
+#
+# Local preview:
+#     cd docs
+#     python -m venv .venv && source .venv/bin/activate
+#     pip install -r requirements-docs.txt
+#     mkdocs serve
+#
+# Production build:
+#     mkdocs build --strict
+# Output: docs/site/
+site_name: SCCAP Documentation
+site_description: >-
+  Secure Coding & Compliance Automation Platform — open-source AI-powered
+  code auditing, remediation, and compliance tooling.
+site_url: https://docs.sccap.dev
+site_author: SCCAP contributors
+
+repo_url: https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform
+repo_name: nerdy-krishna/ai-secure-coding-compliance-platform
+edit_uri: edit/main/docs/docs/
+
+# `docs/docs/` is the prose root (matches the existing Docusaurus layout).
+docs_dir: docs
+site_dir: site
+
+theme:
+  name: material
+  language: en
+  # Brand-green palette inherited from the previous Docusaurus theme:
+  #   primary: #2e8555  (forest green)
+  #   accent:  #25c2a0  (teal accent)
+  # Material's named-colour scheme uses the closest CSS-named anchors;
+  # for a pixel-exact match, drop a small extra.css override.
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform
+
+# Material's default markdown extensions, plus PyMdown to cover the
+# Docusaurus features we used (admonitions, tabs, code fences, mermaid).
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.snippets
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+  - pymdownx.caret
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+
+# Navigation ports the Docusaurus sidebars.js tree 1:1.
+nav:
+  - Home: intro.md
+  - Introduction:
+      - Features: overview/features.md
+      - Technology Stack: overview/technology-stack.md
+      - Security Philosophy: overview/security-philosophy.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Configuration: getting-started/configuration.md
+      - Running the Platform: getting-started/running-the-platform.md
+  - User Guide:
+      - user-guide/index.md
+      - Dashboard Overview: user-guide/dashboard-overview.md
+      - Code Analysis Portal:
+          - Submitting Code: user-guide/code-analysis/submitting-code.md
+          - Understanding Results: user-guide/code-analysis/understanding-results.md
+          - Managing Findings: user-guide/code-analysis/managing-findings.md
+          - Multi-Framework Scanning: user-guide/code-analysis/multi-framework-scanning.md
+      - Chat Interfaces:
+          - Guideline Provision: user-guide/chat-interfaces/guideline-provision.md
+          - Secure Code Generation: user-guide/chat-interfaces/secure-code-generation.md
+      - Unit Test Integration: user-guide/unit-test-integration.md
+      - Reporting: user-guide/reporting.md
+  - Security Frameworks:
+      - security-frameworks/index.md
+      - Supported Frameworks: security-frameworks/supported-frameworks.md
+  - Platform Architecture:
+      - Overview: architecture/overview.md
+      - Agent System: architecture/agent-system.md
+      - Backend Services: architecture/backend-services.md
+      - Frontend Services: architecture/frontend-services.md
+      - Data Flow: architecture/data-flow.md
+      - LLM Integration: architecture/llm-integration.md
+      - RAG System: architecture/rag-system.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Coding Standards: development/coding-standards.md
+      - Testing Strategy: development/testing-strategy.md
+      - Adding New Agents: development/adding-new-agents.md
+      - Updating Framework Knowledge: development/updating-framework-knowledge.md
+      - Semgrep Rule Ingestion: development/rule-source-ingestion.md
+  - API Reference:
+      - api-reference/index.md
+      - Authentication: api-reference/authentication.md
+      - LLM Configuration: api-reference/llm-configuration.md
+      - Code Analysis Endpoints: api-reference/code-analysis-endpoints.md
+      - Results Endpoints: api-reference/results-endpoints.md
+  - Roadmap: roadmap.md
+  - FAQ: faq.md

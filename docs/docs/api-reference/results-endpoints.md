@@ -36,13 +36,13 @@ final scan `status`.
 
 Use this for the Results page.
 
-:::note SARIF + Executive Summary endpoints removed
-The previous `/scans/{id}/sarif` and
-`/scans/{id}/executive-summary/download` endpoints were removed in
-the 2026-04-26 cleanup — the impact-reporting node that backed
-them was never wired into the graph, so both endpoints returned
-404 in practice. They'll come back as a focused feature later.
-:::
+!!! note "SARIF + Executive Summary endpoints removed"
+
+    The previous `/scans/{id}/sarif` and
+    `/scans/{id}/executive-summary/download` endpoints were removed in
+    the 2026-04-26 cleanup — the impact-reporting node that backed
+    them was never wired into the graph, so both endpoints returned
+    404 in practice. They'll come back as a focused feature later.
 
 ## LLM interactions for a scan
 

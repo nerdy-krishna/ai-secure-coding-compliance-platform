@@ -62,11 +62,11 @@ The easiest way to get started is by using the automated setup script. This scri
 
 Once the script completes, you will see a dynamic "Setup Complete!" message with the correct HTTP/HTTPS URLs for the application and Grafana depending on your choices.
 
-:::tip First user becomes superuser
-The first account you register on the running app becomes the
-platform's superuser and is routed through `/setup` to finish LLM,
-SMTP, and system configuration before the rest of the UI unlocks.
-:::
+!!! tip "First user becomes superuser"
+
+    The first account you register on the running app becomes the
+    platform's superuser and is routed through `/setup` to finish LLM,
+    SMTP, and system configuration before the rest of the UI unlocks.
 
 ---
 
