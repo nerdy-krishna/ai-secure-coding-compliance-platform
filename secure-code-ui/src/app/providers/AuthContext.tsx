@@ -12,6 +12,13 @@ export interface AuthContextType {
   initialAuthChecked: boolean;
   error: string | null;
   login: (credentials: UserLoginData) => Promise<void>;
+  /**
+   * Drop an already-issued access token into the session as if the user
+   * had just signed in (passkey, SSO callback, etc.). Mirrors the
+   * post-credential-success path of `login` without going through the
+   * password endpoint.
+   */
+  loginWithAccessToken: (accessToken: string) => void;
   register: (credentials: UserRegisterData) => Promise<UserRead>;
   logout: () => Promise<void>;
   clearError: () => void;

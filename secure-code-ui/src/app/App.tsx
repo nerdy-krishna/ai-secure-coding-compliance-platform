@@ -14,6 +14,7 @@ import { ToastProvider } from "../shared/ui/Toast";
 import LLMSettingsPage from "../features/admin-settings/components/LLMSettingsPage";
 import AppearanceSettingsPage from "../pages/account/AppearanceSettingsPage";
 import DashboardPage from "../pages/account/DashboardPage";
+import SecuritySettingsPage from "../pages/account/SecuritySettingsPage";
 import SubmissionHistoryPage from "../pages/account/SubmissionHistoryPage";
 import AdminFindingsPage from "../pages/admin/AdminFindingsPage";
 import SystemConfigTab from "../pages/admin/SystemConfigTab";
@@ -174,6 +175,10 @@ function AppContent() {
           <Route
             path="/account/settings/appearance"
             element={<AppearanceSettingsPage />}
+          />
+          <Route
+            path="/account/settings/security"
+            element={<SecuritySettingsPage />}
           />
         </Route>
 

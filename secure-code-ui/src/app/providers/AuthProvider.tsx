@@ -198,6 +198,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, []);
 
+  const loginWithAccessToken = useCallback((token: string): void => {
+    if (!token) return;
+    localStorage.setItem("accessToken", token);
+    setAccessToken(token);
+    // Match the password-login path so the user doesn't see a 401 flash
+    // a few minutes after a passkey / SSO sign-in.
+    scheduleProactiveRefresh(token);
+  }, []);
+
   const register = useCallback(
     async (credentials: UserRegisterData): Promise<UserRead> => {
       setIsLoading(true);
@@ -260,6 +269,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     isSetupCompleted,
     error,
     login,
+    loginWithAccessToken,
     register,
     logout,
     clearError,

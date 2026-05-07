@@ -15,6 +15,7 @@ import {
   type LoginGuardResponse,
   type SsoProviderPublic,
 } from "../../../shared/api/ssoService";
+import { webauthnService } from "../../../shared/api/webauthnService";
 
 const SSO_LOGIN_URL = (providerName: string) =>
   `/api/v1/auth/sso/${providerName}/login`;
@@ -22,10 +23,13 @@ const SSO_LOGIN_URL = (providerName: string) =>
 const LoginPageContent: React.FC = () => {
   const {
     login,
+    loginWithAccessToken,
     error: authError,
     isLoading: authLoading,
     clearError,
   } = useAuth();
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const passkeySupported = webauthnService.isSupported();
   const toast = useToast();
   const lastSubmitRef = useRef<number>(0);
   const mountedAt = useRef<number>(Date.now());
@@ -275,6 +279,50 @@ const LoginPageContent: React.FC = () => {
         {authLoading ? "Signing in…" : "Log in"}
         {!authLoading && <Icon.ArrowR size={14} />}
       </button>
+
+      {passkeySupported && !forcedSso?.forced && (
+        <button
+          type="button"
+          className="sccap-btn sccap-btn-lg"
+          disabled={passkeyLoading || authLoading || !form.username.trim()}
+          onClick={async () => {
+            const email = form.username.trim();
+            if (!email) {
+              toast.error("Enter your email first.");
+              return;
+            }
+            setPasskeyLoading(true);
+            try {
+              const res = await webauthnService.login(email);
+              loginWithAccessToken(res.access_token);
+            } catch (err: unknown) {
+              const e = err as {
+                response?: { data?: { detail?: string } };
+                message?: string;
+                name?: string;
+              };
+              // NotAllowedError = user cancelled the prompt; stay quiet.
+              if (e?.name === "NotAllowedError") return;
+              const detail =
+                e?.response?.data?.detail ||
+                e?.message ||
+                "Passkey sign-in failed";
+              toast.error(detail);
+            } finally {
+              setPasskeyLoading(false);
+            }
+          }}
+          style={{ width: "100%", justifyContent: "center" }}
+          title={
+            form.username.trim()
+              ? "Use a passkey registered to this email"
+              : "Enter your email above first"
+          }
+        >
+          <Icon.Lock size={14} />
+          {passkeyLoading ? "Waiting for passkey…" : "Sign in with a passkey"}
+        </button>
+      )}
 
       {/* SSO row — buttons appear when at least one provider is enabled.
           Force-SSO mode pins the active button to the matched provider. */}

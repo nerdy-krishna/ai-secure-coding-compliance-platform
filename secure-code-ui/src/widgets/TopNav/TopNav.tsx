@@ -214,6 +214,11 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
     navigate(isSuperuser ? "/admin/system" : "/account/settings/appearance");
   };
 
+  const goSecurity = () => {
+    setOpen(false);
+    navigate("/account/settings/security");
+  };
+
   const label = isSuperuser ? "Admin" : "User";
   const initials = isSuperuser ? "AD" : "US";
 
@@ -285,6 +290,27 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
             }}
           >
             <Icon.Settings size={14} /> <span>Settings</span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={goSecurity}
+            style={{
+              display: "flex",
+              width: "100%",
+              alignItems: "center",
+              gap: 10,
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "none",
+              background: "transparent",
+              color: "var(--fg)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontSize: 13,
+              textAlign: "left",
+            }}
+          >
+            <Icon.Lock size={14} /> <span>Security &amp; passkeys</span>
           </button>
           <div
             style={{ height: 1, background: "var(--border)", margin: "6px 0" }}
