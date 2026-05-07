@@ -100,6 +100,11 @@ croniter = "^5.0"
 httpx-oauth = ">=0.16,<1.0"
 pyjwt = {extras = ["crypto"], version = ">=2.10,<3.0"}
 python3-saml = ">=1.16,<2.0"
+# Phase WebAuthn — passkey / FIDO2 support. Duo's py_webauthn library
+# wraps the `cryptography` primitives we already use; ships the COSE
+# key parsing, attestation verification, and assertion verification
+# stacks needed for a server-side relying party. MIT.
+webauthn = ">=2.0,<3.0"
 
 
 # Worker-only deps: AST parsing (tree-sitter). The embedder was

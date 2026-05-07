@@ -933,6 +933,11 @@ app.include_router(admin_sso_router, prefix="/api/v1")
 app.include_router(login_guard_router, prefix="/api/v1")
 app.add_middleware(ForceSsoMiddleware)
 
+# WebAuthn / passkey endpoints (Chunk 5).
+from app.api.v1.routers.webauthn import router as webauthn_router  # noqa: E402
+
+app.include_router(webauthn_router, prefix="/api/v1")
+
 app.include_router(
     fastapi_users.get_reset_password_router(),
     prefix="/api/v1/auth",

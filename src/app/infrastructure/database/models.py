@@ -46,6 +46,9 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     saml_subjects: Mapped[List["SamlSubject"]] = relationship(
         "SamlSubject", back_populates="user", cascade="all, delete-orphan"
     )
+    webauthn_credentials: Mapped[List["WebAuthnCredential"]] = relationship(
+        "WebAuthnCredential", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Project(Base):
@@ -895,6 +898,46 @@ class SamlSubject(Base):
         UniqueConstraint(
             "provider_id", "name_id", name="uq_saml_subjects_provider_name_id"
         ),
+    )
+
+
+class WebAuthnCredential(Base):
+    """Registered WebAuthn / FIDO2 authenticator (passkey, hardware key,
+    platform authenticator). One row per credential — a user may have
+    multiple."""
+
+    __tablename__ = "webauthn_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Binary credential id returned at registration. Variable-length;
+    # unique across all users so we can find the credential during the
+    # assertion phase without needing the user to type their email first.
+    credential_id: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # CBOR-encoded COSE public key produced by py_webauthn.
+    public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # Authenticator-asserted signature counter. Bumped on every
+    # successful login. Clone detection: incoming counter must be
+    # strictly greater than stored counter (W3C §6.1.3).
+    sign_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # JSON list of transport hints — ["internal"], ["usb"], ["nfc","ble"].
+    transports: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True)
+    friendly_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    user: Mapped["User"] = relationship(back_populates="webauthn_credentials")
+
+    __table_args__ = (
+        UniqueConstraint("credential_id", name="uq_webauthn_credentials_credential_id"),
     )
 
 
