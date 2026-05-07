@@ -24,6 +24,7 @@ const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/prompts", label: "Prompts" },
   { to: "/admin/smtp", label: "SMTP" },
   { to: "/admin/sso/providers", label: "SSO" },
+  { to: "/admin/scim/tokens", label: "SCIM tokens" },
   { to: "/admin/sso/audit", label: "Auth audit" },
   { to: "/account/settings/llm", label: "LLM configs" },
   { to: "/admin/appearance", label: "Appearance" },
