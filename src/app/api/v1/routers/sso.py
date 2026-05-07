@@ -356,6 +356,7 @@ async def oidc_callback(
             raw_claims=userinfo.full_claims,
             group_claim_path=cfg.group_claim_path,
             group_mapping=cfg.group_mapping,
+            idp_token_expires_at=userinfo.idp_token_expires_at,
         )
     except SsoProvisioningEmailUnverified:
         return _redirect_to_frontend_with_error("email_unverified_at_idp")

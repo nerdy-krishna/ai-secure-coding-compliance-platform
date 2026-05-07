@@ -173,6 +173,15 @@ class OidcConfig(BaseModel):
     group_claim_path: Optional[str] = Field(default=None, max_length=256)
     group_mapping: Dict[str, str] = Field(default_factory=dict)
 
+    # When True, every SCCAP token refresh checks the user's IdP-issued
+    # access-token expiry (persisted on `oauth_accounts.idp_token_expires_at`
+    # at the OIDC callback). Refresh attempts past that wall-clock are
+    # rejected with `session.idp_token_expired` audit event. Caps the
+    # blast radius of an IdP session revocation that we don't directly
+    # observe — the user has at most one IdP-token-lifetime to keep
+    # using SCCAP after the IdP forgets them.
+    bind_to_idp_session: bool = False
+
     @field_validator("issuer_url", mode="after")
     @classmethod
     def _check_issuer_url_safe(cls, v: HttpUrl) -> HttpUrl:

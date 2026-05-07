@@ -843,6 +843,13 @@ class OAuthAccount(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # Wall-clock expiry of the IdP-issued access token. Populated at the
+    # OIDC callback if available; consulted by `/auth/refresh` when the
+    # provider has `bind_to_idp_session=True` (Chunk 4 — session-bind).
+    # Nullable so existing rows + non-bound providers continue to work.
+    idp_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="oauth_accounts")
     provider: Mapped["SsoProvider"] = relationship(back_populates="oauth_accounts")

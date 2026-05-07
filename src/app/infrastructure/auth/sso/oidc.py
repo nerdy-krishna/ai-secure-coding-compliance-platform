@@ -21,6 +21,7 @@ import hashlib
 import logging
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import httpx
@@ -52,6 +53,12 @@ class OidcUserInfo:
     # so `provisioning._sync_groups_from_idp` can extract a configurable
     # path. NEVER persisted to the audit table — only used in-process.
     full_claims: Optional[Dict[str, Any]] = None
+    # UTC wall-clock expiry of the IdP-issued access token (id_token's
+    # `exp` claim, which fastapi-users pyjwt validation already enforced).
+    # Used by Chunk 4's session-bind feature to mirror the IdP's session
+    # ceiling on the SCCAP refresh path. Optional because not every IdP
+    # discloses an exp on the token endpoint response.
+    idp_token_expires_at: Optional[datetime] = None
 
 
 def make_pkce_pair() -> tuple[str, str]:
@@ -211,6 +218,20 @@ async def exchange_code(
             "OIDC userinfo did not include 'email' (and id_token didn't either)"
         )
 
+    # Compute the IdP-asserted access-token expiry (Chunk 4 — session-bind).
+    # Prefer the explicit `expires_at` from the token response; fall back
+    # to id_token's `exp` claim (already pyjwt-validated above so it's a
+    # trusted UTC timestamp).
+    idp_expires_at: Optional[datetime] = None
+    expires_at_raw = token_response.get("expires_at") or claims.get("exp")
+    if expires_at_raw is not None:
+        try:
+            idp_expires_at = datetime.fromtimestamp(
+                int(expires_at_raw), tz=timezone.utc
+            )
+        except (TypeError, ValueError, OSError):
+            idp_expires_at = None
+
     return OidcUserInfo(
         sub=sub,
         email=str(email),
@@ -224,6 +245,7 @@ async def exchange_code(
             if k in {"iss", "aud", "exp", "iat", "sub", "email_verified", "amr", "acr"}
         },
         full_claims=full_claims,
+        idp_token_expires_at=idp_expires_at,
     )
 
 

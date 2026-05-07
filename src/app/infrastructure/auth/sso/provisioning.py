@@ -27,6 +27,7 @@ import logging
 import secrets
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from fastapi import Request
@@ -300,6 +301,7 @@ async def provision_or_link_oidc(
     raw_claims: Optional[dict] = None,
     group_claim_path: Optional[str] = None,
     group_mapping: Optional[Dict[str, str]] = None,
+    idp_token_expires_at: Optional[datetime] = None,
 ) -> ProvisionedIdentity:
     """Resolve an OIDC subject to a SCCAP User — link, JIT-create, or refuse.
 
@@ -332,6 +334,11 @@ async def provision_or_link_oidc(
         if user is None:
             # Defensive: link points at a deleted user. Refuse.
             raise SsoProvisioningError("oauth_accounts row points at missing user")
+        # Push the IdP-asserted token expiry forward each time so the
+        # SCCAP refresh-path session-bind check (Chunk 4) tracks the
+        # IdP's session lifetime in lock-step.
+        if idp_token_expires_at is not None:
+            await repo.update_oauth_token_expiry(existing_link.id, idp_token_expires_at)
         # Re-sync group memberships on every login so directory drift
         # (new groups added at the IdP) propagates without a re-link.
         await _sync_groups_from_idp(
@@ -380,6 +387,7 @@ async def provision_or_link_oidc(
             provider_id=provider.id,
             account_id=sub,
             account_email=norm_email,
+            idp_token_expires_at=idp_token_expires_at,
         )
         await audit.record(
             session,

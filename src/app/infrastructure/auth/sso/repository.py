@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, update
@@ -173,16 +174,36 @@ class SsoProviderRepository:
         provider_id: uuid.UUID,
         account_id: str,
         account_email: str,
+        idp_token_expires_at: Optional[datetime] = None,
     ) -> db_models.OAuthAccount:
         row = db_models.OAuthAccount(
             user_id=user_id,
             provider_id=provider_id,
             account_id=account_id,
             account_email=account_email,
+            idp_token_expires_at=idp_token_expires_at,
         )
         self.session.add(row)
         await self.session.flush()
         return row
+
+    async def update_oauth_token_expiry(
+        self,
+        oauth_account_id: uuid.UUID,
+        idp_token_expires_at: Optional[datetime],
+    ) -> None:
+        """Refresh `oauth_accounts.idp_token_expires_at` on a returning login.
+
+        Called by the OIDC callback for the bind-to-IdP-session feature
+        (Chunk 4) so each successful sign-in pushes the SCCAP session
+        ceiling forward in lock-step with the IdP-issued access-token.
+        """
+        await self.session.execute(
+            update(db_models.OAuthAccount)
+            .where(db_models.OAuthAccount.id == oauth_account_id)
+            .values(idp_token_expires_at=idp_token_expires_at)
+        )
+        await self.session.flush()
 
     async def create_saml_link(
         self,

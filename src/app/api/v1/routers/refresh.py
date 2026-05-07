@@ -165,6 +165,82 @@ async def refresh_access_token(
             detail="Session lifetime exceeded; please log in again.",
         )
 
+    # Chunk 4 — session-bind: when the user's primary OAuth provider has
+    # bind_to_idp_session=True, mirror the IdP-asserted access-token expiry
+    # as a second session ceiling. Caps blast radius of an IdP session
+    # revocation we don't directly observe.
+    try:
+        from sqlalchemy import select as _select
+
+        from app.infrastructure.auth.sso.encryption import decrypt_provider_config
+        from app.infrastructure.auth.sso.models import OidcConfig
+        from app.infrastructure.database.database import AsyncSessionLocal
+        from app.infrastructure.database.models import OAuthAccount, SsoProvider
+
+        async with AsyncSessionLocal() as _check_session:
+            row = (
+                await _check_session.execute(
+                    _select(OAuthAccount, SsoProvider)
+                    .join(SsoProvider, OAuthAccount.provider_id == SsoProvider.id)
+                    .where(OAuthAccount.user_id == user.id)
+                    .order_by(OAuthAccount.created_at.desc())
+                )
+            ).first()
+            if row is not None:
+                oauth_account, provider_row = row
+                if (
+                    provider_row.protocol == "oidc"
+                    and oauth_account.idp_token_expires_at is not None
+                ):
+                    cfg_plain = decrypt_provider_config(provider_row.config_encrypted)
+                    oidc_cfg = OidcConfig.model_validate(cfg_plain)
+                    if oidc_cfg.bind_to_idp_session:
+                        now_utc = datetime.now(timezone.utc)
+                        if oauth_account.idp_token_expires_at < now_utc:
+                            logger.warning(
+                                "auth.refresh.idp_token_expired",
+                                extra={
+                                    "event": "session.idp_token_expired",
+                                    "user_id": user.id,
+                                    "provider_id": str(provider_row.id),
+                                },
+                            )
+                            try:
+                                from app.infrastructure.auth.sso.audit import (
+                                    record_event,
+                                )
+
+                                await record_event(
+                                    db=None,
+                                    event="session.idp_token_expired",
+                                    user_id=user.id,
+                                    provider_id=provider_row.id,
+                                    request=request,
+                                    details={
+                                        "idp_expires_at": (
+                                            oauth_account.idp_token_expires_at.isoformat()
+                                        ),
+                                    },
+                                )
+                            except Exception:
+                                pass
+                            raise HTTPException(
+                                status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail=(
+                                    "IdP session expired; please log in again "
+                                    "via your identity provider."
+                                ),
+                            )
+    except HTTPException:
+        raise
+    except Exception:
+        # Bind check is best-effort. A DB hiccup must NEVER lock users out.
+        logger.warning(
+            "auth.refresh.idp_bind_check_failed",
+            extra={"user_id": user.id},
+            exc_info=True,
+        )
+
     # Rotate the refresh token by generating a new one and setting the cookie.
     # Include typ=REFRESH_TOKEN_TYPE to prevent access-token-as-refresh-token
     # confusion (V09.2.2) and carry original_iat for absolute-lifetime enforcement.

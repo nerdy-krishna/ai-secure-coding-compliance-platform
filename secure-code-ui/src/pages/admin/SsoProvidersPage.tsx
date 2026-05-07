@@ -38,6 +38,7 @@ interface OidcForm {
   require_email_verified_claim: boolean;
   group_claim_path: string;
   group_mapping_json: string;
+  bind_to_idp_session: boolean;
 }
 
 interface SamlForm {
@@ -78,6 +79,7 @@ const EMPTY_OIDC: OidcForm = {
   require_email_verified_claim: true,
   group_claim_path: "",
   group_mapping_json: "{}",
+  bind_to_idp_session: false,
 };
 
 const EMPTY_SAML: SamlForm = {
@@ -138,6 +140,7 @@ function buildOidcConfig(form: OidcForm, isEdit: boolean): Record<string, unknow
   } catch {
     // Caller validated; leave empty
   }
+  cfg.bind_to_idp_session = form.bind_to_idp_session;
   return cfg;
 }
 
@@ -302,6 +305,7 @@ const SsoProvidersPage: React.FC = () => {
           null,
           2,
         ),
+        bind_to_idp_session: Boolean(cfg.bind_to_idp_session ?? false),
       });
       setSaml(EMPTY_SAML);
     } else {
@@ -758,6 +762,20 @@ const SsoProvidersPage: React.FC = () => {
                   />
                   <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
                     Mapped groups are added <b>additively</b> on each login. Group memberships are NEVER auto-removed; <code>is_superuser</code> is NEVER granted via SSO claims.
+                  </span>
+                </label>
+                <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={oidc.bind_to_idp_session}
+                    onChange={(e) =>
+                      setOidc({ ...oidc, bind_to_idp_session: e.target.checked })
+                    }
+                    style={{ accentColor: "var(--primary)" }}
+                  />
+                  Bind SCCAP session to IdP session lifetime
+                  <span style={{ fontSize: 11, color: "var(--fg-subtle)", marginLeft: 8 }}>
+                    (refresh fails after the IdP-issued access token expires)
                   </span>
                 </label>
                 <div className="inset" style={{ padding: 10, fontSize: 12, color: "var(--fg-muted)" }}>
