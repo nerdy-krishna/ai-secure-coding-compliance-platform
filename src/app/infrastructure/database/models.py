@@ -79,6 +79,13 @@ class Project(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     repository_url: Mapped[Optional[str]] = mapped_column(Text)
+    # Tenant scoping (Chunk 8). Nullable; backfilled from user.tenant_id.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -102,6 +109,14 @@ class Scan(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     parent_scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("scans.id"))
+    # Tenant scoping (Chunk 8). Nullable; backfilled from user.tenant_id
+    # (transitively, scan.user_id → user.tenant_id).
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     scan_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=STATUS_QUEUED
@@ -218,6 +233,13 @@ class Finding(Base):
     __tablename__ = "findings"
     id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
     scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id"), nullable=False)
+    # Tenant scoping (Chunk 8). Nullable; backfilled via scan.tenant_id.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     line_number: Mapped[Optional[int]] = mapped_column(Integer)
     # V02.2.1: hard-capped at 512 characters at the persistence layer
@@ -340,6 +362,13 @@ class ChatSession(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     project_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("projects.id"))
+    # Tenant scoping (Chunk 8). Nullable; backfilled from user.tenant_id.
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("llm_configurations.id")
     )
