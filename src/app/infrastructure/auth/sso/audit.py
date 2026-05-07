@@ -227,6 +227,13 @@ EVENT_PASSWORD_LOGIN_BLOCKED = "auth.password_login.blocked_by_force_sso"
 EVENT_PROVIDER_CREATED = "auth.provider.created"
 EVENT_PROVIDER_UPDATED = "auth.provider.updated"
 EVENT_PROVIDER_DELETED = "auth.provider.deleted"
+# Group sync from IdP claims: emitted when a user gains a user_groups
+# membership via the provider's group_mapping. Detail includes the IdP
+# group name that triggered it and the SCCAP group name added.
+EVENT_GROUP_MAPPED = "auth.group.mapped"
+# Emitted when an IdP group name appears in the claims but isn't in the
+# admin-curated `group_mapping`; useful for ops to spot directory drift.
+EVENT_GROUP_UNMAPPED = "auth.group.unmapped"
 
 
 async def record_event(

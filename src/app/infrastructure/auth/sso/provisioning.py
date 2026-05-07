@@ -27,7 +27,7 @@ import logging
 import secrets
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, List, Optional
 
 from fastapi import Request
 from sqlalchemy import select
@@ -163,6 +163,131 @@ async def _create_jit_user(
     return user
 
 
+def _extract_groups_from_claims(
+    claims: Optional[dict], path: Optional[str]
+) -> List[str]:
+    """Walk a dotted-path into ``claims`` and return the value as a list of strings.
+
+    Supports nested objects (Keycloak ``realm_access.roles``,
+    ``resource_access.<client>.roles``) and top-level keys (Okta-style
+    ``groups``). If the path doesn't resolve, the value isn't a list, or
+    any element isn't a string, returns an empty list.
+
+    Never raises — group sync is best-effort and must NEVER break login.
+    """
+    if not claims or not path:
+        return []
+    cursor: object = claims
+    for segment in path.split("."):
+        if not isinstance(cursor, dict):
+            return []
+        cursor = cursor.get(segment)
+        if cursor is None:
+            return []
+    if not isinstance(cursor, list):
+        return []
+    return [str(g) for g in cursor if isinstance(g, str)]
+
+
+async def _sync_groups_from_idp(
+    session: AsyncSession,
+    *,
+    user: db_models.User,
+    provider: db_models.SsoProvider,
+    idp_groups: List[str],
+    group_mapping: Dict[str, str],
+    request: Optional[Request],
+) -> None:
+    """Additively sync user's user_groups membership from IdP group claims.
+
+    For each IdP group in ``idp_groups``, look up its mapped SCCAP group
+    name in ``group_mapping`` and ensure the user is a member of that
+    group. **Never removes** existing memberships — operators retain full
+    control over group revocation via the User Groups admin UI.
+
+    Failures are logged + audited but never raised — the SSO login itself
+    succeeds even if group sync hits a database hiccup.
+    """
+    if not idp_groups or not group_mapping:
+        return
+    from app.infrastructure.database.repositories.user_group_repo import (
+        UserGroupRepository,
+    )
+
+    repo = UserGroupRepository(session)
+    try:
+        existing_groups = await repo.list_groups_for_user(user.id)
+        existing_names = {g.name for g in existing_groups}
+        all_groups = await repo.list_groups()
+        groups_by_name = {g.name: g for g in all_groups}
+    except Exception:
+        logger.warning(
+            "auth.group_sync.lookup_failed",
+            extra={"user_id": user.id, "provider_id": str(provider.id)},
+            exc_info=True,
+        )
+        return
+
+    for idp_group in idp_groups:
+        mapped = group_mapping.get(idp_group)
+        if mapped is None:
+            # Track unmapped IdP group names for operator visibility (drift signal).
+            try:
+                await audit.record(
+                    session,
+                    event=audit.EVENT_GROUP_UNMAPPED,
+                    user_id=user.id,
+                    provider_id=provider.id,
+                    request=request,
+                    details={"idp_group": idp_group},
+                )
+            except Exception:
+                pass
+            continue
+        if mapped in existing_names:
+            continue  # already a member; idempotent
+        target = groups_by_name.get(mapped)
+        if target is None:
+            # Mapping points at a SCCAP group that doesn't exist. Audit
+            # but don't fail — admin should fix the mapping.
+            try:
+                await audit.record(
+                    session,
+                    event=audit.EVENT_GROUP_UNMAPPED,
+                    user_id=user.id,
+                    provider_id=provider.id,
+                    request=request,
+                    details={
+                        "idp_group": idp_group,
+                        "reason": "mapped_target_missing",
+                        "target": mapped,
+                    },
+                )
+            except Exception:
+                pass
+            continue
+        try:
+            await repo.add_member(target.id, user.id)
+            await audit.record(
+                session,
+                event=audit.EVENT_GROUP_MAPPED,
+                user_id=user.id,
+                provider_id=provider.id,
+                request=request,
+                details={"idp_group": idp_group, "sccap_group": mapped},
+            )
+        except Exception:
+            logger.warning(
+                "auth.group_sync.add_member_failed",
+                extra={
+                    "user_id": user.id,
+                    "provider_id": str(provider.id),
+                    "target_group": mapped,
+                },
+                exc_info=True,
+            )
+
+
 async def provision_or_link_oidc(
     session: AsyncSession,
     *,
@@ -172,8 +297,16 @@ async def provision_or_link_oidc(
     email_verified: bool,
     request: Optional[Request] = None,
     require_email_verified: bool = True,
+    raw_claims: Optional[dict] = None,
+    group_claim_path: Optional[str] = None,
+    group_mapping: Optional[Dict[str, str]] = None,
 ) -> ProvisionedIdentity:
-    """Resolve an OIDC subject to a SCCAP User — link, JIT-create, or refuse."""
+    """Resolve an OIDC subject to a SCCAP User — link, JIT-create, or refuse.
+
+    When ``group_claim_path`` and ``group_mapping`` are provided, the
+    user's `user_groups` membership is additively synced from IdP claims
+    after the user is established. ``is_superuser`` is NEVER affected.
+    """
     norm_email = _normalize_email(email)
     if not _domain_allowed(provider, norm_email):
         await audit.record(
@@ -199,6 +332,16 @@ async def provision_or_link_oidc(
         if user is None:
             # Defensive: link points at a deleted user. Refuse.
             raise SsoProvisioningError("oauth_accounts row points at missing user")
+        # Re-sync group memberships on every login so directory drift
+        # (new groups added at the IdP) propagates without a re-link.
+        await _sync_groups_from_idp(
+            session,
+            user=user,
+            provider=provider,
+            idp_groups=_extract_groups_from_claims(raw_claims, group_claim_path),
+            group_mapping=group_mapping or {},
+            request=request,
+        )
         return ProvisionedIdentity(user=user, is_new_user=False, is_new_link=False)
 
     # No link yet. Look up by email.
@@ -246,6 +389,14 @@ async def provision_or_link_oidc(
             email=norm_email,
             request=request,
         )
+        await _sync_groups_from_idp(
+            session,
+            user=user,
+            provider=provider,
+            idp_groups=_extract_groups_from_claims(raw_claims, group_claim_path),
+            group_mapping=group_mapping or {},
+            request=request,
+        )
         return ProvisionedIdentity(user=user, is_new_user=False, is_new_link=True)
 
     # JIT-create branch.
@@ -281,6 +432,15 @@ async def provision_or_link_oidc(
         raise SsoProvisioningPending(
             "user provisioned but awaiting admin approval (jit_policy=approve)"
         )
+    # First-login group sync.
+    await _sync_groups_from_idp(
+        session,
+        user=user,
+        provider=provider,
+        idp_groups=_extract_groups_from_claims(raw_claims, group_claim_path),
+        group_mapping=group_mapping or {},
+        request=request,
+    )
     return ProvisionedIdentity(user=user, is_new_user=True, is_new_link=True)
 
 
@@ -293,6 +453,9 @@ async def provision_or_link_saml(
     email: str,
     session_index: Optional[str],
     request: Optional[Request] = None,
+    saml_attributes: Optional[Dict[str, List[str]]] = None,
+    group_attribute: Optional[str] = None,
+    group_mapping: Optional[Dict[str, str]] = None,
 ) -> ProvisionedIdentity:
     """Resolve a SAML NameID + email-attribute to a SCCAP User.
 
@@ -300,6 +463,11 @@ async def provision_or_link_saml(
     the email attribute. There is no separate ``email_verified`` claim;
     the cryptographic signature is the verification — which is enforced
     upstream by ``saml.process_acs``.
+
+    When ``group_attribute`` and ``group_mapping`` are provided, the user's
+    `user_groups` membership is additively synced from the SAML attribute
+    values after the user is established. ``is_superuser`` is NEVER
+    affected by group sync.
     """
     norm_email = _normalize_email(email)
     if not _domain_allowed(provider, norm_email):
@@ -315,6 +483,12 @@ async def provision_or_link_saml(
             f"email domain not in allowed list for provider {provider.name!r}"
         )
 
+    # Resolve IdP-asserted groups once for use in every branch below.
+    idp_groups: List[str] = []
+    if saml_attributes and group_attribute:
+        raw = saml_attributes.get(group_attribute) or []
+        idp_groups = [g for g in raw if isinstance(g, str)]
+
     repo = SsoProviderRepository(session)
     existing = await repo.find_saml_subject(provider.id, name_id)
     if existing is not None:
@@ -327,6 +501,14 @@ async def provision_or_link_saml(
         user = result.scalar_one_or_none()
         if user is None:
             raise SsoProvisioningError("saml_subjects row points at missing user")
+        await _sync_groups_from_idp(
+            session,
+            user=user,
+            provider=provider,
+            idp_groups=idp_groups,
+            group_mapping=group_mapping or {},
+            request=request,
+        )
         return ProvisionedIdentity(user=user, is_new_user=False, is_new_link=False)
 
     user = await _find_user_by_email(session, norm_email)
@@ -357,6 +539,14 @@ async def provision_or_link_saml(
             user_id=user.id,
             provider_id=provider.id,
             email=norm_email,
+            request=request,
+        )
+        await _sync_groups_from_idp(
+            session,
+            user=user,
+            provider=provider,
+            idp_groups=idp_groups,
+            group_mapping=group_mapping or {},
             request=request,
         )
         return ProvisionedIdentity(user=user, is_new_user=False, is_new_link=True)
@@ -394,6 +584,14 @@ async def provision_or_link_saml(
         raise SsoProvisioningPending(
             "user provisioned but awaiting admin approval (jit_policy=approve)"
         )
+    await _sync_groups_from_idp(
+        session,
+        user=user,
+        provider=provider,
+        idp_groups=idp_groups,
+        group_mapping=group_mapping or {},
+        request=request,
+    )
     return ProvisionedIdentity(user=user, is_new_user=True, is_new_link=True)
 
 

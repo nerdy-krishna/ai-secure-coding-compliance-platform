@@ -155,6 +155,24 @@ class OidcConfig(BaseModel):
     # design (e.g. an internal Keycloak with verified-email-only flows).
     require_email_verified_claim: bool = True
 
+    # Optional group-claim mapping. ``group_claim_path`` is a JSON-pointer-
+    # style dotted path into the IdP's id_token / userinfo claim payload
+    # (e.g. ``"groups"``, ``"https://schemas.x.com/groups"``,
+    # ``"realm_access.roles"`` for Keycloak). The value at that path must
+    # be a list of strings.
+    #
+    # ``group_mapping`` is admin-curated: maps an IdP group string to a
+    # SCCAP ``user_groups.name``. Membership is **additive only** —
+    # SCCAP never auto-removes a user from a group based on a missing
+    # IdP claim, because group memberships have visibility implications
+    # the directory may not be aware of. Manual removal is via the
+    # User Groups admin UI.
+    #
+    # **Security invariant**: ``is_superuser`` is NEVER set from any IdP
+    # claim. This mapping ONLY controls user_groups membership.
+    group_claim_path: Optional[str] = Field(default=None, max_length=256)
+    group_mapping: Dict[str, str] = Field(default_factory=dict)
+
     @field_validator("issuer_url", mode="after")
     @classmethod
     def _check_issuer_url_safe(cls, v: HttpUrl) -> HttpUrl:
@@ -209,6 +227,15 @@ class SamlConfig(BaseModel):
     want_messages_signed: bool = True
     want_assertions_encrypted: bool = False
     reject_deprecated_alg: bool = True
+
+    # Optional group-attribute mapping. ``group_attribute`` is the SAML
+    # attribute name carrying the user's group membership list (e.g.
+    # ``"http://schemas.xmlsoap.org/claims/Group"``, ``"groups"``,
+    # ``"memberOf"`` for ADFS). ``group_mapping`` maps an IdP group
+    # string → SCCAP ``user_groups.name``. Same security invariants as
+    # OIDC: additive only, never touches ``is_superuser``.
+    group_attribute: Optional[str] = Field(default=None, max_length=256)
+    group_mapping: Dict[str, str] = Field(default_factory=dict)
 
     @field_validator("idp_x509_cert")
     @classmethod

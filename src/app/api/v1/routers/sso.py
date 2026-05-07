@@ -353,6 +353,9 @@ async def oidc_callback(
             email_verified=userinfo.email_verified,
             request=request,
             require_email_verified=cfg.require_email_verified_claim,
+            raw_claims=userinfo.full_claims,
+            group_claim_path=cfg.group_claim_path,
+            group_mapping=cfg.group_mapping,
         )
     except SsoProvisioningEmailUnverified:
         return _redirect_to_frontend_with_error("email_unverified_at_idp")
@@ -479,6 +482,9 @@ async def saml_acs(
             email=email,
             session_index=identity_attrs.session_index,
             request=request,
+            saml_attributes=identity_attrs.attributes,
+            group_attribute=cfg.group_attribute,
+            group_mapping=cfg.group_mapping,
         )
     except SsoProvisioningSuperuserLink:
         return _redirect_to_frontend_with_error("superuser_link_refused")

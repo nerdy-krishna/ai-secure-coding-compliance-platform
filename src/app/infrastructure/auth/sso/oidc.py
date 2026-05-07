@@ -45,7 +45,13 @@ class OidcUserInfo:
     email: str
     email_verified: bool
     name: Optional[str] = None
+    # Audit-friendly filtered subset (iss, aud, exp, iat, sub,
+    # email_verified, amr, acr).
     raw_claims: Optional[Dict[str, Any]] = None
+    # Full id_token + userinfo claims, merged. Carries the group claim
+    # so `provisioning._sync_groups_from_idp` can extract a configurable
+    # path. NEVER persisted to the audit table — only used in-process.
+    full_claims: Optional[Dict[str, Any]] = None
 
 
 def make_pkce_pair() -> tuple[str, str]:
@@ -178,20 +184,32 @@ async def exchange_code(
     email_verified = bool(claims.get("email_verified", False))
     name = claims.get("name")
 
-    if not email:
-        # Fall back to userinfo endpoint for the email.
-        access_token = token_response.get("access_token")
-        if not access_token:
-            raise ValueError(
-                "OIDC token response missing access_token; cannot reach userinfo"
+    # Always fetch userinfo when we have an access_token — it commonly
+    # carries the groups claim (Okta, Auth0) even if the id_token doesn't.
+    # Merge userinfo over id_token claims so the merged dict is the most
+    # complete view of the IdP's assertions about this user.
+    full_claims: Dict[str, Any] = dict(claims)
+    access_token = token_response.get("access_token")
+    if access_token:
+        try:
+            userinfo = await _fetch_userinfo(discovery, access_token)
+            full_claims.update(userinfo)
+            if not email:
+                email = userinfo.get("email")
+                email_verified = bool(userinfo.get("email_verified", email_verified))
+                name = userinfo.get("name") or name
+        except Exception:
+            # Userinfo fetch is best-effort. id_token alone is enough to
+            # mint a session if it carries email; group sync simply runs
+            # without the userinfo half of the merge.
+            logger.warning(
+                "oidc.userinfo_fetch_failed", extra={"sub": sub}, exc_info=True
             )
-        userinfo = await _fetch_userinfo(discovery, access_token)
-        email = userinfo.get("email")
-        email_verified = bool(userinfo.get("email_verified", email_verified))
-        name = userinfo.get("name") or name
 
     if not email:
-        raise ValueError("OIDC userinfo did not include 'email'")
+        raise ValueError(
+            "OIDC userinfo did not include 'email' (and id_token didn't either)"
+        )
 
     return OidcUserInfo(
         sub=sub,
@@ -205,6 +223,7 @@ async def exchange_code(
             # avoid bloating audit JSONB.
             if k in {"iss", "aud", "exp", "iat", "sub", "email_verified", "amr", "acr"}
         },
+        full_claims=full_claims,
     )
 
 

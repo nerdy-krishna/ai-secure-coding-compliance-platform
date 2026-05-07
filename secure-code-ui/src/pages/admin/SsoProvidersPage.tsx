@@ -36,6 +36,8 @@ interface OidcForm {
   client_secret: string;
   scopes: string;
   require_email_verified_claim: boolean;
+  group_claim_path: string;
+  group_mapping_json: string;
 }
 
 interface SamlForm {
@@ -54,6 +56,8 @@ interface SamlForm {
   want_assertions_signed: boolean;
   want_messages_signed: boolean;
   want_assertions_encrypted: boolean;
+  group_attribute: string;
+  group_mapping_json: string;
 }
 
 const EMPTY_COMMON: CommonForm = {
@@ -72,6 +76,8 @@ const EMPTY_OIDC: OidcForm = {
   client_secret: "",
   scopes: "openid, email, profile",
   require_email_verified_claim: true,
+  group_claim_path: "",
+  group_mapping_json: "{}",
 };
 
 const EMPTY_SAML: SamlForm = {
@@ -90,6 +96,8 @@ const EMPTY_SAML: SamlForm = {
   want_assertions_signed: true,
   want_messages_signed: true,
   want_assertions_encrypted: false,
+  group_attribute: "",
+  group_mapping_json: "{}",
 };
 
 const UNCHANGED_SENTINEL = "<<unchanged>>";
@@ -117,6 +125,18 @@ function buildOidcConfig(form: OidcForm, isEdit: boolean): Record<string, unknow
     cfg.client_secret = UNCHANGED_SENTINEL;
   } else {
     cfg.client_secret = form.client_secret;
+  }
+  if (form.group_claim_path.trim()) {
+    cfg.group_claim_path = form.group_claim_path.trim();
+  }
+  // group_mapping is admin-curated JSON: {idp_group: sccap_group_name}
+  try {
+    const parsed = JSON.parse(form.group_mapping_json || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      cfg.group_mapping = parsed;
+    }
+  } catch {
+    // Caller validated; leave empty
   }
   return cfg;
 }
@@ -151,6 +171,17 @@ function buildSamlConfig(form: SamlForm, isEdit: boolean): Record<string, unknow
     if (form.sp_x509_cert.trim()) cfg.sp_private_key = UNCHANGED_SENTINEL;
   } else if (form.sp_private_key.trim()) {
     cfg.sp_private_key = form.sp_private_key;
+  }
+  if (form.group_attribute.trim()) {
+    cfg.group_attribute = form.group_attribute.trim();
+  }
+  try {
+    const parsed = JSON.parse(form.group_mapping_json || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      cfg.group_mapping = parsed;
+    }
+  } catch {
+    // Caller validated; leave empty
   }
   return cfg;
 }
@@ -265,6 +296,12 @@ const SsoProvidersPage: React.FC = () => {
         require_email_verified_claim: Boolean(
           cfg.require_email_verified_claim ?? true,
         ),
+        group_claim_path: String(cfg.group_claim_path ?? ""),
+        group_mapping_json: JSON.stringify(
+          (cfg.group_mapping ?? {}) as Record<string, unknown>,
+          null,
+          2,
+        ),
       });
       setSaml(EMPTY_SAML);
     } else {
@@ -288,6 +325,12 @@ const SsoProvidersPage: React.FC = () => {
         want_assertions_signed: Boolean(cfg.want_assertions_signed ?? true),
         want_messages_signed: Boolean(cfg.want_messages_signed ?? true),
         want_assertions_encrypted: Boolean(cfg.want_assertions_encrypted ?? false),
+        group_attribute: String(cfg.group_attribute ?? ""),
+        group_mapping_json: JSON.stringify(
+          (cfg.group_mapping ?? {}) as Record<string, unknown>,
+          null,
+          2,
+        ),
       });
       setOidc(EMPTY_OIDC);
     }
@@ -689,6 +732,34 @@ const SsoProvidersPage: React.FC = () => {
                   />
                   Require <code>email_verified=true</code> claim from the IdP (recommended)
                 </label>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                    Group claim path <span style={{ color: "var(--fg-subtle)" }}>(optional, e.g. <code>groups</code> or <code>realm_access.roles</code>)</span>
+                  </span>
+                  <input
+                    className="sccap-input"
+                    placeholder="groups"
+                    value={oidc.group_claim_path}
+                    onChange={(e) => setOidc({ ...oidc, group_claim_path: e.target.value })}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                    Group mapping (JSON: IdP group → SCCAP user_group name)
+                  </span>
+                  <textarea
+                    className="sccap-input mono"
+                    rows={4}
+                    placeholder='{"engineering": "Platform Engineering", "sec-ops": "Security"}'
+                    value={oidc.group_mapping_json}
+                    onChange={(e) =>
+                      setOidc({ ...oidc, group_mapping_json: e.target.value })
+                    }
+                  />
+                  <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
+                    Mapped groups are added <b>additively</b> on each login. Group memberships are NEVER auto-removed; <code>is_superuser</code> is NEVER granted via SSO claims.
+                  </span>
+                </label>
                 <div className="inset" style={{ padding: 10, fontSize: 12, color: "var(--fg-muted)" }}>
                   Register this redirect URI at the IdP:
                   <div className="mono" style={{ marginTop: 4 }}>
@@ -788,6 +859,34 @@ const SsoProvidersPage: React.FC = () => {
                     Require signed responses
                   </label>
                 </div>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                    Group attribute name <span style={{ color: "var(--fg-subtle)" }}>(optional, e.g. <code>memberOf</code> or <code>http://schemas.xmlsoap.org/claims/Group</code>)</span>
+                  </span>
+                  <input
+                    className="sccap-input"
+                    placeholder="memberOf"
+                    value={saml.group_attribute}
+                    onChange={(e) => setSaml({ ...saml, group_attribute: e.target.value })}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                    Group mapping (JSON: IdP group → SCCAP user_group name)
+                  </span>
+                  <textarea
+                    className="sccap-input mono"
+                    rows={4}
+                    placeholder='{"CN=Engineering,OU=Groups,DC=corp,DC=local": "Platform Engineering"}'
+                    value={saml.group_mapping_json}
+                    onChange={(e) =>
+                      setSaml({ ...saml, group_mapping_json: e.target.value })
+                    }
+                  />
+                  <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
+                    Mapped groups are added <b>additively</b>; <code>is_superuser</code> is NEVER granted via SSO claims.
+                  </span>
+                </label>
                 <div className="inset" style={{ padding: 10, fontSize: 12, color: "var(--fg-muted)" }}>
                   Register these endpoints at the IdP:
                   <div className="mono" style={{ marginTop: 4 }}>
