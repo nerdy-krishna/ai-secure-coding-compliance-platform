@@ -947,6 +947,13 @@ from app.api.v1.routers.admin_scim import router as admin_scim_router  # noqa: E
 app.include_router(scim_router)
 app.include_router(admin_scim_router, prefix="/api/v1")
 
+# Tenant CRUD admin surface (Chunk 7) — superuser-only.
+from app.api.v1.routers.admin_tenants import (  # noqa: E402
+    router as admin_tenants_router,
+)
+
+app.include_router(admin_tenants_router, prefix="/api/v1")
+
 app.include_router(
     fastapi_users.get_reset_password_router(),
     prefix="/api/v1/auth",

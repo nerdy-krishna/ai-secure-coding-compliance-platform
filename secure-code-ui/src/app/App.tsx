@@ -33,6 +33,7 @@ import SsoCallbackPage from "../pages/auth/SsoCallbackPage";
 import SsoProvidersPage from "../pages/admin/SsoProvidersPage";
 import SsoAuditPage from "../pages/admin/SsoAuditPage";
 import ScimTokensPage from "../pages/admin/ScimTokensPage";
+import TenantsPage from "../pages/admin/TenantsPage";
 import SecurityAdvisorPage from "../pages/chat/SecurityAdvisorPage";
 import CompliancePage from "../pages/compliance/CompliancePage";
 import SubmitPage from "../pages/submission/SubmitPage";
@@ -193,6 +194,7 @@ function AppContent() {
           <Route path="/admin/sso/providers" element={<SsoProvidersPage />} />
           <Route path="/admin/sso/audit" element={<SsoAuditPage />} />
           <Route path="/admin/scim/tokens" element={<ScimTokensPage />} />
+          <Route path="/admin/tenants" element={<TenantsPage />} />
           <Route path="/account/settings/llm" element={<LLMSettingsPage />} />
           <Route path="/admin/agents" element={<AgentManagementPage />} />
           <Route

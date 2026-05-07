@@ -19,6 +19,7 @@ const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/system", label: "Platform" },
   { to: "/admin/users", label: "Users" },
   { to: "/admin/user-groups", label: "Groups" },
+  { to: "/admin/tenants", label: "Tenants" },
   { to: "/admin/agents", label: "Agents" },
   { to: "/admin/frameworks", label: "Frameworks" },
   { to: "/admin/prompts", label: "Prompts" },
