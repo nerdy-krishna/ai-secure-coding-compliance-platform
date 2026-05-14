@@ -3,7 +3,7 @@ name = "secure_coding_platform"
 version = "0.1.0"
 description = "SCCAP — Secure Coding & Compliance Automation Platform. Open-source AI-powered code auditing, remediation, and compliance tooling."
 authors = ["dev@nerdykrishna.com"]
-license = "MIT"
+license = "Apache-2.0"
 readme = "README.md"
 packages = [{ include = "app", from = "src" }]
 

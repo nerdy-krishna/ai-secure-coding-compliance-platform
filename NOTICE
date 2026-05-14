@@ -1,5 +1,22 @@
-SCCAP
-Copyright 2025 Krishna Lal H M
+SCCAP — Secure Coding & Compliance Automation Platform
+Copyright 2025-2026 Krishna Lal H M <dev@nerdykrishna.com>
 
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
+This product includes software developed as part of the SCCAP
+project (https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform).
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may
+not use this file except in compliance with the License. A copy of the
+License is distributed with this work in the LICENSE file in the repo
+root, and is also available at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Third-party dependencies retain their respective licenses. See
+pyproject.toml (backend) and secure-code-ui/package.json (frontend) for
+the full dependency lists. Notable bundled binaries (installed via the
+worker Dockerfile) and their licenses:
+
+  - Bandit          Apache-2.0
+  - Semgrep CE      LGPL-2.1
+  - Gitleaks        MIT
+  - OSV-Scanner     Apache-2.0
