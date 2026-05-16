@@ -99,16 +99,46 @@ FRAMEWORKS_DATA: List[Dict[str, str]] = [
 ]
 
 
-# Names of the OWASP-AppSec frameworks (ASVS / Proactive Controls /
-# Cheatsheets). Every legacy agent is mapped to all three; the new
-# LLM / Agentic agents are NOT — they only attach to their respective
-# AI-focused frameworks. This keeps a customer who selects `asvs`
-# from accidentally pulling LLM-prompt-injection RAG context into a
-# server-side-template-injection scan.
-_APPSEC_FRAMEWORK_NAMES = ["asvs", "proactive_controls", "cheatsheets"]
+# --- Agent roster (Framework Expansion #57) ---------------------------------
+#
+# Each framework owns a dedicated agent roster instead of sharing one
+# AppSec pool. Agent names are framework-prefixed for discoverability in
+# the admin UI; every agent declares an explicit `applicable_frameworks`
+# (exactly one framework) so the mapping-refresh below never falls back
+# to a shared default.
+#
+# The per-framework spec lists (`_ASVS_AGENT_SPECS` etc.) carry the
+# bare concern name + domain_query; `_framework_roster` prefixes them
+# into the final `Agent` definitions. ASVS keys RAG retrieval on the
+# ASVS `control_family` taxonomy; Proactive Controls / Cheatsheets key
+# on `framework_name` (their corpora carry no sub-facet).
+
+# Legacy un-prefixed agent names from before the per-framework split.
+# `force_reset` deletes these so "Restore defaults" on an existing
+# deployment clears the pre-split roster (the data migration in #58
+# covers the non-force upgrade path).
+_LEGACY_AGENT_NAMES = [
+    "AccessControlAgent",
+    "ApiSecurityAgent",
+    "ArchitectureAgent",
+    "AuthenticationAgent",
+    "BusinessLogicAgent",
+    "CodeIntegrityAgent",
+    "CommunicationAgent",
+    "ConfigurationAgent",
+    "CryptographyAgent",
+    "DataProtectionAgent",
+    "ErrorHandlingAgent",
+    "FileHandlingAgent",
+    "SessionManagementAgent",
+    "ValidationAgent",
+    "BuildDeploymentAgent",
+    "ClientSideAgent",
+    "CloudContainerAgent",
+]
 
 
-AGENT_DEFINITIONS: List[Dict[str, Any]] = [
+_ASVS_AGENT_SPECS: List[Dict[str, Any]] = [
     {
         "name": "AccessControlAgent",
         "description": (
@@ -375,6 +405,358 @@ AGENT_DEFINITIONS: List[Dict[str, Any]] = [
             "metadata_filter": {"control_family": ["Cloud and Container"]},
         },
     },
+]
+
+
+# OWASP Proactive Controls — developer-focused practices C1–C10.
+# RAG retrieval is scoped by `framework_name`; the PC corpus carries no
+# sub-facet, so the keywords drive the semantic match.
+_PC_AGENT_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "AccessControlAgent",
+        "description": (
+            "C1 — Implement Access Control. Reviews enforcement of "
+            "least privilege, deny-by-default, and consistent "
+            "server-side authorization checks."
+        ),
+        "domain_query": {
+            "keywords": (
+                "access control, implement access control, least "
+                "privilege, deny by default, server-side authorization, "
+                "role-based access control, ownership checks, "
+                "insecure direct object reference"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "CryptographyAgent",
+        "description": (
+            "C2 — Use Cryptography to protect data. Reviews encryption "
+            "of data at rest and in transit, key management, and use of "
+            "vetted cryptographic algorithms."
+        ),
+        "domain_query": {
+            "keywords": (
+                "use cryptography, protect data, encryption at rest, "
+                "encryption in transit, key management, vetted "
+                "algorithms, secrets management, strong hashing, "
+                "secure random number generation"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "InputValidationAgent",
+        "description": (
+            "C3 — Validate all Input & Handle Exceptions. Reviews "
+            "syntactic and semantic input validation, allowlisting, "
+            "and safe exception handling."
+        ),
+        "domain_query": {
+            "keywords": (
+                "validate all input, input validation, allowlist "
+                "validation, syntactic validation, semantic validation, "
+                "handle exceptions, fail securely, exception handling, "
+                "injection prevention, output encoding"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "SecureDesignAgent",
+        "description": (
+            "C4 — Address Security from the Start. Reviews secure "
+            "design, threat modeling outcomes, trust boundaries, and "
+            "secure architecture decisions."
+        ),
+        "domain_query": {
+            "keywords": (
+                "address security from the start, secure design, "
+                "threat modeling, trust boundaries, secure architecture, "
+                "security requirements, secure development lifecycle, "
+                "defense in depth"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "SecureConfigurationAgent",
+        "description": (
+            "C5 — Secure By Default Configurations. Reviews hardened "
+            "defaults, removal of unnecessary features, and absence of "
+            "insecure default credentials or settings."
+        ),
+        "domain_query": {
+            "keywords": (
+                "secure by default, secure configuration, hardened "
+                "defaults, default credentials, unnecessary features, "
+                "security headers, server hardening, least functionality"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "ComponentSecurityAgent",
+        "description": (
+            "C6 — Keep your Components Secure. Reviews dependency "
+            "management, known-vulnerable libraries, and software "
+            "supply-chain integrity."
+        ),
+        "domain_query": {
+            "keywords": (
+                "keep components secure, dependency security, "
+                "known vulnerable components, software composition "
+                "analysis, supply chain security, third-party libraries, "
+                "outdated dependencies, patch management"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "DigitalIdentityAgent",
+        "description": (
+            "C7 — Secure Digital Identities. Reviews authentication, "
+            "credential storage, multi-factor authentication, and "
+            "session lifecycle management."
+        ),
+        "domain_query": {
+            "keywords": (
+                "secure digital identities, authentication, credential "
+                "storage, password hashing, multi-factor authentication, "
+                "session management, session lifecycle, identity "
+                "verification, account recovery"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "BrowserSecurityAgent",
+        "description": (
+            "C8 — Leverage Browser Security Features. Reviews use of "
+            "security headers, Content Security Policy, cookie "
+            "attributes, and other browser-enforced protections."
+        ),
+        "domain_query": {
+            "keywords": (
+                "leverage browser security features, content security "
+                "policy, security headers, secure cookie attributes, "
+                "SameSite cookies, HSTS, subresource integrity, "
+                "clickjacking protection, CORS"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "LoggingMonitoringAgent",
+        "description": (
+            "C9 — Implement Security Logging and Monitoring. Reviews "
+            "security-event logging, log integrity, and avoidance of "
+            "sensitive data in logs."
+        ),
+        "domain_query": {
+            "keywords": (
+                "security logging, monitoring, audit logging, "
+                "security event logging, log integrity, sensitive data "
+                "in logs, detectable events, alerting, tamper-resistant "
+                "logs"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+    {
+        "name": "SsrfAgent",
+        "description": (
+            "C10 — Stop Server-Side Request Forgery. Reviews validation "
+            "of outbound request destinations and protection of "
+            "internal services from SSRF."
+        ),
+        "domain_query": {
+            "keywords": (
+                "server-side request forgery, SSRF, outbound request "
+                "validation, URL allowlist, internal service protection, "
+                "metadata endpoint access, blind SSRF, fetch user "
+                "supplied URL"
+            ),
+            "metadata_filter": {"framework_name": ["proactive_controls"]},
+        },
+    },
+]
+
+
+# OWASP Cheat Sheet Series — topic-organised secure-coding guidance.
+# RAG retrieval is scoped by `framework_name`.
+_CS_AGENT_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "InjectionAgent",
+        "description": (
+            "Injection defenses — SQL, NoSQL, OS command, LDAP, and "
+            "cross-site scripting. Reviews query parameterization and "
+            "context-aware output encoding."
+        ),
+        "domain_query": {
+            "keywords": (
+                "SQL injection, NoSQL injection, OS command injection, "
+                "LDAP injection, cross-site scripting, XSS, query "
+                "parameterization, prepared statements, output "
+                "encoding, context-aware escaping"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "AuthenticationAgent",
+        "description": (
+            "Authentication and password handling — login flows, "
+            "password storage, multi-factor authentication, and "
+            "credential recovery."
+        ),
+        "domain_query": {
+            "keywords": (
+                "authentication, password storage, password hashing, "
+                "bcrypt, argon2, multi-factor authentication, login "
+                "flow, forgot password, credential recovery, brute "
+                "force protection"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "SessionManagementAgent",
+        "description": (
+            "Session management — session token generation, cookie "
+            "attributes, session fixation, and CSRF protection."
+        ),
+        "domain_query": {
+            "keywords": (
+                "session management, session token, session fixation, "
+                "session hijacking, secure cookie attributes, SameSite, "
+                "cross-site request forgery, CSRF token, JWT session"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "AuthorizationAgent",
+        "description": (
+            "Authorization — access-control enforcement, insecure "
+            "direct object references, and privilege boundaries."
+        ),
+        "domain_query": {
+            "keywords": (
+                "authorization, access control, insecure direct object "
+                "reference, IDOR, privilege escalation, role-based "
+                "access control, function-level authorization, "
+                "ownership checks"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "CryptographyAgent",
+        "description": (
+            "Cryptographic storage and key management — encryption of "
+            "data at rest, secrets management, and algorithm selection."
+        ),
+        "domain_query": {
+            "keywords": (
+                "cryptographic storage, encryption at rest, key "
+                "management, secrets management, weak cipher, "
+                "initialization vector, secure random, password "
+                "hashing, algorithm selection"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "TransportSecurityAgent",
+        "description": (
+            "Transport-layer protection — TLS configuration, "
+            "certificate validation, and HTTP Strict Transport "
+            "Security."
+        ),
+        "domain_query": {
+            "keywords": (
+                "transport layer security, TLS configuration, HTTPS, "
+                "certificate validation, certificate pinning, weak "
+                "ciphers, HSTS, HTTP strict transport security, "
+                "downgrade attack"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "InputValidationAgent",
+        "description": (
+            "Input validation and deserialization — allowlist "
+            "validation, mass assignment, and unsafe deserialization."
+        ),
+        "domain_query": {
+            "keywords": (
+                "input validation, allowlist validation, mass "
+                "assignment, unsafe deserialization, object "
+                "deserialization, type confusion, parameter tampering, "
+                "sanitization"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "FileHandlingAgent",
+        "description": (
+            "File handling — upload validation, path traversal, and "
+            "safe storage of user-supplied files."
+        ),
+        "domain_query": {
+            "keywords": (
+                "file upload, unrestricted file upload, path "
+                "traversal, directory traversal, file inclusion, "
+                "content-type validation, file storage location, "
+                "malicious file"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "ErrorLoggingAgent",
+        "description": (
+            "Error handling and logging — preventing information "
+            "leakage through errors and avoiding sensitive data in "
+            "logs."
+        ),
+        "domain_query": {
+            "keywords": (
+                "error handling, information leakage, stack trace "
+                "exposure, verbose error messages, security logging, "
+                "sensitive data in logs, log injection, exception "
+                "handling"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+    {
+        "name": "ApiSecurityAgent",
+        "description": (
+            "API and browser hardening — REST and GraphQL security, "
+            "security headers, CORS, and Content Security Policy."
+        ),
+        "domain_query": {
+            "keywords": (
+                "REST API security, GraphQL security, rate limiting, "
+                "mass assignment, security headers, CORS "
+                "misconfiguration, content security policy, "
+                "clickjacking, API authentication"
+            ),
+            "metadata_filter": {"framework_name": ["cheatsheets"]},
+        },
+    },
+]
+
+
+# The LLM / Agentic agents are framework-native already — they are not
+# part of the AppSec pool, keep their own names, and declare explicit
+# single-framework mappings.
+_AI_AGENT_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "name": "LLMSecurityAgent",
         "description": (
@@ -427,26 +809,87 @@ AGENT_DEFINITIONS: List[Dict[str, Any]] = [
 ]
 
 
+def _framework_roster(
+    specs: List[Dict[str, Any]], framework: str, prefix: str
+) -> List[Dict[str, Any]]:
+    """Expand a per-framework spec list into dedicated `Agent` definitions.
+
+    Each spec's bare concern name is prefixed with `prefix` (e.g.
+    `AccessControlAgent` → `AsvsAccessControlAgent`) and tagged with a
+    single-element `applicable_frameworks`. Keeping the specs prefix-free
+    lets the three AppSec rosters share concern names without colliding
+    on the unique `Agent.name`.
+    """
+    return [
+        {
+            "name": prefix + spec["name"],
+            "description": spec["description"],
+            "domain_query": spec["domain_query"],
+            "applicable_frameworks": [framework],
+        }
+        for spec in specs
+    ]
+
+
+# The full default agent roster — 17 ASVS + 10 Proactive Controls + 10
+# Cheatsheets dedicated agents, plus the two framework-native AI agents.
+AGENT_DEFINITIONS: List[Dict[str, Any]] = (
+    _framework_roster(_ASVS_AGENT_SPECS, "asvs", "Asvs")
+    + _framework_roster(_PC_AGENT_SPECS, "proactive_controls", "ProactiveControls")
+    + _framework_roster(_CS_AGENT_SPECS, "cheatsheets", "Cheatsheets")
+    + _AI_AGENT_DEFINITIONS
+)
+
+
 # Prompt templates loaded from `core/services/seed_prompts/*.md` — see
 # the `_load_prompt` helper at the top of this module for the loader.
-# The constants are kept at module level so historical importers
-# (e.g. `scripts/extract_eval_prompts.py`) keep working without
-# touching their import lines.
+# The `_AUDIT_TEMPLATE` / `_REMEDIATION_TEMPLATE` / `_CHAT_TEMPLATE`
+# constants stay bound to the generic templates so historical importers
+# (`scripts/extract_eval_prompts.py`) keep working without touching
+# their import lines.
 _AUDIT_TEMPLATE = _load_prompt("audit.md")
 _REMEDIATION_TEMPLATE = _load_prompt("remediation.md")
 _CHAT_TEMPLATE = _load_prompt("chat.md")
+
+# Per-framework audit / remediation templates (Framework Expansion #57).
+# One template text per framework, shared across that framework's
+# agents. ASVS and the AI frameworks use the generic templates above;
+# Proactive Controls and Cheatsheets get their own framework-tailored
+# variants. `_build_prompt_templates` selects by the agent's framework.
+_FRAMEWORK_TEMPLATES: Dict[str, Dict[str, str]] = {
+    "proactive_controls": {
+        "audit": _load_prompt("audit_proactive_controls.md"),
+        "remediation": _load_prompt("remediation_proactive_controls.md"),
+    },
+    "cheatsheets": {
+        "audit": _load_prompt("audit_cheatsheets.md"),
+        "remediation": _load_prompt("remediation_cheatsheets.md"),
+    },
+}
+_GENERIC_TEMPLATES: Dict[str, str] = {
+    "audit": _AUDIT_TEMPLATE,
+    "remediation": _REMEDIATION_TEMPLATE,
+}
+
+
+def _templates_for_agent(agent: Dict[str, Any]) -> Dict[str, str]:
+    """Return the `{audit, remediation}` template text for an agent's framework."""
+    frameworks = agent.get("applicable_frameworks") or []
+    framework = frameworks[0] if frameworks else ""
+    return _FRAMEWORK_TEMPLATES.get(framework, _GENERIC_TEMPLATES)
 
 
 def _build_prompt_templates() -> List[Dict[str, Any]]:
     templates: List[Dict[str, Any]] = []
     for agent in AGENT_DEFINITIONS:
+        texts = _templates_for_agent(agent)
         templates.append(
             {
                 "name": f"{agent['name']} - Quick Audit",
                 "template_type": "QUICK_AUDIT",
                 "agent_name": agent["name"],
                 "version": 2,
-                "template_text": _AUDIT_TEMPLATE,
+                "template_text": texts["audit"],
             }
         )
         templates.append(
@@ -455,7 +898,7 @@ def _build_prompt_templates() -> List[Dict[str, Any]]:
                 "template_type": "DETAILED_REMEDIATION",
                 "agent_name": agent["name"],
                 "version": 2,
-                "template_text": _REMEDIATION_TEMPLATE,
+                "template_text": texts["remediation"],
             }
         )
     templates.append(
@@ -539,6 +982,10 @@ async def seed_defaults(
         target_agent_names = [a["name"] for a in AGENT_DEFINITIONS] + [
             "SecurityAdvisorAgent"
         ]
+        # force_reset also clears the pre-split un-prefixed agents so
+        # "Restore defaults" on an existing deployment leaves a clean
+        # per-framework roster.
+        reset_agent_names = target_agent_names + _LEGACY_AGENT_NAMES
 
         if force_reset:
             logger.info(
@@ -560,15 +1007,16 @@ async def seed_defaults(
                 fw.agents = []
             await session.flush()
 
-            # 2. Drop prompt templates + agents + frameworks managed here.
+            # 2. Drop prompt templates + agents + frameworks managed here
+            #    (including the pre-split legacy agent names).
             await session.execute(
                 delete(db_models.PromptTemplate).where(
-                    db_models.PromptTemplate.agent_name.in_(target_agent_names)
+                    db_models.PromptTemplate.agent_name.in_(reset_agent_names)
                 )
             )
             await session.execute(
                 delete(db_models.Agent).where(
-                    db_models.Agent.name.in_(target_agent_names)
+                    db_models.Agent.name.in_(reset_agent_names)
                 )
             )
             await session.execute(
@@ -644,13 +1092,12 @@ async def seed_defaults(
         # the default roster consistent after this seed runs (including when
         # force_reset wasn't needed).
         #
-        # Selective mapping (added with §3.11): each agent's
-        # `applicable_frameworks` field declares which frameworks it
-        # belongs to. Legacy AppSec agents (no field set) attach to
-        # `_APPSEC_FRAMEWORK_NAMES`; the new `LLMSecurityAgent` /
-        # `AgenticSecurityAgent` attach only to their respective AI
-        # frameworks. Selecting `asvs` no longer pulls LLM-prompt-injection
-        # RAG context into a server-side scan and vice versa.
+        # Per-framework mapping (Framework Expansion #57): every agent
+        # declares an explicit single-element `applicable_frameworks`,
+        # so each framework maps only to its own dedicated, framework-
+        # prefixed agents. There is no shared AppSec pool — selecting
+        # `proactive_controls` runs only the Proactive Controls agents,
+        # never the ASVS ones.
         fw_rows = await session.execute(
             select(db_models.Framework).where(
                 db_models.Framework.name.in_(target_fw_names)
@@ -671,9 +1118,7 @@ async def seed_defaults(
             fw["name"]: [] for fw in FRAMEWORKS_DATA
         }
         for agent_def in AGENT_DEFINITIONS:
-            applicable = (
-                agent_def.get("applicable_frameworks") or _APPSEC_FRAMEWORK_NAMES
-            )
+            applicable = agent_def.get("applicable_frameworks") or []
             agent_id = agent_name_to_id.get(agent_def["name"])
             if agent_id is None:
                 continue

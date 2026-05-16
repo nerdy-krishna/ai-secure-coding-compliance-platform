@@ -1,8 +1,8 @@
 # Synthetic case — DO NOT include real customer code (threat-model G8).
-description: ValidationAgent detects XSS via unsanitised template render
+description: AsvsValidationAgent detects XSS via unsanitised template render
 
 vars:
-  agent_name: ValidationAgent
+  agent_name: AsvsValidationAgent
   language: python
   vulnerability_patterns: |
     Pattern: XSS via Jinja `safe` filter on untrusted input.

@@ -1,8 +1,8 @@
 # Synthetic case — DO NOT include real customer code (threat-model G8).
-description: AuthenticationAgent flags route handlers missing auth dependency
+description: AsvsAuthenticationAgent flags route handlers missing auth dependency
 
 vars:
-  agent_name: AuthenticationAgent
+  agent_name: AsvsAuthenticationAgent
   language: python
   vulnerability_patterns: |
     Pattern: FastAPI route handler without an auth dependency

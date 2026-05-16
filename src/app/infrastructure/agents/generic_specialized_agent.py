@@ -16,6 +16,7 @@ from app.infrastructure.database.repositories.prompt_template_repo import (
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.llm_client import get_llm_client, LLMClient
 from app.infrastructure.rag.rag_client import get_rag_service
+from app.infrastructure.rag.facet_resolver import resolve_rag_filter
 from app.core.config_cache import SystemConfigCache
 from app.core.schemas import (
     SpecializedAgentState,
@@ -39,15 +40,6 @@ _SCANNER_FINDINGS_DESCRIPTION_CAP = 200
 MAX_LLM_CALLS_PER_FILE = 80
 MAX_COST_PER_FILE_USD = 1.0
 MAX_FINDINGS_PER_FILE = 50
-
-# V02.2.3 — allowlist for RAG metadata filter keys
-_ALLOWED_FILTER_KEYS = {
-    "framework_name",
-    "cwe_id",
-    "language",
-    "category",
-    "scan_ready",
-}
 
 
 def _format_scanner_findings_block(findings: Optional[List[Any]]) -> str:
@@ -287,37 +279,6 @@ def _detect_target_lang(filename: str) -> str:
     return _LANGUAGE_MAP.get(file_ext, "GENERIC")
 
 
-def _build_rag_filter(
-    metadata_filter: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
-    """Translate the agent's `domain_query.metadata_filter` into a
-    Chroma-style `$and`/`$or`/`$eq` where-clause.
-
-    Always anchors `scan_ready=True` so chat-only RAG docs (Proactive
-    Controls, Cheatsheets) are filtered out.
-    """
-    and_conditions: List[Dict[str, Any]] = [{"scan_ready": {"$eq": True}}]
-    if metadata_filter:
-        for key, value in metadata_filter.items():
-            if key not in _ALLOWED_FILTER_KEYS:
-                logger.warning(
-                    "RAG filter key rejected (not in allowlist)",
-                    extra={"key": key},
-                )
-                continue
-            if isinstance(value, list):
-                if len(value) == 1:
-                    and_conditions.append({key: {"$eq": value[0]}})
-                else:
-                    or_clauses = [{key: {"$eq": item}} for item in value]
-                    and_conditions.append({"$or": or_clauses})
-            else:
-                and_conditions.append({key: {"$eq": value}})
-    if len(and_conditions) > 1:
-        return {"$and": and_conditions}
-    return and_conditions[0]
-
-
 def _extract_patterns_from_doc(
     doc: str, target_lang: str
 ) -> tuple[Optional[str], Optional[str]]:
@@ -402,8 +363,10 @@ def _build_rag_context(
         return None
 
     query_keywords = domain_query.get("keywords", "")
-    metadata_filter = domain_query.get("metadata_filter")
-    chroma_where_filter = _build_rag_filter(metadata_filter)
+    # Framework Expansion #56/#57 — the facet resolver owns the
+    # `domain_query` → Chroma-`where` translation (anchors scan_ready,
+    # honours the framework-aware facet allowlist incl. `control_family`).
+    chroma_where_filter = resolve_rag_filter(domain_query)
 
     retrieved_guidelines = rag_service.query_guidelines(
         query_texts=[query_keywords], n_results=10, where=chroma_where_filter

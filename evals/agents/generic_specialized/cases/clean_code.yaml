@@ -5,7 +5,7 @@
 description: Benign pure function produces no findings
 
 vars:
-  agent_name: ValidationAgent
+  agent_name: AsvsValidationAgent
   language: python
   vulnerability_patterns: |
     No applicable patterns for this code path.
