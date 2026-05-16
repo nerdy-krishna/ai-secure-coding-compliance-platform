@@ -211,9 +211,17 @@ const LLMSettingsPage: React.FC = () => {
       api_key: form.api_key,
     };
     if (editing) {
-      // V15.3.3: explicit allowlist of mutable fields prevents mass-assignment bugs.
+      // V15.3.3: explicit allowlist of mutable fields. `provider` and
+      // `model_name` ARE editable from this form, so omitting them here
+      // silently drops legitimate edits (e.g. fixing a wrong provider
+      // pick at creation time, or migrating to a newer model) while
+      // showing the user a green "saved" toast — see the
+      // anthropic→google misroute incident. The real mass-assignment
+      // guard is the backend's `LLMConfigurationUpdate` Literal schema.
       const updatePayload: LLMConfigurationUpdate = {
         name: payload.name,
+        provider: payload.provider,
+        model_name: payload.model_name,
         tokenizer: payload.tokenizer,
         input_cost_per_million: payload.input_cost_per_million,
         output_cost_per_million: payload.output_cost_per_million,
