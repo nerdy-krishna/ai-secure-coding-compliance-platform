@@ -17,9 +17,19 @@ CWE Essentials concern-area agents set this; every other agent omits it
 and therefore defaults to ``"all"``, so framework rosters that pre-date
 gating are unaffected. Gating only decides which agents *execute* on a
 file — it never changes which CWEs a framework can cite.
+
+Content-based routing (#73)
+---------------------------
+When the caller passes the file's profiled ``applicable_domains`` (from
+the FileProfiler, #71), routing narrows further: only agents whose name
+is an applicable domain run. The profiler is deliberately inclusive, so
+this preserves multi-perspective coverage while skipping agents with no
+plausible relevance to the file. Routing is inclusive by construction —
+if the profile names no domain that maps to a real agent, routing falls
+back to the gating-eligible roster rather than skip the file.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 
 # Systems-language file extensions — C / C++ / Rust / Go. A file with
 # one of these extensions is classed "systems"; everything else (and
@@ -47,6 +57,7 @@ def _agent_gating(agent: Dict[str, Any]) -> str:
 def resolve_agents_for_file(
     file_path: str,
     all_relevant_agents: Dict[str, Dict[str, Any]],
+    applicable_domains: Optional[Iterable[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Return the agents to run against this file.
 
@@ -56,15 +67,32 @@ def resolve_agents_for_file(
         all_relevant_agents: mapping of agent_name → RelevantAgent dict.
             The caller has already filtered by selected frameworks; this
             function narrows further by file characteristics.
+        applicable_domains: the file profile's applicable domains (#73).
+            When provided and non-empty, only agents whose name is one
+            of these domains run. When ``None`` or empty — no profile,
+            or a profile that named nothing — routing falls back to the
+            gating-eligible roster (extension-only routing).
 
     Returns:
         List of RelevantAgent dicts to run against the file. An agent is
         included when its gating is ``"all"`` or matches the file's
-        category. Empty list means "skip this file."
+        category, AND — when ``applicable_domains`` narrows — its name is
+        an applicable domain. Empty list means "skip this file."
     """
     category = _file_category(file_path)
-    return [
-        agent
-        for agent in all_relevant_agents.values()
+    gating_eligible = [
+        (name, agent)
+        for name, agent in all_relevant_agents.items()
         if _agent_gating(agent) in ("all", category)
     ]
+
+    domain_set = {d for d in (applicable_domains or []) if d}
+    if domain_set:
+        routed = [agent for name, agent in gating_eligible if name in domain_set]
+        # Inclusive fallback: a profile that maps to no real agent (stale
+        # vocabulary, every named domain gated out) must not silently
+        # skip the file — fall back to the full gating-eligible roster.
+        if routed:
+            return routed
+
+    return [agent for _name, agent in gating_eligible]

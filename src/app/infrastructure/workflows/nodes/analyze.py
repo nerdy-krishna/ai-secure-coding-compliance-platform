@@ -190,7 +190,15 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             )
             return {"findings": [], "fixes": [], "agent_calls": 0, "agent_failures": 0}
 
-        relevant_agents = resolve_agents_for_file(file_path, all_relevant_agents)
+        # Content-based routing (#73): the file profile's applicable
+        # domains narrow the agent set; falls back to extension-only
+        # routing when the file has no profile.
+        file_profile = (state.get("file_profiles") or {}).get(file_path) or {}
+        relevant_agents = resolve_agents_for_file(
+            file_path,
+            all_relevant_agents,
+            file_profile.get("applicable_domains"),
+        )
         if not relevant_agents:
             logger.warning(
                 "analyze: skipping file — no relevant agents",

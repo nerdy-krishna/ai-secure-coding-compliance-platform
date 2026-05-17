@@ -33,6 +33,7 @@ from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
 from app.shared.lib import cost_estimation
+from app.shared.lib.agent_routing import resolve_agents_for_file
 from app.shared.lib.scan_status import (
     STATUS_PENDING_APPROVAL,
     STATUS_QUEUED_FOR_SCAN,
@@ -80,6 +81,11 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
     if not all_relevant_agents:
         return {"error_message": "Cost estimation missing 'all_relevant_agents'."}
     # --- END REVISED GUARD CLAUSE BLOCK ---
+
+    # Per-file profiles drive content-based agent routing (#73). Empty
+    # when the profiler was skipped — routing then falls back to
+    # extension-only and the estimate is the full-roster worst case.
+    file_profiles: Dict[str, Any] = state.get("file_profiles") or {}
 
     try:
         dependency_graph = nx.node_link_graph(dependency_graph_data)
@@ -133,9 +139,20 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
                     }
                 ]
 
+            # Content-based routing (#73): the estimate reflects the
+            # agent set this file will actually be routed to — driven by
+            # its profile's applicable domains — not the worst-case
+            # full-roster count. The profiler ran before this node so
+            # `file_profiles` is populated.
+            file_profile = file_profiles.get(file_path) or {}
+            routed_agents = resolve_agents_for_file(
+                file_path,
+                all_relevant_agents,
+                file_profile.get("applicable_domains"),
+            )
+
             for chunk in chunks:
-                # In a dry run, we estimate based on all potentially relevant agents.
-                for _ in all_relevant_agents:
+                for _ in routed_agents:
                     total_input_tokens += await cost_estimation.count_tokens(
                         chunk["code"], llm_config
                     )
