@@ -293,13 +293,15 @@ class QdrantStore:
         with _RAG_CALL_SEM:
             for vec in query_embeddings:
                 try:
-                    hits = self._client.search(
+                    # `query_points` replaced the removed `search` API in
+                    # qdrant-client 1.12+; `.points` carries the hit list.
+                    hits = self._client.query_points(
                         collection_name=SECURITY_GUIDELINES_COLLECTION,
-                        query_vector=vec,
+                        query=vec,
                         query_filter=flt,
                         limit=n_results,
                         with_payload=True,
-                    )
+                    ).points
                 except Exception as e:
                     # V16.5.2 — log and return empty result for graceful degradation.
                     logger.warning("qdrant_store: search (guidelines) failed: %s", e)
@@ -351,12 +353,14 @@ class QdrantStore:
         with _RAG_CALL_SEM:
             for vec in query_embeddings:
                 try:
-                    hits = self._client.search(
+                    # `query_points` replaced the removed `search` API in
+                    # qdrant-client 1.12+; `.points` carries the hit list.
+                    hits = self._client.query_points(
                         collection_name=CWE_COLLECTION_NAME,
-                        query_vector=vec,
+                        query=vec,
                         limit=n_results,
                         with_payload=True,
-                    )
+                    ).points
                 except Exception as e:
                     # V16.5.2 — log and return empty result for graceful degradation.
                     logger.warning("qdrant_store: search (cwe) failed: %s", e)
