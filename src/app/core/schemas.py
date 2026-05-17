@@ -63,6 +63,27 @@ class AffectedLocation(BaseModel):
     snippet: Optional[str] = Field(default=None, max_length=20_000)
 
 
+class FileProfile(BaseModel):
+    """Structured per-file understanding produced by the FileProfiler (#71).
+
+    Generated on the utility LLM slot before analysis and persisted as
+    `Scan.file_profiles` — the shared file-understanding artifact later
+    consumed by content-based routing, file-aware retrieval, and
+    consolidation.
+
+    `applicable_domains` are drawn from (and constrained to) the
+    selected frameworks' agent-domain vocabulary — the profiler-node
+    filters any value the LLM returns that is not a real domain, so
+    this list is always a subset of the scan's domain vocabulary.
+    """
+
+    summary: str = Field(max_length=8_000)
+    security_relevant_operations: List[str] = Field(
+        default_factory=list, max_length=200
+    )
+    applicable_domains: List[str] = Field(default_factory=list, max_length=200)
+
+
 class VulnerabilityFinding(BaseModel):
     id: Optional[int] = None
     cwe: Optional[str] = Field(

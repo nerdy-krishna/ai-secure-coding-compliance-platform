@@ -71,9 +71,10 @@ def _validate_repo_url(url: str) -> str:
 class ApprovalRequest(BaseModel):
     """Body for `POST /api/v1/scans/{id}/approve`.
 
-    Two pause points exist in the worker graph (ADR-009): the new
-    prescan-approval interrupt (`STATUS_PENDING_PRESCAN_APPROVAL`) and
-    the existing cost-approval interrupt (`STATUS_PENDING_COST_APPROVAL`).
+    Three pause points exist in the worker graph: the prescan-approval
+    interrupt (`STATUS_PENDING_PRESCAN_APPROVAL`, ADR-009), the
+    profiling-cost interrupt (`STATUS_PENDING_PROFILING_APPROVAL`, #71),
+    and the cost-approval interrupt (`STATUS_PENDING_COST_APPROVAL`).
     The `kind` field discriminates which one is being resumed; the
     consumer also validates `kind` against the scan's current pause
     point before handing the payload to LangGraph (G4 / M1).
@@ -84,7 +85,9 @@ class ApprovalRequest(BaseModel):
     default is taken.
     """
 
-    kind: Literal["prescan_approval", "cost_approval"] = "cost_approval"
+    kind: Literal["prescan_approval", "profiling_approval", "cost_approval"] = (
+        "cost_approval"
+    )
     approved: bool = True
     override_critical_secret: bool = False
 

@@ -135,6 +135,12 @@ class Scan(Base):
     cost_details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     repository_map: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     dependency_graph: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
+    # Per-file profiles produced by the FileProfiler (#71): a
+    # {file_path: {summary, security_relevant_operations,
+    # applicable_domains}} map. The shared file-understanding artifact
+    # consumed downstream by content-based routing and consolidation.
+    # Nullable for scans created before the profiler existed.
+    file_profiles: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     context_bundles: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB)
     summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     # CycloneDX SBOM emitted by OSV-Scanner during the deterministic

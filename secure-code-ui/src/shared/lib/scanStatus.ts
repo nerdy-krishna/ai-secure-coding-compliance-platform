@@ -58,6 +58,11 @@ const STATUS_TABLE: Record<string, StatusMeta> = {
     kind: "needs-input",
     tone: "info",
   },
+  PENDING_PROFILING_APPROVAL: {
+    label: "Awaiting profiling approval",
+    kind: "needs-input",
+    tone: "info",
+  },
 
   // Success
   COMPLETED: { label: "Completed", kind: "completed", tone: "success" },

@@ -41,6 +41,7 @@ _REEXPORTED_NAMES = (
     "STATUS_BLOCKED_PRE_LLM",
     "STATUS_BLOCKED_USER_DECLINE",
     "STATUS_PENDING_PRESCAN_APPROVAL",
+    "STATUS_PENDING_PROFILING_APPROVAL",
     "STATUS_QUEUED_FOR_SCAN",
     "STATUS_FAILED",
     "STATUS_COMPLETED",
@@ -51,6 +52,8 @@ _REEXPORTED_NAMES = (
     "pending_prescan_approval_node",
     "user_decline_node",
     "blocked_pre_llm_node",
+    "estimate_profiling_cost_node",
+    "profile_files_node",
     "estimate_cost_node",
     "analyze_files_parallel_node",
     "correlate_findings_node",
@@ -68,6 +71,7 @@ _REEXPORTED_NAMES = (
     "_route_after_retrieve",
     "_route_after_prescan",
     "_route_after_prescan_approval",
+    "_route_after_profiling_approval",
 )
 
 

@@ -55,6 +55,10 @@ from app.infrastructure.workflows.nodes.prescan import (
     pending_prescan_approval_node,
     user_decline_node,
 )
+from app.infrastructure.workflows.nodes.profile import (
+    estimate_profiling_cost_node,
+    profile_files_node,
+)
 from app.infrastructure.workflows.nodes.results import (
     save_final_report_node,
     save_results_node,
@@ -73,6 +77,7 @@ from app.shared.lib.scan_status import (  # noqa: F401
     STATUS_FAILED,
     STATUS_PENDING_APPROVAL,
     STATUS_PENDING_PRESCAN_APPROVAL,
+    STATUS_PENDING_PROFILING_APPROVAL,
     STATUS_QUEUED_FOR_SCAN,
     STATUS_REMEDIATION_COMPLETED,
 )
@@ -99,6 +104,8 @@ __all__ = [
     "pending_prescan_approval_node",
     "user_decline_node",
     "blocked_pre_llm_node",
+    "estimate_profiling_cost_node",
+    "profile_files_node",
     "estimate_cost_node",
     "analyze_files_parallel_node",
     "correlate_findings_node",
@@ -115,6 +122,7 @@ __all__ = [
     "_route_after_retrieve",
     "_route_after_prescan",
     "_route_after_prescan_approval",
+    "_route_after_profiling_approval",
 ]
 
 
@@ -131,6 +139,8 @@ workflow.add_node("deterministic_prescan", deterministic_prescan_node)
 workflow.add_node("pending_prescan_approval", pending_prescan_approval_node)
 workflow.add_node("blocked_pre_llm", blocked_pre_llm_node)
 workflow.add_node("user_decline", user_decline_node)
+workflow.add_node("estimate_profiling_cost", estimate_profiling_cost_node)
+workflow.add_node("profile_files", profile_files_node)
 workflow.add_node("estimate_cost", estimate_cost_node)
 workflow.add_node("analyze_files_parallel", analyze_files_parallel_node)
 workflow.add_node("correlate_findings", correlate_findings_node)
@@ -161,14 +171,15 @@ def _route_after_prescan(state: WorkerState) -> str:
       operator review (replaces the pre-ADR-009 Critical-Gitleaks
       auto-block — that path now fires only on user-decline-of-override
       after the human has seen the finding).
-    - Findings empty → cost-approval gate at `estimate_cost`.
+    - Findings empty → profiling-cost gate at `estimate_profiling_cost`
+      (#71). The profiling gate fires even with zero prescan findings.
     """
     if state.get("error_message"):
         return "handle_error"
     findings = state.get("findings") or []
     if findings:
         return "pending_prescan_approval"
-    return "estimate_cost"
+    return "estimate_profiling_cost"
 
 
 def _route_after_prescan_approval(state: WorkerState) -> str:
@@ -183,8 +194,8 @@ def _route_after_prescan_approval(state: WorkerState) -> str:
     - ``approved=True`` AND any Critical Gitleaks finding present
       AND ``override_critical_secret=False`` → terminal
       `blocked_pre_llm` (operator declined the override modal).
-    - Otherwise → continue to the cost-approval gate at
-      `estimate_cost`.
+    - Otherwise → continue to the profiling-cost gate at
+      `estimate_profiling_cost` (#71).
     """
     if state.get("error_message"):
         return "handle_error"
@@ -245,7 +256,32 @@ def _route_after_prescan_approval(state: WorkerState) -> str:
         return "user_decline"
     if has_critical_secret and override is not True:
         return "blocked_pre_llm"
-    return "estimate_cost"
+    return "estimate_profiling_cost"
+
+
+def _route_after_profiling_approval(state: WorkerState) -> str:
+    """Route after the profiling-cost interrupt resumes (#71).
+
+    Reads the approval payload stamped into ``state.profiling_approval``
+    by `estimate_profiling_cost_node`:
+
+    - ``approved=False`` → terminal `user_decline` (operator declined
+      the profiling spend).
+    - ``approved=True`` → continue to `profile_files`.
+
+    `approved` is strict-identity-checked so non-bool truthy values are
+    rejected, matching the prescan-approval gate.
+    """
+    if state.get("error_message"):
+        return "handle_error"
+    payload = state.get("profiling_approval") or {}
+    if payload.get("approved") is not True:
+        logger.info(
+            "audit.profiling_approval_routed: declined scan_id=%s",
+            state.get("scan_id"),
+        )
+        return "user_decline"
+    return "profile_files"
 
 
 workflow.add_conditional_edges(
@@ -260,7 +296,7 @@ workflow.add_conditional_edges(
     "deterministic_prescan",
     _route_after_prescan,
     {
-        "estimate_cost": "estimate_cost",
+        "estimate_profiling_cost": "estimate_profiling_cost",
         "pending_prescan_approval": "pending_prescan_approval",
         "handle_error": "handle_error",
     },
@@ -273,7 +309,7 @@ workflow.add_conditional_edges(
     "pending_prescan_approval",
     _route_after_prescan_approval,
     {
-        "estimate_cost": "estimate_cost",
+        "estimate_profiling_cost": "estimate_profiling_cost",
         "blocked_pre_llm": "blocked_pre_llm",
         "user_decline": "user_decline",
         "handle_error": "handle_error",
@@ -281,6 +317,25 @@ workflow.add_conditional_edges(
 )
 workflow.add_edge("blocked_pre_llm", END)
 workflow.add_edge("user_decline", END)
+
+# estimate_profiling_cost_node calls interrupt() — the graph pauses at
+# the profiling-cost gate (status PENDING_PROFILING_APPROVAL). On
+# resume the post-resume router sends the scan to the profiler or to a
+# terminal user-decline. (#71)
+workflow.add_conditional_edges(
+    "estimate_profiling_cost",
+    _route_after_profiling_approval,
+    {
+        "profile_files": "profile_files",
+        "user_decline": "user_decline",
+        "handle_error": "handle_error",
+    },
+)
+workflow.add_conditional_edges(
+    "profile_files",
+    should_continue,
+    {"continue": "estimate_cost", "handle_error": "handle_error"},
+)
 
 # estimate_cost_node calls interrupt(); the graph pauses there, persists
 # state in the checkpointer, and yields. On approval, the worker calls

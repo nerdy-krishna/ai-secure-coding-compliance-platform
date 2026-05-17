@@ -1,14 +1,16 @@
-"""Auto-decline sweeper for stuck prescan-approval interrupts.
+"""Auto-decline sweeper for stuck approval-gate interrupts.
 
 ADR-009 / M7 / G9 — Programmatic callers (CI bots, the MCP
-``sccap_submit_scan`` tool) can submit scans that pause at the
-prescan-approval gate forever if no human ever visits the scan-status
-page. This background task runs on the API container, mirrors the
-``outbox_sweeper`` shape, and transitions any scan stuck in
-``STATUS_PENDING_PRESCAN_APPROVAL`` for more than
-``PRESCAN_APPROVAL_TIMEOUT_HOURS`` (default 24h) to
+``sccap_submit_scan`` tool) can submit scans that pause at an
+approval gate forever if no human ever visits the scan-status page.
+This background task runs on the API container, mirrors the
+``outbox_sweeper`` shape, and transitions any scan stuck at one of the
+human-in-the-loop gate statuses — ``STATUS_PENDING_PRESCAN_APPROVAL``
+(ADR-009) or ``STATUS_PENDING_PROFILING_APPROVAL`` (#71) — for more
+than ``PRESCAN_APPROVAL_TIMEOUT_HOURS`` (default 24h) to
 ``STATUS_BLOCKED_USER_DECLINE``. A scan_event row
-``PRESCAN_AUTO_DECLINED`` is written so operators can correlate.
+(``PRESCAN_AUTO_DECLINED`` / ``PROFILING_AUTO_DECLINED``) is written so
+operators can correlate.
 """
 
 from __future__ import annotations
@@ -24,9 +26,17 @@ from app.infrastructure.database import models as db_models
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_USER_DECLINE,
     STATUS_PENDING_PRESCAN_APPROVAL,
+    STATUS_PENDING_PROFILING_APPROVAL,
 )
 
 logger = logging.getLogger(__name__)
+
+# Gate statuses this sweeper auto-declines, mapped to the audit
+# scan_event stage name written when a stuck scan is transitioned.
+_GATE_STATUS_EVENTS = {
+    STATUS_PENDING_PRESCAN_APPROVAL: "PRESCAN_AUTO_DECLINED",
+    STATUS_PENDING_PROFILING_APPROVAL: "PROFILING_AUTO_DECLINED",
+}
 
 # Default 24 h — matches ADR-009. Operators can tighten this for
 # unattended deployments by editing the constant; full env-var
@@ -60,17 +70,21 @@ async def _delete_checkpointer_thread(scan_id: str) -> None:
 async def _sweep_once() -> int:
     """Single sweep pass. Returns the number of scans transitioned.
 
-    Cutoff column choice: we want "time the scan entered the prescan-
-    approval gate", not "time the scan was created" (a backed-up worker
-    queue would otherwise auto-decline scans the moment they pause).
-    The most recent ``scan_events.timestamp`` for each scan is the
-    closest signal we have without adding an ``updated_at`` column to
+    Cutoff column choice: we want "time the scan entered the approval
+    gate", not "time the scan was created" (a backed-up worker queue
+    would otherwise auto-decline scans the moment they pause). The most
+    recent ``scan_events.timestamp`` for each scan is the closest
+    signal we have without adding an ``updated_at`` column to
     ``scans``. Critical-secret-blocked scans terminate via a different
     path so they never enter this query.
+
+    Both gate statuses (prescan-approval and profiling-cost) are swept
+    in one pass; the audit scan_event name is chosen per row.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(
         hours=PRESCAN_APPROVAL_TIMEOUT_HOURS
     )
+    gate_statuses = list(_GATE_STATUS_EVENTS)
     transitioned = 0
     transitioned_ids: list[str] = []
     async with AsyncSessionLocal() as db:
@@ -81,20 +95,20 @@ async def _sweep_once() -> int:
             .scalar_subquery()
         )
         stmt = (
-            select(db_models.Scan.id)
-            .where(db_models.Scan.status == STATUS_PENDING_PRESCAN_APPROVAL)
+            select(db_models.Scan.id, db_models.Scan.status)
+            .where(db_models.Scan.status.in_(gate_statuses))
             .where(latest_event_ts < cutoff)
         )
-        rows = (await db.execute(stmt)).scalars().all()
-        for scan_id in rows:
+        rows = (await db.execute(stmt)).all()
+        for scan_id, gate_status in rows:
             # Atomic transition: only flip the status if the scan is
-            # still at the prescan gate. Defends against a race with a
+            # still at the SAME gate. Defends against a race with a
             # concurrent operator click on the approve / decline
             # endpoint. (Phase-9 Medium finding.)
             res = await db.execute(
                 update(db_models.Scan)
                 .where(db_models.Scan.id == scan_id)
-                .where(db_models.Scan.status == STATUS_PENDING_PRESCAN_APPROVAL)
+                .where(db_models.Scan.status == gate_status)
                 .values(status=STATUS_BLOCKED_USER_DECLINE)
             )
             if res.rowcount != 1:
@@ -103,7 +117,7 @@ async def _sweep_once() -> int:
             db.add(
                 db_models.ScanEvent(
                     scan_id=scan_id,
-                    stage_name="PRESCAN_AUTO_DECLINED",
+                    stage_name=_GATE_STATUS_EVENTS[gate_status],
                     status="COMPLETED",
                 )
             )

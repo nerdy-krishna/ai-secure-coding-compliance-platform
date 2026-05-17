@@ -33,19 +33,22 @@ def _fake_session() -> Any:
 
 
 async def test_sweep_once_transitions_returned_rows() -> None:
-    """`_sweep_once` issues an UPDATE per scan id returned by the SELECT
-    and writes a PRESCAN_AUTO_DECLINED scan_event for each."""
+    """`_sweep_once` issues an UPDATE per scan returned by the SELECT
+    and writes an auto-declined scan_event for each."""
     import uuid
 
     from app.infrastructure.messaging import prescan_approval_sweeper as mod
+    from app.shared.lib.scan_status import STATUS_PENDING_PRESCAN_APPROVAL
 
     fake = _fake_session()
     stuck_ids = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
 
+    # The SELECT now returns (id, status) rows so the sweeper can pick
+    # the right gate to flip and the right audit event name.
     select_result = MagicMock()
-    scalars_obj = MagicMock()
-    scalars_obj.all = MagicMock(return_value=stuck_ids)
-    select_result.scalars = MagicMock(return_value=scalars_obj)
+    select_result.all = MagicMock(
+        return_value=[(sid, STATUS_PENDING_PRESCAN_APPROVAL) for sid in stuck_ids]
+    )
 
     # Each UPDATE returns a Result whose `.rowcount` is 1 (the sweeper
     # uses `rowcount` for the race-with-operator check).
@@ -69,6 +72,35 @@ async def test_sweep_once_transitions_returned_rows() -> None:
     fake.commit.assert_awaited_once()
 
 
+async def test_sweep_once_handles_the_profiling_cost_gate() -> None:
+    """A scan stuck at the profiling-cost gate (#71) is also swept, and
+    gets a PROFILING_AUTO_DECLINED audit event (not PRESCAN_)."""
+    import uuid
+
+    from app.infrastructure.messaging import prescan_approval_sweeper as mod
+    from app.shared.lib.scan_status import STATUS_PENDING_PROFILING_APPROVAL
+
+    fake = _fake_session()
+    stuck_id = uuid.uuid4()
+
+    select_result = MagicMock()
+    select_result.all = MagicMock(
+        return_value=[(stuck_id, STATUS_PENDING_PROFILING_APPROVAL)]
+    )
+    u = MagicMock()
+    u.rowcount = 1
+    fake.execute.side_effect = [select_result, u]
+
+    with patch.object(mod, "_delete_checkpointer_thread", AsyncMock()):
+        with patch.object(mod, "AsyncSessionLocal", lambda: fake):
+            n = await mod._sweep_once()
+
+    assert n == 1
+    assert fake.add.call_count == 1
+    event = fake.add.call_args.args[0]
+    assert event.stage_name == "PROFILING_AUTO_DECLINED"
+
+
 async def test_sweep_once_no_stuck_scans_is_a_noop() -> None:
     """When the SELECT returns zero rows, no UPDATEs / events / commits
     are needed beyond the no-op commit at the end."""
@@ -76,9 +108,7 @@ async def test_sweep_once_no_stuck_scans_is_a_noop() -> None:
 
     fake = _fake_session()
     select_result = MagicMock()
-    scalars_obj = MagicMock()
-    scalars_obj.all = MagicMock(return_value=[])
-    select_result.scalars = MagicMock(return_value=scalars_obj)
+    select_result.all = MagicMock(return_value=[])
     fake.execute.return_value = select_result
 
     with patch.object(mod, "_delete_checkpointer_thread", AsyncMock()):
@@ -97,14 +127,15 @@ async def test_sweep_once_skips_audit_event_on_race() -> None:
     import uuid
 
     from app.infrastructure.messaging import prescan_approval_sweeper as mod
+    from app.shared.lib.scan_status import STATUS_PENDING_PRESCAN_APPROVAL
 
     fake = _fake_session()
     stuck_ids = [uuid.uuid4(), uuid.uuid4()]
 
     select_result = MagicMock()
-    scalars_obj = MagicMock()
-    scalars_obj.all = MagicMock(return_value=stuck_ids)
-    select_result.scalars = MagicMock(return_value=scalars_obj)
+    select_result.all = MagicMock(
+        return_value=[(sid, STATUS_PENDING_PRESCAN_APPROVAL) for sid in stuck_ids]
+    )
 
     # First UPDATE wins (rowcount=1), second loses the race (rowcount=0).
     u_win = MagicMock()

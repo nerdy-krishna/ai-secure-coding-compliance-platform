@@ -223,11 +223,12 @@ export const scanService = {
   /**
    * Resume a scan paused at one of the worker-graph interrupt points.
    *
-   * Two interrupt points exist (ADR-009): the new prescan-approval
-   * gate (status PENDING_PRESCAN_APPROVAL) and the existing cost-
-   * approval gate (status PENDING_COST_APPROVAL). The body's `kind`
-   * field discriminates; missing body defaults to `cost_approval`
-   * for backward-compat with older callers.
+   * Three interrupt points exist: the prescan-approval gate (status
+   * PENDING_PRESCAN_APPROVAL, ADR-009), the profiling-cost gate
+   * (status PENDING_PROFILING_APPROVAL, #71), and the cost-approval
+   * gate (status PENDING_COST_APPROVAL). The body's `kind` field
+   * discriminates; missing body defaults to `cost_approval` for
+   * backward-compat with older callers.
    *
    * V01.2.2: scanId encoded. V02.3.4: idempotency key forwarded as header.
    * V15.3.3: sanity guard rejects prescan_approval with override_critical_secret=true
@@ -237,7 +238,7 @@ export const scanService = {
   approveScan: async (
     scanId: string,
     payload?: {
-      kind?: "prescan_approval" | "cost_approval";
+      kind?: "prescan_approval" | "profiling_approval" | "cost_approval";
       approved?: boolean;
       override_critical_secret?: boolean;
     },

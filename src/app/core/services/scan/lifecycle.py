@@ -33,6 +33,7 @@ from app.shared.lib.scan_status import (
     STATUS_COMPLETED,
     STATUS_PENDING_APPROVAL,
     STATUS_PENDING_PRESCAN_APPROVAL,
+    STATUS_PENDING_PROFILING_APPROVAL,
     STATUS_QUEUED_FOR_SCAN,
     STATUS_REMEDIATION_COMPLETED,
 )
@@ -124,6 +125,15 @@ class ScanLifecycleService:
                         f"PENDING_PRESCAN_APPROVAL; current status: {scan.status}"
                     ),
                 )
+        elif request.kind == "profiling_approval":
+            if scan.status != STATUS_PENDING_PROFILING_APPROVAL:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Approval kind 'profiling_approval' requires status "
+                        f"PENDING_PROFILING_APPROVAL; current status: {scan.status}"
+                    ),
+                )
         elif request.kind == "cost_approval":
             if scan.status != STATUS_PENDING_APPROVAL:
                 raise HTTPException(
@@ -171,13 +181,27 @@ class ScanLifecycleService:
                 status="COMPLETED",
             )
 
-        # For cost_approval and prescan_approval-approve, the next
-        # worker phase actually progresses so transitioning to
-        # QUEUED_FOR_SCAN is a reasonable intermediate. For
-        # prescan_approval-decline, leave the status as
-        # PENDING_PRESCAN_APPROVAL — the worker's user_decline_node
-        # will set BLOCKED_USER_DECLINE within milliseconds of resume.
-        if not (request.kind == "prescan_approval" and not request.approved):
+        # Audit trail for a declined profiling-cost gate (#71). Same
+        # shape as the prescan decline — the worker routes to
+        # `user_decline_node` which sets STATUS_BLOCKED_USER_DECLINE.
+        if request.kind == "profiling_approval" and not request.approved:
+            await self.repo.create_scan_event(
+                scan_id=scan_id,
+                stage_name="PROFILING_USER_DECLINED",
+                status="COMPLETED",
+            )
+
+        # For cost_approval and the *approved* prescan / profiling
+        # gates, the next worker phase actually progresses so
+        # transitioning to QUEUED_FOR_SCAN is a reasonable intermediate.
+        # For a *declined* prescan or profiling gate, leave the status
+        # at the gate — the worker's user_decline_node will set
+        # BLOCKED_USER_DECLINE within milliseconds of resume.
+        is_gate_decline = (
+            request.kind in ("prescan_approval", "profiling_approval")
+            and not request.approved
+        )
+        if not is_gate_decline:
             await self.repo.update_status(scan_id, STATUS_QUEUED_FOR_SCAN)
             await self.repo.create_scan_event(
                 scan_id=scan_id, stage_name="QUEUED_FOR_SCAN", status="COMPLETED"

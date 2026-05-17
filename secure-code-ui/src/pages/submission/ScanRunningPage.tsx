@@ -693,10 +693,15 @@ const ScanRunningPage: React.FC = () => {
   const costSubmitted =
     submittedForStatus === "PENDING_COST_APPROVAL" &&
     status === "PENDING_COST_APPROVAL";
+  const profilingSubmitted =
+    submittedForStatus === "PENDING_PROFILING_APPROVAL" &&
+    status === "PENDING_PROFILING_APPROVAL";
   const isPendingApproval =
     status === "PENDING_COST_APPROVAL" && !costSubmitted;
   const isPendingPrescan =
     status === "PENDING_PRESCAN_APPROVAL" && !prescanSubmitted;
+  const isPendingProfiling =
+    status === "PENDING_PROFILING_APPROVAL" && !profilingSubmitted;
 
   const progress = useMemo(
     () =>
@@ -753,7 +758,11 @@ const ScanRunningPage: React.FC = () => {
   // "Approve to run the full analysis." with no numbers.
   useEffect(() => {
     if (!scanId) return;
-    if (status !== "PENDING_COST_APPROVAL") return;
+    if (
+      status !== "PENDING_COST_APPROVAL" &&
+      status !== "PENDING_PROFILING_APPROVAL"
+    )
+      return;
     if (costDetails && typeof costDetails.total_estimated_cost === "number")
       return;
     let cancelled = false;
@@ -868,6 +877,44 @@ const ScanRunningPage: React.FC = () => {
         override_critical_secret: false,
       });
       toast.info("Scan stopped before LLM analysis.");
+    } catch (err) {
+      const e = err as { message?: string };
+      toast.error(e.message || "Failed to stop scan");
+      setSubmittedForStatus(null);
+    } finally {
+      setDeclining(false);
+    }
+  }, [scanId, toast]);
+
+  const handleProfilingApprove = useCallback(async () => {
+    if (!scanId) return;
+    setSubmittedForStatus("PENDING_PROFILING_APPROVAL");
+    setApproving(true);
+    try {
+      await scanService.approveScan(scanId, {
+        kind: "profiling_approval",
+        approved: true,
+      });
+      toast.success("Profiling approved. Profiling files…");
+    } catch (err) {
+      const e = err as { message?: string };
+      toast.error(e.message || "Failed to approve profiling");
+      setSubmittedForStatus(null);
+    } finally {
+      setApproving(false);
+    }
+  }, [scanId, toast]);
+
+  const handleProfilingDecline = useCallback(async () => {
+    if (!scanId) return;
+    setSubmittedForStatus("PENDING_PROFILING_APPROVAL");
+    setDeclining(true);
+    try {
+      await scanService.approveScan(scanId, {
+        kind: "profiling_approval",
+        approved: false,
+      });
+      toast.info("Scan stopped before profiling.");
     } catch (err) {
       const e = err as { message?: string };
       toast.error(e.message || "Failed to stop scan");
@@ -1195,6 +1242,67 @@ const ScanRunningPage: React.FC = () => {
           onCancel={() => setOverrideOpen(false)}
           onConfirm={() => void submitPrescanApproval(true)}
         />
+
+        {/* profiling-cost gate (#71) — approve before per-file profiling */}
+        {isPendingProfiling && (
+          <div
+            className="sccap-card"
+            style={{
+              background: "var(--primary-weak)",
+              borderColor: "transparent",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontWeight: 600,
+                  color: "var(--primary-strong)",
+                  marginBottom: 4,
+                }}
+              >
+                Profiling cost estimate ready
+                {typeof costDetails?.total_estimated_cost === "number" && (
+                  <span
+                    style={{
+                      marginLeft: 10,
+                      color: "var(--fg)",
+                      fontSize: 16,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    · ${costDetails.total_estimated_cost.toFixed(4)}
+                  </span>
+                )}
+              </div>
+              <div style={{ color: "var(--fg)", fontSize: 13 }}>
+                Every file is profiled on the utility model before analysis.
+                Approve to run profiling, then you'll see the full analysis
+                cost estimate.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="sccap-btn"
+                onClick={handleProfilingDecline}
+                disabled={declining || approving}
+              >
+                {declining ? "Stopping…" : "Stop"}
+              </button>
+              <button
+                className="sccap-btn sccap-btn-primary"
+                onClick={handleProfilingApprove}
+                disabled={approving || declining}
+              >
+                <Icon.Check size={12} />{" "}
+                {approving ? "Approving…" : "Approve & profile"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* pending-approval banner + actions */}
         {isPendingApproval && (

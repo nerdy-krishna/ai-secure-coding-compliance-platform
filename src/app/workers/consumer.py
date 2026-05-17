@@ -51,6 +51,7 @@ from app.shared.lib.scan_status import (
     STATUS_FAILED,
     STATUS_PENDING_APPROVAL,
     STATUS_PENDING_PRESCAN_APPROVAL,
+    STATUS_PENDING_PROFILING_APPROVAL,
     STATUS_QUEUED,
     STATUS_QUEUED_FOR_SCAN,
     STATUS_REMEDIATION_COMPLETED,
@@ -132,6 +133,7 @@ _WORKFLOW_ENTRY_STATUSES = frozenset(
         STATUS_QUEUED_FOR_SCAN,
         STATUS_PENDING_APPROVAL,
         STATUS_PENDING_PRESCAN_APPROVAL,
+        STATUS_PENDING_PROFILING_APPROVAL,
     }
 )
 
@@ -140,6 +142,7 @@ _WORKFLOW_ENTRY_STATUSES = frozenset(
 # message arriving for a scan that's at the wrong gate (M1 / G4).
 _KIND_TO_EXPECTED_STATUS = {
     "prescan_approval": STATUS_PENDING_PRESCAN_APPROVAL,
+    "profiling_approval": STATUS_PENDING_PROFILING_APPROVAL,
     "cost_approval": STATUS_PENDING_APPROVAL,
 }
 
@@ -247,6 +250,7 @@ async def _run_workflow_for_scan(
 
                 gate_statuses = (
                     STATUS_PENDING_PRESCAN_APPROVAL,
+                    STATUS_PENDING_PROFILING_APPROVAL,
                     STATUS_PENDING_APPROVAL,
                 )
                 if current.status in gate_statuses:
@@ -402,6 +406,8 @@ async def _build_initial_state(
         "patched_files": None,
         "repository_map": None,
         "dependency_graph": None,
+        "file_profiles": None,
+        "profiling_approval": None,
         "all_relevant_agents": {},
         "live_codebase": None,
         "findings": [],

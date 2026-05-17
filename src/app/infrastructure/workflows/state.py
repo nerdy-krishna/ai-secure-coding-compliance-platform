@@ -48,6 +48,14 @@ class WorkerState(TypedDict):
     patched_files: Optional[Dict[str, str]]
     repository_map: Optional[Any]
     dependency_graph: Optional[Any]
+    # Per-file profiles produced by `profile_files_node` (#71): a
+    # {file_path: {summary, security_relevant_operations,
+    # applicable_domains}} map, persisted to `Scan.file_profiles`.
+    file_profiles: Optional[Dict[str, Any]]
+    # Decision payload returned by the profiling-cost interrupt; carries
+    # `approved: bool`. Populated only between the interrupt return and
+    # the next route.
+    profiling_approval: Optional[Dict[str, Any]]
     all_relevant_agents: Dict[str, RelevantAgent]
     live_codebase: Optional[Dict[str, str]]
     findings: List[VulnerabilityFinding]

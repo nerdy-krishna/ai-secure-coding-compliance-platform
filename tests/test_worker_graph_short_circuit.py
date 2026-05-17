@@ -128,11 +128,11 @@ def test_route_after_prescan_picks_pending_approval_on_low_gitleaks():
     assert worker_graph._route_after_prescan(state) == "pending_prescan_approval"
 
 
-def test_route_after_prescan_picks_estimate_cost_on_empty_findings():
-    """Clean prescan (no findings) skips the operator gate and proceeds
-    directly to cost estimation."""
+def test_route_after_prescan_picks_profiling_cost_on_empty_findings():
+    """Clean prescan (no findings) skips the prescan-review gate and
+    proceeds to the profiling-cost gate (#71)."""
     state = _state_with([])
-    assert worker_graph._route_after_prescan(state) == "estimate_cost"
+    assert worker_graph._route_after_prescan(state) == "estimate_profiling_cost"
 
 
 def test_route_after_prescan_picks_handle_error_on_error_message():
