@@ -641,13 +641,17 @@ async def stream_scan_progress(
                         "scan_id": str(scan_id),
                         "status": scan.status,
                     }
-                    # Surface `cost_details` on the cost-approval flip so
-                    # the frontend can render the estimate live without
-                    # a manual refresh. Only sent at the moment we cross
-                    # into PENDING_COST_APPROVAL — the JSONB blob is
+                    # Surface `cost_details` on either cost gate so the
+                    # frontend can render the estimate live without a
+                    # manual refresh. Sent only at the moment we cross
+                    # into a PENDING_*_APPROVAL state — the JSONB blob is
                     # otherwise an internal artifact (V15.3.1) and
                     # there's no UI reason to keep streaming it.
-                    if scan.status == "PENDING_COST_APPROVAL" and scan.cost_details:
+                    if (
+                        scan.status
+                        in ("PENDING_COST_APPROVAL", "PENDING_PROFILING_APPROVAL")
+                        and scan.cost_details
+                    ):
                         cd = scan.cost_details
                         payload["cost_details"] = {
                             "total_estimated_cost": cd.get("total_estimated_cost"),

@@ -820,6 +820,11 @@ class PrescanReviewResponse(BaseModel):
 
 
 class ScanEventItem(BaseModel):
+    # DB primary key of the scan_events row. Exposed as `event_id` so
+    # the frontend can dedupe the live-event-log against the SSE
+    # `scan_event` stream (which carries the same value) by a stable
+    # integer rather than a fragile (stage_name, timestamp) fingerprint.
+    event_id: int = Field(validation_alias="id")
     stage_name: str
     status: str
     timestamp: datetime
@@ -830,6 +835,7 @@ class ScanEventItem(BaseModel):
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class ScanHistoryItem(BaseModel):

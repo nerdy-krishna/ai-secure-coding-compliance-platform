@@ -18,6 +18,33 @@ logger = logging.getLogger(__name__)
 # are reached through the OpenAI-compatible path in the client.
 _SUPPORTED_PROVIDERS = {"openai", "anthropic", "google", "deepseek", "xai"}
 
+# Substrings that strongly identify which provider a model name belongs
+# to. Used to catch a provider/model mismatch (e.g. a DeepSeek model
+# saved under provider="anthropic") at config-save time, rather than
+# letting it 401 every agent call deep into a scan. Deliberately
+# conservative: a model name matching no signature is left alone so a
+# new or oddly-named model is never falsely rejected.
+_PROVIDER_MODEL_SIGNATURES: dict[str, tuple[str, ...]] = {
+    "openai": ("gpt", "o1-", "o3-", "o4-", "chatgpt", "text-embedding", "davinci"),
+    "anthropic": ("claude",),
+    "google": ("gemini", "gemma"),
+    "deepseek": ("deepseek",),
+    "xai": ("grok",),
+}
+
+
+def _provider_for_model(model_name: str) -> Optional[str]:
+    """Best-effort: which provider a model name's prefix points to.
+
+    Returns the provider key when the name carries an unambiguous
+    signature, or ``None`` when it matches nothing known.
+    """
+    lowered = (model_name or "").lower().strip()
+    for provider, signatures in _PROVIDER_MODEL_SIGNATURES.items():
+        if any(sig in lowered for sig in signatures):
+            return provider
+    return None
+
 
 def _validate_cfg(cfg) -> None:
     """Validate LLM configuration fields before persistence.
@@ -32,6 +59,20 @@ def _validate_cfg(cfg) -> None:
     name = getattr(cfg, "name", None)
     if not name or not (1 <= len(name) <= 255):
         raise ValueError("name must be between 1 and 255 characters.")
+    model_name = getattr(cfg, "model_name", None)
+    if not model_name or not (1 <= len(model_name) <= 200):
+        raise ValueError("model_name must be between 1 and 200 characters.")
+    # Catch a provider/model mismatch early — e.g. provider="anthropic"
+    # with model_name="deepseek-v4-flash" would build an Anthropic
+    # client and 401 on every agent call. Only fires when the model
+    # name unambiguously belongs to a *different* provider.
+    inferred = _provider_for_model(model_name)
+    if inferred is not None and inferred != provider:
+        raise ValueError(
+            f"Model '{model_name}' looks like a {inferred} model, but the "
+            f"provider is set to '{provider}'. Set the provider to "
+            f"'{inferred}', or correct the model name."
+        )
     input_cost = getattr(cfg, "input_cost_per_million", None)
     if input_cost is not None and input_cost < 0:
         raise ValueError("input_cost_per_million must be non-negative.")

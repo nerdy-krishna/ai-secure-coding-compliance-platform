@@ -71,6 +71,70 @@ interface ScanStateMsg {
   } | null;
 }
 
+// Normalise a scan-event from any source — the result-endpoint seed,
+// the SSE `scan_event` stream, or the polling fallback — into a
+// `ScanEventMsg`. Returns null for a malformed payload.
+const toScanEventMsg = (
+  scanId: string,
+  raw: unknown,
+): ScanEventMsg | null => {
+  const e = raw as {
+    event_id?: unknown;
+    stage_name?: unknown;
+    status?: unknown;
+    timestamp?: unknown;
+    details?: ScanEventMsg["details"];
+  };
+  if (
+    typeof e.stage_name !== "string" ||
+    e.stage_name.length >= 64 ||
+    typeof e.status !== "string" ||
+    e.status.length >= 64
+  ) {
+    return null;
+  }
+  return {
+    scan_id: scanId,
+    event_id: typeof e.event_id === "number" ? e.event_id : 0,
+    stage_name: e.stage_name,
+    status: e.status,
+    timestamp: typeof e.timestamp === "string" ? e.timestamp : null,
+    details: e.details ?? null,
+  };
+};
+
+// Merge new scan-events into the existing list, deduped by the stable
+// DB id (`event_id`). All three feeds — seed, SSE, poll — re-emit the
+// same rows, so a stable-id dedupe is what keeps the live event log
+// from showing every event two or three times. Events with id 0 (a
+// backend too old to expose the id) fall back to a stage+timestamp key.
+const mergeScanEvents = (
+  prev: ScanEventMsg[],
+  incoming: ScanEventMsg[],
+): ScanEventMsg[] => {
+  if (incoming.length === 0) return prev;
+  const keyOf = (e: ScanEventMsg) =>
+    e.event_id > 0
+      ? `id:${e.event_id}`
+      : `fp:${e.stage_name}|${e.timestamp ?? ""}`;
+  const seen = new Set(prev.map(keyOf));
+  let changed = false;
+  const merged = [...prev];
+  for (const e of incoming) {
+    const k = keyOf(e);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    merged.push(e);
+    changed = true;
+  }
+  if (!changed) return prev;
+  // Stable display order by the monotonic DB id when present.
+  merged.sort((a, b) =>
+    a.event_id > 0 && b.event_id > 0 ? a.event_id - b.event_id : 0,
+  );
+  return merged.slice(-500);
+};
+
 // Known pipeline stages, in order. The backend emits stage_name values
 // matching these keys; unknown stage names are appended live.
 interface Stage {
@@ -314,43 +378,17 @@ const ScanRunningPage: React.FC = () => {
         // Seed the live-event-log + stage-progress from the DB.
         // Terminal scans' SSE streams emit these once and close, so
         // a user landing AFTER the scan finished otherwise sees
-        // "Waiting for events…" forever. SSE still tops up with any
-        // new events for an in-progress scan.
-        const seededEvents = r.events ?? [];
-        if (seededEvents.length > 0) {
-          // ScanEventItem has no `id` field — dedupe by
-          // (stage_name + timestamp). Synthesize an event_id from
-          // the timestamp so the SSE stream's later id-based dedupe
-          // doesn't conflict (SSE-emitted events overwrite by id).
-          setEvents((prev) => {
-            const fingerprint = (e: { stage_name?: string; timestamp?: string | null }) =>
-              `${e.stage_name ?? ""}|${e.timestamp ?? ""}`;
-            const seen = new Set(prev.map((e) => fingerprint(e)));
-            const merged = [...prev];
-            for (const e of seededEvents) {
-              if (!seen.has(fingerprint(e))) {
-                // Generated schema doesn't include `details` (it
-                // was added to the backend after the last codegen),
-                // so read it via a structural cast to keep TS happy
-                // until we regenerate api-generated.ts.
-                const withDetails = e as unknown as {
-                  details?: ScanEventMsg["details"];
-                };
-                merged.push({
-                  scan_id: scanId,
-                  event_id: -Date.parse(e.timestamp ?? "") || 0,
-                  stage_name: e.stage_name,
-                  status: e.status,
-                  timestamp: e.timestamp ?? null,
-                  details: withDetails.details ?? null,
-                });
-              }
-            }
-            return merged.slice(-500);
-          });
+        // "Waiting for events…" forever. The SSE stream and the
+        // polling fallback both top up; `mergeScanEvents` dedupes
+        // every feed by the stable `event_id`.
+        const seeded = (r.events ?? [])
+          .map((e) => toScanEventMsg(scanId, e))
+          .filter((e): e is ScanEventMsg => e !== null);
+        if (seeded.length > 0) {
+          setEvents((prev) => mergeScanEvents(prev, seeded));
           setSeenStages((prev) => {
             const next = new Set(prev);
-            for (const e of seededEvents) next.add(e.stage_name);
+            for (const e of seeded) next.add(e.stage_name);
             return next;
           });
         }
@@ -364,6 +402,53 @@ const ScanRunningPage: React.FC = () => {
       cancelled = true;
     };
   }, [scanId]);
+
+  // Polling fallback. The SSE stream is the primary live feed, but it
+  // can silently stall — a dropped connection that doesn't surface an
+  // error, a token-refresh race, a proxy that buffers events. Without
+  // this, the only recovery was a manual page refresh. While the scan
+  // is non-terminal we re-read `GET /scans/{id}/result` every few
+  // seconds and merge `status` + `events` + `cost_details`; every feed
+  // is deduped by `event_id`, so this never double-counts. Polling
+  // stops as soon as the scan reaches a terminal status.
+  useEffect(() => {
+    if (!scanId) return;
+    if (status && TERMINAL_STATUSES.has(status)) return;
+    let cancelled = false;
+    const POLL_INTERVAL_MS = 5000;
+
+    const tick = async () => {
+      try {
+        const r = await scanService.getScanResult(scanId);
+        if (cancelled) return;
+        if (typeof r.status === "string" && r.status.length < 64) {
+          setStatus(r.status);
+        }
+        if (r.cost_details) {
+          setCostDetails((prev) => ({ ...(prev ?? {}), ...r.cost_details }));
+        }
+        const polled = (r.events ?? [])
+          .map((e) => toScanEventMsg(scanId, e))
+          .filter((e): e is ScanEventMsg => e !== null);
+        if (polled.length > 0) {
+          setEvents((prev) => mergeScanEvents(prev, polled));
+          setSeenStages((prev) => {
+            const next = new Set(prev);
+            for (const e of polled) next.add(e.stage_name);
+            return next;
+          });
+        }
+      } catch {
+        // Best-effort — the next tick (or SSE) recovers.
+      }
+    };
+
+    const timer = setInterval(() => void tick(), POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [scanId, status]);
 
   // Open the SSE stream on mount; close on unmount or when status goes
   // terminal. EventSource cannot send Authorization headers, so we
@@ -387,18 +472,10 @@ const ScanRunningPage: React.FC = () => {
     let retryAttempt = 0;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     // Highest SSE-issued event id we've rendered. Sent as
-    // ?last_event_id=… on reconnect so the backend skips the events
-    // we already ingested. Seeded events use synthesized negative
-    // ids so they don't pollute this counter.
+    // ?last_event_id=… on reconnect so the backend skips events we
+    // already ingested. `mergeScanEvents` dedupes by `event_id`
+    // regardless, so a replayed event is harmless either way.
     let lastSeenEventId = 0;
-    // Dedupe across the seed-on-mount path and SSE replays. Native
-    // EventSource also sends Last-Event-ID on its internal retries
-    // and the backend honors it, but our manual reconnect creates a
-    // brand-new EventSource so we need a frontend safety net too.
-    const eventFingerprint = (e: {
-      stage_name?: string;
-      timestamp?: string | null;
-    }) => `${e.stage_name ?? ""}|${e.timestamp ?? ""}`;
 
     const attachListeners = (es: EventSource) => {
       es.addEventListener("scan_state", (ev) => {
@@ -431,53 +508,32 @@ const ScanRunningPage: React.FC = () => {
 
       es.addEventListener("scan_event", (ev) => {
         try {
-          const payload = JSON.parse((ev as MessageEvent).data) as ScanEventMsg;
-          if (
-            typeof payload.status !== "string" ||
-            payload.status.length >= 64
-          ) {
-            return;
-          }
-          if (
-            typeof payload.stage_name !== "string" ||
-            payload.stage_name.length >= 64
-          ) {
-            return;
-          }
+          const raw = JSON.parse((ev as MessageEvent).data) as unknown;
+          const msg = toScanEventMsg(scanId, raw);
+          if (!msg) return;
           retryAttempt = 0;
           setStreamError(null);
-          if (
-            typeof payload.event_id === "number" &&
-            payload.event_id > lastSeenEventId
-          ) {
-            lastSeenEventId = payload.event_id;
+          if (msg.event_id > lastSeenEventId) {
+            lastSeenEventId = msg.event_id;
           }
-          const fp = eventFingerprint(payload);
-          setEvents((prev) => {
-            // Drop replays — backend re-emits from id=0 on connect
-            // unless Last-Event-ID was honored, and the seed-on-mount
-            // path may have already inserted this row.
-            if (prev.some((e) => eventFingerprint(e) === fp)) return prev;
-            return [...prev, payload].slice(-500);
-          });
+          // mergeScanEvents dedupes by event_id, so a replay on
+          // reconnect or an overlap with the seed/poll feed is a no-op.
+          setEvents((prev) => mergeScanEvents(prev, [msg]));
           setSeenStages((prev) => {
             const next = new Set(prev);
-            next.add(payload.stage_name);
+            next.add(msg.stage_name);
             return next;
           });
-          if (
-            payload.stage_name === "FILE_ANALYZED" &&
-            payload.details?.file_path
-          ) {
-            const filePath = String(payload.details.file_path).slice(0, 512);
+          if (msg.stage_name === "FILE_ANALYZED" && msg.details?.file_path) {
+            const filePath = String(msg.details.file_path).slice(0, 512);
             if (!filePath) return;
             const findingsCount = Math.max(
               0,
-              Number(payload.details?.findings_count) | 0,
+              Number(msg.details?.findings_count) | 0,
             );
             const fixesCount = Math.max(
               0,
-              Number(payload.details?.fixes_count) | 0,
+              Number(msg.details?.fixes_count) | 0,
             );
             setFileProgress((prev) => {
               const next = {
@@ -486,7 +542,7 @@ const ScanRunningPage: React.FC = () => {
                   file_path: filePath,
                   findings_count: findingsCount,
                   fixes_count: fixesCount,
-                  timestamp: payload.timestamp,
+                  timestamp: msg.timestamp,
                 },
               };
               const keys = Object.keys(next);

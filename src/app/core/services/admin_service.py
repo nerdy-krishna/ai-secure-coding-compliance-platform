@@ -71,6 +71,15 @@ class AdminService:
         )
         try:
             config_db = await self.llm_repo.create(config_create)
+        except ValueError as e:
+            # Field-validation failure (`_validate_cfg`) — surface a
+            # clean 400 with the message rather than a generic 500.
+            logger.info(
+                "LLM config create rejected by validation: %s",
+                e,
+                extra={"action": "create_config"},
+            )
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception:
             logger.error(
                 "Admin repo call failed",
@@ -96,6 +105,13 @@ class AdminService:
         )
         try:
             updated_db = await self.llm_repo.update(config_id, config_update)
+        except ValueError as e:
+            logger.info(
+                "LLM config update rejected by validation: %s",
+                e,
+                extra={"action": "update_config", "config_id": str(config_id)},
+            )
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception:
             logger.error(
                 "Admin repo call failed",
