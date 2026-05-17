@@ -15,15 +15,15 @@ fresh install; admins can re-seed them at any time via
 ### OWASP ASVS (`asvs`)
 
 Application Security Verification Standard — the most comprehensive
-of the three. Best for audit-style scans where you want every
-control checked.
+framework. Best for audit-style scans where you want every control
+checked.
 
-- **Ingestion mode**: CSV. The admin uploads a CSV with one row per
-  requirement and the columns `control_id`, `title`, `content`,
-  `framework_name`.
+- **Ingestion mode**: bundled. The ASVS 5.0 corpus (~345 verification
+  requirements) ships in the repo and **auto-ingests on app startup** —
+  no operator action. See
+  [Updating Framework Knowledge](../development/updating-framework-knowledge.md).
+- **Pinned edition**: ASVS 5.0.0.
 - **Typical use**: compliance reports, full-coverage audits.
-- **RAG scope**: hundreds of rows; chunked into a few hundred
-  vector-store entries.
 
 ### OWASP Proactive Controls (`proactive_controls`)
 

@@ -62,19 +62,21 @@ Ingestion runs in-process for now (no separate worker container).
 The UI shows a spinner + the `rag_jobs` row's progress percentage.
 Large Git repos (hundreds of files) can take a couple of minutes.
 
-## Bundled corpora (CWE Essentials, ISVS)
+## Bundled corpora (ASVS, CWE Essentials, ISVS)
 
-Two frameworks ship their RAG corpus inside the repository rather than
+Three frameworks ship their RAG corpus inside the repository rather than
 fetching it from an upstream Git repo:
 
+- **OWASP ASVS** — ~345 verification requirements, from the OWASP ASVS
+  5.0 CSV.
 - **CWE Essentials** — 14 concern-areas, content grounded in the MITRE
   CWE Top 25 (2025).
 - **OWASP ISVS** — 7 concern-areas, content grounded in the OWASP IoT
   Security Verification Standard.
 
-For both, the framework, its concern-area agents, and their prompt
-templates are created automatically by the seed (and by the data
-migration for existing deployments).
+For all three, the framework, its agents, and their prompt templates are
+created automatically by the seed (and by the data migration for
+existing deployments).
 
 **The RAG corpus auto-ingests on app startup.** The corpora ship in the
 repo already authored in the `**Vulnerability Pattern**` /
@@ -82,10 +84,11 @@ repo already authored in the `**Vulnerability Pattern**` /
 through the *raw* path — no LLM enrichment, no cost, no operator action.
 The app lifespan runs the ingest once for any bundled framework whose
 collection is still empty; subsequent boots leave a populated framework
-untouched. Documents are tagged `scan_ready=True` and carry the
-`concern_area` facet each agent filters retrieval on.
+untouched. Documents are tagged `scan_ready=True` and carry the metadata
+facet the framework's agents filter retrieval on — `concern_area` for
+CWE Essentials and ISVS, `control_family` for ASVS.
 
-To re-ingest manually (after editing the corpus, or to force a refresh):
+To re-ingest manually (after editing a corpus, or to force a refresh):
 
 ```
 docker compose exec app python scripts/ingest_bundled_corpora.py
@@ -94,19 +97,24 @@ docker compose exec app python scripts/ingest_bundled_corpora.py
 This is idempotent — it replaces a framework's documents rather than
 duplicating them.
 
-The corpus CSVs (`src/app/data/cwe_essentials_corpus.csv`,
-`src/app/data/isvs_corpus.csv`) are **generated** from the
-per-concern-area markdown under `src/app/data/<framework>_corpus/` —
-edit the markdown, never the CSV, then regenerate with
-`python scripts/build_corpus.py --framework <name> --write`.
+The corpus CSVs are **generated**, never hand-edited:
+
+- `cwe_essentials_corpus.csv` / `isvs_corpus.csv` come from the
+  per-concern-area markdown under `src/app/data/<framework>_corpus/` —
+  edit the markdown, then regenerate with
+  `python scripts/build_corpus.py --framework <name> --write`.
+- `asvs_corpus.csv` comes from `src/app/data/asvs_5.0.0_source.csv`
+  (the OWASP ASVS 5.0 export) — regenerate with
+  `python scripts/build_asvs_corpus.py --write`.
 
 Until a corpus is ingested, a scan against the framework still
 completes — its agents simply produce findings without RAG citations.
 After ingestion the findings carry concern-area-grounded references.
 
-**Edition + refresh path.** Each corpus is pinned to an edition
-(recorded in every markdown file's `edition` frontmatter): CWE
-Essentials to the **CWE Top 25 (2025)**, ISVS to **OWASP ISVS 1.0**.
+**Edition + refresh path.** Each corpus is pinned to an edition: ASVS
+to **5.0.0**, CWE Essentials to the **CWE Top 25 (2025)**, ISVS to
+**OWASP ISVS 1.0** (the concern-area corpora record it in every
+markdown file's `edition` frontmatter).
 Adopting a newer edition is a deliberate action — update the
 concern-area markdown, bump the `edition` frontmatter, run
 `build_corpus.py --framework <name> --write`, and re-ingest with the

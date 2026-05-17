@@ -53,6 +53,19 @@ def test_ingest_bundled_corpus_loads_and_tags_cwe_essentials():
         assert doc_id.startswith("cwe_essentials::")
 
 
+def test_ingest_bundled_corpus_tags_asvs_with_control_family():
+    """ASVS uses the `control_family` facet (not `concern_area`) — its
+    agents filter retrieval on it."""
+    store = _FakeStore()
+    count = ingest_bundled_corpus(store, "asvs")
+
+    assert count > 300  # ASVS 5.0 ships ~345 verification requirements
+    for meta in store.added[0]["metadatas"]:
+        assert meta["framework_name"] == "asvs"
+        assert meta["scan_ready"] is True
+        assert meta["control_family"]  # required by the Asvs* agents' filter
+
+
 def test_ingested_documents_carry_pattern_blocks():
     """The ingested text must hold the `**Vulnerability Pattern**` /
     `**Secure Pattern**` blocks the agent's extractor parses."""
@@ -64,12 +77,12 @@ def test_ingested_documents_carry_pattern_blocks():
 
 
 def test_only_if_empty_skips_already_populated_frameworks():
-    # cwe_essentials already has documents; isvs is empty.
-    store = _FakeStore(existing={"cwe_essentials": 14})
+    # cwe_essentials + asvs already populated; only isvs is empty.
+    store = _FakeStore(existing={"cwe_essentials": 14, "asvs": 345})
     result = ingest_all_bundled_corpora(store, only_if_empty=True)
 
     assert result["cwe_essentials"] == 14  # reported, not re-ingested
-    assert result["isvs"] == 7
+    assert result["isvs"] == 7  # the empty framework was ingested
     # Only the empty framework was (re)ingested.
     assert store.deleted == ["isvs"]
 

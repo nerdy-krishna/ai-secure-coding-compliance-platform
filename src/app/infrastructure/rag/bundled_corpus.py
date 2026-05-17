@@ -24,11 +24,19 @@ logger = logging.getLogger(__name__)
 # `app/data/` — three levels up from this module (rag → infrastructure → app).
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
-# framework_name → bundled corpus CSV filename under `app/data/`.
-BUNDLED_CORPORA: Dict[str, str] = {
-    "cwe_essentials": "cwe_essentials_corpus.csv",
-    "isvs": "isvs_corpus.csv",
+# framework_name → bundled corpus spec. `csv` is the filename under
+# `app/data/`; `facet` is the metadata column the framework's agents
+# filter retrieval on — CWE Essentials / ISVS key on `concern_area`,
+# ASVS keys on `control_family`.
+BUNDLED_CORPORA: Dict[str, Dict[str, str]] = {
+    "cwe_essentials": {"csv": "cwe_essentials_corpus.csv", "facet": "concern_area"},
+    "isvs": {"csv": "isvs_corpus.csv", "facet": "concern_area"},
+    "asvs": {"csv": "asvs_corpus.csv", "facet": "control_family"},
 }
+
+
+# Upsert chunk size — stays at or under the embedder's per-batch cap.
+_ADD_BATCH = 256
 
 
 def _read_corpus_csv(csv_path: Path) -> List[Dict[str, str]]:
@@ -41,11 +49,13 @@ def ingest_bundled_corpus(rag_service: VectorStore, framework: str) -> int:
 
     Idempotent: the framework's existing documents are deleted first, so
     a re-run replaces rather than duplicates. Documents are tagged
-    `scan_ready=True` and carry the `concern_area` facet so the CWE /
-    ISVS agents retrieve them. Returns the document count ingested
-    (0 if the bundled CSV is missing or empty).
+    `scan_ready=True` and carry the framework's retrieval facet so its
+    agents retrieve them. Returns the document count ingested (0 if the
+    bundled CSV is missing or empty).
     """
-    csv_path = _DATA_DIR / BUNDLED_CORPORA[framework]
+    spec = BUNDLED_CORPORA[framework]
+    facet = spec["facet"]
+    csv_path = _DATA_DIR / spec["csv"]
     if not csv_path.exists():
         logger.warning("bundled corpus CSV missing: %s", csv_path)
         return 0
@@ -56,7 +66,7 @@ def ingest_bundled_corpus(rag_service: VectorStore, framework: str) -> int:
     metadatas = [
         {
             "framework_name": framework,
-            "concern_area": row["concern_area"],
+            facet: row[facet],
             "scan_ready": True,
             "source": "bundled",
         }
@@ -64,7 +74,15 @@ def ingest_bundled_corpus(rag_service: VectorStore, framework: str) -> int:
     ]
     ids = [f"{framework}::{row['id']}" for row in rows]
     rag_service.delete_by_framework(framework)
-    rag_service.add(documents=documents, metadatas=metadatas, ids=ids)
+    # The embedder caps a batch at 256 texts; a large corpus (ASVS ships
+    # ~345 requirements) is upserted in chunks.
+    for start in range(0, len(rows), _ADD_BATCH):
+        end = start + _ADD_BATCH
+        rag_service.add(
+            documents=documents[start:end],
+            metadatas=metadatas[start:end],
+            ids=ids[start:end],
+        )
     logger.info(
         "bundled corpus ingested",
         extra={"framework": framework, "docs": len(rows)},
