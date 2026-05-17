@@ -185,6 +185,39 @@ function coverageKey(languages: string[]): string {
   return "sccap_coverage_dismissed_" + [...languages].sort().join(",");
 }
 
+// Language → framework suggestion table (Framework Expansion #63).
+// Drives the advisory banner that nudges a developer toward a framework
+// their detected languages would benefit from. Advisory only — it never
+// alters the framework selection or blocks submission. ISVS has no clean
+// client-side language signal, so the table is CWE-Essentials-focused.
+const FRAMEWORK_SUGGESTIONS: {
+  framework: string;
+  label: string;
+  languages: string[];
+  reason: string;
+}[] = [
+  {
+    framework: "cwe_essentials",
+    label: "CWE Essentials",
+    languages: ["c", "cpp", "go"],
+    reason:
+      "Your upload includes systems / native code. CWE Essentials adds " +
+      "memory-safety, concurrency, and weakness-class coverage that the " +
+      "web-centric frameworks don't.",
+  },
+];
+
+// Per-(framework, language-mix) sessionStorage key — mirrors coverageKey
+// so a dismissal is remembered for the same language mix for the session.
+function frameworkSuggestionKey(framework: string, languages: string[]): string {
+  return (
+    "sccap_fw_suggest_dismissed_" +
+    framework +
+    ":" +
+    [...languages].sort().join(",")
+  );
+}
+
 const SubmitPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -371,6 +404,60 @@ const SubmitPage: React.FC = () => {
     setSelectedFrameworks((prev) =>
       prev.includes(name) ? prev.filter((f) => f !== name) : [...prev, name],
     );
+  };
+
+  // --- Advisory framework-suggestion banner (Framework Expansion #63) ---
+  // Dismissed suggestion keys. Seeded from sessionStorage so a dismissal
+  // survives navigating away from the page and back within the session,
+  // and held in state so the suggestion memo reacts to a dismissal.
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(
+    () => {
+      const keys = new Set<string>();
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k?.startsWith("sccap_fw_suggest_dismissed_")) keys.add(k);
+      }
+      return keys;
+    },
+  );
+
+  // Languages detected from whatever files are currently staged — same
+  // file-name sources the coverage check uses, computed reactively.
+  const detectedLanguages = useMemo(() => {
+    const fileNames =
+      mode === "upload"
+        ? files.map((f) => f.name)
+        : (mode === "archive" || mode === "git") && previewFiles
+          ? previewFiles
+          : [];
+    return detectLanguages(fileNames);
+  }, [mode, files, previewFiles]);
+
+  // The framework to nudge toward, or null. A suggestion is shown only
+  // when the detected languages match the table, the framework exists on
+  // this deployment and is not already selected, and the user has not
+  // dismissed it for this language mix.
+  const frameworkSuggestion = useMemo(() => {
+    if (detectedLanguages.length === 0) return null;
+    for (const s of FRAMEWORK_SUGGESTIONS) {
+      if (selectedFrameworks.includes(s.framework)) continue;
+      if (!frameworks?.some((f) => f.name === s.framework)) continue;
+      if (!s.languages.some((l) => detectedLanguages.includes(l))) continue;
+      if (dismissedSuggestions.has(frameworkSuggestionKey(s.framework, detectedLanguages)))
+        continue;
+      return s;
+    }
+    return null;
+  }, [detectedLanguages, selectedFrameworks, frameworks, dismissedSuggestions]);
+
+  const dismissFrameworkSuggestion = () => {
+    if (!frameworkSuggestion) return;
+    const key = frameworkSuggestionKey(
+      frameworkSuggestion.framework,
+      detectedLanguages,
+    );
+    sessionStorage.setItem(key, "1");
+    setDismissedSuggestions((prev) => new Set(prev).add(key));
   };
 
   // Shared submission logic (called after coverage check or on skip)
@@ -1044,6 +1131,85 @@ const SubmitPage: React.FC = () => {
                   );
                 })}
               </div>
+
+              {frameworkSuggestion && (
+                <div
+                  role="status"
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    marginTop: 10,
+                    padding: "10px 12px",
+                    background: "var(--primary-weak)",
+                    border: "1px solid var(--primary)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      color: "var(--primary)",
+                      flexShrink: 0,
+                      marginTop: 1,
+                    }}
+                  >
+                    <Icon.Sparkle size={16} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 500,
+                        color: "var(--fg)",
+                        fontSize: 13,
+                      }}
+                    >
+                      Suggested framework: {frameworkSuggestion.label}
+                    </div>
+                    <div
+                      style={{
+                        color: "var(--fg-muted)",
+                        fontSize: 12,
+                        marginTop: 2,
+                      }}
+                    >
+                      {frameworkSuggestion.reason}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        toggleFramework(frameworkSuggestion.framework)
+                      }
+                      className="chip"
+                      style={{
+                        cursor: "pointer",
+                        marginTop: 8,
+                        background: "var(--primary)",
+                        color: "var(--bg)",
+                        border: "none",
+                        padding: "5px 12px",
+                      }}
+                    >
+                      Add {frameworkSuggestion.label}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Dismiss suggestion"
+                    onClick={dismissFrameworkSuggestion}
+                    style={{
+                      cursor: "pointer",
+                      background: "none",
+                      border: "none",
+                      color: "var(--fg-muted)",
+                      flexShrink: 0,
+                      padding: 2,
+                      lineHeight: 0,
+                    }}
+                  >
+                    <Icon.X size={14} />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
