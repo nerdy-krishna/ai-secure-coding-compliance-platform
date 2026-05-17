@@ -212,6 +212,18 @@ class Settings(BaseSettings):
     ANTHROPIC_TOKENS_PER_MINUTE: int = Field(
         default=20000, ge=1, description="Max TPM for Anthropic models."
     )
+    DEEPSEEK_REQUESTS_PER_MINUTE: int = Field(
+        default=60, ge=1, description="Max RPM for DeepSeek models."
+    )
+    DEEPSEEK_TOKENS_PER_MINUTE: int = Field(
+        default=30000, ge=1, description="Max TPM for DeepSeek models."
+    )
+    XAI_REQUESTS_PER_MINUTE: int = Field(
+        default=60, ge=1, description="Max RPM for xAI (Grok) models."
+    )
+    XAI_TOKENS_PER_MINUTE: int = Field(
+        default=30000, ge=1, description="Max TPM for xAI (Grok) models."
+    )
 
     # --- Worker ---
     # Hard upper bound for a single scan workflow invocation. If exceeded, the
