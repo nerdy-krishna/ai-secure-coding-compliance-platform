@@ -31,7 +31,12 @@ class WorkerState(TypedDict):
     scan_id: uuid.UUID
     scan_type: str
     current_scan_status: Optional[str]
+    # The two LLM slots configured on the scan (#69). The reasoning slot
+    # drives analysis / consolidation / merge; the utility slot drives
+    # the profiler and fix-snippet verification. Slot resolution lives
+    # in `shared.lib.llm_slots`; utility falls back to reasoning when None.
     reasoning_llm_config_id: Optional[uuid.UUID]
+    utility_llm_config_id: Optional[uuid.UUID]
     files: Optional[Dict[str, str]]
     initial_file_map: Optional[Dict[str, str]]
     final_file_map: Optional[Dict[str, str]]

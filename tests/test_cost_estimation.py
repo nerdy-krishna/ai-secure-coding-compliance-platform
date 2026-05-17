@@ -101,3 +101,54 @@ def test_estimate_for_prompt_uses_predicted_output_ratio():
     assert (
         est["total_estimated_cost"] == est["input_cost"] + est["predicted_output_cost"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Two-slot (utility + reasoning) cost estimation — #69
+# ---------------------------------------------------------------------------
+
+
+def test_two_slot_estimate_sums_each_slot_at_its_own_price():
+    """Each slot is priced at its own configured rate; the result is the
+    sum. Override rates make the arithmetic exact and LiteLLM-independent."""
+    reasoning = _config("openai", "gpt-4o", in_per_m=1_000, out_per_m=2_000)
+    utility = _config("openai", "gpt-4o-mini", in_per_m=100, out_per_m=200)
+    est = cost_estimation.estimate_cost_two_slot(
+        reasoning_config=reasoning,
+        reasoning_input_tokens=1_000,
+        utility_config=utility,
+        utility_input_tokens=2_000,
+    )
+    # reasoning: 1000 in @ $1000/1M = $1.00 + 250 out @ $2000/1M = $0.50
+    # utility:   2000 in @ $100/1M  = $0.20 + 500 out @ $200/1M  = $0.10
+    assert est["slots"]["reasoning"]["total_estimated_cost"] == pytest.approx(1.50)
+    assert est["slots"]["utility"]["total_estimated_cost"] == pytest.approx(0.30)
+    assert est["total_estimated_cost"] == pytest.approx(1.80)
+    assert est["total_input_tokens"] == 3_000
+
+
+def test_two_slot_estimate_with_same_config_in_both_slots():
+    """Same config in both slots equals a single estimate over the
+    combined token count."""
+    cfg = _config("openai", "gpt-4o", in_per_m=1_000, out_per_m=2_000)
+    two_slot = cost_estimation.estimate_cost_two_slot(
+        reasoning_config=cfg,
+        reasoning_input_tokens=600,
+        utility_config=cfg,
+        utility_input_tokens=400,
+    )
+    single = cost_estimation.estimate_cost_for_prompt(cfg, 1_000)
+    assert two_slot["total_estimated_cost"] == pytest.approx(
+        single["total_estimated_cost"]
+    )
+
+
+def test_two_slot_estimate_rejects_negative_tokens():
+    cfg = _config("openai", "gpt-4o")
+    with pytest.raises(ValueError):
+        cost_estimation.estimate_cost_two_slot(
+            reasoning_config=cfg,
+            reasoning_input_tokens=100,
+            utility_config=cfg,
+            utility_input_tokens=-1,
+        )

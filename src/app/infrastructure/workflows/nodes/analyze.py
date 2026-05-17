@@ -29,6 +29,7 @@ from app.infrastructure.workflows.nodes.cost import CHUNK_ONLY_IF_LARGER_THAN
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
 from app.shared.lib.agent_routing import resolve_agents_for_file
+from app.shared.lib.llm_slots import LLMStep, resolve_llm_config_id
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,8 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     if not all_relevant_agents:
         return {"error_message": "Orchestrator is missing 'all_relevant_agents'."}
 
-    reasoning_llm_id = state.get("reasoning_llm_config_id")
+    # Per-file analysis runs on the reasoning slot (#69).
+    reasoning_llm_id = resolve_llm_config_id(LLMStep.ANALYSIS, state)
     if not reasoning_llm_id:
         return {"error_message": "Orchestrator is missing 'reasoning_llm_config_id'."}
     # --- END REVISED GUARD CLAUSE BLOCK ---

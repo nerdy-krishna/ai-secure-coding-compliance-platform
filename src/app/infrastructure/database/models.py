@@ -124,6 +124,13 @@ class Scan(Base):
     reasoning_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("llm_configurations.id")
     )
+    # Utility (cheap) LLM slot — drives trivial steps (the per-file
+    # profiler and fix-snippet verification). Nullable: scans created
+    # before this column, and submits that omit it, fall back to the
+    # reasoning slot at resolution time (see shared.lib.llm_slots).
+    utility_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id")
+    )
     frameworks: Mapped[Optional[List[str]]] = mapped_column(JSONB)
     cost_details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     repository_map: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)

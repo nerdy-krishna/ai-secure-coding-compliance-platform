@@ -395,6 +395,7 @@ async def _build_initial_state(
         "scan_type": "AUDIT",  # overwritten by the DB value in retrieve_and_prepare_data
         "current_scan_status": None,
         "reasoning_llm_config_id": None,
+        "utility_llm_config_id": None,
         "files": None,
         "initial_file_map": None,
         "final_file_map": None,

@@ -235,6 +235,7 @@ const SubmitPage: React.FC = () => {
   );
   const [scanType, setScanType] = useState<ScanType>("AUDIT");
   const [llmConfigId, setLlmConfigId] = useState<string>("");
+  const [utilityLlmConfigId, setUtilityLlmConfigId] = useState<string>("");
   const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
@@ -278,10 +279,11 @@ const SubmitPage: React.FC = () => {
   );
 
   React.useEffect(() => {
-    if (!llmConfigId && llmConfigs && llmConfigs.length > 0) {
-      setLlmConfigId(llmConfigs[0].id);
+    if (llmConfigs && llmConfigs.length > 0) {
+      if (!llmConfigId) setLlmConfigId(llmConfigs[0].id);
+      if (!utilityLlmConfigId) setUtilityLlmConfigId(llmConfigs[0].id);
     }
-  }, [llmConfigs, llmConfigId]);
+  }, [llmConfigs, llmConfigId, utilityLlmConfigId]);
 
   // If the user arrived here via "New scan" on a project page, the
   // navState carries a projectId but the projects list is async — when
@@ -364,7 +366,7 @@ const SubmitPage: React.FC = () => {
 
   const canSubmit = useMemo(() => {
     if (!projectName.trim()) return false;
-    if (!llmConfigId) return false;
+    if (!llmConfigId || !utilityLlmConfigId) return false;
     if (selectedFrameworks.length === 0) return false;
     if (mode === "upload") return files.length > 0;
     if (mode === "git") {
@@ -391,6 +393,7 @@ const SubmitPage: React.FC = () => {
   }, [
     projectName,
     llmConfigId,
+    utilityLlmConfigId,
     selectedFrameworks,
     mode,
     files,
@@ -497,6 +500,7 @@ const SubmitPage: React.FC = () => {
       payload.append("project_name", trimmedName);
       payload.append("scan_type", scanType);
       payload.append("reasoning_llm_config_id", llmConfigId);
+      payload.append("utility_llm_config_id", utilityLlmConfigId);
       // V02.2.1: intersect selectedFrameworks with the loaded allowlist before submitting
       const safeFrameworks = selectedFrameworks.filter((n) => frameworks?.some((f) => f.name === n));
       payload.append("frameworks", safeFrameworks.join(","));
@@ -1056,7 +1060,7 @@ const SubmitPage: React.FC = () => {
                   fontWeight: 500,
                 }}
               >
-                LLM configuration
+                Reasoning LLM
               </label>
               <select
                 className="sccap-select"
@@ -1081,8 +1085,48 @@ const SubmitPage: React.FC = () => {
                   color: "var(--fg-subtle)",
                 }}
               >
-                The same config powers utility, fast, and reasoning slots by
-                default.
+                Drives analysis, consolidation, and the remediation merge —
+                pick a capable model.
+              </div>
+
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  color: "var(--fg-muted)",
+                  marginTop: 14,
+                  marginBottom: 6,
+                  fontWeight: 500,
+                }}
+              >
+                Utility LLM
+              </label>
+              <select
+                className="sccap-select"
+                value={utilityLlmConfigId}
+                onChange={(e) => setUtilityLlmConfigId(e.target.value)}
+                disabled={loadingLlms || !llmConfigs?.length}
+              >
+                {loadingLlms && <option>Loading…</option>}
+                {!loadingLlms && !llmConfigs?.length && (
+                  <option value="">No LLMs configured — see Admin → LLM</option>
+                )}
+                {llmConfigs?.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} · {c.provider}/{c.model_name}
+                  </option>
+                ))}
+              </select>
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: "var(--fg-subtle)",
+                }}
+              >
+                Drives the cheap mechanical steps (profiling, fix
+                verification). A small fast model is fine — or reuse the
+                reasoning model.
               </div>
 
               <label

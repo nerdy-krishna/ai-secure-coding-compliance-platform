@@ -258,6 +258,7 @@ async def create_scan(
     ),
     scan_type: str = Form(..., pattern=r"^(AUDIT|SUGGEST|REMEDIATE)$"),
     reasoning_llm_config_id: Optional[uuid.UUID] = Form(None),
+    utility_llm_config_id: Optional[uuid.UUID] = Form(None),
     frameworks: str = Form(
         ..., min_length=1, max_length=2048
     ),  # Received as a string, will be processed in service
@@ -331,12 +332,18 @@ async def create_scan(
             )
         reasoning_llm_config_id = available[0].id
 
+    # The utility (cheap) slot defaults to the reasoning config when the
+    # submit omits it — "the same model in both slots" is the baseline.
+    if utility_llm_config_id is None:
+        utility_llm_config_id = reasoning_llm_config_id
+
     common_args = {
         "project_name": project_name,
         "user_id": user.id,
         "correlation_id": correlation_id_var.get(),
         "scan_type": scan_type,
         "reasoning_llm_config_id": reasoning_llm_config_id,
+        "utility_llm_config_id": utility_llm_config_id,
         "frameworks": [fw.strip() for fw in frameworks.split(",")],
         "selected_files": selected_files_list,
     }

@@ -27,6 +27,7 @@ from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.llm_client import get_llm_client
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.files import get_language_from_filename
+from app.shared.lib.llm_slots import LLMStep, resolve_llm_config_id
 
 try:
     from tree_sitter_languages import get_parser as ts_get_parser
@@ -324,7 +325,9 @@ async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
     if not proposed_fixes:
         return {}
 
-    reasoning_llm_id = state.get("reasoning_llm_config_id")
+    # Consolidation + the remediation merge agent run on the reasoning
+    # slot (#69) — code-quality-sensitive work.
+    reasoning_llm_id = resolve_llm_config_id(LLMStep.CONSOLIDATION, state)
     if not reasoning_llm_id:
         return {
             "error_message": "consolidate_and_patch requires reasoning_llm_config_id."

@@ -87,15 +87,32 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
     except nx.NetworkXUnfeasible:
         processing_order = sorted(list(live_codebase.keys()))
 
+    # The utility slot drives the cheap steps (#69); it falls back to
+    # the reasoning config when the submit left it unset.
+    utility_llm_config_id = (
+        state.get("utility_llm_config_id") or reasoning_llm_config_id
+    )
+
     total_input_tokens = 0
     async with AsyncSessionLocal() as db:
-        llm_config = await LLMConfigRepository(db).get_by_id_with_decrypted_key(
+        llm_repo = LLMConfigRepository(db)
+        llm_config = await llm_repo.get_by_id_with_decrypted_key(
             reasoning_llm_config_id
         )
         if not llm_config:
             return {
                 "error_message": f"LLM Config {reasoning_llm_config_id} not found for cost estimation."
             }
+        if utility_llm_config_id == reasoning_llm_config_id:
+            utility_llm_config = llm_config
+        else:
+            utility_llm_config = await llm_repo.get_by_id_with_decrypted_key(
+                utility_llm_config_id
+            )
+            if not utility_llm_config:
+                return {
+                    "error_message": f"LLM Config {utility_llm_config_id} not found for cost estimation."
+                }
 
         for file_path in processing_order:
             file_content = live_codebase[file_path]
@@ -123,8 +140,14 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
                         chunk["code"], llm_config
                     )
 
-    cost_details = cost_estimation.estimate_cost_for_prompt(
-        llm_config, total_input_tokens
+    # Two-slot estimate (#69): the analysis dry-run tokens are priced on
+    # the reasoning slot. Utility-slot usage is 0 here until the per-file
+    # profiler (#71) feeds its dry-run tokens into the utility term.
+    cost_details = cost_estimation.estimate_cost_two_slot(
+        reasoning_config=llm_config,
+        reasoning_input_tokens=total_input_tokens,
+        utility_config=utility_llm_config,
+        utility_input_tokens=0,
     )
 
     async with AsyncSessionLocal() as db:

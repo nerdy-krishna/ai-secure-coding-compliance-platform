@@ -101,6 +101,7 @@ class ScanRepository:
         scan_type: str,
         reasoning_llm_config_id: uuid.UUID,
         frameworks: List[str],
+        utility_llm_config_id: Optional[uuid.UUID] = None,
         tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Scan:
         """Creates a new Scan record. ``tenant_id`` is stamped from the
@@ -116,6 +117,7 @@ class ScanRepository:
             scan_type=scan_type,
             status=STATUS_QUEUED,
             reasoning_llm_config_id=reasoning_llm_config_id,
+            utility_llm_config_id=utility_llm_config_id,
             frameworks=frameworks,
             tenant_id=tenant_id,
         )

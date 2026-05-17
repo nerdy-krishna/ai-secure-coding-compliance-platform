@@ -129,6 +129,7 @@ class ScanSubmissionService:
         correlation_id: str,
         reasoning_llm_config_id: uuid.UUID,
         frameworks: List[str],
+        utility_llm_config_id: Optional[uuid.UUID] = None,
         repo_url: Optional[str] = None,
         selected_files: Optional[List[str]] = None,
     ) -> db_models.Scan:
@@ -232,6 +233,7 @@ class ScanSubmissionService:
                 user_id=user_id,
                 scan_type=scan_type,
                 reasoning_llm_config_id=reasoning_llm_config_id,
+                utility_llm_config_id=utility_llm_config_id,
                 frameworks=frameworks,
                 tenant_id=tenant_id,
             )

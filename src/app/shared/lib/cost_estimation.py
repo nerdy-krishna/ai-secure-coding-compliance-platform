@@ -15,7 +15,7 @@ Call signatures are unchanged so existing callers don't need to move.
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import litellm
 
@@ -210,6 +210,77 @@ def estimate_cost_for_prompt(
         "total_estimated_cost": total_estimated_cost,
         "predicted_output_tokens": float(predicted_output_tokens),
         "total_input_tokens": float(input_tokens),
+    }
+
+
+def estimate_cost_two_slot(
+    *,
+    reasoning_config: db_models.LLMConfiguration,
+    reasoning_input_tokens: int,
+    utility_config: db_models.LLMConfiguration,
+    utility_input_tokens: int,
+    output_token_percentage: float = 0.25,
+) -> Dict[str, Any]:
+    """Pre-call cost estimate across both LLM slots of a scan (#69).
+
+    Each slot's input tokens are priced at *that slot's* configured
+    rate; the two slot totals are summed. When the same config sits in
+    both slots the result equals a single-config estimate over the
+    combined token count. The per-scan ceiling is applied to the
+    combined total, not to either slot alone.
+
+    The returned dict carries the same top-level keys as
+    `estimate_cost_for_prompt` (so existing `cost_details` consumers
+    keep working) plus a `slots` breakdown for transparency.
+    """
+    for label, toks in (
+        ("reasoning", reasoning_input_tokens),
+        ("utility", utility_input_tokens),
+    ):
+        if not isinstance(toks, int) or toks < 0:
+            raise ValueError(f"{label}_input_tokens must be a non-negative int")
+    if not (0.0 <= output_token_percentage <= 4.0):
+        raise ValueError("output_token_percentage out of range")
+
+    def _slot(
+        config: db_models.LLMConfiguration, input_tokens: int
+    ) -> Dict[str, float]:
+        predicted_output = max(0, int(input_tokens * output_token_percentage))
+        in_cost, out_cost = _compute_cost(config, input_tokens, predicted_output)
+        return {
+            "input_tokens": float(input_tokens),
+            "predicted_output_tokens": float(predicted_output),
+            "input_cost": in_cost,
+            "predicted_output_cost": out_cost,
+            "total_estimated_cost": in_cost + out_cost,
+        }
+
+    reasoning = _slot(reasoning_config, reasoning_input_tokens)
+    utility = _slot(utility_config, utility_input_tokens)
+    total = reasoning["total_estimated_cost"] + utility["total_estimated_cost"]
+
+    MAX_PER_SCAN_USD = getattr(settings, "MAX_PER_SCAN_ESTIMATED_COST_USD", 100.0)
+    if total > MAX_PER_SCAN_USD:
+        raise ValueError(
+            f"Estimated cost ${total:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
+        )
+    logger.debug(
+        "Two-slot cost estimate: reasoning=$%.6f utility=$%.6f total=$%.6f",
+        reasoning["total_estimated_cost"],
+        utility["total_estimated_cost"],
+        total,
+    )
+    return {
+        "input_cost": reasoning["input_cost"] + utility["input_cost"],
+        "predicted_output_cost": (
+            reasoning["predicted_output_cost"] + utility["predicted_output_cost"]
+        ),
+        "total_estimated_cost": total,
+        "predicted_output_tokens": (
+            reasoning["predicted_output_tokens"] + utility["predicted_output_tokens"]
+        ),
+        "total_input_tokens": (reasoning["input_tokens"] + utility["input_tokens"]),
+        "slots": {"reasoning": reasoning, "utility": utility},
     }
 
 
