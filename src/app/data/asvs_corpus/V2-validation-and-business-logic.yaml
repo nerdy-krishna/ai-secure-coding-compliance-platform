@@ -1,0 +1,679 @@
+# OWASP ASVS 5.0 — Chapter V2: Validation and Business Logic
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V2.1 — Validation and Business Logic Documentation
+# ---------------------------------------------------------------------------
+
+- id: V2.1.1
+  facet: Validation and Business Logic
+  section: Validation and Business Logic Documentation
+  level: 1
+  security_rule: >-
+    The application's documentation must define input validation rules
+    that describe how each data item is checked against its expected
+    structure, covering common formats such as email addresses or card
+    numbers as well as any internal data formats.
+  vulnerability_pattern: >-
+    Validation rules live only in scattered, undocumented code, so the
+    expected structure of each field is unknown, applied inconsistently
+    across endpoints, and impossible to review or test against.
+  secure_pattern: >-
+    A documented set of validation rules defines the expected structure
+    of every data item once, and the code enforces those rules from that
+    single shared definition.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # email checked ad hoc, no documented rule
+        if "@" in email: accept(email)
+      secure: |
+        # rule defined in the validation schema doc and enforced from it
+        VALIDATION_RULES = {"email": EMAIL_FORMAT, "phone": E164_FORMAT}
+        validate(email, VALIDATION_RULES["email"])
+    python:
+      vulnerable: |
+        if "@" in form["email"]:
+            save(form)
+      secure: |
+        class Signup(BaseModel):           # documented schema is the rule
+            email: EmailStr
+            phone: constr(pattern=E164)
+        Signup(**form)
+
+# ---------------------------------------------------------------------------
+
+- id: V2.1.2
+  facet: Validation and Business Logic
+  section: Validation and Business Logic Documentation
+  level: 2
+  security_rule: >-
+    The application's documentation must define how to validate the
+    logical and contextual consistency of combined data items, for
+    example confirming that a suburb matches its ZIP code.
+  vulnerability_pattern: >-
+    Each field is validated in isolation and no documented rule states
+    how related fields must agree, so contextually impossible
+    combinations are accepted.
+  secure_pattern: >-
+    Cross-field consistency rules are documented and enforced, checking
+    that combinations of related data items agree with one another and
+    with reference data before the record is accepted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        validate(zip); validate(city)      # never compared to each other
+      secure: |
+        # documented cross-field rule: zip must resolve to city
+        if lookup_city(zip) != city: reject("zip/city mismatch")
+    python:
+      vulnerable: |
+        Address(zip=zip, city=city)        # fields independent
+      secure: |
+        @model_validator(mode="after")
+        def zip_matches_city(self):
+            if zip_city(self.zip) != self.city: raise ValueError("mismatch")
+            return self
+
+# ---------------------------------------------------------------------------
+
+- id: V2.1.3
+  facet: Validation and Business Logic
+  section: Validation and Business Logic Documentation
+  level: 2
+  security_rule: >-
+    Expectations for business logic limits and validations must be
+    documented, covering both per-user limits and limits that apply
+    globally across the whole application.
+  vulnerability_pattern: >-
+    Business logic limits such as maximum order size or daily transfer
+    caps exist only as undocumented magic numbers, so they are
+    inconsistent, unreviewed, and easy to omit on new code paths.
+  secure_pattern: >-
+    Per-user and global business logic limits are documented in one
+    place and enforced from that shared definition, so every code path
+    applies the same reviewed thresholds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if amount > 5000: reject()         # magic number, undocumented
+      secure: |
+        # limits documented and centralized
+        LIMITS = {"transfer_per_txn": 5000, "transfer_per_day": 20000}
+        if amount > LIMITS["transfer_per_txn"]: reject()
+    python:
+      vulnerable: |
+        if order.qty > 100:
+            raise Error("too many")
+      secure: |
+        from app.policy import BUSINESS_LIMITS   # documented limit table
+        if order.qty > BUSINESS_LIMITS.max_order_qty:
+            raise BusinessLimitError("order quantity limit exceeded")
+
+# ---------------------------------------------------------------------------
+# V2.2 — Input Validation
+# ---------------------------------------------------------------------------
+
+- id: V2.2.1
+  facet: Validation and Business Logic
+  section: Input Validation
+  level: 1
+  security_rule: >-
+    Input must be validated to enforce business and functional
+    expectations, preferring positive allowlist validation of values,
+    patterns, and ranges over rejecting known-bad input.
+  vulnerability_pattern: >-
+    Input is accepted with no validation, or only a denylist of known
+    bad values is applied, so any value outside the expected set passes
+    and reaches business logic unchecked.
+  secure_pattern: >-
+    Input is validated against an allowlist of permitted values,
+    patterns, and numeric ranges, and anything that does not match the
+    expected structure is rejected before processing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        status = request.status            # any string accepted
+      secure: |
+        if request.status not in {"open", "closed", "pending"}: reject()
+    python:
+      vulnerable: |
+        priority = int(request.args["priority"])
+      secure: |
+        priority = int(request.args["priority"])
+        if priority not in range(1, 6): abort(400)
+    javascript:
+      vulnerable: |
+        const role = req.body.role;
+      secure: |
+        const ALLOWED = ["viewer", "editor"];
+        if (!ALLOWED.includes(req.body.role)) return res.sendStatus(400);
+    java:
+      vulnerable: |
+        String type = request.getParameter("type");
+      secure: |
+        if (!Set.of("A", "B", "C").contains(type)) throw new BadRequest();
+    csharp:
+      vulnerable: |
+        var mode = Request.Query["mode"];
+      secure: |
+        if (!new[]{"fast","safe"}.Contains(mode)) return BadRequest();
+
+# ---------------------------------------------------------------------------
+
+- id: V2.2.2
+  facet: Validation and Business Logic
+  section: Input Validation
+  level: 1
+  security_rule: >-
+    Input validation must be enforced at a trusted server-side service
+    layer; client-side validation aids usability but must never be
+    relied on as a security control.
+  vulnerability_pattern: >-
+    Validation is performed only in the browser, so a request crafted
+    outside the UI or with the client checks disabled reaches the server
+    with unvalidated data.
+  secure_pattern: >-
+    Every request is revalidated on the server at a trusted service
+    layer regardless of any client-side checks, so bypassing the UI
+    cannot bypass validation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # only the browser form checks the value
+        server.save(request.body)
+      secure: |
+        server.validate(request.body)      # server revalidates every request
+        server.save(request.body)
+    python:
+      vulnerable: |
+        @app.post("/order")
+        def order(data: dict): save(data)
+      secure: |
+        @app.post("/order")
+        def order(data: OrderModel):       # server-side schema validation
+            save(data)
+    javascript:
+      vulnerable: |
+        app.post("/order", (req, res) => save(req.body));
+      secure: |
+        app.post("/order", (req, res) => {
+          const { error, value } = orderSchema.validate(req.body);
+          if (error) return res.sendStatus(400);
+          save(value);
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/order")
+        void order(@RequestBody Order o) { save(o); }
+      secure: |
+        @PostMapping("/order")
+        void order(@Valid @RequestBody Order o) { save(o); }
+    csharp:
+      vulnerable: |
+        public IActionResult Order(Order o) => Save(o);
+      secure: |
+        public IActionResult Order(Order o) {
+          if (!ModelState.IsValid) return BadRequest(ModelState);
+          return Save(o);
+        }
+
+# ---------------------------------------------------------------------------
+
+- id: V2.2.3
+  facet: Validation and Business Logic
+  section: Input Validation
+  level: 2
+  security_rule: >-
+    The application must verify that combinations of related data items
+    are reasonable and consistent according to predefined rules, not
+    just that each field is individually well-formed.
+  vulnerability_pattern: >-
+    Related fields are validated independently, so a request with each
+    field well-formed but the combination logically impossible — such as
+    an end date before its start date — is accepted.
+  secure_pattern: >-
+    After per-field validation, predefined cross-field rules confirm
+    that related data items are mutually consistent before the request
+    is processed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        validate(start); validate(end)     # never compared
+      secure: |
+        if end <= start: reject("end must be after start")
+    python:
+      vulnerable: |
+        Booking(start=start, end=end)
+      secure: |
+        @model_validator(mode="after")
+        def range_ok(self):
+            if self.end <= self.start: raise ValueError("end before start")
+            return self
+    javascript:
+      vulnerable: |
+        const trip = { start, end };
+      secure: |
+        if (new Date(end) <= new Date(start))
+          throw new Error("end must be after start");
+    java:
+      vulnerable: |
+        Booking b = new Booking(start, end);
+      secure: |
+        if (!end.isAfter(start))
+            throw new ValidationException("end must be after start");
+    csharp:
+      vulnerable: |
+        var b = new Booking { Start = start, End = end };
+      secure: |
+        if (end <= start)
+            throw new ValidationException("end must be after start");
+
+# ---------------------------------------------------------------------------
+# V2.3 — Business Logic Security
+# ---------------------------------------------------------------------------
+
+- id: V2.3.1
+  facet: Validation and Business Logic
+  section: Business Logic Security
+  level: 1
+  security_rule: >-
+    A business logic flow must only be processed for a given user in the
+    expected sequential step order, with no steps skipped or repeated
+    out of sequence.
+  vulnerability_pattern: >-
+    Each step endpoint can be called directly without proof that earlier
+    steps completed, so an attacker jumps straight to a later step such
+    as checkout or confirmation and bypasses prior validation.
+  secure_pattern: >-
+    Server-side state records which step the user has reached, and each
+    step endpoint verifies the prerequisite steps are complete before
+    proceeding.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def confirm_order(): finalize()    # callable before payment step
+      secure: |
+        def confirm_order():
+            if session.step != "payment_done": reject("out of order")
+            finalize()
+    python:
+      vulnerable: |
+        @app.post("/checkout/confirm")
+        def confirm(): place_order()
+      secure: |
+        @app.post("/checkout/confirm")
+        def confirm():
+            if session.get("stage") != "payment": abort(409)
+            place_order()
+    javascript:
+      vulnerable: |
+        app.post("/wizard/finish", (req, res) => complete(req.user));
+      secure: |
+        app.post("/wizard/finish", (req, res) => {
+          if (req.session.stage !== "review") return res.sendStatus(409);
+          complete(req.user);
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/apply/submit")
+        void submit() { finalizeApplication(); }
+      secure: |
+        @PostMapping("/apply/submit")
+        void submit(HttpSession s) {
+          if (!"verified".equals(s.getAttribute("stage"))) throw new Conflict();
+          finalizeApplication();
+        }
+    csharp:
+      vulnerable: |
+        public IActionResult Confirm() => PlaceOrder();
+      secure: |
+        public IActionResult Confirm() {
+          if (HttpContext.Session.GetString("Stage") != "Payment")
+            return Conflict();
+          return PlaceOrder();
+        }
+
+# ---------------------------------------------------------------------------
+
+- id: V2.3.2
+  facet: Validation and Business Logic
+  section: Business Logic Security
+  level: 2
+  security_rule: >-
+    Business logic limits described in the application's documentation
+    must be implemented and enforced so documented limits cannot be
+    exceeded and business logic flaws cannot be exploited.
+  vulnerability_pattern: >-
+    Documented limits such as maximum redemptions per coupon or items
+    per order are not enforced at runtime, so a user can exceed them by
+    repeating or manipulating requests.
+  secure_pattern: >-
+    Each documented business logic limit is enforced server-side on
+    every relevant action, rejecting any request that would push the
+    user or the system past the defined threshold.
+  code_patterns:
+    generic:
+      vulnerable: |
+        apply_coupon(code)                 # no redemption-count check
+      secure: |
+        if redemptions(code, user) >= LIMIT: reject("coupon limit reached")
+        apply_coupon(code)
+    python:
+      vulnerable: |
+        cart.add(item, qty)
+      secure: |
+        if cart.total_qty() + qty > BUSINESS_LIMITS.max_items:
+            raise BusinessLimitError("item limit exceeded")
+        cart.add(item, qty)
+    javascript:
+      vulnerable: |
+        await transfers.create({ from, to, amount });
+      secure: |
+        const today = await transfers.sumToday(from);
+        if (today + amount > LIMITS.dailyTransfer) throw new Error("limit");
+        await transfers.create({ from, to, amount });
+    java:
+      vulnerable: |
+        accountService.withdraw(account, amount);
+      secure: |
+        if (dailyWithdrawn(account) + amount > LIMITS.DAILY_WITHDRAWAL)
+            throw new BusinessLimitException("daily limit exceeded");
+        accountService.withdraw(account, amount);
+    csharp:
+      vulnerable: |
+        _orders.Create(userId, items);
+      secure: |
+        if (_orders.CountToday(userId) >= Limits.MaxOrdersPerDay)
+            throw new BusinessLimitException("daily order limit reached");
+        _orders.Create(userId, items);
+
+# ---------------------------------------------------------------------------
+
+- id: V2.3.3
+  facet: Validation and Business Logic
+  section: Business Logic Security
+  level: 2
+  security_rule: >-
+    Business logic operations must be transactional so a multi-step
+    operation either succeeds in its entirety or is fully rolled back to
+    the previous correct state.
+  vulnerability_pattern: >-
+    A multi-step operation runs its steps without a transaction, so a
+    failure partway through leaves the system in an inconsistent state,
+    for example money debited but never credited.
+  secure_pattern: >-
+    All steps of a business logic operation execute inside a single
+    transaction that commits only on full success and rolls back
+    completely on any error.
+  code_patterns:
+    generic:
+      vulnerable: |
+        debit(from, amount); credit(to, amount)   # crash leaves debit only
+      secure: |
+        with transaction():
+            debit(from, amount); credit(to, amount)
+    python:
+      vulnerable: |
+        account_a.balance -= amt; db.commit()
+        account_b.balance += amt; db.commit()
+      secure: |
+        with db.begin():                   # single atomic transaction
+            account_a.balance -= amt
+            account_b.balance += amt
+    javascript:
+      vulnerable: |
+        await debit(from, amt); await credit(to, amt);
+      secure: |
+        await db.transaction(async (tx) => {
+          await debit(tx, from, amt);
+          await credit(tx, to, amt);
+        });
+    java:
+      vulnerable: |
+        repo.debit(from, amt); repo.credit(to, amt);
+      secure: |
+        @Transactional
+        public void transfer(Id from, Id to, Money amt) {
+          repo.debit(from, amt); repo.credit(to, amt);
+        }
+    csharp:
+      vulnerable: |
+        _repo.Debit(from, amt); _repo.Credit(to, amt);
+      secure: |
+        using var tx = _db.BeginTransaction();
+        _repo.Debit(from, amt); _repo.Credit(to, amt);
+        tx.Commit();
+
+# ---------------------------------------------------------------------------
+
+- id: V2.3.4
+  facet: Validation and Business Logic
+  section: Business Logic Security
+  level: 2
+  security_rule: >-
+    Business logic level locking must protect limited-quantity resources
+    such as seats or delivery slots so concurrent requests cannot
+    double-book the same resource.
+  vulnerability_pattern: >-
+    A resource is checked for availability and then claimed in separate
+    unsynchronized steps, so two concurrent requests both see it free
+    and both claim it, double-booking the resource.
+  secure_pattern: >-
+    The check and the claim happen atomically under a lock or a
+    conditional update, so only one of two concurrent requests can
+    successfully reserve the limited resource.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if seat.free: seat.free = false; book(seat)   # race window
+      secure: |
+        if not atomic_claim(seat): reject("already booked")
+    python:
+      vulnerable: |
+        seat = Seat.get(id)
+        if seat.available: seat.available = False; db.commit()
+      secure: |
+        updated = db.execute(
+            update(Seat).where(Seat.id == id, Seat.available == True)
+                        .values(available=False)).rowcount
+        if updated == 0: abort(409)
+    javascript:
+      vulnerable: |
+        if (slot.free) { slot.free = false; await slot.save(); }
+      secure: |
+        const r = await Slot.updateOne({ _id: id, free: true },
+                                       { $set: { free: false } });
+        if (r.modifiedCount === 0) throw new Error("slot taken");
+    java:
+      vulnerable: |
+        Seat s = repo.find(id);
+        if (s.isFree()) { s.setFree(false); repo.save(s); }
+      secure: |
+        int rows = repo.claimIfFree(id);   // UPDATE ... WHERE free = true
+        if (rows == 0) throw new ConflictException("seat already booked");
+    csharp:
+      vulnerable: |
+        var seat = _db.Seats.Find(id);
+        if (seat.Free) { seat.Free = false; _db.SaveChanges(); }
+      secure: |
+        int rows = _db.Database.ExecuteSqlInterpolated(
+          $"UPDATE Seats SET Free=0 WHERE Id={id} AND Free=1");
+        if (rows == 0) throw new ConflictException("seat already booked");
+
+# ---------------------------------------------------------------------------
+
+- id: V2.3.5
+  facet: Validation and Business Logic
+  section: Business Logic Security
+  level: 3
+  security_rule: >-
+    High-value business logic flows must require multi-user approval, so
+    actions such as large monetary transfers or safety overrides cannot
+    be completed by a single actor.
+  vulnerability_pattern: >-
+    A high-value action is executed immediately on a single user's
+    request, so one compromised or careless account can complete it with
+    no independent approval.
+  secure_pattern: >-
+    High-value actions are recorded as pending and require approval from
+    a separate, distinct user before they execute, enforcing separation
+    of duties.
+  code_patterns:
+    generic:
+      vulnerable: |
+        execute_large_transfer(amount)     # one actor, no approval
+      secure: |
+        req = create_pending(amount)
+        if approver != requester and req.approved: execute(req)
+    python:
+      vulnerable: |
+        if amount > 100000:
+            bank.transfer(src, dst, amount)
+      secure: |
+        if amount > 100000:
+            tr = PendingTransfer.create(src, dst, amount, requested_by=user)
+            # executes only after a different user calls tr.approve(approver)
+    javascript:
+      vulnerable: |
+        if (amount > 100000) await bank.transfer(src, dst, amount);
+      secure: |
+        const t = await PendingTransfer.create({ amount, requestedBy: user.id });
+        // bank.transfer runs only after approve() by a different userId
+    java:
+      vulnerable: |
+        if (amount.isHighValue()) bank.transfer(src, dst, amount);
+      secure: |
+        var req = approvals.createPending(src, dst, amount, requester);
+        // transfer executes only when approvals.approve(req, otherUser) runs
+    csharp:
+      vulnerable: |
+        if (amount > 100000m) _bank.Transfer(src, dst, amount);
+      secure: |
+        var req = _approvals.CreatePending(src, dst, amount, requester);
+        // Transfer runs only after Approve(req, approver) by a distinct user
+
+# ---------------------------------------------------------------------------
+# V2.4 — Anti-automation
+# ---------------------------------------------------------------------------
+
+- id: V2.4.1
+  facet: Validation and Business Logic
+  section: Anti-automation
+  level: 2
+  security_rule: >-
+    Anti-automation controls must protect application functions from
+    excessive calls that could cause data exfiltration, quota
+    exhaustion, denial-of-service, or overuse of costly resources.
+  vulnerability_pattern: >-
+    Sensitive or expensive functions accept unlimited requests per
+    client, so an automated script can scrape data, exhaust quotas, or
+    drive up cost without any throttle.
+  secure_pattern: >-
+    Costly or sensitive endpoints enforce per-client rate limits or
+    quotas, rejecting or delaying requests once a defined threshold over
+    a time window is exceeded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def export_all(): return dump_every_record()   # no throttle
+      secure: |
+        if rate_limiter.exceeded(client_id): reject(429)
+        return dump_every_record()
+    python:
+      vulnerable: |
+        @app.get("/export")
+        def export(): return all_rows()
+      secure: |
+        @app.get("/export")
+        @limiter.limit("5/minute")
+        def export(): return all_rows()
+    javascript:
+      vulnerable: |
+        app.get("/search", (req, res) => res.json(searchAll(req.query)));
+      secure: |
+        const limiter = rateLimit({ windowMs: 60000, max: 30 });
+        app.get("/search", limiter, (req, res) => res.json(searchAll(req.query)));
+    java:
+      vulnerable: |
+        @GetMapping("/report")
+        Report report() { return buildExpensiveReport(); }
+      secure: |
+        @GetMapping("/report")
+        @RateLimiter(name = "report")
+        Report report() { return buildExpensiveReport(); }
+    csharp:
+      vulnerable: |
+        public IActionResult Export() => Ok(DumpAll());
+      secure: |
+        [EnableRateLimiting("expensive")]
+        public IActionResult Export() => Ok(DumpAll());
+
+# ---------------------------------------------------------------------------
+
+- id: V2.4.2
+  facet: Validation and Business Logic
+  section: Anti-automation
+  level: 3
+  security_rule: >-
+    Business logic flows must require realistic human timing, rejecting
+    transaction submissions that arrive faster than a real person could
+    plausibly complete the flow.
+  vulnerability_pattern: >-
+    A flow accepts a submission with no minimum elapsed time since it
+    started, so an automated client can complete it in milliseconds and
+    submit far faster than any human.
+  secure_pattern: >-
+    The server records when a flow started and rejects a submission that
+    arrives sooner than a realistic minimum completion time for a human.
+  code_patterns:
+    generic:
+      vulnerable: |
+        submit(form)                       # accepted instantly
+      secure: |
+        if now() - form.started_at < MIN_HUMAN_TIME: reject("too fast")
+        submit(form)
+    python:
+      vulnerable: |
+        @app.post("/checkout")
+        def checkout(): place_order()
+      secure: |
+        @app.post("/checkout")
+        def checkout():
+            if time.time() - session["form_started"] < 2.0: abort(429)
+            place_order()
+    javascript:
+      vulnerable: |
+        app.post("/signup", (req, res) => createUser(req.body));
+      secure: |
+        app.post("/signup", (req, res) => {
+          if (Date.now() - req.session.formStart < 2000)
+            return res.sendStatus(429);
+          createUser(req.body);
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/apply")
+        void apply() { submitApplication(); }
+      secure: |
+        @PostMapping("/apply")
+        void apply(HttpSession s) {
+          long started = (long) s.getAttribute("formStart");
+          if (System.currentTimeMillis() - started < 2000) throw new TooFast();
+          submitApplication();
+        }
+    csharp:
+      vulnerable: |
+        public IActionResult Apply() => Submit();
+      secure: |
+        public IActionResult Apply() {
+          var started = HttpContext.Session.GetInt64("FormStart") ?? 0;
+          if (Now() - started < 2000) return StatusCode(429);
+          return Submit();
+        }

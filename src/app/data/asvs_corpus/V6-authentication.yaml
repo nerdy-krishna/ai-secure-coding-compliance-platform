@@ -1,0 +1,2098 @@
+# OWASP ASVS 5.0 — Chapter V6: Authentication
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V6.1 — Authentication Documentation
+# ---------------------------------------------------------------------------
+
+- id: V6.1.1
+  facet: Authentication
+  section: Authentication Documentation
+  level: 1
+  security_rule: >-
+    Application documentation must define how rate limiting, anti-automation,
+    and adaptive response defend against credential stuffing and brute force,
+    including how they are configured and how malicious account lockout is
+    prevented.
+  vulnerability_pattern: >-
+    Anti-automation behaviour is undocumented or ad hoc, so brute-force
+    defences are inconsistent and an attacker can lock out legitimate users by
+    deliberately failing logins against their accounts.
+  secure_pattern: >-
+    Documentation describes the rate-limiting and adaptive-response controls,
+    their thresholds, and how they throttle attackers without letting an
+    attacker weaponize lockout against a victim account.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # login throttling exists in code but is undocumented and unbounded
+        if failures(account) > 5: lock(account)   # attacker locks any victim
+      secure: |
+        # documented: throttle by IP+account, slow down rather than hard-lock
+        if failures(ip, account) > 5: delay(backoff(failures))
+
+- id: V6.1.2
+  facet: Authentication
+  section: Authentication Documentation
+  level: 2
+  security_rule: >-
+    A list of context-specific words — organization, product, and system
+    names, project codenames, department and role names, and their
+    permutations — must be documented so they can be blocked from passwords.
+  vulnerability_pattern: >-
+    No documented list of context-specific words exists, so users can pick
+    passwords trivially guessable for this organization, such as the company
+    or product name with a year appended.
+  secure_pattern: >-
+    A maintained denylist of context-specific words and their permutations is
+    documented and referenced by the password policy so these terms are
+    rejected at registration and password change.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no context word list; "AcmeCorp2026" passes the policy
+        accept_password(pw)
+      secure: |
+        CONTEXT_WORDS = load("context_words.txt")   # documented, maintained
+        if contains_context_word(pw, CONTEXT_WORDS): reject(pw)
+
+- id: V6.1.3
+  facet: Authentication
+  section: Authentication Documentation
+  level: 2
+  security_rule: >-
+    When an application offers multiple authentication pathways, all of them
+    must be documented along with the security controls and authentication
+    strength that must be enforced consistently across every pathway.
+  vulnerability_pattern: >-
+    Alternate login pathways such as legacy APIs, mobile endpoints, or SSO
+    fallbacks are undocumented, so each enforces different controls and an
+    attacker uses the weakest one to bypass MFA or rate limiting.
+  secure_pattern: >-
+    Every authentication pathway is enumerated in documentation with the
+    required strength and controls, so reviewers can confirm MFA, throttling,
+    and lockout are applied uniformly.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # web login enforces MFA; the documented-nowhere legacy API does not
+        legacy_api_login(user, password)   # skips MFA
+      secure: |
+        # all pathways documented and routed through one policy gate
+        authenticate(user, credentials, pathway)   # MFA enforced everywhere
+
+# ---------------------------------------------------------------------------
+# V6.2 — Password Security
+# ---------------------------------------------------------------------------
+
+- id: V6.2.1
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    User-chosen passwords must be at least 8 characters long, with a minimum
+    of 15 characters strongly recommended.
+  vulnerability_pattern: >-
+    The application accepts very short passwords, or enforces no minimum
+    length at all, leaving accounts vulnerable to brute force and guessing.
+  secure_pattern: >-
+    A minimum length of at least 8 characters, ideally 15 or more, is
+    enforced on registration and password change, measured in Unicode code
+    points.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if len(password) >= 4: accept(password)
+      secure: |
+        if len(password) >= 8: accept(password)   # 15+ recommended
+    python:
+      vulnerable: |
+        if len(password) < 4: raise ValueError("too short")
+      secure: |
+        if len(password) < 8: raise ValueError("minimum 8 characters")
+    javascript:
+      vulnerable: |
+        if (password.length < 4) throw new Error("too short");
+      secure: |
+        if ([...password].length < 8) throw new Error("minimum 8 characters");
+    java:
+      vulnerable: |
+        if (password.length() < 4) throw new IllegalArgumentException();
+      secure: |
+        if (password.codePointCount(0, password.length()) < 8)
+            throw new IllegalArgumentException("minimum 8 characters");
+    csharp:
+      vulnerable: |
+        if (password.Length < 4) throw new ArgumentException("too short");
+      secure: |
+        if (new StringInfo(password).LengthInTextElements < 8)
+            throw new ArgumentException("minimum 8 characters");
+
+- id: V6.2.2
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    Authenticated users must be able to change their own password through the
+    application.
+  vulnerability_pattern: >-
+    The application provides no self-service password change, so a user who
+    suspects their password is compromised cannot rotate it without help.
+  secure_pattern: >-
+    An authenticated password change endpoint is exposed so users can update
+    their own credentials at any time.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no change-password route exists; users must email support
+      secure: |
+        route("/account/password", method="POST", handler=change_password)
+    python:
+      vulnerable: |
+        # account settings expose email change only, never password
+        urlpatterns = [path("account/email", change_email)]
+      secure: |
+        urlpatterns = [path("account/password", change_password)]
+    javascript:
+      vulnerable: |
+        router.post("/account/email", changeEmail);
+      secure: |
+        router.post("/account/password", requireAuth, changePassword);
+    java:
+      vulnerable: |
+        @PostMapping("/account/email") void changeEmail() { }
+      secure: |
+        @PostMapping("/account/password") void changePassword() { }
+    csharp:
+      vulnerable: |
+        [HttpPost("account/email")] public IActionResult ChangeEmail() => Ok();
+      secure: |
+        [Authorize][HttpPost("account/password")]
+        public IActionResult ChangePassword() => Ok();
+
+- id: V6.2.3
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    The password change function must require both the user's current
+    password and the new password before the change is applied.
+  vulnerability_pattern: >-
+    Password change accepts only a new password, so anyone with a hijacked
+    session or an open unattended browser can silently take over the account.
+  secure_pattern: >-
+    The current password is re-verified against the stored hash before the
+    new password is accepted, proving the requester knows the existing
+    credential.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def change_password(user, new_pw): user.set_password(new_pw)
+      secure: |
+        def change_password(user, current_pw, new_pw):
+            if not verify(user.hash, current_pw): raise Unauthorized()
+            user.set_password(new_pw)
+    python:
+      vulnerable: |
+        def change_password(user, new_pw):
+            user.password_hash = hash_password(new_pw)
+      secure: |
+        def change_password(user, current_pw, new_pw):
+            if not verify_password(user.password_hash, current_pw):
+                raise PermissionError("current password incorrect")
+            user.password_hash = hash_password(new_pw)
+    javascript:
+      vulnerable: |
+        async function changePassword(user, newPw) {
+          user.hash = await hash(newPw);
+        }
+      secure: |
+        async function changePassword(user, currentPw, newPw) {
+          if (!(await verify(user.hash, currentPw))) throw new Error("denied");
+          user.hash = await hash(newPw);
+        }
+    java:
+      vulnerable: |
+        void changePassword(User u, String newPw) {
+            u.setHash(encoder.encode(newPw));
+        }
+      secure: |
+        void changePassword(User u, String currentPw, String newPw) {
+            if (!encoder.matches(currentPw, u.getHash()))
+                throw new AccessDeniedException("current password incorrect");
+            u.setHash(encoder.encode(newPw));
+        }
+    csharp:
+      vulnerable: |
+        void ChangePassword(User u, string newPw) =>
+            u.Hash = _hasher.Hash(newPw);
+      secure: |
+        void ChangePassword(User u, string currentPw, string newPw) {
+            if (!_hasher.Verify(u.Hash, currentPw))
+                throw new UnauthorizedAccessException();
+            u.Hash = _hasher.Hash(newPw);
+        }
+
+- id: V6.2.4
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    Passwords submitted at registration or password change must be checked
+    against at least the top 3000 most common passwords that satisfy the
+    application's own length policy.
+  vulnerability_pattern: >-
+    No common-password check is performed, so users register with widely
+    known passwords that appear at the top of every credential-stuffing list.
+  secure_pattern: >-
+    The proposed password is compared against a curated list of at least the
+    3000 most common policy-compliant passwords and rejected if it matches.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if len(pw) >= 8: accept(pw)   # "password1" passes
+      secure: |
+        if len(pw) >= 8 and pw.lower() not in TOP_COMMON_PASSWORDS: accept(pw)
+    python:
+      vulnerable: |
+        if len(pw) >= 8:
+            user.set_password(pw)
+      secure: |
+        COMMON = load_common_passwords()   # >= top 3000 policy-compliant
+        if pw.lower() in COMMON:
+            raise ValueError("password is too common")
+    javascript:
+      vulnerable: |
+        if (pw.length >= 8) user.setPassword(pw);
+      secure: |
+        if (commonPasswords.has(pw.toLowerCase()))
+          throw new Error("password is too common");
+    java:
+      vulnerable: |
+        if (pw.length() >= 8) user.setPassword(pw);
+      secure: |
+        if (commonPasswords.contains(pw.toLowerCase()))
+            throw new IllegalArgumentException("password is too common");
+    csharp:
+      vulnerable: |
+        if (pw.Length >= 8) user.SetPassword(pw);
+      secure: |
+        if (CommonPasswords.Contains(pw.ToLowerInvariant()))
+            throw new ArgumentException("password is too common");
+
+- id: V6.2.5
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    Passwords of any character composition must be accepted; no rule may
+    require a minimum count of uppercase, lowercase, digit, or special
+    characters.
+  vulnerability_pattern: >-
+    Composition rules force a mix of character classes, which pushes users
+    toward predictable patterns and rejects strong passphrases that lack a
+    digit or symbol.
+  secure_pattern: >-
+    Validation enforces length and denylist checks only, accepting any
+    combination of characters so users can choose long memorable passphrases.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if not (has_upper(pw) and has_digit(pw) and has_symbol(pw)): reject(pw)
+      secure: |
+        if len(pw) >= 8 and pw not in denylist: accept(pw)   # no class rules
+    python:
+      vulnerable: |
+        if not re.search(r"[A-Z]", pw) or not re.search(r"\d", pw):
+            raise ValueError("must contain uppercase and a digit")
+      secure: |
+        if len(pw) < 8:
+            raise ValueError("minimum 8 characters")   # composition unchecked
+    javascript:
+      vulnerable: |
+        if (!/[A-Z]/.test(pw) || !/\d/.test(pw)) throw new Error("need mix");
+      secure: |
+        if ([...pw].length < 8) throw new Error("minimum 8 characters");
+    java:
+      vulnerable: |
+        if (!pw.matches(".*[A-Z].*") || !pw.matches(".*\\d.*"))
+            throw new IllegalArgumentException("need uppercase and digit");
+      secure: |
+        if (pw.codePointCount(0, pw.length()) < 8)
+            throw new IllegalArgumentException("minimum 8 characters");
+    csharp:
+      vulnerable: |
+        if (!pw.Any(char.IsUpper) || !pw.Any(char.IsDigit))
+            throw new ArgumentException("need uppercase and digit");
+      secure: |
+        if (new StringInfo(pw).LengthInTextElements < 8)
+            throw new ArgumentException("minimum 8 characters");
+
+- id: V6.2.6
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    Password input fields must use type=password to mask entry, optionally
+    allowing the user to reveal the full value or the last typed character.
+  vulnerability_pattern: >-
+    The password field uses a plain text input, so the password is visible to
+    anyone able to see the screen and may be saved by autocomplete history.
+  secure_pattern: >-
+    The field is rendered as type=password so the browser masks the entry,
+    with an optional explicit show-password toggle controlled by the user.
+  code_patterns:
+    generic:
+      vulnerable: |
+        render_input(name="password", type="text")
+      secure: |
+        render_input(name="password", type="password")
+    javascript:
+      vulnerable: |
+        <input name="password" type="text" />
+      secure: |
+        <input name="password" type="password" autoComplete="current-password" />
+
+- id: V6.2.7
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    Paste functionality, browser password helpers, and external password
+    managers must be permitted on password fields.
+  vulnerability_pattern: >-
+    Paste is blocked or autocomplete is disabled on the password field, which
+    frustrates password-manager use and nudges users toward weaker, memorable
+    passwords.
+  secure_pattern: >-
+    Password fields leave paste enabled and expose standard autocomplete
+    tokens so browsers and password managers can fill and store credentials.
+  code_patterns:
+    generic:
+      vulnerable: |
+        passwordField.onPaste = event -> event.preventDefault()
+      secure: |
+        # paste left enabled; no handler suppresses it
+    javascript:
+      vulnerable: |
+        <input type="password" onPaste={e => e.preventDefault()}
+               autoComplete="off" />
+      secure: |
+        <input type="password" autoComplete="current-password" />
+
+- id: V6.2.8
+  facet: Authentication
+  section: Password Security
+  level: 1
+  security_rule: >-
+    The password must be verified exactly as received from the user, with no
+    truncation, case folding, or other modification.
+  vulnerability_pattern: >-
+    The password is trimmed, lowercased, or truncated before hashing or
+    verification, silently shrinking the keyspace and accepting variants the
+    user never chose.
+  secure_pattern: >-
+    The raw submitted password is passed unchanged to the hashing or
+    verification function, preserving every character and its case.
+  code_patterns:
+    generic:
+      vulnerable: |
+        verify(user.hash, password.lower().strip()[:20])
+      secure: |
+        verify(user.hash, password)   # exact value, untouched
+    python:
+      vulnerable: |
+        return verify_password(user.hash, password.strip().lower())
+      secure: |
+        return verify_password(user.hash, password)
+    javascript:
+      vulnerable: |
+        return verify(user.hash, password.trim().toLowerCase());
+      secure: |
+        return verify(user.hash, password);
+    java:
+      vulnerable: |
+        return encoder.matches(password.trim().toLowerCase(), user.getHash());
+      secure: |
+        return encoder.matches(password, user.getHash());
+    csharp:
+      vulnerable: |
+        return _hasher.Verify(user.Hash, password.Trim().ToLowerInvariant());
+      secure: |
+        return _hasher.Verify(user.Hash, password);
+
+- id: V6.2.9
+  facet: Authentication
+  section: Password Security
+  level: 2
+  security_rule: >-
+    The application must permit passwords of at least 64 characters in length.
+  vulnerability_pattern: >-
+    A low maximum length is enforced, so the application rejects long
+    passphrases that would otherwise provide strong entropy.
+  secure_pattern: >-
+    The maximum password length is set to at least 64 characters so long
+    passphrases are accepted, with a reasonable upper bound only to bound
+    hashing cost.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if len(pw) > 16: reject(pw)
+      secure: |
+        if len(pw) > 128: reject(pw)   # comfortably allows 64+
+    python:
+      vulnerable: |
+        if len(pw) > 20:
+            raise ValueError("password too long")
+      secure: |
+        if len(pw) > 128:
+            raise ValueError("password too long")   # 64+ accepted
+    javascript:
+      vulnerable: |
+        if (pw.length > 16) throw new Error("password too long");
+      secure: |
+        if ([...pw].length > 128) throw new Error("password too long");
+    java:
+      vulnerable: |
+        if (pw.length() > 20) throw new IllegalArgumentException();
+      secure: |
+        if (pw.codePointCount(0, pw.length()) > 128)
+            throw new IllegalArgumentException("password too long");
+    csharp:
+      vulnerable: |
+        if (pw.Length > 16) throw new ArgumentException("too long");
+      secure: |
+        if (new StringInfo(pw).LengthInTextElements > 128)
+            throw new ArgumentException("password too long");
+
+- id: V6.2.10
+  facet: Authentication
+  section: Password Security
+  level: 2
+  security_rule: >-
+    A password must remain valid until it is found to be compromised or the
+    user chooses to rotate it; routine periodic expiry must not be required.
+  vulnerability_pattern: >-
+    Passwords are force-expired on a fixed schedule, which trains users to
+    pick incremental variants and rotate to weaker, predictable passwords.
+  secure_pattern: >-
+    Passwords have no scheduled expiry; rotation is triggered only by a
+    detected compromise or an explicit user request.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if password_age(user) > days(90): force_password_change(user)
+      secure: |
+        if user.password_known_compromised: force_password_change(user)
+    python:
+      vulnerable: |
+        if (now - user.password_set_at).days > 90:
+            user.must_change_password = True
+      secure: |
+        if user.credential_breached:
+            user.must_change_password = True   # no time-based expiry
+    java:
+      vulnerable: |
+        if (DAYS.between(user.getPasswordSetAt(), now()) > 90)
+            user.setMustChangePassword(true);
+      secure: |
+        if (user.isCredentialBreached())
+            user.setMustChangePassword(true);
+    csharp:
+      vulnerable: |
+        if ((DateTime.UtcNow - user.PasswordSetAt).TotalDays > 90)
+            user.MustChangePassword = true;
+      secure: |
+        if (user.CredentialBreached)
+            user.MustChangePassword = true;
+
+- id: V6.2.11
+  facet: Authentication
+  section: Password Security
+  level: 2
+  security_rule: >-
+    The documented list of context-specific words must actually be enforced
+    during password creation to block easily guessed passwords.
+  vulnerability_pattern: >-
+    A context-word list is documented but never wired into the password
+    validator, so organization and product names still pass as passwords.
+  secure_pattern: >-
+    Password validation loads the documented context-word list and rejects
+    any password that contains one of those words or a simple permutation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # context_words.txt exists but validate_password never reads it
+        validate_password(pw)
+      secure: |
+        if matches_context_word(pw, CONTEXT_WORDS): reject(pw)
+    python:
+      vulnerable: |
+        def validate_password(pw):
+            if len(pw) < 8: raise ValueError("too short")
+      secure: |
+        def validate_password(pw):
+            if len(pw) < 8: raise ValueError("too short")
+            if contains_context_word(pw, CONTEXT_WORDS):
+                raise ValueError("password uses a banned context word")
+    java:
+      vulnerable: |
+        void validate(String pw) {
+            if (pw.length() < 8) throw new IllegalArgumentException();
+        }
+      secure: |
+        void validate(String pw) {
+            if (pw.length() < 8) throw new IllegalArgumentException();
+            if (contextWords.matches(pw))
+                throw new IllegalArgumentException("banned context word");
+        }
+    csharp:
+      vulnerable: |
+        void Validate(string pw) {
+            if (pw.Length < 8) throw new ArgumentException("too short");
+        }
+      secure: |
+        void Validate(string pw) {
+            if (pw.Length < 8) throw new ArgumentException("too short");
+            if (ContextWords.Matches(pw))
+                throw new ArgumentException("banned context word");
+        }
+
+- id: V6.2.12
+  facet: Authentication
+  section: Password Security
+  level: 2
+  security_rule: >-
+    Passwords submitted at registration or password change must be checked
+    against a set of known breached passwords.
+  vulnerability_pattern: >-
+    No breach check is run, so users adopt passwords already exposed in
+    public data breaches and immediately vulnerable to credential stuffing.
+  secure_pattern: >-
+    The proposed password is checked against a breached-password dataset, for
+    example via a k-anonymity range API or a local breach corpus, and
+    rejected on a match.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if len(pw) >= 8: accept(pw)
+      secure: |
+        if is_breached(pw): reject(pw)   # k-anonymity range lookup
+    python:
+      vulnerable: |
+        if len(pw) >= 8:
+            user.set_password(pw)
+      secure: |
+        prefix, suffix = sha1_prefix_suffix(pw)
+        if suffix in breach_api.range(prefix):
+            raise ValueError("password found in a known breach")
+    javascript:
+      vulnerable: |
+        if (pw.length >= 8) user.setPassword(pw);
+      secure: |
+        if (await pwnedPasswords.isBreached(pw))
+          throw new Error("password found in a known breach");
+    java:
+      vulnerable: |
+        if (pw.length() >= 8) user.setPassword(pw);
+      secure: |
+        if (breachedPasswordService.isBreached(pw))
+            throw new IllegalArgumentException("password found in a breach");
+    csharp:
+      vulnerable: |
+        if (pw.Length >= 8) user.SetPassword(pw);
+      secure: |
+        if (await _breachCheck.IsBreachedAsync(pw))
+            throw new ArgumentException("password found in a known breach");
+
+# ---------------------------------------------------------------------------
+# V6.3 — General Authentication Security
+# ---------------------------------------------------------------------------
+
+- id: V6.3.1
+  facet: Authentication
+  section: General Authentication Security
+  level: 1
+  security_rule: >-
+    Controls against credential stuffing and password brute force must be
+    implemented in line with what the application's security documentation
+    specifies.
+  vulnerability_pattern: >-
+    The login endpoint accepts unlimited attempts with no throttling, so an
+    attacker can guess passwords or replay stolen credential lists at speed.
+  secure_pattern: >-
+    Login is protected by rate limiting and adaptive response keyed on IP and
+    account, applying delays or challenges as configured in the security
+    documentation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def login(user, pw): return verify(user.hash, pw)   # unlimited tries
+      secure: |
+        def login(ip, user, pw):
+            if rate_limited(ip, user): raise TooManyRequests()
+            return verify(user.hash, pw)
+    python:
+      vulnerable: |
+        @app.post("/login")
+        def login(data):
+            return authenticate(data.user, data.password)
+      secure: |
+        @app.post("/login")
+        @limiter.limit("5/minute")
+        def login(data):
+            return authenticate(data.user, data.password)
+    javascript:
+      vulnerable: |
+        app.post("/login", (req, res) => authenticate(req.body));
+      secure: |
+        const limit = rateLimit({ windowMs: 60000, max: 5 });
+        app.post("/login", limit, (req, res) => authenticate(req.body));
+    java:
+      vulnerable: |
+        @PostMapping("/login") Token login(@RequestBody Creds c) {
+            return authenticate(c);
+        }
+      secure: |
+        @RateLimiter(name = "login")
+        @PostMapping("/login") Token login(@RequestBody Creds c) {
+            return authenticate(c);
+        }
+    csharp:
+      vulnerable: |
+        [HttpPost("login")]
+        public IActionResult Login(Creds c) => Ok(Authenticate(c));
+      secure: |
+        [EnableRateLimiting("login")]
+        [HttpPost("login")]
+        public IActionResult Login(Creds c) => Ok(Authenticate(c));
+
+- id: V6.3.2
+  facet: Authentication
+  section: General Authentication Security
+  level: 1
+  security_rule: >-
+    Default user accounts such as root, admin, or sa must not be present in
+    the deployed application, or must be disabled.
+  vulnerability_pattern: >-
+    The application ships with a built-in administrative account and a
+    well-known default password, giving an attacker an easy first foothold.
+  secure_pattern: >-
+    No default credentials exist in production; initial admin access is
+    created during setup with a unique, operator-supplied password, and any
+    seeded accounts are disabled.
+  code_patterns:
+    generic:
+      vulnerable: |
+        seed_user(name="admin", password="admin")
+      secure: |
+        # first admin created interactively during setup; no seeded password
+    python:
+      vulnerable: |
+        db.add(User(username="admin", password_hash=hash("admin")))
+      secure: |
+        if User.count() == 0:
+            create_admin(prompt_username(), prompt_unique_password())
+    java:
+      vulnerable: |
+        userRepo.save(new User("admin", encoder.encode("admin")));
+      secure: |
+        if (userRepo.count() == 0) bootstrapAdminFromSetupForm();
+    csharp:
+      vulnerable: |
+        db.Users.Add(new User("admin", _hasher.Hash("admin")));
+      secure: |
+        if (!db.Users.Any()) BootstrapAdminFromSetup();
+
+- id: V6.3.3
+  facet: Authentication
+  section: General Authentication Security
+  level: 2
+  security_rule: >-
+    Access to the application must require multi-factor authentication or a
+    combination of single-factor mechanisms; for L3 one factor must be a
+    phishing-resistant hardware authenticator that confirms user intent.
+  vulnerability_pattern: >-
+    Authentication relies on a single factor — a password alone — so a
+    phished or stuffed credential is enough to fully take over an account.
+  secure_pattern: >-
+    Login requires a second factor in addition to the password, such as a
+    TOTP or a FIDO hardware authenticator, before a session is issued.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if verify(user.hash, password): issue_session(user)
+      secure: |
+        if verify(user.hash, password) and verify_second_factor(user, otp):
+            issue_session(user)
+    python:
+      vulnerable: |
+        if verify_password(user.hash, password):
+            return create_session(user)
+      secure: |
+        if verify_password(user.hash, password) and \
+           verify_totp(user.totp_secret, otp_code):
+            return create_session(user)
+    javascript:
+      vulnerable: |
+        if (await verify(user.hash, password)) return issueSession(user);
+      secure: |
+        if (await verify(user.hash, password) &&
+            verifyTotp(user.totpSecret, otpCode))
+          return issueSession(user);
+    java:
+      vulnerable: |
+        if (encoder.matches(password, user.getHash()))
+            return sessionService.create(user);
+      secure: |
+        if (encoder.matches(password, user.getHash())
+            && totpVerifier.verify(user.getTotpSecret(), otpCode))
+            return sessionService.create(user);
+    csharp:
+      vulnerable: |
+        if (_hasher.Verify(user.Hash, password))
+            return _sessions.Create(user);
+      secure: |
+        if (_hasher.Verify(user.Hash, password)
+            && _totp.Verify(user.TotpSecret, otpCode))
+            return _sessions.Create(user);
+
+- id: V6.3.4
+  facet: Authentication
+  section: General Authentication Security
+  level: 2
+  security_rule: >-
+    When multiple authentication pathways exist there must be no undocumented
+    paths, and security controls and authentication strength must be enforced
+    consistently across all of them.
+  vulnerability_pattern: >-
+    A forgotten or undocumented pathway, such as a legacy mobile token
+    endpoint, skips MFA or rate limiting, giving an attacker a weaker route
+    in.
+  secure_pattern: >-
+    All authentication routes are inventoried and funnelled through a single
+    policy layer so MFA, throttling, and lockout apply identically everywhere.
+  code_patterns:
+    generic:
+      vulnerable: |
+        web_login(user, pw, otp)         # enforces MFA
+        mobile_v1_login(user, pw)        # undocumented, skips MFA
+      secure: |
+        for path in all_login_paths(): authenticate(path, creds)  # one policy
+    python:
+      vulnerable: |
+        @app.post("/api/v1/token")      # legacy, no MFA, undocumented
+        def legacy_token(data):
+            return issue(authenticate_password_only(data))
+      secure: |
+        @app.post("/api/v1/token")
+        def token(data):
+            return issue(authentication_policy.run(data))   # MFA enforced
+    java:
+      vulnerable: |
+        @PostMapping("/legacy/login")   // bypasses the MFA filter
+        Token legacy(@RequestBody Creds c) { return passwordOnly(c); }
+      secure: |
+        @PostMapping("/legacy/login")
+        Token legacy(@RequestBody Creds c) { return authPolicy.run(c); }
+    csharp:
+      vulnerable: |
+        [HttpPost("legacy/login")]      // not behind the MFA middleware
+        public IActionResult Legacy(Creds c) => Ok(PasswordOnly(c));
+      secure: |
+        [HttpPost("legacy/login")]
+        public IActionResult Legacy(Creds c) => Ok(_authPolicy.Run(c));
+
+- id: V6.3.5
+  facet: Authentication
+  section: General Authentication Security
+  level: 3
+  security_rule: >-
+    Users must be notified of suspicious authentication attempts, whether
+    successful or not, such as logins from an unusual location or client or a
+    success following several failures.
+  vulnerability_pattern: >-
+    The application never alerts users to anomalous logins, so an account
+    takeover from a new device or country goes completely unnoticed.
+  secure_pattern: >-
+    Authentication events are evaluated for risk signals, and the user is
+    sent an out-of-band notification when a login looks suspicious.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if verify(user.hash, pw): issue_session(user)   # silent
+      secure: |
+        if verify(user.hash, pw):
+            if is_suspicious(user, ip, device): notify_user(user, login_event)
+            issue_session(user)
+    python:
+      vulnerable: |
+        def on_login(user, request):
+            create_session(user)
+      secure: |
+        def on_login(user, request):
+            if anomalous(user, request.ip, request.user_agent):
+                send_security_alert(user, request)
+            create_session(user)
+    javascript:
+      vulnerable: |
+        function onLogin(user, req) { createSession(user); }
+      secure: |
+        function onLogin(user, req) {
+          if (isAnomalous(user, req.ip, req.headers["user-agent"]))
+            sendSecurityAlert(user, req);
+          createSession(user);
+        }
+    java:
+      vulnerable: |
+        void onLogin(User u, Request r) { sessions.create(u); }
+      secure: |
+        void onLogin(User u, Request r) {
+            if (riskEngine.isAnomalous(u, r)) alerts.sendLoginAlert(u, r);
+            sessions.create(u);
+        }
+    csharp:
+      vulnerable: |
+        void OnLogin(User u, HttpRequest r) => _sessions.Create(u);
+      secure: |
+        void OnLogin(User u, HttpRequest r) {
+            if (_risk.IsAnomalous(u, r)) _alerts.SendLoginAlert(u, r);
+            _sessions.Create(u);
+        }
+
+- id: V6.3.6
+  facet: Authentication
+  section: General Authentication Security
+  level: 3
+  security_rule: >-
+    Email must not be used as a single-factor or multi-factor authentication
+    mechanism.
+  vulnerability_pattern: >-
+    A login code is emailed and treated as an authentication factor, so
+    whoever controls the often weakly protected mailbox can authenticate.
+  secure_pattern: >-
+    Authentication factors are limited to passwords plus a real second factor
+    such as TOTP or a hardware authenticator; email is used only for
+    non-authentication notifications.
+  code_patterns:
+    generic:
+      vulnerable: |
+        code = random_code(); email(user, code)
+        if input_code == code: authenticate(user)   # email as a factor
+      secure: |
+        if verify_totp(user.totp_secret, otp): authenticate(user)
+    python:
+      vulnerable: |
+        send_email(user, f"Your login code is {code}")
+        if submitted == code:
+            authenticate(user)
+      secure: |
+        if verify_totp(user.totp_secret, submitted_otp):
+            authenticate(user)
+    java:
+      vulnerable: |
+        mailer.send(user, "Login code: " + code);
+        if (submitted.equals(code)) authenticate(user);
+      secure: |
+        if (totpVerifier.verify(user.getTotpSecret(), submittedOtp))
+            authenticate(user);
+    csharp:
+      vulnerable: |
+        _mail.Send(user, $"Login code: {code}");
+        if (submitted == code) Authenticate(user);
+      secure: |
+        if (_totp.Verify(user.TotpSecret, submittedOtp)) Authenticate(user);
+
+- id: V6.3.7
+  facet: Authentication
+  section: General Authentication Security
+  level: 3
+  security_rule: >-
+    Users must be notified after changes to their authentication details,
+    including credential resets and changes to the username or email address.
+  vulnerability_pattern: >-
+    A password reset or email change is applied silently, so a victim of
+    account takeover gets no warning that their credentials were altered.
+  secure_pattern: >-
+    Any change to a credential or to the username or email triggers an
+    out-of-band notification, sent to the previous contact address when an
+    email is being changed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def reset_password(user, new_pw): user.set_password(new_pw)
+      secure: |
+        def reset_password(user, new_pw):
+            user.set_password(new_pw)
+            notify_user(user, "your password was reset")
+    python:
+      vulnerable: |
+        def change_email(user, new_email):
+            user.email = new_email
+      secure: |
+        def change_email(user, new_email):
+            old = user.email
+            user.email = new_email
+            send_notice(old, "your account email was changed")
+    java:
+      vulnerable: |
+        void changeEmail(User u, String email) { u.setEmail(email); }
+      secure: |
+        void changeEmail(User u, String email) {
+            String old = u.getEmail();
+            u.setEmail(email);
+            mailer.send(old, "your account email was changed");
+        }
+    csharp:
+      vulnerable: |
+        void ChangeEmail(User u, string email) => u.Email = email;
+      secure: |
+        void ChangeEmail(User u, string email) {
+            var old = u.Email;
+            u.Email = email;
+            _mail.Send(old, "your account email was changed");
+        }
+
+- id: V6.3.8
+  facet: Authentication
+  section: General Authentication Security
+  level: 3
+  security_rule: >-
+    Valid usernames must not be inferable from failed authentication, and
+    registration and forgot-password flows must give identical responses,
+    status codes, and timing whether or not an account exists.
+  vulnerability_pattern: >-
+    Login, registration, or password reset reveals account existence through
+    a distinct error message, HTTP status, or noticeably different response
+    time, enabling username enumeration.
+  secure_pattern: >-
+    These flows return a single generic message and status regardless of
+    whether the account exists, and run the same work so response timing does
+    not leak existence.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if not user: return error("no such user")
+        if not verify(user.hash, pw): return error("wrong password")
+      secure: |
+        ok = user and verify(user.hash, pw)
+        return error("invalid username or password") if not ok else success()
+    python:
+      vulnerable: |
+        if user is None:
+            return Response("user not found", status=404)
+        if not verify(user.hash, pw):
+            return Response("incorrect password", status=401)
+      secure: |
+        hashed = user.hash if user else DUMMY_HASH   # constant-time path
+        if not (user and verify_password(hashed, pw)):
+            return Response("invalid username or password", status=401)
+    javascript:
+      vulnerable: |
+        if (!user) return res.status(404).send("user not found");
+        if (!verify(user.hash, pw)) return res.status(401).send("bad password");
+      secure: |
+        const hash = user ? user.hash : DUMMY_HASH;
+        if (!user || !(await verify(hash, pw)))
+          return res.status(401).send("invalid username or password");
+    java:
+      vulnerable: |
+        if (user == null) return notFound("user not found");
+        if (!encoder.matches(pw, user.getHash()))
+            return unauthorized("incorrect password");
+      secure: |
+        String hash = user != null ? user.getHash() : DUMMY_HASH;
+        if (user == null || !encoder.matches(pw, hash))
+            return unauthorized("invalid username or password");
+    csharp:
+      vulnerable: |
+        if (user == null) return NotFound("user not found");
+        if (!_hasher.Verify(user.Hash, pw))
+            return Unauthorized("incorrect password");
+      secure: |
+        var hash = user?.Hash ?? DummyHash;
+        if (user == null || !_hasher.Verify(hash, pw))
+            return Unauthorized("invalid username or password");
+
+# ---------------------------------------------------------------------------
+# V6.4 — Authentication Factor Lifecycle and Recovery
+# ---------------------------------------------------------------------------
+
+- id: V6.4.1
+  facet: Authentication
+  section: Authentication Factor Lifecycle and Recovery
+  level: 1
+  security_rule: >-
+    System-generated initial passwords and activation codes must be securely
+    randomly generated, comply with the password policy, expire after a short
+    period or on first use, and never become the long-term password.
+  vulnerability_pattern: >-
+    Initial passwords are predictable or never expire, so an unused or stale
+    activation secret can be guessed or reused to take over an account.
+  secure_pattern: >-
+    Initial secrets are generated with a CSPRNG, carry a short expiry, are
+    single-use, and force the user to set a new password before normal access.
+  code_patterns:
+    generic:
+      vulnerable: |
+        initial_pw = "Welcome123"          # static, never expires
+      secure: |
+        initial_pw = csprng_password(); set_expiry(minutes=30); mark_single_use()
+    python:
+      vulnerable: |
+        activation_code = str(user.id) + "2026"
+      secure: |
+        import secrets
+        activation_code = secrets.token_urlsafe(16)
+        store_code(activation_code, expires_at=now() + timedelta(minutes=30),
+                   single_use=True)
+    java:
+      vulnerable: |
+        String code = "ACT-" + user.getId();
+      secure: |
+        byte[] b = new byte[16];
+        SecureRandom.getInstanceStrong().nextBytes(b);
+        String code = Base64.getUrlEncoder().withoutPadding().encodeToString(b);
+        store(code, Instant.now().plus(30, MINUTES), true);
+    csharp:
+      vulnerable: |
+        var code = "ACT-" + user.Id;
+      secure: |
+        var code = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(16));
+        Store(code, DateTime.UtcNow.AddMinutes(30), singleUse: true);
+
+- id: V6.4.2
+  facet: Authentication
+  section: Authentication Factor Lifecycle and Recovery
+  level: 1
+  security_rule: >-
+    Password hints and knowledge-based authentication, such as so-called
+    secret questions, must not be present in the application.
+  vulnerability_pattern: >-
+    Account recovery relies on secret questions or password hints, whose
+    answers are often public knowledge or guessable and effectively weaken
+    the credential.
+  secure_pattern: >-
+    There are no secret questions or password hints; recovery uses a secure
+    token-based reset flow that does not depend on guessable personal facts.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if answer == user.security_answer: allow_reset(user)
+      secure: |
+        # no security questions; reset uses a one-time emailed token
+        if valid_reset_token(token): allow_reset(user)
+    python:
+      vulnerable: |
+        if request.form["mothers_maiden_name"] == user.secret_answer:
+            reset_password(user)
+      secure: |
+        if verify_reset_token(token):
+            reset_password(user)
+    java:
+      vulnerable: |
+        if (answer.equals(user.getSecretAnswer())) resetPassword(user);
+      secure: |
+        if (resetTokens.verify(token)) resetPassword(user);
+    csharp:
+      vulnerable: |
+        if (answer == user.SecretAnswer) ResetPassword(user);
+      secure: |
+        if (_resetTokens.Verify(token)) ResetPassword(user);
+
+- id: V6.4.3
+  facet: Authentication
+  section: Authentication Factor Lifecycle and Recovery
+  level: 2
+  security_rule: >-
+    A secure forgotten-password reset process must be implemented that does
+    not bypass any multi-factor authentication the user has enabled.
+  vulnerability_pattern: >-
+    The password reset flow lets a user regain access with only an emailed
+    link, skipping their configured second factor and reducing account
+    security to a single channel.
+  secure_pattern: >-
+    The reset flow uses a short-lived single-use token and still requires the
+    user's enabled second factor before a new password takes effect.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if valid_reset_token(token): set_password(user, new_pw)  # MFA skipped
+      secure: |
+        if valid_reset_token(token) and verify_second_factor(user, otp):
+            set_password(user, new_pw)
+    python:
+      vulnerable: |
+        if verify_reset_token(token):
+            user.set_password(new_pw)
+      secure: |
+        if verify_reset_token(token) and verify_totp(user.totp_secret, otp):
+            user.set_password(new_pw)
+    java:
+      vulnerable: |
+        if (resetTokens.verify(token)) user.setPassword(newPw);
+      secure: |
+        if (resetTokens.verify(token)
+            && totpVerifier.verify(user.getTotpSecret(), otp))
+            user.setPassword(newPw);
+    csharp:
+      vulnerable: |
+        if (_resetTokens.Verify(token)) user.SetPassword(newPw);
+      secure: |
+        if (_resetTokens.Verify(token) && _totp.Verify(user.TotpSecret, otp))
+            user.SetPassword(newPw);
+
+- id: V6.4.4
+  facet: Authentication
+  section: Authentication Factor Lifecycle and Recovery
+  level: 2
+  security_rule: >-
+    When a multi-factor authentication factor is lost, identity proofing must
+    be repeated at the same assurance level used during the original
+    enrollment.
+  vulnerability_pattern: >-
+    A lost second factor can be replaced with only a weak self-service check,
+    so an attacker who controls the recovery channel re-enrolls their own
+    device.
+  secure_pattern: >-
+    Re-enrolling a replacement factor requires identity proofing equivalent
+    to the original enrollment, rather than a lower-assurance shortcut.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if email_link_clicked(user): enroll_new_factor(user)
+      secure: |
+        if proofing_level(recovery) >= proofing_level(enrollment):
+            enroll_new_factor(user)
+    python:
+      vulnerable: |
+        def replace_mfa(user):
+            enroll_totp(user)   # no identity proofing at all
+      secure: |
+        def replace_mfa(user, proofing_result):
+            if proofing_result.level < user.enrollment_proofing_level:
+                raise PermissionError("re-proofing required")
+            enroll_totp(user)
+    java:
+      vulnerable: |
+        void replaceMfa(User u) { enrollTotp(u); }
+      secure: |
+        void replaceMfa(User u, Proofing p) {
+            if (p.level() < u.getEnrollmentProofingLevel())
+                throw new AccessDeniedException("re-proofing required");
+            enrollTotp(u);
+        }
+    csharp:
+      vulnerable: |
+        void ReplaceMfa(User u) => EnrollTotp(u);
+      secure: |
+        void ReplaceMfa(User u, Proofing p) {
+            if (p.Level < u.EnrollmentProofingLevel)
+                throw new UnauthorizedAccessException("re-proofing required");
+            EnrollTotp(u);
+        }
+
+- id: V6.4.5
+  facet: Authentication
+  section: Authentication Factor Lifecycle and Recovery
+  level: 3
+  security_rule: >-
+    Renewal instructions for authentication mechanisms that expire must be
+    sent with enough lead time to complete renewal before expiry, using
+    automated reminders where needed.
+  vulnerability_pattern: >-
+    Notice of an expiring authentication mechanism arrives only after it has
+    lapsed, locking users out and pushing them toward risky recovery paths.
+  secure_pattern: >-
+    Automated reminders are scheduled well before an authentication mechanism
+    expires, giving users time to renew it through the normal process.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if expired(credential): notify(user, "your credential has expired")
+      secure: |
+        if expires_within(credential, days(14)):
+            notify(user, "renew your credential before it expires")
+    python:
+      vulnerable: |
+        if cert.expires_at < now():
+            email(user, "your certificate expired")
+      secure: |
+        if cert.expires_at - now() <= timedelta(days=14):
+            email(user, "renew your certificate now to avoid lockout")
+    java:
+      vulnerable: |
+        if (cert.expiresAt().isBefore(now()))
+            mailer.send(user, "certificate expired");
+      secure: |
+        if (cert.expiresAt().isBefore(now().plus(14, DAYS)))
+            mailer.send(user, "renew your certificate now");
+    csharp:
+      vulnerable: |
+        if (cert.ExpiresAt < DateTime.UtcNow)
+            _mail.Send(user, "certificate expired");
+      secure: |
+        if (cert.ExpiresAt <= DateTime.UtcNow.AddDays(14))
+            _mail.Send(user, "renew your certificate now");
+
+- id: V6.4.6
+  facet: Authentication
+  section: Authentication Factor Lifecycle and Recovery
+  level: 3
+  security_rule: >-
+    Administrators may start a password reset for a user, but must not be
+    able to set or choose that user's password, so an administrator never
+    knows a user's credential.
+  vulnerability_pattern: >-
+    An admin function sets a user's password directly to a value the admin
+    picks, meaning the administrator knows the user's password and can
+    impersonate them.
+  secure_pattern: >-
+    Admin recovery only triggers a self-service reset flow, sending the user
+    a one-time link so the user alone chooses the new password.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def admin_reset(admin, user, new_pw): user.set_password(new_pw)
+      secure: |
+        def admin_reset(admin, user): send_reset_link(user)  # user picks it
+    python:
+      vulnerable: |
+        @admin_required
+        def reset(user, new_password):
+            user.set_password(new_password)
+      secure: |
+        @admin_required
+        def reset(user):
+            token = issue_reset_token(user)
+            email(user, reset_url(token))   # user sets their own password
+    java:
+      vulnerable: |
+        void adminReset(User u, String newPw) { u.setPassword(newPw); }
+      secure: |
+        void adminReset(User u) {
+            String token = resetTokens.issue(u);
+            mailer.send(u, resetUrl(token));
+        }
+    csharp:
+      vulnerable: |
+        void AdminReset(User u, string newPw) => u.SetPassword(newPw);
+      secure: |
+        void AdminReset(User u) {
+            var token = _resetTokens.Issue(u);
+            _mail.Send(u, ResetUrl(token));
+        }
+
+# ---------------------------------------------------------------------------
+# V6.5 — General Multi-factor authentication requirements
+# ---------------------------------------------------------------------------
+
+- id: V6.5.1
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 2
+  security_rule: >-
+    Lookup secrets, out-of-band codes, and time-based one-time passwords must
+    be usable only once, so a captured or observed code cannot be replayed.
+  vulnerability_pattern: >-
+    An OTP or recovery code remains valid after a successful use within its
+    time window, letting an attacker who intercepts it replay it.
+  secure_pattern: >-
+    Each code is marked consumed atomically on first successful verification
+    and rejected on every subsequent attempt within its lifetime.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if code == expected: authenticate(user)   # code stays usable
+      secure: |
+        if code == expected and not consumed(code):
+            mark_consumed(code); authenticate(user)
+    python:
+      vulnerable: |
+        if verify_totp(user.totp_secret, code):
+            authenticate(user)
+      secure: |
+        if verify_totp(user.totp_secret, code) and \
+           redis.set(f"otp:{user.id}:{code}", 1, nx=True, ex=90):
+            authenticate(user)
+    java:
+      vulnerable: |
+        if (totp.verify(user.getSecret(), code)) authenticate(user);
+      secure: |
+        if (totp.verify(user.getSecret(), code)
+            && usedCodes.markUsedIfNew(user.getId(), code))
+            authenticate(user);
+    csharp:
+      vulnerable: |
+        if (_totp.Verify(user.Secret, code)) Authenticate(user);
+      secure: |
+        if (_totp.Verify(user.Secret, code)
+            && _usedCodes.TryMarkUsed(user.Id, code))
+            Authenticate(user);
+
+- id: V6.5.2
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 2
+  security_rule: >-
+    Lookup secrets stored in the backend with less than 112 bits of entropy
+    must be hashed with an approved password-hashing algorithm using a 32-bit
+    random salt; a standard hash is acceptable only at 112 bits or more.
+  vulnerability_pattern: >-
+    Low-entropy lookup or recovery secrets are stored in plaintext or with a
+    fast unsalted hash, so a database leak exposes them to immediate offline
+    cracking.
+  secure_pattern: >-
+    Low-entropy secrets are stored using an approved slow password-hashing
+    algorithm with a per-secret random salt; only high-entropy secrets may
+    use a plain cryptographic hash.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(recovery_code)                       # plaintext
+      secure: |
+        store(argon2(recovery_code, salt=random_bytes(4)))
+    python:
+      vulnerable: |
+        db.save(recovery_code)
+      secure: |
+        from argon2 import PasswordHasher
+        db.save(PasswordHasher().hash(recovery_code))   # salted slow hash
+    java:
+      vulnerable: |
+        repo.save(recoveryCode);
+      secure: |
+        repo.save(argon2Encoder.encode(recoveryCode));
+    csharp:
+      vulnerable: |
+        db.Save(recoveryCode);
+      secure: |
+        db.Save(_argon2.Hash(recoveryCode));   // salted slow hash
+
+- id: V6.5.3
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 2
+  security_rule: >-
+    Lookup secrets, out-of-band codes, and TOTP seeds must be generated with
+    a cryptographically secure pseudorandom number generator so values are
+    not predictable.
+  vulnerability_pattern: >-
+    Codes or seeds are produced by a non-cryptographic PRNG or seeded by
+    time, letting an attacker predict or reproduce them.
+  secure_pattern: >-
+    All authentication secrets are drawn from a CSPRNG so every value is
+    unpredictable and independent of any observable state.
+  code_patterns:
+    generic:
+      vulnerable: |
+        code = random(100000, 999999)        # non-crypto PRNG
+      secure: |
+        code = csprng_int(100000, 999999)
+    python:
+      vulnerable: |
+        import random
+        code = random.randint(100000, 999999)
+      secure: |
+        import secrets
+        code = secrets.randbelow(900000) + 100000
+    javascript:
+      vulnerable: |
+        const code = Math.floor(Math.random() * 1000000);
+      secure: |
+        const code = crypto.randomInt(0, 1000000);
+    java:
+      vulnerable: |
+        int code = new Random().nextInt(1000000);
+      secure: |
+        int code = SecureRandom.getInstanceStrong().nextInt(1000000);
+    csharp:
+      vulnerable: |
+        var code = new Random().Next(0, 1000000);
+      secure: |
+        var code = RandomNumberGenerator.GetInt32(0, 1000000);
+
+- id: V6.5.4
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 2
+  security_rule: >-
+    Lookup secrets and out-of-band authentication codes must carry at least
+    20 bits of entropy, typically 4 random alphanumeric characters or 6
+    random digits.
+  vulnerability_pattern: >-
+    Out-of-band codes are too short, for example a 3-digit code, leaving so
+    few possibilities that brute force succeeds quickly.
+  secure_pattern: >-
+    Codes are generated with at least 20 bits of entropy, such as 6 random
+    digits, so the search space is large enough to resist guessing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        code = csprng_digits(3)            # ~10 bits of entropy
+      secure: |
+        code = csprng_digits(6)            # ~20 bits of entropy
+    python:
+      vulnerable: |
+        code = f"{secrets.randbelow(1000):03d}"
+      secure: |
+        code = f"{secrets.randbelow(1000000):06d}"
+    java:
+      vulnerable: |
+        String code = String.format("%03d", rnd.nextInt(1000));
+      secure: |
+        String code = String.format("%06d", rnd.nextInt(1000000));
+    csharp:
+      vulnerable: |
+        var code = RandomNumberGenerator.GetInt32(1000).ToString("D3");
+      secure: |
+        var code = RandomNumberGenerator.GetInt32(1000000).ToString("D6");
+
+- id: V6.5.5
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 2
+  security_rule: >-
+    Out-of-band requests, codes, and tokens must have a defined lifetime —
+    at most 10 minutes for out-of-band requests and at most 30 seconds for
+    TOTP codes.
+  vulnerability_pattern: >-
+    An out-of-band code or token has no expiry, so an attacker can use a code
+    captured hours or days earlier.
+  secure_pattern: >-
+    Each code is stamped with a short expiry — 10 minutes or less for
+    out-of-band, 30 seconds for TOTP — and rejected once that window passes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(code)                                # no expiry
+      secure: |
+        store(code, expires_at=now() + minutes(10))
+    python:
+      vulnerable: |
+        otp_store[user.id] = code
+      secure: |
+        otp_store[user.id] = (code, now() + timedelta(minutes=10))
+        # verification rejects when now() > expiry
+    java:
+      vulnerable: |
+        otpRepo.save(new Otp(user.getId(), code));
+      secure: |
+        otpRepo.save(new Otp(user.getId(), code,
+                             Instant.now().plus(10, MINUTES)));
+    csharp:
+      vulnerable: |
+        _otp.Save(new Otp(user.Id, code));
+      secure: |
+        _otp.Save(new Otp(user.Id, code, DateTime.UtcNow.AddMinutes(10)));
+
+- id: V6.5.6
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 3
+  security_rule: >-
+    Any authentication factor, including physical devices, must be revocable
+    in the event of theft or other loss.
+  vulnerability_pattern: >-
+    There is no way to revoke a registered authenticator, so a stolen
+    hardware key or compromised device keeps working indefinitely.
+  secure_pattern: >-
+    Each registered factor can be individually revoked, immediately
+    invalidating it for future authentication.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # authenticators table has no revoked flag and no revoke path
+      secure: |
+        def revoke_factor(user, factor_id): mark_revoked(user, factor_id)
+    python:
+      vulnerable: |
+        # no endpoint or column to disable a registered authenticator
+      secure: |
+        def revoke_factor(user, factor_id):
+            f = AuthFactor.get(user.id, factor_id)
+            f.revoked_at = now()
+    java:
+      vulnerable: |
+        // AuthFactor entity has no revoked field
+      secure: |
+        void revokeFactor(User u, String factorId) {
+            authFactorRepo.findById(factorId)
+                .ifPresent(f -> f.setRevokedAt(Instant.now()));
+        }
+    csharp:
+      vulnerable: |
+        // no RevokeFactor action exists
+      secure: |
+        void RevokeFactor(User u, Guid factorId) {
+            var f = _factors.Find(factorId);
+            f.RevokedAt = DateTime.UtcNow;
+        }
+
+- id: V6.5.7
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 3
+  security_rule: >-
+    Biometric authentication may be used only as a secondary factor,
+    combined with either something you have or something you know.
+  vulnerability_pattern: >-
+    A biometric such as a fingerprint or face scan is accepted as the sole
+    factor, even though biometrics cannot be revoked and can be spoofed or
+    compromised.
+  secure_pattern: >-
+    Biometric verification is paired with another factor, such as a password
+    or a possession factor, so it never stands alone.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if biometric_ok(scan): authenticate(user)
+      secure: |
+        if biometric_ok(scan) and verify(user.hash, password):
+            authenticate(user)
+    python:
+      vulnerable: |
+        if match_fingerprint(scan, user.template):
+            authenticate(user)
+      secure: |
+        if match_fingerprint(scan, user.template) and \
+           verify_password(user.hash, password):
+            authenticate(user)
+    java:
+      vulnerable: |
+        if (biometrics.matches(scan, user.getTemplate()))
+            authenticate(user);
+      secure: |
+        if (biometrics.matches(scan, user.getTemplate())
+            && encoder.matches(password, user.getHash()))
+            authenticate(user);
+    csharp:
+      vulnerable: |
+        if (_biometrics.Matches(scan, user.Template)) Authenticate(user);
+      secure: |
+        if (_biometrics.Matches(scan, user.Template)
+            && _hasher.Verify(user.Hash, password))
+            Authenticate(user);
+
+- id: V6.5.8
+  facet: Authentication
+  section: General Multi-factor authentication requirements
+  level: 3
+  security_rule: >-
+    TOTP codes must be validated against a time source from a trusted
+    service, never against time supplied by an untrusted or client-provided
+    source.
+  vulnerability_pattern: >-
+    The server validates a TOTP using a timestamp sent by the client, so an
+    attacker can pick a time window and replay a known code.
+  secure_pattern: >-
+    TOTP verification uses the server's own trusted, synchronized clock and
+    ignores any client-supplied time value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        verify_totp(secret, code, at=request.client_time)
+      secure: |
+        verify_totp(secret, code, at=trusted_server_time())
+    python:
+      vulnerable: |
+        totp.verify(code, for_time=int(request.args["ts"]))
+      secure: |
+        totp.verify(code, for_time=time.time())   # server clock only
+    java:
+      vulnerable: |
+        totp.verify(secret, code, Long.parseLong(request.getParameter("ts")));
+      secure: |
+        totp.verify(secret, code, Instant.now().getEpochSecond());
+    csharp:
+      vulnerable: |
+        _totp.Verify(secret, code, long.Parse(Request.Query["ts"]));
+      secure: |
+        _totp.Verify(secret, code, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+# ---------------------------------------------------------------------------
+# V6.6 — Out-of-Band authentication mechanisms
+# ---------------------------------------------------------------------------
+
+- id: V6.6.1
+  facet: Authentication
+  section: Out-of-Band authentication mechanisms
+  level: 2
+  security_rule: >-
+    PSTN-delivered OTPs via phone or SMS may be offered only when the phone
+    number was previously validated, stronger alternatives such as TOTP are
+    also offered, and users are informed of the risks; for L3 phone and SMS
+    must not be available.
+  vulnerability_pattern: >-
+    SMS is the only or default second factor, and is offered to unverified
+    numbers, exposing users to SIM-swap and SS7 interception attacks.
+  secure_pattern: >-
+    SMS OTP is offered only to validated numbers, alongside a stronger TOTP
+    or hardware option, with a clear risk notice, and is disabled entirely
+    for L3.
+  code_patterns:
+    generic:
+      vulnerable: |
+        offer_mfa_options(["sms"])              # SMS only, number unverified
+      secure: |
+        opts = ["totp", "hardware_key"]
+        if phone_verified(user): opts.append("sms")   # with risk notice
+        offer_mfa_options(opts)
+    python:
+      vulnerable: |
+        def mfa_options(user):
+            return ["sms"]
+      secure: |
+        def mfa_options(user):
+            opts = ["totp", "webauthn"]
+            if user.phone_verified:
+                opts.append("sms")   # shown with a SIM-swap risk warning
+            return opts
+    java:
+      vulnerable: |
+        List<String> mfaOptions(User u) { return List.of("sms"); }
+      secure: |
+        List<String> mfaOptions(User u) {
+            var opts = new ArrayList<>(List.of("totp", "webauthn"));
+            if (u.isPhoneVerified()) opts.add("sms");
+            return opts;
+        }
+    csharp:
+      vulnerable: |
+        IEnumerable<string> MfaOptions(User u) => new[] { "sms" };
+      secure: |
+        IEnumerable<string> MfaOptions(User u) {
+            var opts = new List<string> { "totp", "webauthn" };
+            if (u.PhoneVerified) opts.Add("sms");
+            return opts;
+        }
+
+- id: V6.6.2
+  facet: Authentication
+  section: Out-of-Band authentication mechanisms
+  level: 2
+  security_rule: >-
+    Out-of-band requests, codes, and tokens must be bound to the specific
+    authentication request that generated them and must not be valid for any
+    earlier or later request.
+  vulnerability_pattern: >-
+    An out-of-band code is stored only against the user, so a code from one
+    login attempt can be replayed to complete a different session.
+  secure_pattern: >-
+    Each code is tied to a unique authentication request identifier and
+    verified only against the session that created it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        otp_store[user.id] = code
+        if submitted == otp_store[user.id]: authenticate(user)
+      secure: |
+        otp_store[request_id] = code
+        if request_id == session.request_id and submitted == otp_store[request_id]:
+            authenticate(user)
+    python:
+      vulnerable: |
+        cache.set(f"otp:{user.id}", code)
+      secure: |
+        cache.set(f"otp:{auth_request_id}", code)
+        # verify only when auth_request_id matches the current session
+    java:
+      vulnerable: |
+        cache.put("otp:" + user.getId(), code);
+      secure: |
+        cache.put("otp:" + authRequestId, code);
+        // verified against the session's own authRequestId
+    csharp:
+      vulnerable: |
+        _cache.Set($"otp:{user.Id}", code);
+      secure: |
+        _cache.Set($"otp:{authRequestId}", code);
+        // bound to this authentication request only
+
+- id: V6.6.3
+  facet: Authentication
+  section: Out-of-Band authentication mechanisms
+  level: 2
+  security_rule: >-
+    A code-based out-of-band authentication mechanism must be protected
+    against brute force with rate limiting, and ideally use a code with at
+    least 64 bits of entropy.
+  vulnerability_pattern: >-
+    Unlimited verification attempts are allowed against a short numeric code,
+    so an attacker can iterate the entire code space in seconds.
+  secure_pattern: >-
+    Verification attempts are rate limited per code and per account, and the
+    code is invalidated after a small number of failures.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if submitted == code: authenticate(user)   # unlimited attempts
+      secure: |
+        if attempts(request_id) >= 5: invalidate(code); raise TooManyRequests()
+        if submitted == code: authenticate(user)
+    python:
+      vulnerable: |
+        def verify_otp(user, submitted):
+            return submitted == otp_store[user.id]
+      secure: |
+        def verify_otp(request_id, submitted):
+            if incr(f"otp_tries:{request_id}") > 5:
+                invalidate(request_id)
+                raise TooManyRequests()
+            return submitted == otp_store[request_id]
+    java:
+      vulnerable: |
+        boolean verify(User u, String submitted) {
+            return submitted.equals(otpStore.get(u.getId()));
+        }
+      secure: |
+        boolean verify(String requestId, String submitted) {
+            if (tries.incrementAndGet(requestId) > 5) {
+                otpStore.invalidate(requestId);
+                throw new TooManyRequestsException();
+            }
+            return submitted.equals(otpStore.get(requestId));
+        }
+    csharp:
+      vulnerable: |
+        bool Verify(User u, string submitted) =>
+            submitted == _otpStore[u.Id];
+      secure: |
+        bool Verify(string requestId, string submitted) {
+            if (_tries.Increment(requestId) > 5) {
+                _otpStore.Invalidate(requestId);
+                throw new TooManyRequestsException();
+            }
+            return submitted == _otpStore[requestId];
+        }
+
+- id: V6.6.4
+  facet: Authentication
+  section: Out-of-Band authentication mechanisms
+  level: 3
+  security_rule: >-
+    Where push notifications are used for multi-factor authentication, rate
+    limiting must prevent push-bombing attacks, and number matching may also
+    be used to mitigate the risk.
+  vulnerability_pattern: >-
+    Each login attempt fires an approval push with no limit, so an attacker
+    floods the victim with prompts until one is approved out of fatigue.
+  secure_pattern: >-
+    Approval pushes are rate limited per account, and number matching
+    requires the user to enter a code shown on the login screen, defeating
+    blind approvals.
+  code_patterns:
+    generic:
+      vulnerable: |
+        on_login_attempt(user): send_push(user)         # one per attempt
+      secure: |
+        if pushes_sent(user, last_minutes(10)) < 3:
+            send_push_with_number_match(user, challenge)
+    python:
+      vulnerable: |
+        def on_login(user):
+            push_service.send(user, "Approve login?")
+      secure: |
+        def on_login(user):
+            if recent_pushes(user) >= 3:
+                raise TooManyRequests()
+            push_service.send(user, f"Enter {challenge} to approve")
+    java:
+      vulnerable: |
+        void onLogin(User u) { pushService.send(u, "Approve login?"); }
+      secure: |
+        void onLogin(User u) {
+            if (recentPushes(u) >= 3) throw new TooManyRequestsException();
+            pushService.send(u, "Enter " + challenge + " to approve");
+        }
+    csharp:
+      vulnerable: |
+        void OnLogin(User u) => _push.Send(u, "Approve login?");
+      secure: |
+        void OnLogin(User u) {
+            if (RecentPushes(u) >= 3) throw new TooManyRequestsException();
+            _push.Send(u, $"Enter {challenge} to approve");
+        }
+
+# ---------------------------------------------------------------------------
+# V6.7 — Cryptographic authentication mechanism
+# ---------------------------------------------------------------------------
+
+- id: V6.7.1
+  facet: Authentication
+  section: Cryptographic authentication mechanism
+  level: 3
+  security_rule: >-
+    Certificates used to verify cryptographic authentication assertions must
+    be stored in a way that protects them from modification.
+  vulnerability_pattern: >-
+    Trusted verification certificates are kept in a world-writable file or
+    mutable database row, so an attacker can swap in their own certificate
+    and forge accepted assertions.
+  secure_pattern: >-
+    Verification certificates are held in an integrity-protected store such
+    as a read-only trust store, a hardware security module, or a managed key
+    vault with strict write controls.
+  code_patterns:
+    generic:
+      vulnerable: |
+        cert = read_file("/tmp/trusted.pem")        # writable by anyone
+      secure: |
+        cert = trust_store.load("auth-verify")      # integrity-protected store
+    python:
+      vulnerable: |
+        with open("/var/data/trusted.pem") as f:    # 0666 permissions
+            cert = load_pem_x509_certificate(f.read().encode())
+      secure: |
+        cert = key_vault.get_certificate("auth-verify")   # managed, immutable
+    java:
+      vulnerable: |
+        X509Certificate c = loadPem(new File("/tmp/trusted.pem"));
+      secure: |
+        KeyStore ks = KeyStore.getInstance("PKCS11");   // HSM-backed
+        X509Certificate c = (X509Certificate) ks.getCertificate("auth-verify");
+    csharp:
+      vulnerable: |
+        var cert = new X509Certificate2(@"C:\temp\trusted.pem");
+      secure: |
+        using var store = new X509Store(StoreName.Root,
+            StoreLocation.LocalMachine, OpenFlags.ReadOnly);
+
+- id: V6.7.2
+  facet: Authentication
+  section: Cryptographic authentication mechanism
+  level: 3
+  security_rule: >-
+    The challenge nonce used in cryptographic authentication must be at least
+    64 bits long and statistically unique, or unique over the lifetime of the
+    cryptographic device.
+  vulnerability_pattern: >-
+    The authentication challenge is too short or reused, so a captured
+    signed response can be replayed to authenticate again.
+  secure_pattern: >-
+    Each challenge is a fresh nonce of at least 64 bits drawn from a CSPRNG,
+    making replay of a previously signed response infeasible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        challenge = counter                       # short and predictable
+      secure: |
+        challenge = csprng_bytes(16)              # 128-bit unique nonce
+    python:
+      vulnerable: |
+        challenge = str(int(time.time()))
+      secure: |
+        import secrets
+        challenge = secrets.token_bytes(16)       # 128 bits from a CSPRNG
+    java:
+      vulnerable: |
+        byte[] challenge = Long.toString(counter++).getBytes();
+      secure: |
+        byte[] challenge = new byte[16];
+        SecureRandom.getInstanceStrong().nextBytes(challenge);
+    csharp:
+      vulnerable: |
+        var challenge = Encoding.UTF8.GetBytes(counter++.ToString());
+      secure: |
+        var challenge = RandomNumberGenerator.GetBytes(16);
+
+# ---------------------------------------------------------------------------
+# V6.8 — Authentication with an Identity Provider
+# ---------------------------------------------------------------------------
+
+- id: V6.8.1
+  facet: Authentication
+  section: Authentication with an Identity Provider
+  level: 2
+  security_rule: >-
+    When multiple identity providers are supported, a user's identity must
+    not be spoofable through another provider; users should be keyed on the
+    IdP identifier combined with the user's ID at that IdP.
+  vulnerability_pattern: >-
+    The application matches federated users by email or bare user ID alone,
+    so an attacker registering the same identifier at a different IdP takes
+    over the account.
+  secure_pattern: >-
+    Accounts are keyed on the pair of IdP identifier and the subject claim
+    from that IdP, so identifiers from different providers never collide.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user = find_user(email=claims.email)
+      secure: |
+        user = find_user(idp_id=provider.id, subject=claims.sub)
+    python:
+      vulnerable: |
+        user = User.query.filter_by(email=id_token["email"]).first()
+      secure: |
+        user = User.query.filter_by(
+            idp=provider_id, idp_subject=id_token["sub"]).first()
+    javascript:
+      vulnerable: |
+        const user = await User.findOne({ email: claims.email });
+      secure: |
+        const user = await User.findOne({
+          idp: providerId, idpSubject: claims.sub });
+    java:
+      vulnerable: |
+        User u = userRepo.findByEmail(claims.getEmail());
+      secure: |
+        User u = userRepo.findByIdpAndSubject(providerId, claims.getSubject());
+    csharp:
+      vulnerable: |
+        var u = _users.SingleOrDefault(x => x.Email == claims.Email);
+      secure: |
+        var u = _users.SingleOrDefault(x =>
+            x.Idp == providerId && x.IdpSubject == claims.Subject);
+
+- id: V6.8.2
+  facet: Authentication
+  section: Authentication with an Identity Provider
+  level: 2
+  security_rule: >-
+    The presence and integrity of digital signatures on authentication
+    assertions such as JWTs or SAML assertions must always be validated, and
+    any unsigned or invalidly signed assertion must be rejected.
+  vulnerability_pattern: >-
+    The application decodes a JWT or SAML assertion without verifying its
+    signature, or accepts the alg none value, so an attacker can forge
+    arbitrary claims.
+  secure_pattern: >-
+    Every assertion is verified against the expected signing key and
+    algorithm before any claim is trusted, and unsigned assertions are
+    rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = jwt_decode(token, verify=false)
+      secure: |
+        claims = jwt_decode(token, key=idp_public_key, algorithms=["RS256"])
+    python:
+      vulnerable: |
+        claims = jwt.decode(token, options={"verify_signature": False})
+      secure: |
+        claims = jwt.decode(token, idp_public_key, algorithms=["RS256"])
+    javascript:
+      vulnerable: |
+        const claims = jwt.decode(token);
+      secure: |
+        const claims = jwt.verify(token, idpPublicKey, { algorithms: ["RS256"] });
+    java:
+      vulnerable: |
+        Claims c = Jwts.parser().parseClaimsJwt(unsignedToken).getBody();
+      secure: |
+        Claims c = Jwts.parser().verifyWith(idpPublicKey).build()
+                       .parseSignedClaims(token).getPayload();
+    csharp:
+      vulnerable: |
+        var jwt = new JwtSecurityToken(token);   // no signature check
+      secure: |
+        var p = new TokenValidationParameters {
+            ValidateIssuerSigningKey = true, IssuerSigningKey = idpKey };
+        handler.ValidateToken(token, p, out _);
+
+- id: V6.8.3
+  facet: Authentication
+  section: Authentication with an Identity Provider
+  level: 2
+  security_rule: >-
+    SAML assertions must be processed uniquely and used only once within
+    their validity period, to prevent replay attacks.
+  vulnerability_pattern: >-
+    A SAML assertion is accepted on every presentation within its validity
+    window, so an attacker who captures one can replay it to log in.
+  secure_pattern: >-
+    The assertion ID is recorded on first use and any later presentation of
+    the same ID within the validity window is rejected as a replay.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if valid_window(assertion): authenticate(assertion.subject)
+      secure: |
+        if valid_window(assertion) and not seen(assertion.id):
+            record_seen(assertion.id); authenticate(assertion.subject)
+    python:
+      vulnerable: |
+        if assertion.not_before <= now() <= assertion.not_on_or_after:
+            log_in(assertion.subject)
+      secure: |
+        if within_window(assertion) and \
+           cache.set(f"saml:{assertion.id}", 1, nx=True, ex=600):
+            log_in(assertion.subject)
+    java:
+      vulnerable: |
+        if (assertion.isWithinValidity()) login(assertion.getSubject());
+      secure: |
+        if (assertion.isWithinValidity()
+            && replayCache.recordIfNew(assertion.getId()))
+            login(assertion.getSubject());
+    csharp:
+      vulnerable: |
+        if (assertion.IsWithinValidity()) Login(assertion.Subject);
+      secure: |
+        if (assertion.IsWithinValidity()
+            && _replayCache.TryRecord(assertion.Id))
+            Login(assertion.Subject);
+
+- id: V6.8.4
+  facet: Authentication
+  section: Authentication with an Identity Provider
+  level: 2
+  security_rule: >-
+    When an external IdP is used and specific authentication strength,
+    methods, or recentness are required, the application must verify these
+    using the IdP's response, for example OIDC acr, amr, and auth_time
+    claims, with a documented fallback when the IdP omits them.
+  vulnerability_pattern: >-
+    The application accepts any successful IdP login without checking
+    assurance claims, so a single-factor login satisfies a flow that needs
+    MFA or a recent re-authentication.
+  secure_pattern: >-
+    The application inspects the acr, amr, and auth_time claims to confirm
+    the required strength, method, and recentness, and applies a documented
+    minimum-strength assumption when the claims are absent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if id_token.valid: grant_access(sensitive_function)
+      secure: |
+        if id_token.valid and "mfa" in id_token.amr \
+           and fresh(id_token.auth_time): grant_access(sensitive_function)
+    python:
+      vulnerable: |
+        if verify_id_token(token):
+            allow_admin_action()
+      secure: |
+        claims = verify_id_token(token)
+        if "mfa" in claims.get("amr", []) and \
+           now() - claims.get("auth_time", 0) < 300:
+            allow_admin_action()
+    javascript:
+      vulnerable: |
+        if (await verifyIdToken(token)) allowAdminAction();
+      secure: |
+        const c = await verifyIdToken(token);
+        if (c.amr?.includes("mfa") && Date.now() / 1000 - c.auth_time < 300)
+          allowAdminAction();
+    java:
+      vulnerable: |
+        if (idTokenVerifier.verify(token)) allowAdminAction();
+      secure: |
+        var c = idTokenVerifier.verify(token);
+        if (c.getAmr().contains("mfa")
+            && Instant.now().getEpochSecond() - c.getAuthTime() < 300)
+            allowAdminAction();
+    csharp:
+      vulnerable: |
+        if (_idToken.Verify(token)) AllowAdminAction();
+      secure: |
+        var c = _idToken.Verify(token);
+        if (c.Amr.Contains("mfa")
+            && DateTimeOffset.UtcNow.ToUnixTimeSeconds() - c.AuthTime < 300)
+            AllowAdminAction();

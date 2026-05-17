@@ -1,0 +1,1937 @@
+# OWASP ASVS 5.0 — Chapter V10: OAuth and OIDC
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V10.1 — Generic OAuth and OIDC Security
+# ---------------------------------------------------------------------------
+
+- id: V10.1.1
+  facet: OAuth and OIDC
+  section: Generic OAuth and OIDC Security
+  level: 2
+  security_rule: >-
+    Access and refresh tokens must only be exposed to components that
+    strictly need them. With a backend-for-frontend pattern, browser
+    JavaScript must never hold tokens — they stay confined to the backend.
+  vulnerability_pattern: >-
+    Access or refresh tokens are returned to the browser and stored in
+    localStorage, sessionStorage, or a script-readable cookie, so any
+    cross-site scripting flaw or third-party script can exfiltrate them.
+  secure_pattern: >-
+    Tokens are held only by a confidential backend; the browser receives
+    just an opaque session cookie marked HttpOnly and Secure, and the
+    backend attaches the real token to upstream calls on the user's behalf.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respondToBrowser({ access_token: token, refresh_token: refresh })
+      secure: |
+        storeTokensServerSide(session, token, refresh)
+        setCookie("sid", session.id, httpOnly=true, secure=true)
+    python:
+      vulnerable: |
+        return JSONResponse({"access_token": token, "refresh_token": refresh})
+      secure: |
+        request.session["token_ref"] = vault.store(token, refresh)
+        return RedirectResponse("/app")  # browser only gets the session cookie
+    javascript:
+      vulnerable: |
+        localStorage.setItem("access_token", resp.access_token);
+      secure: |
+        // BFF keeps tokens; browser calls same-origin API with the session cookie
+        await fetch("/api/profile", { credentials: "same-origin" });
+    java:
+      vulnerable: |
+        model.addAttribute("accessToken", tokens.getAccessToken());
+      secure: |
+        httpSession.setAttribute("tokenRef", tokenStore.save(tokens));
+    csharp:
+      vulnerable: |
+        return Ok(new { access_token = token, refresh_token = refresh });
+      secure: |
+        HttpContext.Session.SetString("tokenRef", _vault.Store(token, refresh));
+        return Redirect("/app");
+
+- id: V10.1.2
+  facet: OAuth and OIDC
+  section: Generic OAuth and OIDC Security
+  level: 2
+  security_rule: >-
+    The client must accept authorization-server values such as the code or
+    ID Token only when they belong to a flow it started, by binding
+    unguessable per-transaction secrets (PKCE code_verifier, state, nonce)
+    to the same user-agent session.
+  vulnerability_pattern: >-
+    The client omits or does not check the state, nonce, or PKCE binding,
+    so an attacker can inject an authorization response from a flow the
+    victim never initiated and have it accepted.
+  secure_pattern: >-
+    The client generates a random per-transaction state, nonce, and PKCE
+    verifier, stores them bound to the user-agent session, and on callback
+    rejects the response unless the returned values match what was stored.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onCallback(code): exchangeCodeForToken(code)
+      secure: |
+        onCallback(code, state):
+          assert state == session.state and pkceMatches(session.verifier)
+          exchangeCodeForToken(code, session.verifier)
+    python:
+      vulnerable: |
+        token = oauth.fetch_token(code=request.args["code"])
+      secure: |
+        if request.args["state"] != session.pop("oauth_state"):
+            abort(400)
+        token = oauth.fetch_token(code=request.args["code"],
+                                  code_verifier=session.pop("pkce_verifier"))
+    javascript:
+      vulnerable: |
+        const token = await client.exchange({ code: params.get("code") });
+      secure: |
+        if (params.get("state") !== sessionStorage.getItem("oauth_state")) throw Error("bad state");
+        const token = await client.exchange({ code: params.get("code"), codeVerifier: stored });
+    java:
+      vulnerable: |
+        OAuth2Token token = client.exchange(request.getParameter("code"));
+      secure: |
+        if (!request.getParameter("state").equals(session.getAttribute("state")))
+            throw new SecurityException("state mismatch");
+        OAuth2Token token = client.exchange(code, (String) session.getAttribute("verifier"));
+    csharp:
+      vulnerable: |
+        var token = await _client.ExchangeCodeAsync(Request.Query["code"]);
+      secure: |
+        if (Request.Query["state"] != HttpContext.Session.GetString("state"))
+            return BadRequest();
+        var token = await _client.ExchangeCodeAsync(code, verifier);
+
+# ---------------------------------------------------------------------------
+# V10.2 — OAuth Client
+# ---------------------------------------------------------------------------
+
+- id: V10.2.1
+  facet: OAuth and OIDC
+  section: OAuth Client
+  level: 2
+  security_rule: >-
+    A code-flow OAuth client must defend its token request against
+    cross-site request forgery, either with PKCE or by validating the
+    state parameter returned in the authorization response.
+  vulnerability_pattern: >-
+    The callback exchanges any code it receives for tokens without
+    checking PKCE or a state value, so an attacker can forge a callback
+    request and have the victim's client log in under the attacker's code.
+  secure_pattern: >-
+    The client stores a random state value (and a PKCE verifier) before
+    redirecting, and the callback handler rejects the request unless the
+    returned state matches and the verifier completes the PKCE exchange.
+  code_patterns:
+    generic:
+      vulnerable: |
+        handleCallback(code): tokens = exchange(code)
+      secure: |
+        handleCallback(code, state):
+          if state != session.state: reject()
+          tokens = exchange(code, session.verifier)
+    python:
+      vulnerable: |
+        @app.route("/callback")
+        def cb(): return exchange(request.args["code"])
+      secure: |
+        @app.route("/callback")
+        def cb():
+            if request.args.get("state") != session.pop("state", None): abort(403)
+            return exchange(request.args["code"], session.pop("verifier"))
+    javascript:
+      vulnerable: |
+        app.get("/callback", (req, res) => exchange(req.query.code));
+      secure: |
+        app.get("/callback", (req, res) => {
+          if (req.query.state !== req.session.state) return res.sendStatus(403);
+          exchange(req.query.code, req.session.verifier);
+        });
+    java:
+      vulnerable: |
+        public Token callback(String code) { return client.exchange(code); }
+      secure: |
+        public Token callback(String code, String state, HttpSession s) {
+          if (!state.equals(s.getAttribute("state"))) throw new ForbiddenException();
+          return client.exchange(code, (String) s.getAttribute("verifier"));
+        }
+    csharp:
+      vulnerable: |
+        public IActionResult Callback(string code) => Ok(_client.Exchange(code));
+      secure: |
+        public IActionResult Callback(string code, string state) {
+          if (state != HttpContext.Session.GetString("state")) return Forbid();
+          return Ok(_client.Exchange(code, _verifier));
+        }
+
+- id: V10.2.2
+  facet: OAuth and OIDC
+  section: OAuth Client
+  level: 2
+  security_rule: >-
+    An OAuth client that can talk to more than one authorization server
+    must defend against mix-up attacks, for example by requiring the iss
+    parameter and validating it on both the authorization and token responses.
+  vulnerability_pattern: >-
+    The client tracks only that a flow is in progress, not which
+    authorization server it was started with, so an attacker can swap
+    responses between servers and have a code redeemed at the wrong server.
+  secure_pattern: >-
+    The client records which authorization server each transaction targets
+    and verifies the iss value returned in the authorization response
+    matches that server before redeeming the code at its token endpoint.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onCallback(code): redeemAt(defaultTokenEndpoint, code)
+      secure: |
+        onCallback(code, iss):
+          if iss != session.expectedIssuer: reject()
+          redeemAt(issuerToEndpoint(iss), code)
+    python:
+      vulnerable: |
+        token = exchange(token_endpoint, request.args["code"])
+      secure: |
+        if request.args["iss"] != session["expected_iss"]:
+            abort(400, "mix-up attack")
+        token = exchange(endpoint_for(request.args["iss"]), request.args["code"])
+    javascript:
+      vulnerable: |
+        const token = await exchange(tokenEndpoint, req.query.code);
+      secure: |
+        if (req.query.iss !== req.session.expectedIss) throw Error("mix-up");
+        const token = await exchange(endpointFor(req.query.iss), req.query.code);
+    java:
+      vulnerable: |
+        Token t = client.exchange(tokenEndpoint, code);
+      secure: |
+        if (!iss.equals(session.getAttribute("expectedIss")))
+            throw new SecurityException("mix-up attack");
+        Token t = client.exchange(endpointFor(iss), code);
+    csharp:
+      vulnerable: |
+        var token = await _client.Exchange(tokenEndpoint, code);
+      secure: |
+        if (iss != HttpContext.Session.GetString("expectedIss"))
+            throw new SecurityException("mix-up attack");
+        var token = await _client.Exchange(EndpointFor(iss), code);
+
+- id: V10.2.3
+  facet: OAuth and OIDC
+  section: OAuth Client
+  level: 3
+  security_rule: >-
+    The OAuth client must request only the scopes and authorization
+    parameters it actually needs from the authorization server, following
+    the principle of least privilege.
+  vulnerability_pattern: >-
+    The client requests broad or wildcard scopes far beyond what the
+    feature uses, so a compromised token or client grants the attacker
+    access to data and operations the application never needed.
+  secure_pattern: >-
+    The authorization request lists only the minimal scopes required for
+    the current operation, keeping the issued token's privileges as narrow
+    as the feature allows.
+  code_patterns:
+    generic:
+      vulnerable: |
+        authorizeUrl(scope="openid profile email admin offline_access all")
+      secure: |
+        authorizeUrl(scope="openid profile")   # only what this feature needs
+    python:
+      vulnerable: |
+        oauth.authorize_redirect(scope="read write admin delete")
+      secure: |
+        oauth.authorize_redirect(scope="read")
+    javascript:
+      vulnerable: |
+        const url = client.authorizeUrl({ scope: "openid profile email admin" });
+      secure: |
+        const url = client.authorizeUrl({ scope: "openid profile" });
+    java:
+      vulnerable: |
+        request.setScope("read write admin offline_access");
+      secure: |
+        request.setScope("read");
+    csharp:
+      vulnerable: |
+        options.Scope.Add("openid"); options.Scope.Add("profile"); options.Scope.Add("admin");
+      secure: |
+        options.Scope.Add("openid"); options.Scope.Add("profile");
+
+# ---------------------------------------------------------------------------
+# V10.3 — OAuth Resource Server
+# ---------------------------------------------------------------------------
+
+- id: V10.3.1
+  facet: OAuth and OIDC
+  section: OAuth Resource Server
+  level: 2
+  security_rule: >-
+    The resource server must accept an access token only when that token
+    is intended for it, checking the audience via the aud claim of a
+    structured token or through the token introspection endpoint.
+  vulnerability_pattern: >-
+    The resource server validates only that a token's signature is good,
+    so a token minted for a different service is accepted and can be
+    replayed across APIs that share an issuer.
+  secure_pattern: >-
+    After signature validation the resource server checks that the
+    token's audience equals its own identifier, rejecting any token whose
+    aud claim or introspection result names a different service.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = verifySignature(token); allow(claims)
+      secure: |
+        claims = verifySignature(token)
+        if claims.aud != "https://api.myservice.example": reject()
+    python:
+      vulnerable: |
+        claims = jwt.decode(token, key, algorithms=["RS256"])
+      secure: |
+        claims = jwt.decode(token, key, algorithms=["RS256"],
+                            audience="https://api.myservice.example")
+    javascript:
+      vulnerable: |
+        const claims = jwt.verify(token, key, { algorithms: ["RS256"] });
+      secure: |
+        const claims = jwt.verify(token, key,
+          { algorithms: ["RS256"], audience: "https://api.myservice.example" });
+    java:
+      vulnerable: |
+        Jws<Claims> jws = parser.parseClaimsJws(token);
+      secure: |
+        Jws<Claims> jws = Jwts.parser().requireAudience("https://api.myservice.example")
+            .verifyWith(key).build().parseSignedClaims(token);
+    csharp:
+      vulnerable: |
+        var p = handler.ValidateToken(token, new TokenValidationParameters {
+          ValidateAudience = false }, out _);
+      secure: |
+        var p = handler.ValidateToken(token, new TokenValidationParameters {
+          ValidateAudience = true, ValidAudience = "https://api.myservice.example" }, out _);
+
+- id: V10.3.2
+  facet: OAuth and OIDC
+  section: OAuth Resource Server
+  level: 2
+  security_rule: >-
+    The resource server must base authorization decisions on the delegated
+    authorization claims of the access token, including sub, scope, and
+    authorization_details when those claims are present.
+  vulnerability_pattern: >-
+    The resource server treats any validly signed token as full access
+    and ignores the scope or authorization_details claims, so a token
+    issued for a narrow purpose can perform privileged operations.
+  secure_pattern: >-
+    Each protected operation checks that the token carries the required
+    scope or authorization_details entry, denying the request when the
+    delegated authorization does not cover the requested action.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if validToken(token): performWrite()
+      secure: |
+        if "write" in claims.scope: performWrite()
+        else: deny()
+    python:
+      vulnerable: |
+        if token_is_valid(token):
+            delete_record(id)
+      secure: |
+        if "records:delete" not in claims["scope"].split():
+            abort(403)
+        delete_record(id)
+    javascript:
+      vulnerable: |
+        if (verified) deleteRecord(id);
+      secure: |
+        if (!claims.scope.split(" ").includes("records:delete")) return res.sendStatus(403);
+        deleteRecord(id);
+    java:
+      vulnerable: |
+        if (jws != null) repository.delete(id);
+      secure: |
+        if (!claims.get("scope", String.class).contains("records:delete"))
+            throw new ForbiddenException();
+        repository.delete(id);
+    csharp:
+      vulnerable: |
+        [Authorize] public IActionResult Delete(int id) { _repo.Delete(id); return Ok(); }
+      secure: |
+        [Authorize(Policy = "records:delete")]
+        public IActionResult Delete(int id) { _repo.Delete(id); return Ok(); }
+
+- id: V10.3.3
+  facet: OAuth and OIDC
+  section: OAuth Resource Server
+  level: 2
+  security_rule: >-
+    When an access-control decision needs a unique user, the resource
+    server must identify that user from claims that cannot be reassigned,
+    typically the combination of iss and sub rather than a mutable claim.
+  vulnerability_pattern: >-
+    The resource server keys the user on a reassignable claim such as
+    email or preferred_username, so when that value is changed or reused
+    a new account silently inherits another user's data and permissions.
+  secure_pattern: >-
+    The resource server derives the user key from the immutable iss plus
+    sub pair, so the local account binding survives email changes and
+    cannot be hijacked by reusing a freed username.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user = lookupByEmail(claims.email)
+      secure: |
+        user = lookupBySubject(claims.iss + "|" + claims.sub)
+    python:
+      vulnerable: |
+        user = User.query.filter_by(email=claims["email"]).first()
+      secure: |
+        key = f"{claims['iss']}|{claims['sub']}"
+        user = User.query.filter_by(subject_key=key).first()
+    javascript:
+      vulnerable: |
+        const user = await db.users.findOne({ email: claims.email });
+      secure: |
+        const user = await db.users.findOne({ subjectKey: `${claims.iss}|${claims.sub}` });
+    java:
+      vulnerable: |
+        User u = userRepo.findByEmail(claims.get("email", String.class));
+      secure: |
+        String key = claims.getIssuer() + "|" + claims.getSubject();
+        User u = userRepo.findBySubjectKey(key);
+    csharp:
+      vulnerable: |
+        var user = _db.Users.SingleOrDefault(u => u.Email == claims["email"]);
+      secure: |
+        var key = $"{claims["iss"]}|{claims["sub"]}";
+        var user = _db.Users.SingleOrDefault(u => u.SubjectKey == key);
+
+- id: V10.3.4
+  facet: OAuth and OIDC
+  section: OAuth Resource Server
+  level: 2
+  security_rule: >-
+    When a resource server requires a specific authentication strength,
+    method, or recentness, it must verify the access token satisfies those
+    constraints using the OIDC acr, amr, and auth_time claims.
+  vulnerability_pattern: >-
+    A sensitive operation accepts any valid token regardless of how the
+    user authenticated, so a session established with a weak factor or
+    long ago is enough to perform a high-assurance action.
+  secure_pattern: >-
+    Before a sensitive operation the resource server checks the acr or amr
+    claim meets the required assurance level and that auth_time is recent
+    enough, prompting step-up authentication otherwise.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if validToken(token): doSensitiveAction()
+      secure: |
+        if claims.acr == "mfa" and now - claims.auth_time < 300:
+          doSensitiveAction()
+        else: requireStepUp()
+    python:
+      vulnerable: |
+        if token_valid:
+            transfer_funds(amount)
+      secure: |
+        if claims.get("acr") != "mfa" or time.time() - claims["auth_time"] > 300:
+            abort(401, "step-up required")
+        transfer_funds(amount)
+    javascript:
+      vulnerable: |
+        if (verified) transferFunds(amount);
+      secure: |
+        if (claims.acr !== "mfa" || Date.now() / 1000 - claims.auth_time > 300)
+          return res.status(401).send("step-up required");
+        transferFunds(amount);
+    java:
+      vulnerable: |
+        if (jws != null) accountService.transfer(amount);
+      secure: |
+        if (!"mfa".equals(claims.get("acr")) ||
+            Instant.now().getEpochSecond() - claims.get("auth_time", Long.class) > 300)
+          throw new StepUpRequiredException();
+        accountService.transfer(amount);
+    csharp:
+      vulnerable: |
+        if (User.Identity.IsAuthenticated) _bank.Transfer(amount);
+      secure: |
+        if (User.FindFirstValue("acr") != "mfa" ||
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds() - authTime > 300)
+          return Unauthorized("step-up required");
+        _bank.Transfer(amount);
+
+- id: V10.3.5
+  facet: OAuth and OIDC
+  section: OAuth Resource Server
+  level: 3
+  security_rule: >-
+    The resource server must prevent use or replay of stolen access tokens
+    by requiring sender-constrained tokens, either Mutual TLS for OAuth 2
+    or OAuth 2 Demonstration of Proof of Possession.
+  vulnerability_pattern: >-
+    The resource server accepts bearer access tokens with no proof of
+    possession, so a token captured from logs, a proxy, or a compromised
+    client can be replayed by any party that holds the string.
+  secure_pattern: >-
+    The resource server requires sender-constrained tokens and verifies
+    the presenter holds the bound key — checking the mTLS client
+    certificate thumbprint or a valid DPoP proof against the token's cnf claim.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if validToken(bearerToken): allow()
+      secure: |
+        if validToken(token) and dpopProofMatches(token.cnf, request.dpop):
+          allow()
+    python:
+      vulnerable: |
+        claims = jwt.decode(token, key, algorithms=["RS256"])
+      secure: |
+        claims = jwt.decode(token, key, algorithms=["RS256"])
+        if claims["cnf"]["jkt"] != dpop_thumbprint(request.headers["DPoP"]):
+            abort(401, "DPoP proof mismatch")
+    javascript:
+      vulnerable: |
+        const claims = jwt.verify(token, key);
+      secure: |
+        const claims = jwt.verify(token, key);
+        if (claims.cnf.jkt !== dpopThumbprint(req.headers.dpop))
+          return res.status(401).send("DPoP mismatch");
+    java:
+      vulnerable: |
+        Claims c = parser.parseClaimsJws(token).getBody();
+      secure: |
+        Claims c = parser.parseClaimsJws(token).getBody();
+        if (!cnfThumbprint(c).equals(dpopThumbprint(request.getHeader("DPoP"))))
+            throw new UnauthorizedException("DPoP mismatch");
+    csharp:
+      vulnerable: |
+        var claims = handler.ValidateToken(token, parms, out _);
+      secure: |
+        var claims = handler.ValidateToken(token, parms, out _);
+        if (claims.FindFirstValue("cnf") != DpopThumbprint(Request.Headers["DPoP"]))
+            return Unauthorized("DPoP mismatch");
+
+# ---------------------------------------------------------------------------
+# V10.4 — OAuth Authorization Server
+# ---------------------------------------------------------------------------
+
+- id: V10.4.1
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 1
+  security_rule: >-
+    The authorization server must validate every redirect URI against a
+    client-specific allowlist of pre-registered URIs using exact string
+    comparison, never a prefix or pattern match.
+  vulnerability_pattern: >-
+    The redirect URI is accepted on a substring, prefix, or wildcard
+    match, so an attacker registers a lookalike path or open-redirect
+    suffix and has the authorization code delivered to their endpoint.
+  secure_pattern: >-
+    The submitted redirect URI must be byte-for-byte equal to one of the
+    URIs pre-registered for that client; any non-exact value is rejected
+    before the authorization request proceeds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if redirectUri.startsWith(client.baseUrl): proceed()
+      secure: |
+        if redirectUri in client.registeredRedirectUris: proceed()
+        else: reject()
+    python:
+      vulnerable: |
+        if redirect_uri.startswith(client.base_url):
+            issue_code()
+      secure: |
+        if redirect_uri not in client.registered_redirect_uris:
+            abort(400, "invalid redirect_uri")
+        issue_code()
+    javascript:
+      vulnerable: |
+        if (redirectUri.includes(client.domain)) issueCode();
+      secure: |
+        if (!client.registeredRedirectUris.includes(redirectUri))
+          return res.status(400).send("invalid redirect_uri");
+        issueCode();
+    java:
+      vulnerable: |
+        if (redirectUri.startsWith(client.getBaseUrl())) issueCode();
+      secure: |
+        if (!client.getRegisteredRedirectUris().contains(redirectUri))
+            throw new InvalidRequestException("invalid redirect_uri");
+        issueCode();
+    csharp:
+      vulnerable: |
+        if (redirectUri.StartsWith(client.BaseUrl)) IssueCode();
+      secure: |
+        if (!client.RegisteredRedirectUris.Contains(redirectUri, StringComparer.Ordinal))
+          return BadRequest("invalid redirect_uri");
+        IssueCode();
+
+- id: V10.4.2
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 1
+  security_rule: >-
+    An authorization code must be usable only once; on a second token
+    request with an already-redeemed code the authorization server must
+    reject it and revoke any tokens already issued from that code.
+  vulnerability_pattern: >-
+    The authorization server does not mark codes as consumed, so a code
+    leaked through logs or the browser history can be replayed to mint a
+    second set of tokens for the attacker.
+  secure_pattern: >-
+    Code redemption is atomic and single-use: the first valid token
+    request consumes the code, and any later use of the same code is
+    rejected and triggers revocation of the tokens issued from it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        code = lookup(codeValue); issueTokens(code)
+      secure: |
+        code = consumeOnce(codeValue)
+        if code.alreadyUsed: revokeTokensFor(code); reject()
+    python:
+      vulnerable: |
+        code = AuthCode.query.get(code_value)
+        return issue_tokens(code)
+      secure: |
+        code = AuthCode.query.with_for_update().get(code_value)
+        if code.used:
+            revoke_tokens_for(code); abort(400, "code reuse")
+        code.used = True
+        return issue_tokens(code)
+    javascript:
+      vulnerable: |
+        const code = await codes.find(codeValue);
+        return issueTokens(code);
+      secure: |
+        const code = await codes.findOneAndUpdate(
+          { value: codeValue, used: false }, { used: true });
+        if (!code) { await revokeTokensFor(codeValue); throw Error("code reuse"); }
+    java:
+      vulnerable: |
+        AuthCode code = codeRepo.find(codeValue);
+        return issueTokens(code);
+      secure: |
+        AuthCode code = codeRepo.findAndMarkUsed(codeValue);  // atomic
+        if (code == null) { revokeTokensFor(codeValue); throw new InvalidGrantException(); }
+        return issueTokens(code);
+    csharp:
+      vulnerable: |
+        var code = _codes.Find(codeValue);
+        return IssueTokens(code);
+      secure: |
+        var code = _codes.ConsumeOnce(codeValue);  // atomic mark-used
+        if (code is null) { _tokens.RevokeFor(codeValue); throw new InvalidGrantException(); }
+        return IssueTokens(code);
+
+- id: V10.4.3
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 1
+  security_rule: >-
+    Authorization codes must be short-lived — at most 10 minutes for L1
+    and L2 applications and at most 1 minute for L3 — and rejected once
+    that lifetime has elapsed.
+  vulnerability_pattern: >-
+    Authorization codes have a long or unbounded lifetime, so a code
+    leaked through a referrer header or proxy log remains redeemable for
+    hours, widening the window for replay.
+  secure_pattern: >-
+    Each code carries a short expiry stamped at issue time, and the token
+    endpoint rejects the code as expired once that brief window — minutes,
+    not hours — has passed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        code.expiresAt = now + hours(24)
+      secure: |
+        code.expiresAt = now + minutes(1)
+        if now > code.expiresAt: reject()
+    python:
+      vulnerable: |
+        code.expires_at = datetime.utcnow() + timedelta(hours=24)
+      secure: |
+        code.expires_at = datetime.utcnow() + timedelta(minutes=1)
+        if datetime.utcnow() > code.expires_at:
+            abort(400, "code expired")
+    javascript:
+      vulnerable: |
+        code.expiresAt = Date.now() + 24 * 3600 * 1000;
+      secure: |
+        code.expiresAt = Date.now() + 60 * 1000;
+        if (Date.now() > code.expiresAt) throw Error("code expired");
+    java:
+      vulnerable: |
+        code.setExpiresAt(Instant.now().plus(Duration.ofHours(24)));
+      secure: |
+        code.setExpiresAt(Instant.now().plus(Duration.ofMinutes(1)));
+        if (Instant.now().isAfter(code.getExpiresAt())) throw new InvalidGrantException();
+    csharp:
+      vulnerable: |
+        code.ExpiresAt = DateTime.UtcNow.AddHours(24);
+      secure: |
+        code.ExpiresAt = DateTime.UtcNow.AddMinutes(1);
+        if (DateTime.UtcNow > code.ExpiresAt) throw new InvalidGrantException();
+
+- id: V10.4.4
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 1
+  security_rule: >-
+    For each client, the authorization server must allow only the grant
+    types that client genuinely needs; the implicit token grant and the
+    resource-owner password grant must no longer be used.
+  vulnerability_pattern: >-
+    A client is configured to allow every grant type, including the
+    deprecated implicit and password grants, so a single misuse or
+    compromise exposes flows the application never relies on.
+  secure_pattern: >-
+    Each client registration enumerates the minimal set of grant types it
+    requires, and the authorization server rejects any grant request that
+    is not on that per-client list; implicit and password are never enabled.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client.allowedGrants = "authorization_code token password refresh_token"
+      secure: |
+        client.allowedGrants = "authorization_code refresh_token"
+        if requestedGrant not in client.allowedGrants: reject()
+    python:
+      vulnerable: |
+        client.grant_types = ["authorization_code", "token", "password"]
+      secure: |
+        client.grant_types = ["authorization_code", "refresh_token"]
+        if grant_type not in client.grant_types:
+            abort(400, "unauthorized_grant_type")
+    javascript:
+      vulnerable: |
+        client.grantTypes = ["authorization_code", "implicit", "password"];
+      secure: |
+        client.grantTypes = ["authorization_code", "refresh_token"];
+        if (!client.grantTypes.includes(grantType)) throw Error("unauthorized_grant_type");
+    java:
+      vulnerable: |
+        client.setGrantTypes(List.of("authorization_code", "implicit", "password"));
+      secure: |
+        client.setGrantTypes(List.of("authorization_code", "refresh_token"));
+        if (!client.getGrantTypes().contains(grantType))
+            throw new UnauthorizedGrantException();
+    csharp:
+      vulnerable: |
+        client.AllowedGrantTypes = GrantTypes.ImplicitAndClientCredentials;
+      secure: |
+        client.AllowedGrantTypes = GrantTypes.Code;
+        if (!client.AllowedGrantTypes.Contains(grantType)) throw new InvalidGrantException();
+
+- id: V10.4.5
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 1
+  security_rule: >-
+    The authorization server must mitigate refresh-token replay for public
+    clients, preferably with sender-constrained tokens; if rotation is used
+    instead, it must invalidate each refresh token on use and revoke the
+    whole chain if an already-used token is presented.
+  vulnerability_pattern: >-
+    A public client's refresh token is long-lived and reusable, so a
+    stolen refresh token can be redeemed repeatedly with no detection of
+    the legitimate client and the attacker running in parallel.
+  secure_pattern: >-
+    Refresh tokens are sender-constrained, or rotated so each use returns
+    a new token and invalidates the old one; presenting a consumed token
+    triggers revocation of every refresh token in that authorization chain.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if validRefresh(rt): issueAccessToken()   # rt stays usable
+      secure: |
+        if rt.consumed: revokeChain(rt.familyId); reject()
+        rt.consumed = true; issueAccessToken(); issueNewRefresh()
+    python:
+      vulnerable: |
+        if refresh_token.valid:
+            return new_access_token()
+      secure: |
+        if refresh_token.consumed:
+            revoke_family(refresh_token.family_id); abort(400, "refresh reuse")
+        refresh_token.consumed = True
+        return new_access_token(), rotate_refresh(refresh_token)
+    javascript:
+      vulnerable: |
+        if (rt.valid) return issueAccessToken();
+      secure: |
+        if (rt.consumed) { await revokeFamily(rt.familyId); throw Error("refresh reuse"); }
+        rt.consumed = true;
+        return { access: issueAccessToken(), refresh: rotate(rt) };
+    java:
+      vulnerable: |
+        if (refreshToken.isValid()) return newAccessToken();
+      secure: |
+        if (refreshToken.isConsumed()) {
+          revokeFamily(refreshToken.getFamilyId()); throw new InvalidGrantException();
+        }
+        refreshToken.setConsumed(true);
+        return newAccessToken();
+    csharp:
+      vulnerable: |
+        if (rt.IsValid) return IssueAccessToken();
+      secure: |
+        if (rt.Consumed) { _tokens.RevokeFamily(rt.FamilyId); throw new InvalidGrantException(); }
+        rt.Consumed = true;
+        return new TokenPair(IssueAccessToken(), Rotate(rt));
+
+- id: V10.4.6
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 2
+  security_rule: >-
+    For the code grant, the authorization server must require PKCE — a
+    valid code_challenge with method S256, never plain — at the
+    authorization endpoint, and must validate the code_verifier at the
+    token endpoint.
+  vulnerability_pattern: >-
+    The authorization server does not enforce PKCE or accepts the plain
+    challenge method, so an attacker who intercepts an authorization code
+    can redeem it without proving possession of the verifier.
+  secure_pattern: >-
+    The authorization endpoint rejects requests lacking a code_challenge
+    or using method plain, and the token endpoint recomputes the S256
+    hash of the code_verifier and rejects any mismatch.
+  code_patterns:
+    generic:
+      vulnerable: |
+        issueCode(req)   # no code_challenge required
+      secure: |
+        if req.code_challenge_method != "S256": reject()
+        if sha256(token_req.verifier) != storedChallenge: reject()
+    python:
+      vulnerable: |
+        return issue_code(client_id, redirect_uri)
+      secure: |
+        if request.args.get("code_challenge_method") != "S256":
+            abort(400, "S256 PKCE required")
+        return issue_code(client_id, redirect_uri, code_challenge)
+    javascript:
+      vulnerable: |
+        issueCode(req.query.client_id, req.query.redirect_uri);
+      secure: |
+        if (req.query.code_challenge_method !== "S256")
+          return res.status(400).send("S256 PKCE required");
+        issueCode(req.query.client_id, req.query.redirect_uri, req.query.code_challenge);
+    java:
+      vulnerable: |
+        return issueCode(clientId, redirectUri);
+      secure: |
+        if (!"S256".equals(challengeMethod))
+            throw new InvalidRequestException("S256 PKCE required");
+        return issueCode(clientId, redirectUri, codeChallenge);
+    csharp:
+      vulnerable: |
+        return IssueCode(clientId, redirectUri);
+      secure: |
+        if (codeChallengeMethod != "S256")
+          return BadRequest("S256 PKCE required");
+        return IssueCode(clientId, redirectUri, codeChallenge);
+
+- id: V10.4.7
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 2
+  security_rule: >-
+    If unauthenticated dynamic client registration is supported, the
+    authorization server must validate the submitted client metadata,
+    ensure user consent, and warn the user before processing an
+    authorization request from an untrusted client.
+  vulnerability_pattern: >-
+    Dynamic client registration accepts arbitrary metadata and the
+    resulting client is treated as trusted, so an attacker self-registers
+    a lookalike app and silently harvests user authorizations.
+  secure_pattern: >-
+    Dynamically registered client metadata such as redirect URIs and
+    logos is validated, the client is flagged as untrusted, and the
+    consent screen explicitly warns the user before any authorization proceeds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client = registerClient(submittedMetadata)
+      secure: |
+        client = registerClient(validate(submittedMetadata))
+        client.trusted = false
+        showConsentWithUntrustedWarning(client)
+    python:
+      vulnerable: |
+        client = Client.create(**request.json)
+      secure: |
+        meta = validate_client_metadata(request.json)
+        client = Client.create(**meta, trusted=False)
+        consent_screen(client, warn_untrusted=True)
+    javascript:
+      vulnerable: |
+        const client = await Client.create(req.body);
+      secure: |
+        const meta = validateClientMetadata(req.body);
+        const client = await Client.create({ ...meta, trusted: false });
+        renderConsent(client, { warnUntrusted: true });
+    java:
+      vulnerable: |
+        Client client = clientService.register(request.getMetadata());
+      secure: |
+        ClientMetadata meta = metadataValidator.validate(request.getMetadata());
+        Client client = clientService.register(meta, false);  // trusted=false
+        consentService.show(client, true);  // warn untrusted
+    csharp:
+      vulnerable: |
+        var client = _clients.Register(request.Metadata);
+      secure: |
+        var meta = _validator.Validate(request.Metadata);
+        var client = _clients.Register(meta, trusted: false);
+        _consent.Show(client, warnUntrusted: true);
+
+- id: V10.4.8
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 2
+  security_rule: >-
+    Refresh tokens must have an absolute expiration, even when sliding
+    expiration is applied, so the token cannot be renewed indefinitely.
+  vulnerability_pattern: >-
+    A refresh token with sliding expiration is renewed on every use with
+    no absolute cap, so a stolen token can be kept alive forever as long
+    as the attacker keeps redeeming it.
+  secure_pattern: >-
+    The refresh token records an absolute maximum lifetime fixed at issue
+    time; sliding renewal extends the window only up to that hard cap,
+    after which the token is rejected and re-authentication is required.
+  code_patterns:
+    generic:
+      vulnerable: |
+        rt.expiresAt = now + slidingWindow   # extended every use, no cap
+      secure: |
+        rt.absoluteExpiry = issuedAt + days(30)
+        rt.expiresAt = min(now + slidingWindow, rt.absoluteExpiry)
+    python:
+      vulnerable: |
+        rt.expires_at = datetime.utcnow() + timedelta(days=7)
+      secure: |
+        absolute = rt.issued_at + timedelta(days=30)
+        rt.expires_at = min(datetime.utcnow() + timedelta(days=7), absolute)
+    javascript:
+      vulnerable: |
+        rt.expiresAt = Date.now() + 7 * 86400000;
+      secure: |
+        const absolute = rt.issuedAt + 30 * 86400000;
+        rt.expiresAt = Math.min(Date.now() + 7 * 86400000, absolute);
+    java:
+      vulnerable: |
+        rt.setExpiresAt(Instant.now().plus(Duration.ofDays(7)));
+      secure: |
+        Instant absolute = rt.getIssuedAt().plus(Duration.ofDays(30));
+        Instant sliding = Instant.now().plus(Duration.ofDays(7));
+        rt.setExpiresAt(sliding.isBefore(absolute) ? sliding : absolute);
+    csharp:
+      vulnerable: |
+        rt.ExpiresAt = DateTime.UtcNow.AddDays(7);
+      secure: |
+        var absolute = rt.IssuedAt.AddDays(30);
+        var sliding = DateTime.UtcNow.AddDays(7);
+        rt.ExpiresAt = sliding < absolute ? sliding : absolute;
+
+- id: V10.4.9
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 2
+  security_rule: >-
+    An authorized user must be able to revoke refresh tokens and reference
+    access tokens through the authorization server's user interface, to
+    contain malicious clients or stolen tokens.
+  vulnerability_pattern: >-
+    Once issued, tokens cannot be revoked before expiry and the user has
+    no way to see or terminate active grants, so a stolen token stays
+    valid until it naturally expires.
+  secure_pattern: >-
+    The authorization server exposes a session and token management view
+    where the user lists active grants and revokes any refresh or
+    reference access token, which immediately invalidates it server-side.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # tokens valid until expiry; no revocation surface
+      secure: |
+        onUserRevoke(tokenId, currentUser):
+          token = lookup(tokenId)
+          if token.owner == currentUser: token.revoked = true
+    python:
+      vulnerable: |
+        # no endpoint to revoke a user's own tokens
+      secure: |
+        @app.post("/account/tokens/<token_id>/revoke")
+        def revoke(token_id):
+            t = Token.query.get_or_404(token_id)
+            if t.user_id != current_user.id: abort(403)
+            t.revoked = True
+    javascript:
+      vulnerable: |
+        // tokens cannot be revoked before expiry
+      secure: |
+        app.post("/account/tokens/:id/revoke", async (req, res) => {
+          const t = await Token.find(req.params.id);
+          if (t.userId !== req.user.id) return res.sendStatus(403);
+          await t.update({ revoked: true });
+        });
+    java:
+      vulnerable: |
+        // no user-facing token revocation
+      secure: |
+        @PostMapping("/account/tokens/{id}/revoke")
+        public void revoke(@PathVariable String id, @AuthenticationPrincipal User u) {
+          Token t = tokenRepo.findById(id).orElseThrow();
+          if (!t.getUserId().equals(u.getId())) throw new ForbiddenException();
+          t.setRevoked(true);
+        }
+    csharp:
+      vulnerable: |
+        // tokens remain valid until natural expiry
+      secure: |
+        [HttpPost("account/tokens/{id}/revoke")]
+        public IActionResult Revoke(string id) {
+          var t = _tokens.Find(id);
+          if (t.UserId != User.GetId()) return Forbid();
+          t.Revoked = true; return Ok();
+        }
+
+- id: V10.4.10
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 2
+  security_rule: >-
+    A confidential client must be authenticated on every client-to-server
+    backchannel request, including token requests, pushed authorization
+    requests, and token revocation requests.
+  vulnerability_pattern: >-
+    The token, PAR, or revocation endpoint accepts a request that names a
+    confidential client without verifying client credentials, so anyone
+    can act as that client on the backchannel.
+  secure_pattern: >-
+    Every backchannel endpoint authenticates the confidential client —
+    via client secret, private_key_jwt, or mTLS — before processing the
+    request, and rejects any unauthenticated or mismatched credential.
+  code_patterns:
+    generic:
+      vulnerable: |
+        handleTokenRequest(req)   # client identity trusted from client_id alone
+      secure: |
+        if not authenticateClient(req.client_id, req.credentials): reject()
+        handleTokenRequest(req)
+    python:
+      vulnerable: |
+        client = Client.query.get(request.form["client_id"])
+        return issue_tokens(client)
+      secure: |
+        client = authenticate_client(request)  # verifies secret / JWT / mTLS
+        if client is None:
+            abort(401, "invalid_client")
+        return issue_tokens(client)
+    javascript:
+      vulnerable: |
+        const client = await Client.find(req.body.client_id);
+        return issueTokens(client);
+      secure: |
+        const client = await authenticateClient(req);
+        if (!client) return res.status(401).send("invalid_client");
+        return issueTokens(client);
+    java:
+      vulnerable: |
+        Client client = clientRepo.find(request.getParameter("client_id"));
+        return issueTokens(client);
+      secure: |
+        Client client = clientAuthenticator.authenticate(request);
+        if (client == null) throw new InvalidClientException();
+        return issueTokens(client);
+    csharp:
+      vulnerable: |
+        var client = _clients.Find(Request.Form["client_id"]);
+        return IssueTokens(client);
+      secure: |
+        var client = _clientAuth.Authenticate(Request);
+        if (client is null) return Unauthorized("invalid_client");
+        return IssueTokens(client);
+
+- id: V10.4.11
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 2
+  security_rule: >-
+    The authorization server configuration must assign each OAuth client
+    only the scopes it actually requires, so a client cannot request or
+    receive privileges beyond its purpose.
+  vulnerability_pattern: >-
+    A client is configured with the full catalogue of scopes regardless
+    of need, so a compromised client or token can reach data and
+    operations the application was never designed to expose to it.
+  secure_pattern: >-
+    Each client registration lists a narrow allowed-scopes set, and the
+    authorization server clamps any scope request to that set, never
+    issuing a token with a scope the client is not entitled to.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client.allowedScopes = allScopes
+      secure: |
+        client.allowedScopes = {"read:profile", "read:orders"}
+        granted = requestedScopes intersect client.allowedScopes
+    python:
+      vulnerable: |
+        client.allowed_scopes = ALL_SCOPES
+      secure: |
+        client.allowed_scopes = {"read:profile", "read:orders"}
+        granted = set(requested_scopes) & client.allowed_scopes
+    javascript:
+      vulnerable: |
+        client.allowedScopes = ALL_SCOPES;
+      secure: |
+        client.allowedScopes = ["read:profile", "read:orders"];
+        const granted = requested.filter(s => client.allowedScopes.includes(s));
+    java:
+      vulnerable: |
+        client.setAllowedScopes(Scopes.ALL);
+      secure: |
+        client.setAllowedScopes(Set.of("read:profile", "read:orders"));
+        requested.retainAll(client.getAllowedScopes());
+    csharp:
+      vulnerable: |
+        client.AllowedScopes = Scopes.All;
+      secure: |
+        client.AllowedScopes = new[] { "read:profile", "read:orders" };
+        var granted = requested.Intersect(client.AllowedScopes);
+
+- id: V10.4.12
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 3
+  security_rule: >-
+    For each client the authorization server must allow only the
+    response_mode value that client needs, validating it against the
+    expected values or relying on PAR or JWT-secured authorization requests.
+  vulnerability_pattern: >-
+    The authorization endpoint honours any response_mode the request
+    asks for, so an attacker can switch a client to a mode such as
+    fragment or form_post that leaks the response to an unintended sink.
+  secure_pattern: >-
+    Each client registration pins the permitted response_mode, and the
+    authorization server rejects any request whose response_mode is not
+    on that per-client list.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respondUsing(req.response_mode)
+      secure: |
+        if req.response_mode not in client.allowedResponseModes: reject()
+        respondUsing(req.response_mode)
+    python:
+      vulnerable: |
+        mode = request.args.get("response_mode", "query")
+        return respond(mode)
+      secure: |
+        mode = request.args.get("response_mode", "query")
+        if mode not in client.allowed_response_modes:
+            abort(400, "invalid response_mode")
+        return respond(mode)
+    javascript:
+      vulnerable: |
+        respond(req.query.response_mode);
+      secure: |
+        if (!client.allowedResponseModes.includes(req.query.response_mode))
+          return res.status(400).send("invalid response_mode");
+        respond(req.query.response_mode);
+    java:
+      vulnerable: |
+        return respond(request.getParameter("response_mode"));
+      secure: |
+        String mode = request.getParameter("response_mode");
+        if (!client.getAllowedResponseModes().contains(mode))
+            throw new InvalidRequestException("invalid response_mode");
+        return respond(mode);
+    csharp:
+      vulnerable: |
+        return Respond(Request.Query["response_mode"]);
+      secure: |
+        var mode = Request.Query["response_mode"].ToString();
+        if (!client.AllowedResponseModes.Contains(mode))
+          return BadRequest("invalid response_mode");
+        return Respond(mode);
+
+- id: V10.4.13
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 3
+  security_rule: >-
+    When the code grant is used, it must always be combined with pushed
+    authorization requests so authorization parameters are sent over the
+    backchannel rather than through the browser.
+  vulnerability_pattern: >-
+    Authorization parameters travel as front-channel query string values,
+    so they can be observed or tampered with in the browser before the
+    authorization server ever sees them.
+  secure_pattern: >-
+    The client first pushes the authorization parameters to the PAR
+    endpoint over an authenticated backchannel call and then sends the
+    user to the authorization endpoint with only the opaque request_uri.
+  code_patterns:
+    generic:
+      vulnerable: |
+        redirect("/authorize?client_id=..&scope=..&redirect_uri=..")
+      secure: |
+        requestUri = postToPAR(client, params)   # backchannel
+        redirect("/authorize?client_id=..&request_uri=" + requestUri)
+    python:
+      vulnerable: |
+        return redirect(f"/authorize?client_id={cid}&scope={scope}")
+      secure: |
+        request_uri = par_client.push(client_id=cid, scope=scope)
+        return redirect(f"/authorize?client_id={cid}&request_uri={request_uri}")
+    javascript:
+      vulnerable: |
+        res.redirect(`/authorize?client_id=${cid}&scope=${scope}`);
+      secure: |
+        const requestUri = await parClient.push({ clientId: cid, scope });
+        res.redirect(`/authorize?client_id=${cid}&request_uri=${requestUri}`);
+    java:
+      vulnerable: |
+        response.sendRedirect("/authorize?client_id=" + cid + "&scope=" + scope);
+      secure: |
+        String requestUri = parClient.push(cid, scope);
+        response.sendRedirect("/authorize?client_id=" + cid + "&request_uri=" + requestUri);
+    csharp:
+      vulnerable: |
+        return Redirect($"/authorize?client_id={cid}&scope={scope}");
+      secure: |
+        var requestUri = await _par.PushAsync(cid, scope);
+        return Redirect($"/authorize?client_id={cid}&request_uri={requestUri}");
+
+- id: V10.4.14
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 3
+  security_rule: >-
+    The authorization server must issue only sender-constrained access
+    tokens, bound either to a client certificate via mutual TLS or to a
+    DPoP key.
+  vulnerability_pattern: >-
+    The authorization server issues plain bearer access tokens, so any
+    party that captures a token can use it without proving possession of
+    a bound key.
+  secure_pattern: >-
+    Every issued access token carries a cnf claim binding it to the
+    presenter's mTLS certificate thumbprint or DPoP public key, so the
+    token is useless without the matching private key.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = issueAccessToken(claims)   # plain bearer
+      secure: |
+        claims.cnf = { jkt: dpopKeyThumbprint(req) }
+        token = issueAccessToken(claims)
+    python:
+      vulnerable: |
+        token = jwt.encode(claims, key, algorithm="RS256")
+      secure: |
+        claims["cnf"] = {"jkt": dpop_thumbprint(request.headers["DPoP"])}
+        token = jwt.encode(claims, key, algorithm="RS256")
+    javascript:
+      vulnerable: |
+        const token = jwt.sign(claims, key, { algorithm: "RS256" });
+      secure: |
+        claims.cnf = { jkt: dpopThumbprint(req.headers.dpop) };
+        const token = jwt.sign(claims, key, { algorithm: "RS256" });
+    java:
+      vulnerable: |
+        String token = Jwts.builder().claims(claims).signWith(key).compact();
+      secure: |
+        claims.put("cnf", Map.of("jkt", dpopThumbprint(request.getHeader("DPoP"))));
+        String token = Jwts.builder().claims(claims).signWith(key).compact();
+    csharp:
+      vulnerable: |
+        var token = handler.CreateEncodedJwt(descriptor);
+      secure: |
+        descriptor.Claims["cnf"] = new { jkt = DpopThumbprint(Request.Headers["DPoP"]) };
+        var token = handler.CreateEncodedJwt(descriptor);
+
+- id: V10.4.15
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 3
+  security_rule: >-
+    For a server-side client, the authorization server must ensure the
+    authorization_details value originates from the client backend and was
+    not tampered with by the user, for example by requiring PAR or JAR.
+  vulnerability_pattern: >-
+    The rich authorization_details parameter is read from a front-channel
+    request, so the user can edit it in the browser to broaden the
+    transaction the consent screen describes.
+  secure_pattern: >-
+    For server-side clients the authorization_details is supplied only
+    through PAR or a signed JAR request object, so the value is fixed by
+    the backend and cannot be altered between the client and the server.
+  code_patterns:
+    generic:
+      vulnerable: |
+        details = req.query.authorization_details
+      secure: |
+        details = readFromParOrSignedJar(req.request_uri)
+    python:
+      vulnerable: |
+        details = json.loads(request.args["authorization_details"])
+      secure: |
+        pushed = par_store.get(request.args["request_uri"])
+        details = pushed.authorization_details  # set by the client backend
+    javascript:
+      vulnerable: |
+        const details = JSON.parse(req.query.authorization_details);
+      secure: |
+        const pushed = await parStore.get(req.query.request_uri);
+        const details = pushed.authorizationDetails;
+    java:
+      vulnerable: |
+        String details = request.getParameter("authorization_details");
+      secure: |
+        PushedRequest pushed = parStore.get(request.getParameter("request_uri"));
+        String details = pushed.getAuthorizationDetails();
+    csharp:
+      vulnerable: |
+        var details = Request.Query["authorization_details"].ToString();
+      secure: |
+        var pushed = _parStore.Get(Request.Query["request_uri"]);
+        var details = pushed.AuthorizationDetails;
+
+- id: V10.4.16
+  facet: OAuth and OIDC
+  section: OAuth Authorization Server
+  level: 3
+  security_rule: >-
+    The client must be confidential and the authorization server must
+    require a strong, replay-resistant, public-key client authentication
+    method such as mutual TLS or private_key_jwt.
+  vulnerability_pattern: >-
+    The client authenticates with a shared client secret, so a leaked
+    secret from logs, a config file, or a breach lets an attacker fully
+    impersonate the client.
+  secure_pattern: >-
+    The authorization server requires public-key client authentication —
+    tls_client_auth, self_signed_tls_client_auth, or private_key_jwt — so
+    no reusable shared secret exists to be stolen and replayed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client.authMethod = "client_secret_post"
+      secure: |
+        client.authMethod = "private_key_jwt"
+        if req.authMethod != client.authMethod: reject()
+    python:
+      vulnerable: |
+        client.token_endpoint_auth_method = "client_secret_basic"
+      secure: |
+        client.token_endpoint_auth_method = "private_key_jwt"
+        verify_private_key_jwt(request.form["client_assertion"], client.jwks)
+    javascript:
+      vulnerable: |
+        client.tokenEndpointAuthMethod = "client_secret_post";
+      secure: |
+        client.tokenEndpointAuthMethod = "private_key_jwt";
+        await verifyPrivateKeyJwt(req.body.client_assertion, client.jwks);
+    java:
+      vulnerable: |
+        client.setAuthMethod("client_secret_basic");
+      secure: |
+        client.setAuthMethod("private_key_jwt");
+        privateKeyJwtVerifier.verify(request.getParameter("client_assertion"), client.getJwks());
+    csharp:
+      vulnerable: |
+        client.TokenEndpointAuthMethod = "client_secret_post";
+      secure: |
+        client.TokenEndpointAuthMethod = "private_key_jwt";
+        _jwtVerifier.Verify(Request.Form["client_assertion"], client.Jwks);
+
+# ---------------------------------------------------------------------------
+# V10.5 — OIDC Client
+# ---------------------------------------------------------------------------
+
+- id: V10.5.1
+  facet: OAuth and OIDC
+  section: OIDC Client
+  level: 2
+  security_rule: >-
+    The OIDC client acting as relying party must mitigate ID Token replay
+    by checking that the nonce claim in the ID Token matches the nonce it
+    sent in the authentication request.
+  vulnerability_pattern: >-
+    The client accepts an ID Token without comparing its nonce to the
+    value it generated, so an attacker can replay an ID Token captured
+    from another session and have it accepted.
+  secure_pattern: >-
+    The client generates a random nonce, stores it bound to the
+    user-agent session, and rejects the ID Token unless the token's nonce
+    claim equals the stored value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        idToken = verify(rawIdToken); login(idToken.sub)
+      secure: |
+        idToken = verify(rawIdToken)
+        if idToken.nonce != session.nonce: reject()
+        login(idToken.sub)
+    python:
+      vulnerable: |
+        claims = jwt.decode(id_token, key, algorithms=["RS256"])
+      secure: |
+        claims = jwt.decode(id_token, key, algorithms=["RS256"])
+        if claims.get("nonce") != session.pop("oidc_nonce"):
+            abort(400, "nonce mismatch")
+    javascript:
+      vulnerable: |
+        const claims = jwt.verify(idToken, key);
+      secure: |
+        const claims = jwt.verify(idToken, key);
+        if (claims.nonce !== req.session.oidcNonce) throw Error("nonce mismatch");
+    java:
+      vulnerable: |
+        Claims c = parser.parseClaimsJws(idToken).getBody();
+      secure: |
+        Claims c = parser.parseClaimsJws(idToken).getBody();
+        if (!Objects.equals(c.get("nonce"), session.getAttribute("nonce")))
+            throw new SecurityException("nonce mismatch");
+    csharp:
+      vulnerable: |
+        var claims = handler.ValidateToken(idToken, parms, out _);
+      secure: |
+        var claims = handler.ValidateToken(idToken, parms, out _);
+        if (claims.FindFirstValue("nonce") != HttpContext.Session.GetString("nonce"))
+            throw new SecurityException("nonce mismatch");
+
+- id: V10.5.2
+  facet: OAuth and OIDC
+  section: OIDC Client
+  level: 2
+  security_rule: >-
+    The OIDC client must uniquely identify the user from ID Token claims
+    that cannot be reassigned within an identity provider, normally the
+    sub claim scoped to that provider.
+  vulnerability_pattern: >-
+    The client identifies users by a mutable ID Token claim such as email
+    or name, so a changed or reused value at the provider can let one
+    user inherit another's local account.
+  secure_pattern: >-
+    The client keys the local account on the provider's immutable sub
+    claim (scoped per issuer), so identity is stable across profile
+    changes and freed usernames cannot be hijacked.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user = findOrCreateByEmail(idToken.email)
+      secure: |
+        user = findOrCreateBySubject(idToken.iss, idToken.sub)
+    python:
+      vulnerable: |
+        user = get_or_create(User, email=claims["email"])
+      secure: |
+        user = get_or_create(User, issuer=claims["iss"], subject=claims["sub"])
+    javascript:
+      vulnerable: |
+        const user = await Users.upsert({ email: claims.email });
+      secure: |
+        const user = await Users.upsert({ issuer: claims.iss, subject: claims.sub });
+    java:
+      vulnerable: |
+        User u = userService.findByEmail(claims.get("email", String.class));
+      secure: |
+        User u = userService.findBySubject(claims.getIssuer(), claims.getSubject());
+    csharp:
+      vulnerable: |
+        var user = _users.GetByEmail(claims["email"]);
+      secure: |
+        var user = _users.GetBySubject(claims["iss"], claims["sub"]);
+
+- id: V10.5.3
+  facet: OAuth and OIDC
+  section: OIDC Client
+  level: 2
+  security_rule: >-
+    The OIDC client must reject authorization server metadata whose issuer
+    URL does not exactly match the issuer URL the client was pre-configured
+    to trust, blocking impersonation through forged metadata.
+  vulnerability_pattern: >-
+    The client fetches and trusts discovery metadata without checking the
+    issuer field, so a malicious server can serve metadata that
+    impersonates a legitimate provider.
+  secure_pattern: >-
+    After loading discovery metadata the client compares its issuer value
+    against the pre-configured expected issuer using exact string
+    comparison and rejects the metadata on any mismatch.
+  code_patterns:
+    generic:
+      vulnerable: |
+        metadata = fetchDiscovery(discoveryUrl); use(metadata)
+      secure: |
+        metadata = fetchDiscovery(discoveryUrl)
+        if metadata.issuer != expectedIssuer: reject()
+    python:
+      vulnerable: |
+        metadata = requests.get(discovery_url).json()
+      secure: |
+        metadata = requests.get(discovery_url).json()
+        if metadata["issuer"] != EXPECTED_ISSUER:
+            raise ValueError("issuer mismatch")
+    javascript:
+      vulnerable: |
+        const metadata = await (await fetch(discoveryUrl)).json();
+      secure: |
+        const metadata = await (await fetch(discoveryUrl)).json();
+        if (metadata.issuer !== EXPECTED_ISSUER) throw new Error("issuer mismatch");
+    java:
+      vulnerable: |
+        ProviderMetadata m = discoveryClient.fetch(discoveryUrl);
+      secure: |
+        ProviderMetadata m = discoveryClient.fetch(discoveryUrl);
+        if (!m.getIssuer().equals(EXPECTED_ISSUER))
+            throw new SecurityException("issuer mismatch");
+    csharp:
+      vulnerable: |
+        var metadata = await _discovery.GetAsync(discoveryUrl);
+      secure: |
+        var metadata = await _discovery.GetAsync(discoveryUrl);
+        if (metadata.Issuer != ExpectedIssuer)
+            throw new SecurityException("issuer mismatch");
+
+- id: V10.5.4
+  facet: OAuth and OIDC
+  section: OIDC Client
+  level: 2
+  security_rule: >-
+    The OIDC client must confirm that an ID Token is intended for it by
+    checking that the token's aud claim equals the client's own client_id.
+  vulnerability_pattern: >-
+    The client verifies only the ID Token signature and ignores the aud
+    claim, so a token minted for a different relying party at the same
+    provider is accepted and can be replayed.
+  secure_pattern: >-
+    After signature validation the client checks the aud claim equals its
+    own client_id and rejects any ID Token whose audience names a
+    different relying party.
+  code_patterns:
+    generic:
+      vulnerable: |
+        idToken = verifySignature(raw); login(idToken.sub)
+      secure: |
+        idToken = verifySignature(raw)
+        if idToken.aud != myClientId: reject()
+        login(idToken.sub)
+    python:
+      vulnerable: |
+        claims = jwt.decode(id_token, key, algorithms=["RS256"])
+      secure: |
+        claims = jwt.decode(id_token, key, algorithms=["RS256"],
+                            audience=MY_CLIENT_ID)
+    javascript:
+      vulnerable: |
+        const claims = jwt.verify(idToken, key, { algorithms: ["RS256"] });
+      secure: |
+        const claims = jwt.verify(idToken, key,
+          { algorithms: ["RS256"], audience: MY_CLIENT_ID });
+    java:
+      vulnerable: |
+        Jws<Claims> jws = parser.parseClaimsJws(idToken);
+      secure: |
+        Jws<Claims> jws = Jwts.parser().requireAudience(MY_CLIENT_ID)
+            .verifyWith(key).build().parseSignedClaims(idToken);
+    csharp:
+      vulnerable: |
+        var claims = handler.ValidateToken(idToken, new TokenValidationParameters {
+          ValidateAudience = false }, out _);
+      secure: |
+        var claims = handler.ValidateToken(idToken, new TokenValidationParameters {
+          ValidateAudience = true, ValidAudience = MyClientId }, out _);
+
+- id: V10.5.5
+  facet: OAuth and OIDC
+  section: OIDC Client
+  level: 2
+  security_rule: >-
+    For OIDC back-channel logout the relying party must reject malformed
+    logout tokens — verifying the type is logout+jwt, the events claim has
+    the correct member, and no nonce claim is present — to prevent forced
+    logout denial of service and cross-JWT confusion.
+  vulnerability_pattern: >-
+    The relying party processes any signed JWT it receives at the logout
+    endpoint, so an ID Token or other JWT can be replayed as a logout
+    token to forcibly terminate a victim's sessions.
+  secure_pattern: >-
+    The logout endpoint validates the token typ header is logout+jwt,
+    requires the back-channel logout events member, and rejects any token
+    that carries a nonce claim before honouring the logout.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = verify(logoutToken); endSession(claims.sub)
+      secure: |
+        if header.typ != "logout+jwt": reject()
+        if "events" not in claims or "nonce" in claims: reject()
+        endSession(claims.sub)
+    python:
+      vulnerable: |
+        claims = jwt.decode(logout_token, key, algorithms=["RS256"])
+        end_session(claims["sub"])
+      secure: |
+        header = jwt.get_unverified_header(logout_token)
+        claims = jwt.decode(logout_token, key, algorithms=["RS256"])
+        if header["typ"] != "logout+jwt" or "nonce" in claims \
+                or "http://schemas.openid.net/event/backchannel-logout" not in claims["events"]:
+            abort(400, "invalid logout token")
+        end_session(claims["sub"])
+    javascript:
+      vulnerable: |
+        const claims = jwt.verify(logoutToken, key);
+        endSession(claims.sub);
+      secure: |
+        const { header, payload } = jwt.verify(logoutToken, key, { complete: true });
+        if (header.typ !== "logout+jwt" || payload.nonce || !payload.events)
+          return res.status(400).send("invalid logout token");
+        endSession(payload.sub);
+    java:
+      vulnerable: |
+        Claims c = parser.parseClaimsJws(logoutToken).getBody();
+        endSession(c.getSubject());
+      secure: |
+        Jws<Claims> jws = parser.parseClaimsJws(logoutToken);
+        if (!"logout+jwt".equals(jws.getHeader().getType())
+            || jws.getBody().containsKey("nonce")
+            || !jws.getBody().containsKey("events"))
+          throw new InvalidTokenException("invalid logout token");
+        endSession(jws.getBody().getSubject());
+    csharp:
+      vulnerable: |
+        var claims = handler.ValidateToken(logoutToken, parms, out _);
+        EndSession(claims.FindFirstValue("sub"));
+      secure: |
+        var jwt = handler.ReadJwtToken(logoutToken);
+        if (jwt.Header.Typ != "logout+jwt" || jwt.Payload.ContainsKey("nonce")
+            || !jwt.Payload.ContainsKey("events"))
+          return BadRequest("invalid logout token");
+        EndSession(jwt.Subject);
+
+# ---------------------------------------------------------------------------
+# V10.6 — OpenID Provider
+# ---------------------------------------------------------------------------
+
+- id: V10.6.1
+  facet: OAuth and OIDC
+  section: OpenID Provider
+  level: 2
+  security_rule: >-
+    The OpenID Provider must allow only the response types code, ciba,
+    id_token, or id_token code; the token implicit flow must never be
+    permitted and plain code is preferred over the hybrid flow.
+  vulnerability_pattern: >-
+    The provider accepts response_type values including token, enabling
+    an implicit flow that returns access tokens through the browser front
+    channel where they leak via history and referrers.
+  secure_pattern: >-
+    The provider validates response_type against a fixed allowlist of
+    code, ciba, id_token, and id_token code, and rejects any request that
+    asks for the implicit token response.
+  code_patterns:
+    generic:
+      vulnerable: |
+        proceedWith(req.response_type)
+      secure: |
+        allowed = {"code", "ciba", "id_token", "id_token code"}
+        if req.response_type not in allowed: reject()
+    python:
+      vulnerable: |
+        return authorize(request.args["response_type"])
+      secure: |
+        allowed = {"code", "ciba", "id_token", "id_token code"}
+        if request.args["response_type"] not in allowed:
+            abort(400, "unsupported_response_type")
+        return authorize(request.args["response_type"])
+    javascript:
+      vulnerable: |
+        authorize(req.query.response_type);
+      secure: |
+        const allowed = ["code", "ciba", "id_token", "id_token code"];
+        if (!allowed.includes(req.query.response_type))
+          return res.status(400).send("unsupported_response_type");
+        authorize(req.query.response_type);
+    java:
+      vulnerable: |
+        return authorize(request.getParameter("response_type"));
+      secure: |
+        Set<String> allowed = Set.of("code", "ciba", "id_token", "id_token code");
+        if (!allowed.contains(request.getParameter("response_type")))
+            throw new InvalidRequestException("unsupported_response_type");
+        return authorize(request.getParameter("response_type"));
+    csharp:
+      vulnerable: |
+        return Authorize(Request.Query["response_type"]);
+      secure: |
+        var allowed = new[] { "code", "ciba", "id_token", "id_token code" };
+        if (!allowed.Contains(Request.Query["response_type"].ToString()))
+          return BadRequest("unsupported_response_type");
+        return Authorize(Request.Query["response_type"]);
+
+- id: V10.6.2
+  facet: OAuth and OIDC
+  section: OpenID Provider
+  level: 2
+  security_rule: >-
+    The OpenID Provider must mitigate forced-logout denial of service by
+    obtaining explicit end-user confirmation, or by validating logout
+    request parameters such as the id_token_hint when present.
+  vulnerability_pattern: >-
+    The provider terminates a user's session on receipt of any logout
+    request, so an attacker can forcibly log a victim out simply by
+    triggering the logout endpoint.
+  secure_pattern: >-
+    The provider either prompts the user to confirm logout or validates
+    the id_token_hint binds the request to the current session, so an
+    unsolicited logout request cannot end the session unilaterally.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onLogoutRequest(): endSession(currentUser)
+      secure: |
+        onLogoutRequest(idTokenHint):
+          if validHintForSession(idTokenHint) or userConfirmed(): endSession(currentUser)
+    python:
+      vulnerable: |
+        @app.get("/logout")
+        def logout(): return end_session(current_user)
+      secure: |
+        @app.get("/logout")
+        def logout():
+            hint = request.args.get("id_token_hint")
+            if not hint_matches_session(hint) and not confirmed():
+                return render_template("confirm_logout.html")
+            return end_session(current_user)
+    javascript:
+      vulnerable: |
+        app.get("/logout", (req, res) => endSession(req.user));
+      secure: |
+        app.get("/logout", (req, res) => {
+          if (!hintMatchesSession(req.query.id_token_hint) && !req.query.confirmed)
+            return res.render("confirm-logout");
+          endSession(req.user);
+        });
+    java:
+      vulnerable: |
+        @GetMapping("/logout")
+        public void logout() { endSession(currentUser()); }
+      secure: |
+        @GetMapping("/logout")
+        public String logout(@RequestParam(required = false) String idTokenHint) {
+          if (!hintMatchesSession(idTokenHint) && !isConfirmed())
+            return "confirm-logout";
+          endSession(currentUser()); return "logged-out";
+        }
+    csharp:
+      vulnerable: |
+        [HttpGet("logout")] public IActionResult Logout() { EndSession(User); return Ok(); }
+      secure: |
+        [HttpGet("logout")]
+        public IActionResult Logout(string idTokenHint, bool confirmed = false) {
+          if (!HintMatchesSession(idTokenHint) && !confirmed) return View("ConfirmLogout");
+          EndSession(User); return Ok();
+        }
+
+# ---------------------------------------------------------------------------
+# V10.7 — Consent Management
+# ---------------------------------------------------------------------------
+
+- id: V10.7.1
+  facet: OAuth and OIDC
+  section: Consent Management
+  level: 2
+  security_rule: >-
+    The authorization server must obtain user consent for each
+    authorization request, and must always explicitly prompt for consent
+    when the client's identity cannot be assured.
+  vulnerability_pattern: >-
+    The authorization server silently reuses a prior consent or skips the
+    consent screen entirely, so a client gains authorization the user
+    never knowingly approved.
+  secure_pattern: >-
+    The authorization server checks for a valid recorded consent covering
+    the requested scopes and client, and always shows an explicit consent
+    prompt when the client is untrusted or no matching consent exists.
+  code_patterns:
+    generic:
+      vulnerable: |
+        issueCode(client, scopes)   # consent never checked
+      secure: |
+        if not hasConsent(user, client, scopes) or not client.trusted:
+          showConsentScreen(client, scopes)
+        else: issueCode(client, scopes)
+    python:
+      vulnerable: |
+        return issue_code(client, scopes)
+      secure: |
+        if not consent_store.covers(user, client, scopes) or not client.trusted:
+            return render_template("consent.html", client=client, scopes=scopes)
+        return issue_code(client, scopes)
+    javascript:
+      vulnerable: |
+        return issueCode(client, scopes);
+      secure: |
+        if (!consentStore.covers(user, client, scopes) || !client.trusted)
+          return res.render("consent", { client, scopes });
+        return issueCode(client, scopes);
+    java:
+      vulnerable: |
+        return issueCode(client, scopes);
+      secure: |
+        if (!consentStore.covers(user, client, scopes) || !client.isTrusted())
+            return "consent";
+        return issueCode(client, scopes);
+    csharp:
+      vulnerable: |
+        return IssueCode(client, scopes);
+      secure: |
+        if (!_consent.Covers(user, client, scopes) || !client.Trusted)
+          return View("Consent", new ConsentModel(client, scopes));
+        return IssueCode(client, scopes);
+
+- id: V10.7.2
+  facet: OAuth and OIDC
+  section: Consent Management
+  level: 2
+  security_rule: >-
+    When prompting for consent the authorization server must present clear
+    and sufficient information — the nature of the requested
+    authorizations, the identity of the application, and the lifetime of
+    the grant.
+  vulnerability_pattern: >-
+    The consent screen shows only raw scope strings or an opaque client
+    name, so the user cannot understand what access they are granting,
+    to whom, or for how long.
+  secure_pattern: >-
+    The consent screen renders human-readable descriptions of each
+    requested scope or authorization detail, the verified application
+    identity, and the lifetime of the authorization being granted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        render("Approve access?", scopes=rawScopeStrings)
+      secure: |
+        render(consentView,
+          app=client.displayName, verified=client.verified,
+          permissions=describe(scopes), lifetime=grant.lifetime)
+    python:
+      vulnerable: |
+        return render_template("consent.html", scopes=scopes)
+      secure: |
+        return render_template("consent.html",
+            app_name=client.display_name, verified=client.verified,
+            permissions=[describe_scope(s) for s in scopes],
+            lifetime=grant_lifetime)
+    javascript:
+      vulnerable: |
+        res.render("consent", { scopes });
+      secure: |
+        res.render("consent", {
+          appName: client.displayName, verified: client.verified,
+          permissions: scopes.map(describeScope), lifetime: grant.lifetime,
+        });
+    java:
+      vulnerable: |
+        model.addAttribute("scopes", scopes);
+        return "consent";
+      secure: |
+        model.addAttribute("appName", client.getDisplayName());
+        model.addAttribute("permissions", scopes.stream().map(this::describe).toList());
+        model.addAttribute("lifetime", grant.getLifetime());
+        return "consent";
+    csharp:
+      vulnerable: |
+        return View("Consent", scopes);
+      secure: |
+        return View("Consent", new ConsentModel {
+          AppName = client.DisplayName, Verified = client.Verified,
+          Permissions = scopes.Select(DescribeScope), Lifetime = grant.Lifetime });
+
+- id: V10.7.3
+  facet: OAuth and OIDC
+  section: Consent Management
+  level: 2
+  security_rule: >-
+    The user must be able to review, modify, and revoke the consents they
+    have granted through the authorization server.
+  vulnerability_pattern: >-
+    Once consent is granted the user has no interface to see or withdraw
+    it, so a client keeps its authorization indefinitely even after the
+    user no longer wants to allow it.
+  secure_pattern: >-
+    The authorization server provides a consent management view where the
+    user lists every granted authorization and can narrow its scopes or
+    revoke it, with revocation invalidating the associated tokens.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # consents stored but never exposed to the user
+      secure: |
+        onRevokeConsent(consentId, currentUser):
+          c = lookup(consentId)
+          if c.owner == currentUser: c.delete(); revokeTokensFor(c)
+    python:
+      vulnerable: |
+        # no route to review or revoke granted consents
+      secure: |
+        @app.post("/account/consents/<cid>/revoke")
+        def revoke_consent(cid):
+            c = Consent.query.get_or_404(cid)
+            if c.user_id != current_user.id: abort(403)
+            revoke_tokens_for(c); db.session.delete(c)
+    javascript:
+      vulnerable: |
+        // granted consents are not user-manageable
+      secure: |
+        app.post("/account/consents/:id/revoke", async (req, res) => {
+          const c = await Consent.find(req.params.id);
+          if (c.userId !== req.user.id) return res.sendStatus(403);
+          await revokeTokensFor(c); await c.destroy();
+        });
+    java:
+      vulnerable: |
+        // no consent management endpoint
+      secure: |
+        @PostMapping("/account/consents/{id}/revoke")
+        public void revoke(@PathVariable String id, @AuthenticationPrincipal User u) {
+          Consent c = consentRepo.findById(id).orElseThrow();
+          if (!c.getUserId().equals(u.getId())) throw new ForbiddenException();
+          tokenService.revokeFor(c); consentRepo.delete(c);
+        }
+    csharp:
+      vulnerable: |
+        // consents cannot be reviewed or revoked by the user
+      secure: |
+        [HttpPost("account/consents/{id}/revoke")]
+        public IActionResult Revoke(string id) {
+          var c = _consents.Find(id);
+          if (c.UserId != User.GetId()) return Forbid();
+          _tokens.RevokeFor(c); _consents.Delete(c); return Ok();
+        }

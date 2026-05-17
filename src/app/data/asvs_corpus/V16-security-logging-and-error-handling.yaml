@@ -1,0 +1,735 @@
+# OWASP ASVS 5.0 — Chapter V16: Security Logging and Error Handling
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V16.1 — Security Logging Documentation
+# ---------------------------------------------------------------------------
+
+- id: V16.1.1
+  facet: Security Logging and Error Handling
+  section: Security Logging Documentation
+  level: 2
+  security_rule: >-
+    Maintain a log inventory that documents, for each layer of the
+    technology stack, which events are logged, the log format, where logs
+    are stored, how they are used, who can access them, and the retention
+    period.
+  vulnerability_pattern: >-
+    Logging is configured ad hoc per service with no central record of
+    what is captured, where it lives, or how long it is kept, so gaps,
+    duplicate sinks, and unbounded retention go unnoticed.
+  secure_pattern: >-
+    A maintained inventory describes the logging at every layer — events,
+    formats, storage locations, usage, access controls, and retention —
+    and is reviewed when the stack changes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # logging set up per service, no inventory of events or retention
+      secure: |
+        # log-inventory.md records: layer, events, format, sink, access, retention
+
+# ---------------------------------------------------------------------------
+# V16.2 — General Logging
+# ---------------------------------------------------------------------------
+
+- id: V16.2.1
+  facet: Security Logging and Error Handling
+  section: General Logging
+  level: 2
+  security_rule: >-
+    Every log entry must carry the metadata needed to reconstruct an
+    incident timeline — when it happened, where, who the actor was, and
+    what action was taken.
+  vulnerability_pattern: >-
+    A log line records only a free-text message with no timestamp, actor,
+    source, or action fields, so an investigator cannot tie the event to a
+    user, request, or point in time.
+  secure_pattern: >-
+    Each entry is structured with explicit fields for timestamp, actor or
+    user id, source address or component, and the action or outcome, so
+    events can be correlated and sequenced.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("login failed")
+      secure: |
+        log(event="login_failed", ts=now_utc(), user=user_id, ip=src_ip)
+    python:
+      vulnerable: |
+        logger.info("login failed")
+      secure: |
+        logger.info("login_failed", extra={"user_id": user_id, "src_ip": ip})
+    javascript:
+      vulnerable: |
+        logger.info("login failed");
+      secure: |
+        logger.info({ event: "login_failed", userId, srcIp, ts: new Date().toISOString() });
+    java:
+      vulnerable: |
+        log.info("login failed");
+      secure: |
+        log.info("login_failed user={} ip={} at={}", userId, srcIp, Instant.now());
+    csharp:
+      vulnerable: |
+        logger.LogInformation("login failed");
+      secure: |
+        logger.LogInformation("login_failed user={UserId} ip={Ip}", userId, srcIp);
+
+- id: V16.2.2
+  facet: Security Logging and Error Handling
+  section: General Logging
+  level: 2
+  security_rule: >-
+    Synchronize the clocks of all logging components and record timestamps
+    in UTC, or with an explicit time-zone offset, so events across systems
+    can be ordered reliably.
+  vulnerability_pattern: >-
+    Timestamps are written in unsynchronized local server time with no
+    offset, so daylight-saving shifts and clock drift make events from
+    different hosts impossible to order correctly.
+  secure_pattern: >-
+    Hosts sync their clocks via NTP and the application records timestamps
+    in UTC or with an explicit offset, giving a consistent global ordering
+    across distributed components.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ts = localTimeNow()              # ambiguous, drifts, no offset
+      secure: |
+        ts = utcTimeNow()                # ISO-8601 UTC, NTP-synced host
+    python:
+      vulnerable: |
+        ts = datetime.now().isoformat()
+      secure: |
+        ts = datetime.now(timezone.utc).isoformat()
+    javascript:
+      vulnerable: |
+        const ts = new Date().toString();
+      secure: |
+        const ts = new Date().toISOString();   // UTC, Z-suffixed
+    java:
+      vulnerable: |
+        String ts = LocalDateTime.now().toString();
+      secure: |
+        String ts = Instant.now().toString();   // UTC
+    csharp:
+      vulnerable: |
+        var ts = DateTime.Now.ToString();
+      secure: |
+        var ts = DateTimeOffset.UtcNow.ToString("o");
+
+- id: V16.2.3
+  facet: Security Logging and Error Handling
+  section: General Logging
+  level: 2
+  security_rule: >-
+    The application must only write or broadcast logs to the files and
+    services recorded in the log inventory, with no undocumented sinks.
+  vulnerability_pattern: >-
+    An ad hoc print, console write, or extra handler ships log data to a
+    file or third-party endpoint that the inventory does not list, leaking
+    events to an uncontrolled location.
+  secure_pattern: >-
+    Logging is routed only through the configured handlers that target the
+    documented sinks, and stray prints or unapproved appenders are removed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        print(event)                      # undocumented stdout sink
+        postTo("https://3p-analytics", event)
+      secure: |
+        logger.emit(event)                # routes only to inventoried sinks
+    python:
+      vulnerable: |
+        print(f"audit: {event}")
+      secure: |
+        logging.getLogger("audit").info(event)   # configured handlers only
+    javascript:
+      vulnerable: |
+        console.log(event);
+        fetch("https://3p-analytics", { method: "POST", body: event });
+      secure: |
+        logger.info(event);              // winston transports per inventory
+    java:
+      vulnerable: |
+        System.out.println("audit: " + event);
+      secure: |
+        auditLogger.info(event);         // appenders per logback config
+    csharp:
+      vulnerable: |
+        Console.WriteLine($"audit: {event}");
+      secure: |
+        _logger.LogInformation("audit {Event}", event);  // configured providers
+
+- id: V16.2.4
+  facet: Security Logging and Error Handling
+  section: General Logging
+  level: 2
+  security_rule: >-
+    Logs must be emitted in a format the log processor can read and
+    correlate, preferably a single common structured format across the
+    application.
+  vulnerability_pattern: >-
+    Each component writes logs in its own free-text shape, so the log
+    processor cannot parse fields or correlate events and analysts fall
+    back to manual grepping.
+  secure_pattern: >-
+    Every component emits the same structured format, such as JSON lines
+    with shared field names, so the processor can index, query, and
+    correlate events automatically.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("user " + name + " did " + action + " ok")
+      secure: |
+        log(json(event=action, user=name, outcome="ok"))
+    python:
+      vulnerable: |
+        logger.info("user %s did %s", name, action)
+      secure: |
+        logger.info(json.dumps({"event": action, "user": name, "outcome": "ok"}))
+    javascript:
+      vulnerable: |
+        logger.info(`user ${name} did ${action}`);
+      secure: |
+        logger.info(JSON.stringify({ event: action, user: name, outcome: "ok" }));
+    java:
+      vulnerable: |
+        log.info("user " + name + " did " + action);
+      secure: |
+        log.info(mapper.writeValueAsString(Map.of("event", action, "user", name)));
+    csharp:
+      vulnerable: |
+        logger.LogInformation("user " + name + " did " + action);
+      secure: |
+        logger.LogInformation("{Payload}", JsonSerializer.Serialize(new { action, name }));
+
+- id: V16.2.5
+  facet: Security Logging and Error Handling
+  section: General Logging
+  level: 2
+  security_rule: >-
+    Logging of sensitive data must follow the data's protection level —
+    some data, such as credentials or payment details, must never be
+    logged, and other data, such as session tokens, may only appear hashed
+    or masked.
+  vulnerability_pattern: >-
+    Request bodies, headers, or objects are logged verbatim, so passwords,
+    card numbers, and session tokens land in plaintext in log files that
+    have a wider audience than the data warrants.
+  secure_pattern: >-
+    Sensitive fields are dropped or masked before logging, and tokens are
+    logged only as a hash or partial value, so log access does not become
+    a path to credential exposure.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("login", body=requestBody)        # password in plaintext
+      secure: |
+        log("login", user=username)           # secret fields omitted
+    python:
+      vulnerable: |
+        logger.info("auth attempt %s", request.json)
+      secure: |
+        logger.info("auth attempt user=%s token=%s", user, sha256(token)[:8])
+    javascript:
+      vulnerable: |
+        logger.info("login", req.body);
+      secure: |
+        logger.info("login", { user: req.body.user });   // password dropped
+    java:
+      vulnerable: |
+        log.info("login payload {}", payload);
+      secure: |
+        log.info("login user={} token={}", user, mask(token));
+    csharp:
+      vulnerable: |
+        logger.LogInformation("login {Body}", requestBody);
+      secure: |
+        logger.LogInformation("login user={User} token={Token}", user, Mask(token));
+
+# ---------------------------------------------------------------------------
+# V16.3 — Security Events
+# ---------------------------------------------------------------------------
+
+- id: V16.3.1
+  facet: Security Logging and Error Handling
+  section: Security Events
+  level: 2
+  security_rule: >-
+    All authentication operations must be logged, both successful and
+    failed, and should capture additional metadata such as the
+    authentication type or factors used.
+  vulnerability_pattern: >-
+    Only failures are logged, or only successes, so brute-force runs and
+    account takeovers leave no usable trail and the factors involved are
+    never recorded.
+  secure_pattern: >-
+    Every authentication attempt emits a log entry with the outcome, the
+    actor, the source, and the method or factors used, giving full
+    visibility into login activity.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if !ok: log("auth failed")             # success path silent
+      secure: |
+        log(event="auth", outcome=ok, user=user_id, method="totp", ip=src_ip)
+    python:
+      vulnerable: |
+        if not verified:
+            logger.warning("auth failed")
+      secure: |
+        logger.info("auth", extra={"outcome": verified, "user": user_id, "mfa": "totp"})
+    javascript:
+      vulnerable: |
+        if (!ok) logger.warn("auth failed");
+      secure: |
+        logger.info({ event: "auth", outcome: ok, userId, factor: "webauthn", srcIp });
+    java:
+      vulnerable: |
+        if (!ok) log.warn("auth failed");
+      secure: |
+        log.info("auth outcome={} user={} factor={}", ok, userId, "totp");
+    csharp:
+      vulnerable: |
+        if (!ok) logger.LogWarning("auth failed");
+      secure: |
+        logger.LogInformation("auth outcome={Ok} user={User} factor={Factor}", ok, userId, "totp");
+
+- id: V16.3.2
+  facet: Security Logging and Error Handling
+  section: Security Events
+  level: 2
+  security_rule: >-
+    Failed authorization attempts must be logged, and at L3 every
+    authorization decision must be logged, including access to sensitive
+    data, without logging the sensitive data itself.
+  vulnerability_pattern: >-
+    Access-denied outcomes pass silently, so probing for unauthorized
+    resources is invisible, and successful access to sensitive records
+    leaves no audit entry.
+  secure_pattern: >-
+    Each authorization check emits an entry with the actor, the resource,
+    and the allow-or-deny decision, recording references to sensitive data
+    rather than the data itself.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if !allowed: return 403                # denial not recorded
+      secure: |
+        log(event="authz", decision=allowed, user=user_id, resource=res_id)
+    python:
+      vulnerable: |
+        if not can_access(user, doc):
+            abort(403)
+      secure: |
+        logger.info("authz", extra={"decision": allowed, "user": user.id, "res": doc.id})
+    javascript:
+      vulnerable: |
+        if (!allowed) return res.sendStatus(403);
+      secure: |
+        logger.info({ event: "authz", decision: allowed, userId, resourceId });
+    java:
+      vulnerable: |
+        if (!allowed) throw new AccessDeniedException();
+      secure: |
+        log.info("authz decision={} user={} resource={}", allowed, userId, resId);
+    csharp:
+      vulnerable: |
+        if (!allowed) return Forbid();
+      secure: |
+        logger.LogInformation("authz decision={D} user={U} resource={R}", allowed, userId, resId);
+
+- id: V16.3.3
+  facet: Security Logging and Error Handling
+  section: Security Events
+  level: 2
+  security_rule: >-
+    The application must log the security events defined in its
+    documentation and also log attempts to bypass controls such as input
+    validation, business logic, and anti-automation.
+  vulnerability_pattern: >-
+    A rejected input or a violated business rule is handled by returning
+    an error with no log entry, so probing and automation against the
+    controls produces no detectable signal.
+  secure_pattern: >-
+    Whenever a control rejects a request — failed validation, a broken
+    business invariant, or a rate-limit trip — a security event is logged
+    with the actor and the reason.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if !valid(input): return 400           # bypass attempt not logged
+      secure: |
+        if !valid(input):
+            log(event="validation_failed", user=user_id, field=name); return 400
+    python:
+      vulnerable: |
+        if not schema.is_valid(payload):
+            return error(400)
+      secure: |
+        if not schema.is_valid(payload):
+            logger.warning("validation_failed", extra={"user": user_id})
+            return error(400)
+    javascript:
+      vulnerable: |
+        if (!schema.safeParse(body).success) return res.sendStatus(400);
+      secure: |
+        if (!schema.safeParse(body).success) {
+          logger.warn({ event: "validation_failed", userId }); return res.sendStatus(400);
+        }
+    java:
+      vulnerable: |
+        if (!validator.validate(input).isEmpty()) return badRequest();
+      secure: |
+        if (!violations.isEmpty()) { log.warn("validation_failed user={}", userId); return badRequest(); }
+    csharp:
+      vulnerable: |
+        if (!ModelState.IsValid) return BadRequest();
+      secure: |
+        if (!ModelState.IsValid) { logger.LogWarning("validation_failed user={U}", userId); return BadRequest(); }
+
+- id: V16.3.4
+  facet: Security Logging and Error Handling
+  section: Security Events
+  level: 2
+  security_rule: >-
+    The application must log unexpected errors and security-control
+    failures, including backend TLS handshake failures.
+  vulnerability_pattern: >-
+    Unexpected exceptions and failed security controls — such as a backend
+    TLS connection that cannot be established — are swallowed silently, so
+    a failing or downgraded control is never noticed.
+  secure_pattern: >-
+    Unexpected errors and control failures are caught and logged at an
+    appropriate severity with enough context to investigate, and a TLS
+    failure is recorded rather than ignored.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try: callBackend()
+        except: pass                           # TLS failure swallowed
+      secure: |
+        try: callBackend()
+        except TlsError as e: log(event="tls_failure", error=e); raise
+    python:
+      vulnerable: |
+        try:
+            requests.get(url)
+        except Exception:
+            pass
+      secure: |
+        except requests.exceptions.SSLError as e:
+            logger.error("backend_tls_failure", exc_info=e); raise
+    javascript:
+      vulnerable: |
+        try { await fetch(url); } catch { /* ignored */ }
+      secure: |
+        catch (e) { logger.error({ event: "backend_tls_failure", err: e.message }); throw e; }
+    java:
+      vulnerable: |
+        try { client.send(req); } catch (Exception e) { }
+      secure: |
+        catch (SSLHandshakeException e) { log.error("backend_tls_failure", e); throw e; }
+    csharp:
+      vulnerable: |
+        try { await http.GetAsync(url); } catch { }
+      secure: |
+        catch (AuthenticationException e) { logger.LogError(e, "backend_tls_failure"); throw; }
+
+# ---------------------------------------------------------------------------
+# V16.4 — Log Protection
+# ---------------------------------------------------------------------------
+
+- id: V16.4.1
+  facet: Security Logging and Error Handling
+  section: Log Protection
+  level: 2
+  security_rule: >-
+    All logging components must encode or neutralize untrusted data before
+    writing it, so attacker-supplied newlines or control characters cannot
+    forge or corrupt log entries.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated straight into a log line, so embedded
+    newline or carriage-return characters let an attacker inject fake log
+    entries or split one record into many.
+  secure_pattern: >-
+    Untrusted values are passed as structured parameters or have newline
+    and control characters stripped or escaped before logging, so each
+    event remains a single, faithful record.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("login for " + username)           # username may contain newlines
+      secure: |
+        log("login", user=sanitizeForLog(username))
+    python:
+      vulnerable: |
+        logger.info("login for " + username)
+      secure: |
+        logger.info("login for %s", username.replace("\r", "").replace("\n", ""))
+    javascript:
+      vulnerable: |
+        logger.info("login for " + username);
+      secure: |
+        logger.info("login for %s", username.replace(/[\r\n]/g, ""));
+    java:
+      vulnerable: |
+        log.info("login for " + username);
+      secure: |
+        log.info("login for {}", username.replaceAll("[\\r\\n]", ""));
+    csharp:
+      vulnerable: |
+        logger.LogInformation("login for " + username);
+      secure: |
+        logger.LogInformation("login for {User}", username.Replace("\r", "").Replace("\n", ""));
+
+- id: V16.4.2
+  facet: Security Logging and Error Handling
+  section: Log Protection
+  level: 2
+  security_rule: >-
+    Logs must be protected from unauthorized access and must not be
+    modifiable after they are written.
+  vulnerability_pattern: >-
+    Log files are world-readable or writable and stored only on the
+    application host, so any user or a compromised process can read,
+    tamper with, or erase the audit trail.
+  secure_pattern: >-
+    Logs are written with restrictive permissions to append-only or
+    write-once storage, and access is limited to a small set of
+    authorized principals.
+  code_patterns:
+    generic:
+      vulnerable: |
+        open(logfile, mode="rw", perms=world_readable)
+      secure: |
+        open(logfile, mode="append-only", perms=owner_only)
+    python:
+      vulnerable: |
+        open("/var/log/app.log", "a")          # default 0644, world-readable
+      secure: |
+        os.umask(0o077); open("/var/log/app.log", "a")  # owner-only
+
+- id: V16.4.3
+  facet: Security Logging and Error Handling
+  section: Log Protection
+  level: 2
+  security_rule: >-
+    Logs must be transmitted securely to a logically separate system for
+    analysis and alerting, so that a breach of the application does not
+    compromise its logs.
+  vulnerability_pattern: >-
+    Logs stay only on the application host, or are shipped over an
+    unencrypted channel, so an attacker who breaches the host can read,
+    alter, or delete the only copy of the audit trail.
+  secure_pattern: >-
+    Logs are forwarded over an authenticated, encrypted channel to a
+    separate, hardened logging system, so a copy survives and stays
+    trustworthy even if the application host is compromised.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # logs written only to local disk on the app host
+      secure: |
+        # log shipper forwards over TLS to a separate, hardened SIEM
+    python:
+      vulnerable: |
+        logging.FileHandler("/var/log/app.log")
+      secure: |
+        from logging.handlers import SysLogHandler
+        SysLogHandler(address=("siem.internal", 6514))  # TLS syslog, separate host
+
+- id: V16.5.1
+  facet: Security Logging and Error Handling
+  section: Error Handling
+  level: 2
+  security_rule: >-
+    When an unexpected or security-sensitive error occurs, return a
+    generic message to the consumer and never expose internal detail such
+    as stack traces, queries, secret keys, or tokens.
+  vulnerability_pattern: >-
+    An exception propagates to the response, so the consumer receives a
+    stack trace, SQL statement, file path, or secret that reveals internal
+    structure and aids further attack.
+  secure_pattern: >-
+    The error is logged in full server-side and the consumer receives only
+    a generic message and a correlation id, with debug detail and stack
+    traces disabled in production responses.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return 500, exception.stackTrace()
+      secure: |
+        log(exception); return 500, "An unexpected error occurred (ref " + id + ")"
+    python:
+      vulnerable: |
+        return jsonify(error=str(exc), trace=traceback.format_exc()), 500
+      secure: |
+        logger.exception(exc)
+        return jsonify(error="Internal error", ref=corr_id), 500
+    javascript:
+      vulnerable: |
+        res.status(500).send(err.stack);
+      secure: |
+        logger.error(err);
+        res.status(500).json({ error: "Internal error", ref: corrId });
+    java:
+      vulnerable: |
+        return ResponseEntity.status(500).body(ex.toString());
+      secure: |
+        log.error("unhandled", ex);
+        return ResponseEntity.status(500).body(Map.of("error", "Internal error", "ref", id));
+    csharp:
+      vulnerable: |
+        return StatusCode(500, ex.ToString());
+      secure: |
+        logger.LogError(ex, "unhandled");
+        return StatusCode(500, new { error = "Internal error", reference = id });
+
+- id: V16.5.2
+  facet: Security Logging and Error Handling
+  section: Error Handling
+  level: 2
+  security_rule: >-
+    The application must keep operating securely when an external resource
+    is unavailable, using patterns such as circuit breakers or graceful
+    degradation.
+  vulnerability_pattern: >-
+    A failing dependency is called directly with no timeout or fallback,
+    so the failure cascades — threads block, retries pile up, and the
+    whole application becomes unavailable.
+  secure_pattern: >-
+    Calls to external resources are wrapped in a circuit breaker with
+    timeouts and a defined fallback, so a dependency outage degrades one
+    feature instead of taking the application down.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = remoteService.call(req)       # no timeout, no fallback
+      secure: |
+        result = breaker.run(lambda: remoteService.call(req), fallback=cached)
+    python:
+      vulnerable: |
+        data = requests.get(url).json()
+      secure: |
+        @circuit(failure_threshold=5, fallback=load_cached)
+        def fetch(): return requests.get(url, timeout=2).json()
+    javascript:
+      vulnerable: |
+        const data = await fetch(url).then(r => r.json());
+      secure: |
+        const data = await breaker.fire(url).catch(() => cachedData);
+    java:
+      vulnerable: |
+        Data d = restClient.get(url);
+      secure: |
+        Data d = circuitBreaker.run(() -> restClient.get(url), t -> cachedData);
+    csharp:
+      vulnerable: |
+        var data = await http.GetFromJsonAsync<Data>(url);
+      secure: |
+        var data = await retryAndBreakerPolicy.ExecuteAsync(() => http.GetFromJsonAsync<Data>(url));
+
+- id: V16.5.3
+  facet: Security Logging and Error Handling
+  section: Error Handling
+  level: 2
+  security_rule: >-
+    The application must fail gracefully and securely when an exception
+    occurs, never falling open — for example never processing a
+    transaction after the validation logic itself errored.
+  vulnerability_pattern: >-
+    An exception in a security check is caught and treated as a pass, or
+    control falls through to the success path, so an error in the control
+    grants the access it was meant to deny.
+  secure_pattern: >-
+    When a security check raises an exception the request is denied — the
+    default outcome on error is deny, and processing only continues after
+    the check has explicitly succeeded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try: allowed = checkAccess(user)
+        except: allowed = true                 # fail-open
+      secure: |
+        try: allowed = checkAccess(user)
+        except: allowed = false                # fail-closed
+    python:
+      vulnerable: |
+        try:
+            ok = verify_signature(msg)
+        except Exception:
+            ok = True
+      secure: |
+        try:
+            ok = verify_signature(msg)
+        except Exception:
+            logger.exception("verify failed"); ok = False
+    javascript:
+      vulnerable: |
+        let ok; try { ok = verifyToken(t); } catch { ok = true; }
+      secure: |
+        let ok; try { ok = verifyToken(t); } catch { ok = false; }
+    java:
+      vulnerable: |
+        boolean ok; try { ok = authz.check(u); } catch (Exception e) { ok = true; }
+      secure: |
+        boolean ok; try { ok = authz.check(u); } catch (Exception e) { ok = false; }
+    csharp:
+      vulnerable: |
+        bool ok; try { ok = Authz.Check(u); } catch { ok = true; }
+      secure: |
+        bool ok; try { ok = Authz.Check(u); } catch { ok = false; }
+
+- id: V16.5.4
+  facet: Security Logging and Error Handling
+  section: Error Handling
+  level: 3
+  security_rule: >-
+    A last-resort error handler must catch every unhandled exception, so
+    error detail still reaches the logs and a single error cannot crash
+    the whole application process.
+  vulnerability_pattern: >-
+    There is no top-level handler, so an unhandled exception either leaks
+    a default framework error page or terminates the process, losing the
+    error detail and the application's availability.
+  secure_pattern: >-
+    A global last-resort handler wraps the application, logging the full
+    exception and returning a generic response, so the process stays up
+    and no error detail is lost.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no global handler; an unhandled exception crashes the process
+      secure: |
+        onUnhandled(e -> { log(e); return genericError() })
+    python:
+      vulnerable: |
+        # individual routes only; nothing catches the rest
+      secure: |
+        @app.errorhandler(Exception)
+        def handle(e): logger.exception(e); return generic_error(), 500
+    javascript:
+      vulnerable: |
+        // no error-handling middleware registered
+      secure: |
+        app.use((err, req, res, next) => { logger.error(err); res.status(500).json(generic); });
+    java:
+      vulnerable: |
+        // no ControllerAdvice; container shows a default error page
+      secure: |
+        @ControllerAdvice
+        class GlobalHandler { @ExceptionHandler(Exception.class) ResponseEntity<?> all(Exception e) { ... } }
+    csharp:
+      vulnerable: |
+        // no exception-handling middleware in the pipeline
+      secure: |
+        app.UseExceptionHandler("/error");   // last-resort handler logs and returns generic

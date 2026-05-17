@@ -1,0 +1,981 @@
+# OWASP ASVS 5.0 — Chapter V11: Cryptography
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V11.1 — Cryptographic Inventory and Documentation
+# ---------------------------------------------------------------------------
+
+- id: V11.1.1
+  facet: Cryptography
+  section: Cryptographic Inventory and Documentation
+  level: 2
+  security_rule: >-
+    Maintain a documented key-management policy and key lifecycle aligned
+    with a recognized standard such as NIST SP 800-57, and ensure keys are
+    not overshared — shared secrets with at most two entities and private
+    keys held by a single entity.
+  vulnerability_pattern: >-
+    Cryptographic keys are created, distributed, and retired ad hoc with
+    no documented policy, and the same key or private key is shared widely
+    across services, users, or environments.
+  secure_pattern: >-
+    A written key-management policy defines generation, rotation, escrow,
+    and destruction for every key, and access is scoped so each key is
+    held by the minimum number of entities its purpose allows.
+  code_patterns:
+    generic:
+      vulnerable: |
+        SHARED_KEY = "one key emailed to every team, no rotation policy"
+      secure: |
+        key = kms.get_key("payments-signing", policy="NIST-SP-800-57")
+        # rotation, escrow, and holders documented in the key policy
+
+- id: V11.1.2
+  facet: Cryptography
+  section: Cryptographic Inventory and Documentation
+  level: 2
+  security_rule: >-
+    Keep a maintained and regularly updated cryptographic inventory of all
+    keys, algorithms, and certificates, documenting where each key may and
+    may not be used and which data types it may and may not protect.
+  vulnerability_pattern: >-
+    There is no inventory of the algorithms, keys, and certificates the
+    application uses, so weak ciphers, expired certificates, and misused
+    keys go unnoticed and key purpose is never enforced.
+  secure_pattern: >-
+    A living inventory records every algorithm, key, and certificate with
+    its allowed scope and data classification, and is reviewed on a
+    schedule so deprecated or misused crypto is found and remediated.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no record of which keys exist, where, or what they may protect
+      secure: |
+        crypto_inventory.register(key_id="db-field-key",
+                                  algo="AES-256-GCM",
+                                  allowed_data="PII", forbidden_data="payment")
+
+- id: V11.1.3
+  facet: Cryptography
+  section: Cryptographic Inventory and Documentation
+  level: 3
+  security_rule: >-
+    Employ cryptographic discovery mechanisms that automatically identify
+    every instance of cryptography in the system, including encryption,
+    hashing, and signing operations.
+  vulnerability_pattern: >-
+    Cryptographic usage is tracked only by memory or manual notes, so
+    forgotten or third-party crypto calls are never discovered and cannot
+    be audited or migrated.
+  secure_pattern: >-
+    Automated discovery tooling scans code, dependencies, and runtime to
+    enumerate all encryption, hashing, and signing operations, feeding the
+    cryptographic inventory continuously.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # crypto usage discovered only by accident during incidents
+      secure: |
+        scan = crypto_bom.discover(repo="./", scan_runtime=True)
+        crypto_inventory.merge(scan.encryption, scan.hashing, scan.signing)
+
+- id: V11.1.4
+  facet: Cryptography
+  section: Cryptographic Inventory and Documentation
+  level: 3
+  security_rule: >-
+    Maintain a cryptographic inventory that includes a documented
+    migration plan describing the path to new cryptographic standards,
+    such as post-quantum cryptography, so future threats can be answered.
+  vulnerability_pattern: >-
+    The inventory exists but there is no migration plan, so when an
+    algorithm is broken or post-quantum cryptography becomes mandatory
+    there is no roadmap to move keys, data, and protocols.
+  secure_pattern: >-
+    The inventory is paired with a documented migration plan that maps
+    each algorithm to its successor, sequences the cutover, and identifies
+    the data that must be re-protected under post-quantum schemes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # inventory exists but no plan for when RSA-2048 is deprecated
+      secure: |
+        migration_plan = {"RSA-2048": "ML-KEM-768", "ECDSA-P256": "ML-DSA-65"}
+        crypto_inventory.attach_migration_plan(migration_plan, target="PQC")
+
+# ---------------------------------------------------------------------------
+# V11.2 — Secure Cryptography Implementation
+# ---------------------------------------------------------------------------
+
+- id: V11.2.1
+  facet: Cryptography
+  section: Secure Cryptography Implementation
+  level: 2
+  security_rule: >-
+    Use industry-validated implementations — vetted libraries and
+    hardware-accelerated modules — for all cryptographic operations rather
+    than home-grown or unreviewed code.
+  vulnerability_pattern: >-
+    Cryptographic primitives are hand-rolled or copied from an unvetted
+    source, so subtle implementation flaws and side channels weaken
+    encryption that looks correct on the surface.
+  secure_pattern: >-
+    All cryptographic operations are delegated to a maintained, widely
+    reviewed library or a validated hardware module, and no custom cipher,
+    hash, or padding code is written.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ciphertext = my_homemade_xor_cipher(plaintext, key)
+      secure: |
+        ciphertext = vetted_crypto_lib.aes_gcm_encrypt(plaintext, key, nonce)
+    python:
+      vulnerable: |
+        def encrypt(data, key): return bytes(b ^ key[0] for b in data)
+      secure: |
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        ct = AESGCM(key).encrypt(nonce, data, None)
+    javascript:
+      vulnerable: |
+        function encrypt(d, k) { return d.split("").map(c => c ^ k).join(""); }
+      secure: |
+        const ct = crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data);
+    java:
+      vulnerable: |
+        byte[] ct = customCipher.scramble(plaintext, key);
+      secure: |
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        c.init(Cipher.ENCRYPT_MODE, key, gcmSpec);
+    csharp:
+      vulnerable: |
+        var ct = MyCrypto.RollYourOwn(plaintext, key);
+      secure: |
+        using var aes = new AesGcm(key);
+        aes.Encrypt(nonce, plaintext, ciphertext, tag);
+
+- id: V11.2.2
+  facet: Cryptography
+  section: Secure Cryptography Implementation
+  level: 2
+  security_rule: >-
+    Design the application with crypto agility so algorithms, key lengths,
+    rounds, ciphers, and modes can be reconfigured or swapped at any time,
+    and keys, passwords, and encrypted data can be replaced and re-encrypted.
+  vulnerability_pattern: >-
+    The cipher, mode, and key length are hard-coded throughout the code,
+    so when an algorithm is broken or a post-quantum scheme is needed the
+    application cannot be upgraded without a rewrite.
+  secure_pattern: >-
+    Algorithm choices live in configuration behind an indirection layer,
+    ciphertext is tagged with the scheme that produced it, and a
+    re-encryption path exists so keys and data can be migrated cleanly.
+  code_patterns:
+    generic:
+      vulnerable: |
+        cipher = new Cipher("AES-128-CBC")   # algorithm fixed in code
+      secure: |
+        cipher = crypto_factory.for_scheme(config.active_scheme)
+        # scheme id stored with each ciphertext for seamless migration
+    python:
+      vulnerable: |
+        ct = aes_cbc_encrypt(data, KEY)   # one hard-coded scheme everywhere
+      secure: |
+        scheme = config.crypto["active"]            # e.g. "AES-256-GCM"
+        ct = registry[scheme].encrypt(data, KEY)    # tag = scheme + version
+    java:
+      vulnerable: |
+        Cipher c = Cipher.getInstance("AES/CBC/PKCS5Padding");
+      secure: |
+        Cipher c = Cipher.getInstance(cryptoConfig.getActiveTransformation());
+    csharp:
+      vulnerable: |
+        var c = Aes.Create();   // mode and key size pinned at the call site
+      secure: |
+        var c = CryptoFactory.Create(_config.ActiveScheme);  // swappable
+
+- id: V11.2.3
+  facet: Cryptography
+  section: Secure Cryptography Implementation
+  level: 2
+  security_rule: >-
+    Ensure every cryptographic primitive provides at least 128 bits of
+    security given its algorithm, key size, and configuration — for
+    example a 256-bit ECC key or a 3072-bit RSA key.
+  vulnerability_pattern: >-
+    Keys are generated with sizes below the 128-bit security threshold,
+    such as 1024-bit RSA or 80-bit symmetric keys, making the protected
+    data feasible to recover with current resources.
+  secure_pattern: >-
+    Key sizes are chosen so each primitive meets or exceeds 128 bits of
+    security — at least 3072-bit RSA, 256-bit ECC, or 256-bit AES — based
+    on published equivalence tables.
+  code_patterns:
+    generic:
+      vulnerable: |
+        rsa_key = generate_rsa(bits=1024)   # roughly 80-bit security
+      secure: |
+        rsa_key = generate_rsa(bits=3072)   # roughly 128-bit security
+    python:
+      vulnerable: |
+        key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+      secure: |
+        key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    java:
+      vulnerable: |
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
+        g.initialize(1024);
+      secure: |
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
+        g.initialize(3072);
+    csharp:
+      vulnerable: |
+        using var rsa = RSA.Create(1024);
+      secure: |
+        using var rsa = RSA.Create(3072);
+
+- id: V11.2.4
+  facet: Cryptography
+  section: Secure Cryptography Implementation
+  level: 3
+  security_rule: >-
+    Make all cryptographic operations constant-time, with no
+    short-circuit behavior in comparisons, calculations, or returns, so
+    timing differences do not leak secret information.
+  vulnerability_pattern: >-
+    Secret values such as MACs, tokens, or password hashes are compared
+    with an early-exit equality check, so the time taken reveals how many
+    leading bytes matched and the secret can be recovered byte by byte.
+  secure_pattern: >-
+    Comparisons of secret material use a constant-time equality function
+    that always examines every byte, so the operation duration is
+    independent of the input and leaks nothing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if userMac == expectedMac: accept()   # returns early on first mismatch
+      secure: |
+        if constantTimeEquals(userMac, expectedMac): accept()
+    python:
+      vulnerable: |
+        if token == stored_token: grant_access()
+      secure: |
+        import hmac
+        if hmac.compare_digest(token, stored_token): grant_access()
+    javascript:
+      vulnerable: |
+        if (userMac === expectedMac) accept();
+      secure: |
+        if (crypto.timingSafeEqual(Buffer.from(userMac), Buffer.from(expectedMac)))
+          accept();
+    java:
+      vulnerable: |
+        if (userMac.equals(expectedMac)) accept();
+      secure: |
+        if (MessageDigest.isEqual(userMac, expectedMac)) accept();
+    csharp:
+      vulnerable: |
+        if (userMac.SequenceEqual(expectedMac)) Accept();
+      secure: |
+        if (CryptographicOperations.FixedTimeEquals(userMac, expectedMac))
+          Accept();
+
+- id: V11.2.5
+  facet: Cryptography
+  section: Secure Cryptography Implementation
+  level: 3
+  security_rule: >-
+    Ensure cryptographic modules fail securely and handle errors so they
+    do not create new vulnerabilities such as padding oracle attacks.
+  vulnerability_pattern: >-
+    Decryption code distinguishes a padding error from an authentication
+    or other failure in its response or timing, so an attacker can use the
+    error as an oracle to recover plaintext.
+  secure_pattern: >-
+    Decryption uses authenticated encryption or verifies a MAC before
+    decrypting, and every failure path returns one indistinguishable
+    error so no padding or structure detail is revealed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try: decrypt_cbc(ct)
+        except PaddingError: return "bad padding"   # leaks an oracle
+      secure: |
+        if not verify_mac(ct): return "decryption failed"  # one generic error
+        decrypt_cbc(ct)
+    python:
+      vulnerable: |
+        try:
+            return unpad(cipher.decrypt(ct))
+        except ValueError:
+            return "invalid padding", 400
+      secure: |
+        from cryptography.exceptions import InvalidTag
+        try:
+            return AESGCM(key).decrypt(nonce, ct, None)
+        except InvalidTag:
+            return "decryption failed", 400
+    java:
+      vulnerable: |
+        catch (BadPaddingException e) { return "padding error"; }
+      secure: |
+        catch (AEADBadTagException e) { return "decryption failed"; }
+    csharp:
+      vulnerable: |
+        catch (CryptographicException e) { return "bad padding"; }
+      secure: |
+        catch (AuthenticationTagMismatchException) { return "decryption failed"; }
+
+# ---------------------------------------------------------------------------
+# V11.3 — Encryption Algorithms
+# ---------------------------------------------------------------------------
+
+- id: V11.3.1
+  facet: Cryptography
+  section: Encryption Algorithms
+  level: 1
+  security_rule: >-
+    Do not use insecure block cipher modes such as ECB or weak padding
+    schemes such as PKCS#1 v1.5, because they leak structure or enable
+    practical attacks.
+  vulnerability_pattern: >-
+    Data is encrypted with ECB mode, which reveals identical plaintext
+    blocks as identical ciphertext, or with a weak padding scheme that
+    enables forgery or oracle attacks.
+  secure_pattern: >-
+    Encryption uses an authenticated mode such as GCM and, for RSA, OAEP
+    padding, so identical plaintext blocks differ and padding cannot be
+    exploited.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ciphertext = aes_encrypt(data, key, mode="ECB")
+      secure: |
+        ciphertext = aes_encrypt(data, key, mode="GCM", nonce=fresh_nonce)
+    python:
+      vulnerable: |
+        Cipher(algorithms.AES(key), modes.ECB())
+      secure: |
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        AESGCM(key).encrypt(nonce, data, None)
+    java:
+      vulnerable: |
+        Cipher.getInstance("AES/ECB/PKCS5Padding");
+      secure: |
+        Cipher.getInstance("AES/GCM/NoPadding");
+    csharp:
+      vulnerable: |
+        var aes = Aes.Create();
+        aes.Mode = CipherMode.ECB;
+      secure: |
+        using var aes = new AesGcm(key);
+        aes.Encrypt(nonce, plaintext, ciphertext, tag);
+
+- id: V11.3.2
+  facet: Cryptography
+  section: Encryption Algorithms
+  level: 1
+  security_rule: >-
+    Use only approved ciphers and modes, such as AES in GCM mode, for
+    symmetric encryption.
+  vulnerability_pattern: >-
+    Encryption relies on a deprecated or weak cipher such as DES, 3DES,
+    RC4, or Blowfish, which no longer provides adequate strength against
+    modern attacks.
+  secure_pattern: >-
+    Symmetric encryption uses a current approved cipher and mode, AES with
+    GCM being the standard choice, providing both confidentiality and
+    integrity.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ciphertext = des_encrypt(data, key)
+      secure: |
+        ciphertext = aes_gcm_encrypt(data, key, nonce)
+    python:
+      vulnerable: |
+        from Crypto.Cipher import DES
+        cipher = DES.new(key, DES.MODE_ECB)
+      secure: |
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        cipher = AESGCM(key)
+    java:
+      vulnerable: |
+        Cipher.getInstance("DES/ECB/PKCS5Padding");
+      secure: |
+        Cipher.getInstance("AES/GCM/NoPadding");
+    csharp:
+      vulnerable: |
+        using var des = TripleDES.Create();
+      secure: |
+        using var aes = new AesGcm(key);
+
+- id: V11.3.3
+  facet: Cryptography
+  section: Encryption Algorithms
+  level: 2
+  security_rule: >-
+    Protect encrypted data against unauthorized modification, preferably
+    with an approved authenticated encryption mode, or by pairing an
+    approved encryption method with an approved MAC.
+  vulnerability_pattern: >-
+    Data is encrypted for confidentiality only, with no authentication
+    tag or MAC, so an attacker can flip ciphertext bits and silently alter
+    the decrypted plaintext.
+  secure_pattern: >-
+    Encryption uses an authenticated mode such as AES-GCM, or an approved
+    cipher combined with an approved MAC, so any tampering with the
+    ciphertext is detected before the plaintext is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ciphertext = aes_cbc_encrypt(data, key, iv)   # no integrity tag
+      secure: |
+        ciphertext, tag = aes_gcm_encrypt(data, key, nonce)
+    python:
+      vulnerable: |
+        ct = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor().update(data)
+      secure: |
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        ct = AESGCM(key).encrypt(nonce, data, None)   # tag appended
+    javascript:
+      vulnerable: |
+        const ct = crypto.subtle.encrypt({ name: "AES-CBC", iv }, key, data);
+      secure: |
+        const ct = crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data);
+    java:
+      vulnerable: |
+        Cipher.getInstance("AES/CBC/PKCS5Padding");
+      secure: |
+        Cipher.getInstance("AES/GCM/NoPadding");
+    csharp:
+      vulnerable: |
+        using var aes = Aes.Create();   // CBC, confidentiality only
+      secure: |
+        using var aes = new AesGcm(key);  // authenticated encryption
+
+- id: V11.3.4
+  facet: Cryptography
+  section: Encryption Algorithms
+  level: 3
+  security_rule: >-
+    Never reuse a nonce or initialization vector for more than one
+    encryption key and data-element pair, and generate single-use numbers
+    by a method appropriate for the algorithm.
+  vulnerability_pattern: >-
+    A fixed or counter-reset IV or nonce is reused with the same key, so
+    in stream or GCM modes the keystream repeats and the authentication
+    guarantee collapses.
+  secure_pattern: >-
+    A fresh, unique nonce is generated for every encryption under a given
+    key — random for GCM or a strictly monotonic counter — and it is never
+    repeated for that key.
+  code_patterns:
+    generic:
+      vulnerable: |
+        IV = b"000000000000"          # constant IV reused for every message
+        ct = aes_gcm_encrypt(data, key, IV)
+      secure: |
+        nonce = secure_random_bytes(12)   # fresh per message
+        ct = aes_gcm_encrypt(data, key, nonce)
+    python:
+      vulnerable: |
+        NONCE = b"\x00" * 12
+        AESGCM(key).encrypt(NONCE, data, None)
+      secure: |
+        import os
+        AESGCM(key).encrypt(os.urandom(12), data, None)
+    javascript:
+      vulnerable: |
+        const iv = new Uint8Array(12);   // all-zero IV reused
+      secure: |
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+    java:
+      vulnerable: |
+        byte[] iv = new byte[12];   // zero-filled, reused each call
+      secure: |
+        byte[] iv = new byte[12];
+        SecureRandom.getInstanceStrong().nextBytes(iv);
+    csharp:
+      vulnerable: |
+        byte[] nonce = new byte[12];   // never randomized
+      secure: |
+        byte[] nonce = RandomNumberGenerator.GetBytes(12);
+
+- id: V11.3.5
+  facet: Cryptography
+  section: Encryption Algorithms
+  level: 3
+  security_rule: >-
+    When an encryption algorithm is combined with a MAC, operate in
+    encrypt-then-MAC mode — compute the MAC over the ciphertext, not the
+    plaintext.
+  vulnerability_pattern: >-
+    The MAC is computed over the plaintext and then encrypted, or computed
+    in parallel, so the ciphertext is decrypted before its integrity is
+    checked and padding oracle and forgery attacks become possible.
+  secure_pattern: >-
+    The MAC is computed over the finished ciphertext and verified in
+    constant time before any decryption occurs, so tampered messages are
+    rejected without ever being processed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ct = encrypt(plaintext + mac(plaintext, mac_key), enc_key)  # MAC-then-encrypt
+      secure: |
+        ct = encrypt(plaintext, enc_key)
+        tag = mac(ct, mac_key)                # encrypt-then-MAC
+    python:
+      vulnerable: |
+        blob = encrypt(data + hmac_sha256(mac_key, data), enc_key)
+      secure: |
+        ct = encrypt(data, enc_key)
+        tag = hmac.new(mac_key, ct, hashlib.sha256).digest()
+    java:
+      vulnerable: |
+        byte[] blob = encrypt(concat(data, hmac(macKey, data)), encKey);
+      secure: |
+        byte[] ct = encrypt(data, encKey);
+        byte[] tag = hmac(macKey, ct);   // MAC over ciphertext
+    csharp:
+      vulnerable: |
+        var blob = Encrypt(Concat(data, Hmac(macKey, data)), encKey);
+      secure: |
+        var ct = Encrypt(data, encKey);
+        var tag = Hmac(macKey, ct);   // encrypt-then-MAC
+
+# ---------------------------------------------------------------------------
+# V11.4 — Hashing and Hash-based Functions
+# ---------------------------------------------------------------------------
+
+- id: V11.4.1
+  facet: Cryptography
+  section: Hashing and Hash-based Functions
+  level: 1
+  security_rule: >-
+    Use only approved hash functions for cryptographic purposes such as
+    digital signatures, HMAC, KDF, and random bit generation, and never
+    use disallowed functions such as MD5 for any cryptographic purpose.
+  vulnerability_pattern: >-
+    A broken hash function such as MD5 or SHA-1 is used for a signature,
+    HMAC, integrity check, or token, so collisions and forgeries are
+    practical.
+  secure_pattern: >-
+    Cryptographic operations use a current approved hash such as SHA-256
+    or SHA-3, and legacy MD5 and SHA-1 are restricted to non-security
+    uses only.
+  code_patterns:
+    generic:
+      vulnerable: |
+        digest = md5(message)
+      secure: |
+        digest = sha256(message)
+    python:
+      vulnerable: |
+        import hashlib
+        h = hashlib.md5(data).hexdigest()
+      secure: |
+        import hashlib
+        h = hashlib.sha256(data).hexdigest()
+    javascript:
+      vulnerable: |
+        const h = crypto.createHash("md5").update(data).digest("hex");
+      secure: |
+        const h = crypto.createHash("sha256").update(data).digest("hex");
+    java:
+      vulnerable: |
+        MessageDigest md = MessageDigest.getInstance("MD5");
+      secure: |
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+    csharp:
+      vulnerable: |
+        using var md = MD5.Create();
+      secure: |
+        using var sha = SHA256.Create();
+
+- id: V11.4.2
+  facet: Cryptography
+  section: Hashing and Hash-based Functions
+  level: 2
+  security_rule: >-
+    Store passwords with an approved, computationally intensive password
+    hashing function, with cost parameters tuned per current guidance to
+    balance security against performance.
+  vulnerability_pattern: >-
+    Passwords are stored as a plain or fast-hash digest such as SHA-256,
+    or with no salt, so a leaked database can be cracked at billions of
+    guesses per second.
+  secure_pattern: >-
+    Passwords are run through a memory-hard, salted password hashing
+    function such as Argon2id, bcrypt, or scrypt with tuned cost
+    parameters, making offline brute-force attacks impractical.
+  code_patterns:
+    generic:
+      vulnerable: |
+        stored = sha256(password)
+      secure: |
+        stored = argon2id_hash(password)   # per-user salt + tuned cost
+    python:
+      vulnerable: |
+        stored = hashlib.sha256(password.encode()).hexdigest()
+      secure: |
+        from argon2 import PasswordHasher
+        stored = PasswordHasher().hash(password)
+    javascript:
+      vulnerable: |
+        const stored = crypto.createHash("sha256").update(password).digest("hex");
+      secure: |
+        const stored = await argon2.hash(password, { type: argon2.argon2id });
+    java:
+      vulnerable: |
+        String stored = sha256Hex(password);
+      secure: |
+        String stored = new Argon2PasswordEncoder(16, 32, 1, 19456, 2)
+                             .encode(password);
+    csharp:
+      vulnerable: |
+        var stored = Convert.ToHexString(SHA256.HashData(bytes));
+      secure: |
+        var stored = Argon2.Hash(password);   // Konscious Argon2id
+
+- id: V11.4.3
+  facet: Cryptography
+  section: Hashing and Hash-based Functions
+  level: 2
+  security_rule: >-
+    Use collision-resistant hash functions with adequate output length
+    where data authentication or integrity is needed — at least 256 bits
+    when collision resistance is required, at least 128 bits when only
+    second-preimage resistance is required.
+  vulnerability_pattern: >-
+    A digital signature or integrity check relies on a hash with an
+    output too short or no longer collision resistant, such as SHA-1, so
+    an attacker can craft two inputs with the same digest.
+  secure_pattern: >-
+    Signatures and integrity checks use a collision-resistant hash with at
+    least a 256-bit output, such as SHA-256 or SHA-3-256, matching the
+    resistance the use case demands.
+  code_patterns:
+    generic:
+      vulnerable: |
+        signature = sign(sha1(document), private_key)
+      secure: |
+        signature = sign(sha256(document), private_key)
+    python:
+      vulnerable: |
+        key.sign(data, padding.PKCS1v15(), hashes.SHA1())
+      secure: |
+        key.sign(data, padding.PSS(mgf=padding.MGF1(hashes.SHA256()),
+                 salt_length=padding.PSS.MAX_LENGTH), hashes.SHA256())
+    java:
+      vulnerable: |
+        Signature.getInstance("SHA1withRSA");
+      secure: |
+        Signature.getInstance("SHA256withRSA");
+    csharp:
+      vulnerable: |
+        rsa.SignData(data, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
+      secure: |
+        rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+
+- id: V11.4.4
+  facet: Cryptography
+  section: Hashing and Hash-based Functions
+  level: 2
+  security_rule: >-
+    When deriving secret keys from passwords, use an approved key
+    derivation function with key-stretching parameters tuned to balance
+    security against performance and resist brute-force attacks.
+  vulnerability_pattern: >-
+    A cryptographic key is derived from a password by a single fast hash
+    or a KDF with too few iterations, so the key can be brute-forced as
+    cheaply as the password itself.
+  secure_pattern: >-
+    Keys are derived with an approved key-stretching KDF such as PBKDF2,
+    scrypt, or Argon2 using a unique salt and a high, current iteration
+    or memory cost.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = sha256(password)   # no salt, no stretching
+      secure: |
+        key = pbkdf2(password, salt=random_salt, iterations=600000, dklen=32)
+    python:
+      vulnerable: |
+        key = hashlib.sha256(password.encode()).digest()
+      secure: |
+        key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600_000, 32)
+    javascript:
+      vulnerable: |
+        const key = crypto.createHash("sha256").update(password).digest();
+      secure: |
+        const key = crypto.pbkdf2Sync(password, salt, 600000, 32, "sha256");
+    java:
+      vulnerable: |
+        byte[] key = MessageDigest.getInstance("SHA-256").digest(pw);
+      secure: |
+        var spec = new PBEKeySpec(pw, salt, 600_000, 256);
+        byte[] key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                         .generateSecret(spec).getEncoded();
+    csharp:
+      vulnerable: |
+        var key = SHA256.HashData(passwordBytes);
+      secure: |
+        var key = Rfc2898DeriveBytes.Pbkdf2(password, salt, 600_000,
+                      HashAlgorithmName.SHA256, 32);
+
+# ---------------------------------------------------------------------------
+# V11.5 — Random Values
+# ---------------------------------------------------------------------------
+
+- id: V11.5.1
+  facet: Cryptography
+  section: Random Values
+  level: 2
+  security_rule: >-
+    Generate every non-guessable random number or string with a
+    cryptographically secure pseudo-random number generator and at least
+    128 bits of entropy; UUIDs do not satisfy this requirement.
+  vulnerability_pattern: >-
+    Security-sensitive values such as session tokens, password-reset
+    codes, or API keys are generated with a non-cryptographic random
+    source or a UUID, so they are predictable or low in entropy.
+  secure_pattern: >-
+    Non-guessable values come from a cryptographically secure PRNG with at
+    least 128 bits of entropy, encoded for transport, and not derived from
+    a general-purpose random generator or UUID.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = random_int()                # non-cryptographic PRNG
+      secure: |
+        token = csprng_bytes(32)             # 256 bits from a CSPRNG
+    python:
+      vulnerable: |
+        import random
+        token = str(random.random())
+      secure: |
+        import secrets
+        token = secrets.token_urlsafe(32)
+    javascript:
+      vulnerable: |
+        const token = Math.random().toString(36).slice(2);
+      secure: |
+        const token = crypto.randomBytes(32).toString("hex");
+    java:
+      vulnerable: |
+        String token = Long.toString(new Random().nextLong());
+      secure: |
+        byte[] b = new byte[32];
+        SecureRandom.getInstanceStrong().nextBytes(b);
+    csharp:
+      vulnerable: |
+        var token = new Random().Next().ToString();
+      secure: |
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
+- id: V11.5.2
+  facet: Cryptography
+  section: Random Values
+  level: 3
+  security_rule: >-
+    Ensure the random number generation mechanism is designed to keep
+    working securely even under heavy demand, without degrading entropy or
+    blocking unpredictably.
+  vulnerability_pattern: >-
+    Under load the random source falls back to a weaker generator,
+    repeats output, or depletes its entropy pool, so values that must be
+    unpredictable become guessable during traffic spikes.
+  secure_pattern: >-
+    The CSPRNG is backed by a properly seeded, non-depleting source that
+    sustains throughput under load, and high-rate generation is verified
+    to never silently fall back to a weak source.
+  code_patterns:
+    generic:
+      vulnerable: |
+        rng = fast_prng_seeded_once_at_boot()   # degrades under heavy use
+      secure: |
+        rng = os_csprng()    # kernel CSPRNG, reseeds, safe under load
+    python:
+      vulnerable: |
+        rng = random.Random(seed)   # same stream reused under concurrency
+      secure: |
+        import secrets
+        value = secrets.token_bytes(32)   # os.urandom-backed, non-blocking
+    java:
+      vulnerable: |
+        SecureRandom sr = SecureRandom.getInstance("SHA1PRNG");
+      secure: |
+        SecureRandom sr = SecureRandom.getInstanceStrong();
+    csharp:
+      vulnerable: |
+        var rng = new Random();   // shared, not thread-safe under load
+      secure: |
+        var bytes = RandomNumberGenerator.GetBytes(32);  // OS-backed CSPRNG
+
+# ---------------------------------------------------------------------------
+# V11.6 — Public Key Cryptography
+# ---------------------------------------------------------------------------
+
+- id: V11.6.1
+  facet: Cryptography
+  section: Public Key Cryptography
+  level: 2
+  security_rule: >-
+    Use only approved algorithms and modes for key generation, seeding,
+    and digital signature operations, and ensure key generation never
+    produces insecure keys vulnerable to known attacks such as Fermat
+    factorization of RSA keys.
+  vulnerability_pattern: >-
+    Keys are generated with an unapproved algorithm, a poor random seed,
+    or parameters that yield weak keys — such as RSA primes too close
+    together — that are vulnerable to factorization or forgery.
+  secure_pattern: >-
+    Key generation and signing use a vetted library with approved
+    algorithms, a strong random seed, and parameter checks, so generated
+    keys are not susceptible to known attacks.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = generate_rsa(bits=1024, seed=fixed_seed)
+      secure: |
+        key = vetted_lib.generate_rsa(bits=3072)   # CSPRNG-seeded, checked
+    python:
+      vulnerable: |
+        key = RSA.construct((n, e), consistency_check=False)  # unchecked params
+      secure: |
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    java:
+      vulnerable: |
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
+        g.initialize(1024, new Random());
+      secure: |
+        KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
+        g.initialize(3072, SecureRandom.getInstanceStrong());
+    csharp:
+      vulnerable: |
+        using var rsa = RSA.Create(1024);
+      secure: |
+        using var rsa = RSA.Create(3072);   // OS-vetted key generation
+
+- id: V11.6.2
+  facet: Cryptography
+  section: Public Key Cryptography
+  level: 3
+  security_rule: >-
+    Use approved cryptographic algorithms for key exchange, such as
+    Diffie-Hellman, with secure parameters, to prevent attacks on key
+    establishment that could enable adversary-in-the-middle or
+    cryptographic breaks.
+  vulnerability_pattern: >-
+    Key exchange uses weak or unvalidated parameters — a small DH group,
+    an unverified peer public key, or a non-approved curve — allowing an
+    adversary to recover the shared secret or intercept the channel.
+  secure_pattern: >-
+    Key exchange uses an approved algorithm with strong, validated
+    parameters — a 2048-bit-or-larger DH group or an approved curve such
+    as X25519 — and peer public keys are validated before use.
+  code_patterns:
+    generic:
+      vulnerable: |
+        shared = dh_exchange(group_bits=512, peer_pub)   # tiny, unchecked group
+      secure: |
+        shared = ecdh_exchange(curve="X25519", validate_peer=True)
+    python:
+      vulnerable: |
+        params = dh.generate_parameters(generator=2, key_size=512)
+      secure: |
+        from cryptography.hazmat.primitives.asymmetric.x25519 import \
+            X25519PrivateKey
+        shared = X25519PrivateKey.generate().exchange(peer_public_key)
+    java:
+      vulnerable: |
+        KeyPairGenerator.getInstance("DH").initialize(512);
+      secure: |
+        KeyPairGenerator g = KeyPairGenerator.getInstance("XDH");
+        g.initialize(new NamedParameterSpec("X25519"));
+    csharp:
+      vulnerable: |
+        using var dh = new ECDiffieHellmanCng(256) { HashAlgorithm = CngAlgorithm.MD5 };
+      secure: |
+        using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
+
+# ---------------------------------------------------------------------------
+# V11.7 — In-Use Data Cryptography
+# ---------------------------------------------------------------------------
+
+- id: V11.7.1
+  facet: Cryptography
+  section: In-Use Data Cryptography
+  level: 3
+  security_rule: >-
+    Use full memory encryption to protect sensitive data while it is in
+    use, preventing access by unauthorized users or processes.
+  vulnerability_pattern: >-
+    Sensitive data is held in plaintext in process memory while in use, so
+    a memory dump, swap file, or another process on the host can read it
+    directly.
+  secure_pattern: >-
+    Sensitive in-use data is protected by full memory encryption or a
+    confidential-computing enclave, so plaintext is never exposed in
+    readable host memory.
+  code_patterns:
+    generic:
+      vulnerable: |
+        secret = load_plaintext_secret()   # resides unencrypted in RAM
+      secure: |
+        with enclave.protected_memory() as mem:   # memory-encrypted region
+            mem.store(load_secret())
+
+- id: V11.7.2
+  facet: Cryptography
+  section: In-Use Data Cryptography
+  level: 3
+  security_rule: >-
+    Apply data minimization so the least amount of sensitive data is
+    exposed during processing, and re-encrypt or discard that data
+    immediately after use or as soon as feasible.
+  vulnerability_pattern: >-
+    Decrypted sensitive data is loaded in full and left in memory long
+    after the operation that needed it, widening the window in which it
+    can be leaked or scraped.
+  secure_pattern: >-
+    Only the minimal fields needed are decrypted, they are used promptly,
+    and the plaintext is zeroized or re-encrypted immediately afterwards
+    to shrink the exposure window.
+  code_patterns:
+    generic:
+      vulnerable: |
+        record = decrypt_entire_record(blob)   # full plaintext kept around
+      secure: |
+        field = decrypt_field(blob, "ssn")     # decrypt only what is needed
+        use(field); zeroize(field)             # wipe right after use
+    python:
+      vulnerable: |
+        data = decrypt(blob)
+        process(data)   # 'data' lingers in memory for the rest of the request
+      secure: |
+        buf = bytearray(decrypt(blob))
+        try:
+            process(buf)
+        finally:
+            for i in range(len(buf)): buf[i] = 0   # zeroize after use
+    java:
+      vulnerable: |
+        String secret = new String(decrypt(blob));   // immutable, cannot wipe
+      secure: |
+        char[] secret = decryptToChars(blob);
+        try { process(secret); } finally { Arrays.fill(secret, '\0'); }
+    csharp:
+      vulnerable: |
+        string secret = Decrypt(blob);   // immutable, lingers until GC
+      secure: |
+        byte[] secret = Decrypt(blob);
+        try { Process(secret); }
+        finally { CryptographicOperations.ZeroMemory(secret); }

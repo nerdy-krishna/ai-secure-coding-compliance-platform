@@ -1,0 +1,783 @@
+# OWASP ASVS 5.0 — Chapter V4: API and Web Service
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V4.1 — Generic Web Service Security
+# ---------------------------------------------------------------------------
+
+- id: V4.1.1
+  facet: API and Web Service
+  section: Generic Web Service Security
+  level: 1
+  security_rule: >-
+    Every HTTP response that carries a body must declare a Content-Type
+    header that accurately describes the body, including an explicit
+    charset such as UTF-8 for textual and XML media types.
+  vulnerability_pattern: >-
+    A response body is returned with a missing, generic, or mismatched
+    Content-Type, or with no charset, so the browser sniffs the type and
+    may treat the bytes as a different, more dangerous media type.
+  secure_pattern: >-
+    The handler sets a Content-Type that matches the actual body and
+    includes an explicit charset for text and XML, so the client parses
+    the response in exactly the intended format.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(body=jsonString)            # no Content-Type set
+      secure: |
+        respond(body=jsonString, headers={"Content-Type": "application/json; charset=utf-8"})
+    python:
+      vulnerable: |
+        return Response(html)               # defaults to text/plain
+      secure: |
+        return Response(html, mimetype="text/html; charset=utf-8")
+    javascript:
+      vulnerable: |
+        res.send(JSON.stringify(data));
+      secure: |
+        res.type("application/json; charset=utf-8").send(JSON.stringify(data));
+    java:
+      vulnerable: |
+        response.getWriter().write(json);
+      secure: |
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(json);
+    csharp:
+      vulnerable: |
+        return Content(json);
+      secure: |
+        return Content(json, "application/json", Encoding.UTF8);
+
+- id: V4.1.2
+  facet: API and Web Service
+  section: Generic Web Service Security
+  level: 2
+  security_rule: >-
+    Only browser-facing endpoints may auto-redirect HTTP to HTTPS; API
+    and service endpoints must reject plaintext requests outright so an
+    accidental unencrypted call is noticed rather than silently upgraded.
+  vulnerability_pattern: >-
+    A global HTTP-to-HTTPS redirect is applied to every endpoint, so an
+    API client misconfigured to use plaintext keeps working and leaks
+    request data over HTTP without anyone noticing.
+  secure_pattern: >-
+    Redirects are limited to user-facing pages, while API and service
+    routes return an error or refuse the connection when reached over
+    plain HTTP, making the misconfiguration visible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if scheme == "http": redirect(httpsUrl)   # applied to every route
+      secure: |
+        if scheme == "http" and isApiRoute(path): reject(400, "HTTPS required")
+    python:
+      vulnerable: |
+        app.add_middleware(HTTPSRedirectMiddleware)   # all routes, incl. /api
+      secure: |
+        @app.middleware("http")
+        async def api_https_only(request, call_next):
+            if request.url.path.startswith("/api") and request.url.scheme == "http":
+                return JSONResponse({"detail": "HTTPS required"}, status_code=400)
+            return await call_next(request)
+    javascript:
+      vulnerable: |
+        app.use((req, res, next) => req.secure ? next() : res.redirect("https://" + req.headers.host + req.url));
+      secure: |
+        app.use("/api", (req, res, next) => req.secure ? next() : res.status(400).json({ error: "HTTPS required" }));
+    java:
+      vulnerable: |
+        http.requiresChannel(c -> c.anyRequest().requiresSecure());
+      secure: |
+        http.requiresChannel(c -> c.requestMatchers("/web/**").requiresSecure());
+        // /api/** rejected by a filter when scheme is http, not redirected
+    csharp:
+      vulnerable: |
+        app.UseHttpsRedirection();          // redirects API calls too
+      secure: |
+        app.UseWhen(c => !c.Request.Path.StartsWithSegments("/api"),
+                    b => b.UseHttpsRedirection());
+
+- id: V4.1.3
+  facet: API and Web Service
+  section: Generic Web Service Security
+  level: 2
+  security_rule: >-
+    Headers set by trusted intermediaries such as load balancers or
+    proxies (for example X-Real-IP, X-Forwarded-For, X-User-ID) must not
+    be accepted from end-user requests and must be stripped at the edge.
+  vulnerability_pattern: >-
+    The application trusts an intermediary header without confirming it
+    came from a trusted hop, so a client can spoof X-Forwarded-For,
+    X-Real-IP, or an identity header to forge its address or identity.
+  secure_pattern: >-
+    The trust boundary strips or overwrites intermediary headers on
+    inbound requests, and the application only honors them when the
+    immediate peer is a known, trusted proxy.
+  code_patterns:
+    generic:
+      vulnerable: |
+        userId = request.header("X-User-ID")     # set by client, trusted blindly
+      secure: |
+        if peerIp in trustedProxies: userId = request.header("X-User-ID")
+        else: reject("untrusted X-User-ID")
+    python:
+      vulnerable: |
+        client_ip = request.headers["X-Forwarded-For"].split(",")[0]
+      secure: |
+        # trust the proxy chain explicitly; everything else is stripped at the edge
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["10.0.0.0/8"])
+        client_ip = request.client.host
+    javascript:
+      vulnerable: |
+        const ip = req.headers["x-forwarded-for"];
+      secure: |
+        app.set("trust proxy", "10.0.0.0/8");   // only this hop may set XFF
+        const ip = req.ip;
+    java:
+      vulnerable: |
+        String ip = request.getHeader("X-Forwarded-For");
+      secure: |
+        // ForwardedHeaderFilter honors XFF only from configured internal proxies
+        String ip = request.getRemoteAddr();
+    csharp:
+      vulnerable: |
+        var ip = Request.Headers["X-Forwarded-For"].ToString();
+      secure: |
+        // ForwardedHeadersOptions.KnownProxies restricts who may set the header
+        var ip = HttpContext.Connection.RemoteIpAddress;
+
+- id: V4.1.4
+  facet: API and Web Service
+  section: Generic Web Service Security
+  level: 3
+  security_rule: >-
+    The application must accept only the HTTP methods it explicitly
+    supports (including OPTIONS for CORS preflight) and reject every
+    other method rather than handling it implicitly.
+  vulnerability_pattern: >-
+    Routes are wired up without restricting the method, so verbs the
+    application never intended to support (such as PUT, DELETE, or TRACE)
+    reach a handler or a permissive default and are processed.
+  secure_pattern: >-
+    Each route declares the exact methods it serves, and unsupported
+    methods return 405 Method Not Allowed, so the attack surface is the
+    documented verb set and nothing more.
+  code_patterns:
+    generic:
+      vulnerable: |
+        route("/users", handler)            # matches any method
+      secure: |
+        route("/users", handler, methods={"GET", "POST"})   # else 405
+    python:
+      vulnerable: |
+        @app.route("/users")
+        def users(): ...
+      secure: |
+        @app.route("/users", methods=["GET", "POST"])
+        def users(): ...
+    javascript:
+      vulnerable: |
+        app.all("/users", handler);
+      secure: |
+        app.get("/users", handler);
+        app.post("/users", handler);
+        // other verbs fall through to a 405 handler
+    java:
+      vulnerable: |
+        @RequestMapping("/users")
+        public Object users() { ... }
+      secure: |
+        @GetMapping("/users")
+        public Object listUsers() { ... }
+    csharp:
+      vulnerable: |
+        [Route("users")]
+        public IActionResult Users() { ... }
+      secure: |
+        [HttpGet("users")]
+        public IActionResult ListUsers() { ... }
+
+- id: V4.1.5
+  facet: API and Web Service
+  section: Generic Web Service Security
+  level: 3
+  security_rule: >-
+    Highly sensitive requests or transactions, especially those crossing
+    multiple systems, must carry a per-message digital signature that
+    provides assurance beyond transport-layer protection alone.
+  vulnerability_pattern: >-
+    A sensitive transaction relies only on TLS for integrity, so once it
+    leaves the encrypted hop any intermediary or compromised relay can
+    alter the payload without detection.
+  secure_pattern: >-
+    The message itself is signed with the sender's key and the receiver
+    verifies the signature, so tampering anywhere along the path is
+    detected regardless of how many systems the message traverses.
+  code_patterns:
+    generic:
+      vulnerable: |
+        send(transaction)                   # integrity = TLS only
+      secure: |
+        send(transaction, signature=sign(canonical(transaction), privateKey))
+    python:
+      vulnerable: |
+        requests.post(url, json=payment)
+      secure: |
+        sig = private_key.sign(canonical_json(payment).encode(), padding.PKCS1v15(), hashes.SHA256())
+        requests.post(url, json=payment, headers={"X-Signature": b64(sig)})
+    java:
+      vulnerable: |
+        httpClient.send(HttpRequest.newBuilder(uri).POST(body).build(), handler);
+      secure: |
+        Signature s = Signature.getInstance("SHA256withRSA");
+        s.initSign(privateKey); s.update(canonicalBytes);
+        req.header("X-Signature", base64(s.sign()));
+    csharp:
+      vulnerable: |
+        await httpClient.PostAsJsonAsync(url, payment);
+      secure: |
+        var sig = rsa.SignData(canonicalBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.Headers.Add("X-Signature", Convert.ToBase64String(sig));
+
+# ---------------------------------------------------------------------------
+# V4.2 — HTTP Message Structure Validation
+# ---------------------------------------------------------------------------
+
+- id: V4.2.1
+  facet: API and Web Service
+  section: HTTP Message Structure Validation
+  level: 2
+  security_rule: >-
+    Every component in the request path must determine HTTP message
+    boundaries with the mechanism correct for the protocol version, so
+    that conflicting framing cannot be exploited for request smuggling.
+  vulnerability_pattern: >-
+    A component honors Content-Length while another honors
+    Transfer-Encoding for the same HTTP/1.x request, or accepts an
+    HTTP/2 message whose Content-Length disagrees with its DATA frames,
+    letting an attacker smuggle a second request past a front-end.
+  secure_pattern: >-
+    In HTTP/1.x a present Transfer-Encoding makes Content-Length ignored
+    per RFC, and in HTTP/2 or HTTP/3 the receiver verifies Content-Length
+    against the actual DATA frame length, rejecting any mismatch.
+  code_patterns:
+    generic:
+      vulnerable: |
+        length = header("Content-Length")   # used even when Transfer-Encoding present
+      secure: |
+        if header("Transfer-Encoding"): useChunkedFraming()
+        else: length = header("Content-Length")
+    python:
+      vulnerable: |
+        # custom parser reads body by Content-Length, ignores Transfer-Encoding
+        body = sock.recv(int(headers["Content-Length"]))
+      secure: |
+        # delegate framing to a hardened server; reject both headers together
+        if "Transfer-Encoding" in headers and "Content-Length" in headers:
+            raise BadRequest("conflicting framing")
+
+- id: V4.2.2
+  facet: API and Web Service
+  section: HTTP Message Structure Validation
+  level: 3
+  security_rule: >-
+    When the application generates HTTP messages, the Content-Length
+    header must agree with the actual body length produced by the
+    protocol framing, so downstream parsers cannot be desynchronized.
+  vulnerability_pattern: >-
+    The application emits a Content-Length that does not match the bytes
+    it actually writes, so a proxy and the origin disagree on where the
+    message ends and an attacker can smuggle a following request.
+  secure_pattern: >-
+    Content-Length is computed from the encoded body or delegated to the
+    framework's writer, which keeps the declared length and the framed
+    body length consistent for every response.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setHeader("Content-Length", str(len(text)))   # then writes encoded bytes
+        write(text.encode("utf-8"))
+      secure: |
+        data = text.encode("utf-8")
+        setHeader("Content-Length", str(len(data)))
+        write(data)
+    python:
+      vulnerable: |
+        start_response("200 OK", [("Content-Length", str(len(body)))])
+        return [body.encode("utf-8")]       # byte count differs from len(body)
+      secure: |
+        payload = body.encode("utf-8")
+        start_response("200 OK", [("Content-Length", str(len(payload)))])
+        return [payload]
+    java:
+      vulnerable: |
+        response.setContentLength(text.length());   // chars, not bytes
+        response.getOutputStream().write(text.getBytes(UTF_8));
+      secure: |
+        byte[] data = text.getBytes(StandardCharsets.UTF_8);
+        response.setContentLength(data.length);
+        response.getOutputStream().write(data);
+    csharp:
+      vulnerable: |
+        Response.Headers.ContentLength = text.Length;
+        await Response.WriteAsync(text);
+      secure: |
+        var data = Encoding.UTF8.GetBytes(text);
+        Response.Headers.ContentLength = data.Length;
+        await Response.Body.WriteAsync(data);
+
+- id: V4.2.3
+  facet: API and Web Service
+  section: HTTP Message Structure Validation
+  level: 3
+  security_rule: >-
+    The application must neither send nor accept HTTP/2 or HTTP/3
+    messages that carry connection-specific header fields such as
+    Transfer-Encoding, which are illegal in those protocols.
+  vulnerability_pattern: >-
+    An HTTP/2 or HTTP/3 message includes a connection-specific header
+    such as Transfer-Encoding or Connection, which a downgrading proxy
+    may translate into HTTP/1.1 framing and enable response splitting.
+  secure_pattern: >-
+    Outbound HTTP/2 and HTTP/3 messages omit connection-specific
+    headers, and inbound messages carrying them are rejected as
+    malformed before any handler processes them.
+  code_patterns:
+    generic:
+      vulnerable: |
+        h2Request.setHeader("Transfer-Encoding", "chunked")
+      secure: |
+        if protocol >= "HTTP/2" and hasHeader("Transfer-Encoding"): reject(400)
+    python:
+      vulnerable: |
+        headers = {"Transfer-Encoding": "chunked", ":method": "POST"}  # over HTTP/2
+      secure: |
+        FORBIDDEN_H2 = {"transfer-encoding", "connection", "keep-alive", "upgrade"}
+        if request.http_version >= "2" and FORBIDDEN_H2 & set(map(str.lower, headers)):
+            raise BadRequest("connection-specific header in HTTP/2")
+    javascript:
+      vulnerable: |
+        http2Stream.respond({ ":status": 200, "transfer-encoding": "chunked" });
+      secure: |
+        http2Stream.respond({ ":status": 200 });   // length framing only over h2
+    java:
+      vulnerable: |
+        h2Headers.add("transfer-encoding", "chunked");
+      secure: |
+        if (httpVersion.isAtLeast(HTTP_2) && headers.contains("transfer-encoding"))
+            throw new ProtocolException("illegal header for HTTP/2");
+
+- id: V4.2.4
+  facet: API and Web Service
+  section: HTTP Message Structure Validation
+  level: 3
+  security_rule: >-
+    HTTP/2 and HTTP/3 requests must be accepted only when their header
+    field names and values contain no CR, LF, or CRLF sequences, so
+    header injection cannot be smuggled through them.
+  vulnerability_pattern: >-
+    A header name or value carrying a carriage return or line feed is
+    accepted, so when the message is serialized to HTTP/1.x an attacker
+    can inject additional header fields or split the response.
+  secure_pattern: >-
+    Every inbound header name and value is scanned for CR and LF
+    characters and the request is rejected if any are present, before
+    the headers are stored or forwarded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        headers[name] = value               # value may contain \r\n
+      secure: |
+        if "\r" in value or "\n" in value: reject(400, "CRLF in header")
+        headers[name] = value
+    python:
+      vulnerable: |
+        response[user_header_name] = user_header_value
+      secure: |
+        if any(c in user_header_value for c in "\r\n"):
+            raise BadRequest("CRLF in header value")
+        response[user_header_name] = user_header_value
+    javascript:
+      vulnerable: |
+        res.setHeader(name, value);
+      secure: |
+        if (/[\r\n]/.test(name) || /[\r\n]/.test(value)) return res.sendStatus(400);
+        res.setHeader(name, value);
+    java:
+      vulnerable: |
+        response.setHeader(name, value);
+      secure: |
+        if (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0)
+            throw new IllegalArgumentException("CRLF in header");
+        response.setHeader(name, value);
+    csharp:
+      vulnerable: |
+        Response.Headers[name] = value;
+      secure: |
+        if (value.IndexOfAny(new[] { '\r', '\n' }) >= 0)
+            return BadRequest("CRLF in header");
+        Response.Headers[name] = value;
+
+- id: V4.2.5
+  facet: API and Web Service
+  section: HTTP Message Structure Validation
+  level: 3
+  security_rule: >-
+    When the application builds outbound requests, it must validate or
+    constrain URI and header field lengths so it does not produce
+    requests too large for the receiving component to accept.
+  vulnerability_pattern: >-
+    The application concatenates unbounded user data into an outbound
+    URI or into headers such as Authorization or Cookie, producing a
+    request the receiver rejects and causing a self-inflicted denial of
+    service.
+  secure_pattern: >-
+    Outbound URIs and request headers are length-checked or truncated
+    against the receiver's known limits before the request is sent, so
+    an oversized request is never emitted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        get(baseUrl + "?ids=" + ",".join(userIds))   # may exceed URI limit
+      secure: |
+        url = baseUrl + "?ids=" + ",".join(userIds)
+        if len(url) > MAX_URI_LEN: raise TooLong("split into batched requests")
+    python:
+      vulnerable: |
+        requests.get(f"{base}/search?q={query}")
+      secure: |
+        if len(query) > 1024: raise ValueError("query too long for upstream")
+        requests.get(f"{base}/search", params={"q": query})
+    javascript:
+      vulnerable: |
+        fetch(`${base}/items?filter=${filter}`);
+      secure: |
+        if (filter.length > 1024) throw new Error("filter too long for upstream");
+        fetch(`${base}/items?` + new URLSearchParams({ filter }));
+    java:
+      vulnerable: |
+        client.get(base + "/lookup?token=" + token);
+      secure: |
+        if (token.length() > 4096) throw new IllegalArgumentException("token too long");
+        client.get(base + "/lookup?token=" + URLEncoder.encode(token, UTF_8));
+    csharp:
+      vulnerable: |
+        await http.GetAsync($"{base}/find?q={query}");
+      secure: |
+        if (query.Length > 1024) throw new ArgumentException("query too long");
+        await http.GetAsync($"{base}/find?q={Uri.EscapeDataString(query)}");
+
+# ---------------------------------------------------------------------------
+# V4.3 — GraphQL
+# ---------------------------------------------------------------------------
+
+- id: V4.3.1
+  facet: API and Web Service
+  section: GraphQL
+  level: 2
+  security_rule: >-
+    GraphQL and similar expressive query layers must enforce a query
+    allowlist, depth limit, amount limit, or cost analysis so expensive
+    nested queries cannot cause a denial of service.
+  vulnerability_pattern: >-
+    The GraphQL server executes any client query with no depth, breadth,
+    or cost bound, so a deeply nested or cyclic query forces the resolver
+    to do unbounded work and exhausts the server.
+  secure_pattern: >-
+    The server caps query depth and complexity, or accepts only
+    persisted allowlisted queries, rejecting any request whose cost
+    exceeds the configured budget before resolution begins.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = graphql.execute(schema, clientQuery)   # no limits
+      secure: |
+        if queryDepth(clientQuery) > 10 or queryCost(clientQuery) > 1000: reject(400)
+        result = graphql.execute(schema, clientQuery)
+    python:
+      vulnerable: |
+        schema.execute(query)
+      secure: |
+        from graphql import validate
+        from graphql.validation import depth_limit_validator
+        errors = validate(schema.graphql_schema, parse(query), [depth_limit_validator(10)])
+        if errors: raise GraphQLError("query too deep")
+    javascript:
+      vulnerable: |
+        const server = new ApolloServer({ schema });
+      secure: |
+        const server = new ApolloServer({
+          schema,
+          validationRules: [depthLimit(10), costLimit({ maxCost: 1000 })],
+        });
+    java:
+      vulnerable: |
+        GraphQL.newGraphQL(schema).build();
+      secure: |
+        GraphQL.newGraphQL(schema)
+               .instrumentation(new MaxQueryDepthInstrumentation(10))
+               .build();
+    csharp:
+      vulnerable: |
+        services.AddGraphQL(b => b.AddSchema<AppSchema>());
+      secure: |
+        services.AddGraphQL(b => b.AddSchema<AppSchema>()
+                                  .AddValidationRule(new MaxComplexityRule(1000, maxDepth: 10)));
+
+- id: V4.3.2
+  facet: API and Web Service
+  section: GraphQL
+  level: 2
+  security_rule: >-
+    GraphQL introspection must be disabled in production unless the API
+    is deliberately offered to external parties, so the full schema is
+    not exposed to attackers.
+  vulnerability_pattern: >-
+    Introspection is left enabled on a production GraphQL endpoint that
+    is not a public API, so anyone can download the complete schema and
+    map every type, field, and mutation for attack.
+  secure_pattern: >-
+    Introspection is disabled in production environments by configuration
+    or a validation rule, and enabled only for internal use or for APIs
+    explicitly intended to be consumed by third parties.
+  code_patterns:
+    generic:
+      vulnerable: |
+        server = graphqlServer(schema, introspection=true)
+      secure: |
+        server = graphqlServer(schema, introspection=(env == "development"))
+    python:
+      vulnerable: |
+        GraphQLView.as_view("graphql", schema=schema)
+      secure: |
+        from graphql.validation import NoSchemaIntrospectionCustomRule
+        rules = [] if DEBUG else [NoSchemaIntrospectionCustomRule]
+        GraphQLView.as_view("graphql", schema=schema, validation_rules=rules)
+    javascript:
+      vulnerable: |
+        const server = new ApolloServer({ schema, introspection: true });
+      secure: |
+        const server = new ApolloServer({ schema, introspection: process.env.NODE_ENV !== "production" });
+    java:
+      vulnerable: |
+        GraphQL.newGraphQL(schema).build();
+      secure: |
+        GraphQL.newGraphQL(schema)
+               .instrumentation(new NoIntrospectionGraphqlFieldVisibility())
+               .build();
+    csharp:
+      vulnerable: |
+        services.AddGraphQL(b => b.AddSchema<AppSchema>());
+      secure: |
+        services.AddGraphQL(b => b.AddSchema<AppSchema>()
+                                  .AddSchemaVisitor(new IntrospectionDisabledIn(env)));
+
+# ---------------------------------------------------------------------------
+# V4.4 — WebSocket
+# ---------------------------------------------------------------------------
+
+- id: V4.4.1
+  facet: API and Web Service
+  section: WebSocket
+  level: 1
+  security_rule: >-
+    All WebSocket connections must use WebSocket over TLS (the wss
+    scheme), so the channel is encrypted end to end like HTTPS traffic.
+  vulnerability_pattern: >-
+    A WebSocket connection is opened with the plaintext ws scheme, so
+    every frame travels unencrypted and any network observer can read or
+    tamper with the session.
+  secure_pattern: >-
+    Connections are established exclusively with the wss scheme over
+    TLS, and plain ws upgrade requests are refused by the server.
+  code_patterns:
+    generic:
+      vulnerable: |
+        socket = openWebSocket("ws://api.example.com/feed")
+      secure: |
+        socket = openWebSocket("wss://api.example.com/feed")
+    python:
+      vulnerable: |
+        ws = await websockets.connect("ws://api.example.com/feed")
+      secure: |
+        ws = await websockets.connect("wss://api.example.com/feed", ssl=ssl_ctx)
+    javascript:
+      vulnerable: |
+        const ws = new WebSocket("ws://api.example.com/feed");
+      secure: |
+        const ws = new WebSocket("wss://api.example.com/feed");
+    java:
+      vulnerable: |
+        container.connectToServer(handler, URI.create("ws://api.example.com/feed"));
+      secure: |
+        container.connectToServer(handler, URI.create("wss://api.example.com/feed"));
+    csharp:
+      vulnerable: |
+        await ws.ConnectAsync(new Uri("ws://api.example.com/feed"), token);
+      secure: |
+        await ws.ConnectAsync(new Uri("wss://api.example.com/feed"), token);
+
+- id: V4.4.2
+  facet: API and Web Service
+  section: WebSocket
+  level: 2
+  security_rule: >-
+    During the WebSocket handshake the server must check the Origin
+    header against an allowlist of permitted origins and reject any
+    connection from an origin not on the list.
+  vulnerability_pattern: >-
+    The WebSocket server completes the handshake without inspecting the
+    Origin header, so a script on any malicious site can open an
+    authenticated cross-site WebSocket connection (Cross-Site WebSocket
+    Hijacking).
+  secure_pattern: >-
+    The handshake handler reads the Origin header, compares it against a
+    configured allowlist of trusted origins, and aborts the upgrade when
+    the origin does not match.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onHandshake(req): accept()          # Origin never checked
+      secure: |
+        onHandshake(req):
+            if req.header("Origin") not in ALLOWED_ORIGINS: reject(403)
+            accept()
+    python:
+      vulnerable: |
+        async def ws_endpoint(ws): await ws.accept()
+      secure: |
+        async def ws_endpoint(ws):
+            if ws.headers.get("origin") not in ALLOWED_ORIGINS:
+                await ws.close(code=1008); return
+            await ws.accept()
+    javascript:
+      vulnerable: |
+        const wss = new WebSocketServer({ server });
+      secure: |
+        const wss = new WebSocketServer({ server, verifyClient: (info, done) =>
+          done(ALLOWED_ORIGINS.has(info.origin)) });
+    java:
+      vulnerable: |
+        public void afterConnectionEstablished(WebSocketSession s) { }
+      secure: |
+        protected boolean checkOrigin(ServerHttpRequest req) {
+            return ALLOWED_ORIGINS.contains(req.getHeaders().getOrigin());
+        }
+    csharp:
+      vulnerable: |
+        var socket = await context.WebSockets.AcceptWebSocketAsync();
+      secure: |
+        if (!AllowedOrigins.Contains(context.Request.Headers.Origin.ToString()))
+        { context.Response.StatusCode = 403; return; }
+        var socket = await context.WebSockets.AcceptWebSocketAsync();
+
+- id: V4.4.3
+  facet: API and Web Service
+  section: WebSocket
+  level: 2
+  security_rule: >-
+    When the application's standard session management cannot be used
+    over WebSocket, the dedicated tokens used instead must satisfy the
+    same session management security requirements.
+  vulnerability_pattern: >-
+    A WebSocket channel uses an ad hoc token that is long-lived, not
+    bound to a session, lacks entropy, or is never revoked, so it fails
+    the protections that normal session cookies provide.
+  secure_pattern: >-
+    Dedicated WebSocket tokens are generated with strong entropy, scoped
+    and time-limited, validated on every connection, and revocable, so
+    they meet the same bar as the standard session mechanism.
+  code_patterns:
+    generic:
+      vulnerable: |
+        wsToken = userId + ":" + appName          # guessable, never expires
+      secure: |
+        wsToken = randomSecure(32); store(wsToken, userId, ttl=300, revocable=true)
+    python:
+      vulnerable: |
+        token = base64(f"{user.id}".encode())
+      secure: |
+        token = secrets.token_urlsafe(32)
+        await ws_token_store.set(token, user.id, ex=300)
+    javascript:
+      vulnerable: |
+        const token = String(user.id);
+      secure: |
+        const token = crypto.randomBytes(32).toString("base64url");
+        await redis.set(`ws:${token}`, user.id, "EX", 300);
+    java:
+      vulnerable: |
+        String token = Integer.toString(user.getId());
+      secure: |
+        byte[] b = new byte[32]; new SecureRandom().nextBytes(b);
+        String token = Base64.getUrlEncoder().encodeToString(b);
+        wsTokenStore.put(token, user.getId(), Duration.ofMinutes(5));
+    csharp:
+      vulnerable: |
+        var token = user.Id.ToString();
+      secure: |
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        await wsTokenStore.SetAsync(token, user.Id, TimeSpan.FromMinutes(5));
+
+- id: V4.4.4
+  facet: API and Web Service
+  section: WebSocket
+  level: 2
+  security_rule: >-
+    When an existing HTTPS session transitions to a WebSocket channel,
+    the dedicated WebSocket token must be issued or validated through
+    that previously authenticated HTTPS session.
+  vulnerability_pattern: >-
+    A WebSocket token is handed out or accepted without tying it to the
+    user's already authenticated HTTPS session, so an unauthenticated or
+    different client can obtain and use a channel token.
+  secure_pattern: >-
+    The WebSocket token is minted on an authenticated HTTPS endpoint and
+    bound to that session, and the WebSocket handshake validates the
+    token against the originating authenticated session before accepting.
+  code_patterns:
+    generic:
+      vulnerable: |
+        GET /ws-token -> return newToken()        # no auth on the issuing route
+      secure: |
+        GET /ws-token (requires authenticated HTTPS session) ->
+            token bound to session.user; handshake verifies that binding
+    python:
+      vulnerable: |
+        @app.get("/ws-token")
+        def ws_token(): return {"token": new_token()}
+      secure: |
+        @app.get("/ws-token")
+        def ws_token(user: User = Depends(current_active_user)):
+            t = secrets.token_urlsafe(32); store(t, user.id, ttl=60); return {"token": t}
+    javascript:
+      vulnerable: |
+        app.get("/ws-token", (req, res) => res.json({ token: newToken() }));
+      secure: |
+        app.get("/ws-token", requireAuth, (req, res) => {
+          const t = mintToken(); store(t, req.user.id, 60); res.json({ token: t });
+        });
+    java:
+      vulnerable: |
+        @GetMapping("/ws-token")
+        public Token wsToken() { return new Token(mint()); }
+      secure: |
+        @GetMapping("/ws-token")
+        public Token wsToken(@AuthenticationPrincipal User user) {
+            return wsTokens.issueFor(user.getId(), Duration.ofMinutes(1));
+        }
+    csharp:
+      vulnerable: |
+        [HttpGet("ws-token")]
+        public Token WsToken() => new(Mint());
+      secure: |
+        [Authorize]
+        [HttpGet("ws-token")]
+        public Token WsToken() => _wsTokens.IssueFor(User.GetId(), TimeSpan.FromMinutes(1));

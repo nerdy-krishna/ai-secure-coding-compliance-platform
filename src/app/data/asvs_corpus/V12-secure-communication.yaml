@@ -1,0 +1,517 @@
+# OWASP ASVS 5.0 — Chapter V12: Secure Communication
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V12.1 — General TLS Security Guidance
+# ---------------------------------------------------------------------------
+
+- id: V12.1.1
+  facet: Secure Communication
+  section: General TLS Security Guidance
+  level: 1
+  security_rule: >-
+    Only current recommended TLS protocol versions, TLS 1.2 and TLS 1.3,
+    may be enabled, and the newest available version must be preferred for
+    every connection.
+  vulnerability_pattern: >-
+    The TLS stack still permits obsolete protocol versions such as SSL 3.0,
+    TLS 1.0, or TLS 1.1, so a downgrade or a legacy client can negotiate a
+    weak handshake that is vulnerable to known attacks.
+  secure_pattern: >-
+    The server and client are configured with a minimum protocol version of
+    TLS 1.2, legacy versions are explicitly disabled, and TLS 1.3 is offered
+    and preferred where supported.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.set_min_version("SSLv3")     # legacy versions still negotiable
+      secure: |
+        tls.set_min_version("TLS1.2")    # TLS 1.3 preferred, legacy disabled
+    python:
+      vulnerable: |
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)   # allows TLS 1.0/1.1
+      secure: |
+        ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    javascript:
+      vulnerable: |
+        https.createServer({ secureProtocol: "TLSv1_method" }, app);
+      secure: |
+        https.createServer({ minVersion: "TLSv1.2" }, app);
+    java:
+      vulnerable: |
+        sslEngine.setEnabledProtocols(new String[]{"SSLv3", "TLSv1"});
+      secure: |
+        sslEngine.setEnabledProtocols(new String[]{"TLSv1.3", "TLSv1.2"});
+    csharp:
+      vulnerable: |
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11;
+      secure: |
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+- id: V12.1.2
+  facet: Secure Communication
+  section: General TLS Security Guidance
+  level: 2
+  security_rule: >-
+    Only recommended cipher suites may be enabled with the strongest set as
+    preferred, and L3 applications must restrict the suite list to those
+    that provide forward secrecy.
+  vulnerability_pattern: >-
+    The cipher suite list still includes weak or export-grade algorithms
+    such as RC4, 3DES, or static-RSA key exchange, so a connection can
+    negotiate a cipher with no forward secrecy or known cryptographic flaws.
+  secure_pattern: >-
+    The server advertises only strong AEAD cipher suites that use ephemeral
+    key exchange for forward secrecy, orders them strongest first, and
+    enforces its own preference order during negotiation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.set_ciphers("ALL:RC4:3DES")          # weak, no forward secrecy
+      secure: |
+        tls.set_ciphers("ECDHE-ECDSA-AES256-GCM-SHA384")  # AEAD + ECDHE
+    python:
+      vulnerable: |
+        ctx.set_ciphers("DEFAULT:!aNULL")
+      secure: |
+        ctx.set_ciphers("ECDHE+AESGCM:ECDHE+CHACHA20")
+    javascript:
+      vulnerable: |
+        tls.createServer({ ciphers: "ALL" }, handler);
+      secure: |
+        tls.createServer({ ciphers: "TLS_AES_256_GCM_SHA384:ECDHE-RSA-AES256-GCM-SHA384",
+                           honorCipherOrder: true }, handler);
+    java:
+      vulnerable: |
+        sslEngine.setEnabledCipherSuites(new String[]{"TLS_RSA_WITH_3DES_EDE_CBC_SHA"});
+      secure: |
+        sslEngine.setEnabledCipherSuites(
+            new String[]{"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"});
+    csharp:
+      vulnerable: |
+        var opts = new SslServerAuthenticationOptions();  // OS default, includes weak
+      secure: |
+        var opts = new SslServerAuthenticationOptions {
+            CipherSuitesPolicy = new CipherSuitesPolicy(
+                new[]{ TlsCipherSuite.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 }) };
+
+- id: V12.1.3
+  facet: Secure Communication
+  section: General TLS Security Guidance
+  level: 2
+  security_rule: >-
+    When mutual TLS is used, the application must verify that the client
+    certificate chains to a trusted CA before the certificate identity is
+    used for authentication or authorization.
+  vulnerability_pattern: >-
+    The application reads the subject or SAN from a presented client
+    certificate and trusts the identity without confirming the certificate
+    was validated against a trusted CA, so a self-signed or forged
+    certificate is accepted.
+  secure_pattern: >-
+    The TLS layer is configured to require and verify the client
+    certificate against a trusted CA bundle, and the application uses the
+    certificate identity only after that verification has succeeded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        identity = clientCert.subject           # used without chain verification
+      secure: |
+        if verifyChain(clientCert, trustedCAs): identity = clientCert.subject
+    python:
+      vulnerable: |
+        ctx.verify_mode = ssl.CERT_NONE
+        user = peer_cert["subject"]
+      secure: |
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_verify_locations("trusted-ca.pem")
+    javascript:
+      vulnerable: |
+        https.createServer({ requestCert: true }, (req, res) => {
+          const user = req.socket.getPeerCertificate().subject.CN; });
+      secure: |
+        https.createServer({ requestCert: true, rejectUnauthorized: true,
+          ca: [fs.readFileSync("trusted-ca.pem")] }, handler);
+    java:
+      vulnerable: |
+        sslEngine.setWantClientAuth(true);   // request only, not enforced
+      secure: |
+        sslEngine.setNeedClientAuth(true);   // chain verified against truststore
+    csharp:
+      vulnerable: |
+        var opts = new SslServerAuthenticationOptions {
+            ClientCertificateRequired = true };  // no validation callback
+      secure: |
+        var opts = new SslServerAuthenticationOptions {
+            ClientCertificateRequired = true,
+            RemoteCertificateValidationCallback = ValidateAgainstTrustedCa };
+
+- id: V12.1.4
+  facet: Secure Communication
+  section: General TLS Security Guidance
+  level: 3
+  security_rule: >-
+    Certificate revocation checking, such as OCSP stapling, must be enabled
+    and configured so that revoked server certificates are detected and
+    rejected.
+  vulnerability_pattern: >-
+    The TLS endpoint performs no revocation checking, so a certificate that
+    has been revoked after a key compromise is still accepted by clients as
+    valid.
+  secure_pattern: >-
+    The server is configured to staple a fresh OCSP response in the
+    handshake, and clients enforce revocation checks so a revoked
+    certificate causes the connection to fail.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.ocsp_stapling = false           # revocation never checked
+      secure: |
+        tls.ocsp_stapling = true            # stapled OCSP response served
+    javascript:
+      vulnerable: |
+        tls.createServer({ cert, key }, handler);   # no stapling enabled
+      secure: |
+        const server = tls.createServer({ cert, key }, handler);
+        server.on("OCSPRequest", (cert, issuer, cb) => cb(null, ocspResponse));
+    csharp:
+      vulnerable: |
+        var opts = new SslClientAuthenticationOptions {
+            CertificateRevocationCheckMode = X509RevocationMode.NoCheck };
+      secure: |
+        var opts = new SslClientAuthenticationOptions {
+            CertificateRevocationCheckMode = X509RevocationMode.Online };
+
+- id: V12.1.5
+  facet: Secure Communication
+  section: General TLS Security Guidance
+  level: 3
+  security_rule: >-
+    Encrypted Client Hello must be enabled in the application's TLS
+    settings so that sensitive handshake metadata such as the Server Name
+    Indication is not exposed in plaintext.
+  vulnerability_pattern: >-
+    The TLS handshake sends the Server Name Indication and other Client
+    Hello fields in cleartext, so a network observer learns which service
+    or virtual host the client is connecting to.
+  secure_pattern: >-
+    Encrypted Client Hello is enabled and the necessary ECH configuration
+    is published, so the sensitive parts of the Client Hello including the
+    SNI are encrypted to the server during the handshake.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.ech_enabled = false             # SNI sent in cleartext
+      secure: |
+        tls.ech_enabled = true              # Client Hello inner encrypted
+    python:
+      vulnerable: |
+        ctx = ssl.create_default_context()  # ECH not configured
+      secure: |
+        ctx = ssl.create_default_context()
+        ctx.set_ech_config(published_ech_config)   # encrypt SNI in handshake
+
+# ---------------------------------------------------------------------------
+# V12.2 — HTTPS Communication with External Facing Services
+# ---------------------------------------------------------------------------
+
+- id: V12.2.1
+  facet: Secure Communication
+  section: HTTPS Communication with External Facing Services
+  level: 1
+  security_rule: >-
+    All connectivity between a client and external facing HTTP-based
+    services must use TLS, and the connection must never fall back to
+    plaintext or unencrypted communication.
+  vulnerability_pattern: >-
+    An external facing endpoint is reachable over plain HTTP, or HTTPS
+    requests silently downgrade to HTTP, so credentials and data travel the
+    network in cleartext.
+  secure_pattern: >-
+    Services are exposed only over HTTPS, plain-HTTP requests are redirected
+    to HTTPS and protected with HSTS, and clients require an https scheme so
+    no plaintext fallback is possible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        fetch("http://api.example.com/login")    # plaintext endpoint
+      secure: |
+        fetch("https://api.example.com/login")   # TLS enforced, HSTS set
+    python:
+      vulnerable: |
+        requests.get("http://api.example.com/data")
+      secure: |
+        requests.get("https://api.example.com/data")
+    javascript:
+      vulnerable: |
+        app.listen(80, () => serve());
+      secure: |
+        app.use((req, res, next) => req.secure ? next()
+          : res.redirect("https://" + req.headers.host + req.url));
+    java:
+      vulnerable: |
+        URL url = new URL("http://api.example.com/data");
+      secure: |
+        URL url = new URL("https://api.example.com/data");
+    csharp:
+      vulnerable: |
+        var resp = await client.GetAsync("http://api.example.com/data");
+      secure: |
+        var resp = await client.GetAsync("https://api.example.com/data");
+
+- id: V12.2.2
+  facet: Secure Communication
+  section: HTTPS Communication with External Facing Services
+  level: 1
+  security_rule: >-
+    External facing services must present TLS certificates issued by a
+    publicly trusted certificate authority rather than self-signed or
+    privately issued certificates.
+  vulnerability_pattern: >-
+    A public endpoint serves a self-signed or internally issued
+    certificate, so clients either reject the connection or are trained to
+    bypass certificate warnings, which masks real attacks.
+  secure_pattern: >-
+    The external endpoint is provisioned with a certificate from a publicly
+    trusted CA, for example via ACME and Let's Encrypt, and the certificate
+    is renewed automatically before expiry.
+  code_patterns:
+    generic:
+      vulnerable: |
+        server.use_cert("self-signed.pem")       # not publicly trusted
+      secure: |
+        server.use_cert(acme.obtain("example.com"))  # publicly trusted CA
+    javascript:
+      vulnerable: |
+        https.createServer({ cert: selfSignedCert, key }, handler);
+      secure: |
+        https.createServer({ cert: letsEncryptCert, key: letsEncryptKey }, handler);
+
+- id: V12.3.1
+  facet: Secure Communication
+  section: General Service to Service Communication Security
+  level: 2
+  security_rule: >-
+    All inbound and outbound connections, including those to monitoring,
+    management, SSH, middleware, databases, and partner systems, must use an
+    encrypted protocol such as TLS with no fallback to plaintext.
+  vulnerability_pattern: >-
+    A backend connection to a database, cache, message broker, or partner
+    API is made over an unencrypted protocol, so credentials and data on
+    that internal link can be read by anyone on the network path.
+  secure_pattern: >-
+    Every service connection is configured to require TLS or an equivalent
+    encrypted transport, and the client refuses to proceed if encryption
+    cannot be negotiated.
+  code_patterns:
+    generic:
+      vulnerable: |
+        db.connect("postgres://user:pw@db/app?sslmode=disable")
+      secure: |
+        db.connect("postgres://user:pw@db/app?sslmode=verify-full")
+    python:
+      vulnerable: |
+        psycopg.connect(host="db", dbname="app", sslmode="disable")
+      secure: |
+        psycopg.connect(host="db", dbname="app", sslmode="verify-full")
+    javascript:
+      vulnerable: |
+        const client = new Client({ host: "db", ssl: false });
+      secure: |
+        const client = new Client({ host: "db",
+          ssl: { rejectUnauthorized: true, ca: caCert } });
+    java:
+      vulnerable: |
+        var url = "jdbc:postgresql://db/app?ssl=false";
+      secure: |
+        var url = "jdbc:postgresql://db/app?ssl=true&sslmode=verify-full";
+    csharp:
+      vulnerable: |
+        var conn = "Host=db;Database=app;SSL Mode=Disable";
+      secure: |
+        var conn = "Host=db;Database=app;SSL Mode=VerifyFull";
+
+- id: V12.3.2
+  facet: Secure Communication
+  section: General Service to Service Communication Security
+  level: 2
+  security_rule: >-
+    TLS clients must validate the certificate presented by the TLS server
+    before exchanging any application data with it.
+  vulnerability_pattern: >-
+    The TLS client disables or ignores certificate verification, for
+    example by accepting any certificate or any hostname, so an attacker
+    presenting any certificate can intercept the connection.
+  secure_pattern: >-
+    The client uses the default verifying TLS configuration that checks the
+    certificate chain against trusted CAs and confirms the hostname matches,
+    and never overrides that with a permissive callback.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.verify_peer = false             # any certificate accepted
+      secure: |
+        tls.verify_peer = true              # chain and hostname checked
+    python:
+      vulnerable: |
+        requests.get(url, verify=False)
+      secure: |
+        requests.get(url, verify=True)      # default verifying context
+    javascript:
+      vulnerable: |
+        https.get({ host, rejectUnauthorized: false }, handler);
+      secure: |
+        https.get({ host, rejectUnauthorized: true }, handler);
+    java:
+      vulnerable: |
+        sslContext.init(null, new TrustManager[]{ trustAllCerts }, null);
+      secure: |
+        sslContext.init(null, null, null);  // platform truststore validation
+    csharp:
+      vulnerable: |
+        handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
+      secure: |
+        var handler = new HttpClientHandler();  // default chain validation
+
+- id: V12.3.3
+  facet: Secure Communication
+  section: General Service to Service Communication Security
+  level: 2
+  security_rule: >-
+    Connectivity between internal HTTP-based services within the
+    application must use TLS or another appropriate transport encryption
+    mechanism, with no fallback to unencrypted communication.
+  vulnerability_pattern: >-
+    Internal microservices call each other over plain HTTP on the
+    assumption the network is trusted, so a foothold inside the network
+    exposes all east-west traffic in cleartext.
+  secure_pattern: >-
+    Internal service-to-service calls use HTTPS or mTLS, often enforced by a
+    service mesh, and a plain-HTTP request between services is rejected
+    rather than served.
+  code_patterns:
+    generic:
+      vulnerable: |
+        call("http://billing.internal/charge")   # cleartext east-west
+      secure: |
+        call("https://billing.internal/charge")  # TLS between services
+    python:
+      vulnerable: |
+        httpx.post("http://inventory.internal/reserve", json=order)
+      secure: |
+        httpx.post("https://inventory.internal/reserve", json=order, verify=ca_bundle)
+    javascript:
+      vulnerable: |
+        await fetch("http://users.internal/profile/" + id);
+      secure: |
+        await fetch("https://users.internal/profile/" + id);
+    java:
+      vulnerable: |
+        var req = HttpRequest.newBuilder(URI.create("http://orders.internal/get"));
+      secure: |
+        var req = HttpRequest.newBuilder(URI.create("https://orders.internal/get"));
+    csharp:
+      vulnerable: |
+        await client.GetAsync("http://payments.internal/status");
+      secure: |
+        await client.GetAsync("https://payments.internal/status");
+
+- id: V12.3.4
+  facet: Secure Communication
+  section: General Service to Service Communication Security
+  level: 2
+  security_rule: >-
+    TLS connections between internal services must use trusted
+    certificates, and where internal or self-signed certificates are used
+    the consumer must trust only specific internal CAs or specific pinned
+    certificates.
+  vulnerability_pattern: >-
+    An internal client disables verification entirely to tolerate
+    self-signed certificates, so it will accept any certificate from any
+    peer instead of just the intended internal ones.
+  secure_pattern: >-
+    The internal client keeps verification enabled but narrows its trust to
+    a dedicated internal CA bundle or a pinned certificate, so only the
+    intended internal services are accepted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.verify_peer = false             # tolerate self-signed by disabling
+      secure: |
+        tls.trusted_cas = loadInternalCaBundle()   # trust only internal CA
+    python:
+      vulnerable: |
+        httpx.Client(verify=False)
+      secure: |
+        httpx.Client(verify="internal-ca.pem")     # pin internal CA only
+    javascript:
+      vulnerable: |
+        new https.Agent({ rejectUnauthorized: false });
+      secure: |
+        new https.Agent({ ca: fs.readFileSync("internal-ca.pem") });
+    java:
+      vulnerable: |
+        sslContext.init(null, new TrustManager[]{ trustAllCerts }, null);
+      secure: |
+        var ks = KeyStore.getInstance("PKCS12");
+        ks.load(internalTruststore, pw);   // trust only internal CAs
+    csharp:
+      vulnerable: |
+        handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
+      secure: |
+        handler.ServerCertificateCustomValidationCallback =
+            (m, cert, ch, e) => cert.Thumbprint == PinnedInternalThumbprint;
+
+- id: V12.3.5
+  facet: Secure Communication
+  section: General Service to Service Communication Security
+  level: 3
+  security_rule: >-
+    Services communicating internally must use strong mutual authentication
+    such as TLS client authentication backed by PKI, with replay-resistant
+    mechanisms verifying the identity of each endpoint.
+  vulnerability_pattern: >-
+    Intra-service calls authenticate with a shared static secret or no
+    endpoint identity at all, so any process that obtains the secret can
+    impersonate a service and replayed requests are accepted.
+  secure_pattern: >-
+    Each service presents and verifies a short-lived PKI-issued certificate
+    via mutual TLS, often managed by a service mesh, so both endpoints prove
+    identity and replayed handshakes are rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        call(peer, headers={"X-Service-Key": SHARED_SECRET})  # static, no mTLS
+      secure: |
+        call(peer, clientCert=meshIssuedCert, verify=meshCaBundle)  # mutual TLS
+    python:
+      vulnerable: |
+        httpx.post(url, headers={"X-Service-Key": SHARED_SECRET})
+      secure: |
+        httpx.post(url, cert=("svc.pem", "svc.key"), verify="mesh-ca.pem")
+    javascript:
+      vulnerable: |
+        fetch(url, { headers: { "x-service-key": SHARED_SECRET } });
+      secure: |
+        const agent = new https.Agent({ cert: svcCert, key: svcKey, ca: meshCa });
+        fetch(url, { agent });
+    java:
+      vulnerable: |
+        req.header("X-Service-Key", SHARED_SECRET);
+      secure: |
+        var sslCtx = SSLContext.getInstance("TLS");
+        sslCtx.init(svcKeyManagers, meshTrustManagers, null);  // mTLS identity
+    csharp:
+      vulnerable: |
+        client.DefaultRequestHeaders.Add("X-Service-Key", SharedSecret);
+      secure: |
+        var handler = new HttpClientHandler();
+        handler.ClientCertificates.Add(meshIssuedCert);  // mTLS, mesh CA trust

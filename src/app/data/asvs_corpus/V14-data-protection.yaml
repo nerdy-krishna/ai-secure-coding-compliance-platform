@@ -1,0 +1,575 @@
+# OWASP ASVS 5.0 — Chapter V14: Data Protection
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+#
+# STATUS: complete — V14.1 + V14.2 + V14.3 (13 of 13 requirements).
+
+# ---------------------------------------------------------------------------
+# V14.1 — Data Protection Documentation
+# ---------------------------------------------------------------------------
+
+- id: V14.1.1
+  facet: Data Protection
+  section: Data Protection Documentation
+  level: 2
+  security_rule: >-
+    All sensitive data the application creates or processes must be
+    identified and classified into protection levels, including data that
+    is merely encoded such as Base64 strings or the plaintext payload of a
+    JWT, with classification informed by applicable privacy regulations.
+  vulnerability_pattern: >-
+    Sensitive values are treated as protected simply because they are
+    encoded, so Base64 blobs or JWT payloads carry secrets in plain view
+    and no classification exists to drive encryption or access controls.
+  secure_pattern: >-
+    Every data element is catalogued and assigned a protection level, with
+    encoded-but-not-encrypted data recognised as plaintext, and the
+    classification reflects the privacy regimes the application must meet.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = base64encode(ssn)        # encoded, treated as if protected
+      secure: |
+        classify(ssn, level="restricted")   # encoding is not protection
+        token = encrypt(ssn, key)
+    python:
+      vulnerable: |
+        payload = base64.b64encode(json.dumps({"ssn": ssn}).encode())
+      secure: |
+        # ssn classified RESTRICTED in the data inventory; encrypt at rest
+        payload = fernet.encrypt(json.dumps({"ssn": ssn}).encode())
+    java:
+      vulnerable: |
+        String token = Base64.getEncoder().encodeToString(ssn.getBytes());
+      secure: |
+        // ssn classified RESTRICTED; Base64 is not confidentiality
+        byte[] token = cipher.doFinal(ssn.getBytes(StandardCharsets.UTF_8));
+
+# ---------------------------------------------------------------------------
+
+- id: V14.1.2
+  facet: Data Protection
+  section: Data Protection Documentation
+  level: 2
+  security_rule: >-
+    Each sensitive-data protection level must have a documented set of
+    protection requirements covering encryption, integrity verification,
+    retention, logging rules, access control for sensitive data in logs,
+    database-level encryption, and the privacy technologies to be applied.
+  vulnerability_pattern: >-
+    Protection levels exist in name only with no documented requirements,
+    so developers guess at how to encrypt, retain, or log each class of
+    data and apply inconsistent or absent controls.
+  secure_pattern: >-
+    Every protection level has a written specification stating the
+    required encryption, integrity checks, retention period, logging and
+    log access rules, and privacy-enhancing technologies for that class.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # protection levels named but undocumented
+        store(record, level="confidential")   # no requirements attached
+      secure: |
+        policy = load_policy("confidential")   # encryption, retention, logging
+        store(record, policy=policy)
+
+# ---------------------------------------------------------------------------
+# V14.2 — General Data Protection
+# ---------------------------------------------------------------------------
+
+- id: V14.2.1
+  facet: Data Protection
+  section: General Data Protection
+  level: 1
+  security_rule: >-
+    Sensitive data must be sent to the server only in the HTTP message
+    body or header fields, never in the URL path or query string, so that
+    API keys and session tokens are not exposed.
+  vulnerability_pattern: >-
+    Secrets such as API keys or session tokens are placed in the URL or
+    query string, where they leak into server logs, browser history,
+    proxies, and Referer headers.
+  secure_pattern: >-
+    Sensitive values travel in the request body or in a header field such
+    as Authorization, keeping them out of access logs, caches, and the
+    Referer header.
+  code_patterns:
+    generic:
+      vulnerable: |
+        get("https://api.example.com/data?api_key=" + apiKey)
+      secure: |
+        get("https://api.example.com/data", headers={"Authorization": "Bearer " + apiKey})
+    python:
+      vulnerable: |
+        requests.get(f"https://api.example.com/data?token={session_token}")
+      secure: |
+        requests.get("https://api.example.com/data",
+                     headers={"Authorization": f"Bearer {session_token}"})
+    javascript:
+      vulnerable: |
+        fetch(`/api/data?api_key=${apiKey}`);
+      secure: |
+        fetch("/api/data", { headers: { Authorization: `Bearer ${apiKey}` } });
+    java:
+      vulnerable: |
+        var req = HttpRequest.newBuilder(URI.create(base + "?token=" + token)).build();
+      secure: |
+        var req = HttpRequest.newBuilder(URI.create(base))
+                     .header("Authorization", "Bearer " + token).build();
+    csharp:
+      vulnerable: |
+        await client.GetAsync($"https://api.example.com/data?apiKey={apiKey}");
+      secure: |
+        client.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
+        await client.GetAsync("https://api.example.com/data");
+
+# ---------------------------------------------------------------------------
+
+- id: V14.2.2
+  facet: Data Protection
+  section: General Data Protection
+  level: 2
+  security_rule: >-
+    The application must prevent sensitive data from being cached in
+    server-side components such as load balancers and application caches,
+    or ensure that such data is securely purged after use.
+  vulnerability_pattern: >-
+    Responses or fragments containing sensitive data are stored in a
+    shared server cache without scoping, so the data persists and can be
+    served to other users or read from the cache store.
+  secure_pattern: >-
+    Sensitive responses are excluded from shared caches, or cache entries
+    are scoped per user and have a short time-to-live, and the cache is
+    securely purged once the data is no longer needed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        cache.set("profile", sensitiveProfile)      # shared, never purged
+      secure: |
+        cache.set("profile:" + userId, redact(profile), ttl=60)
+        cache.delete("profile:" + userId)           # purge after use
+    python:
+      vulnerable: |
+        cache.set("report", confidential_report)
+      secure: |
+        cache.set(f"report:{user.id}", confidential_report, timeout=60)
+        cache.delete(f"report:{user.id}")
+    java:
+      vulnerable: |
+        appCache.put("balance", accountBalance);
+      secure: |
+        appCache.put("balance:" + userId, accountBalance, Duration.ofSeconds(60));
+        appCache.invalidate("balance:" + userId);
+    csharp:
+      vulnerable: |
+        _cache.Set("statement", statement);
+      secure: |
+        _cache.Set($"statement:{userId}", statement, TimeSpan.FromSeconds(60));
+        _cache.Remove($"statement:{userId}");
+
+# ---------------------------------------------------------------------------
+
+- id: V14.2.3
+  facet: Data Protection
+  section: General Data Protection
+  level: 2
+  security_rule: >-
+    Sensitive data must not be sent to untrusted third parties such as
+    analytics trackers or advertising scripts, so that data is not
+    collected outside the application's control.
+  vulnerability_pattern: >-
+    Sensitive values are passed to third-party tracking, analytics, or
+    advertising calls, leaking personal data to parties the application
+    does not control.
+  secure_pattern: >-
+    Only non-sensitive, approved fields are sent to third-party services,
+    and sensitive data is stripped, hashed, or withheld before any
+    external call is made.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tracker.send({event: "signup", email: user.email, ssn: user.ssn})
+      secure: |
+        tracker.send({event: "signup"})        # no sensitive fields leave
+    python:
+      vulnerable: |
+        analytics.track(user.email, "purchase", {"card": card_number})
+      secure: |
+        analytics.track(anonymized_id(user), "purchase", {"amount": amount})
+    javascript:
+      vulnerable: |
+        gtag("event", "login", { user_email: user.email });
+      secure: |
+        gtag("event", "login");   // no PII forwarded to the tracker
+    java:
+      vulnerable: |
+        analyticsClient.track(user.getEmail(), Map.of("ssn", user.getSsn()));
+      secure: |
+        analyticsClient.track(pseudonym(user), Map.of("plan", user.getPlan()));
+    csharp:
+      vulnerable: |
+        _analytics.Track(user.Email, new { CardNumber = user.CardNumber });
+      secure: |
+        _analytics.Track(Pseudonymize(user), new { Plan = user.Plan });
+
+# ---------------------------------------------------------------------------
+
+- id: V14.2.4
+  facet: Data Protection
+  section: General Data Protection
+  level: 2
+  security_rule: >-
+    The encryption, integrity verification, retention, logging, log access
+    control, and privacy controls for sensitive data must be implemented
+    exactly as defined in the documentation for that data's protection
+    level.
+  vulnerability_pattern: >-
+    Code handles sensitive data with ad hoc controls that diverge from the
+    documented protection level, so the actual encryption, retention, or
+    logging behaviour does not match the stated requirements.
+  secure_pattern: >-
+    The protection level for a data element drives its handling, with
+    encryption, retention, and logging behaviour read from the documented
+    policy rather than hardcoded per call site.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("user record: " + record)      # ignores the data policy
+      secure: |
+        policy = policy_for(record.level)
+        log.info("user record: " + policy.redact(record))
+    python:
+      vulnerable: |
+        db.save(record)                          # no encryption, ad hoc
+      secure: |
+        policy = policy_for(record.classification)
+        db.save(policy.encrypt(record), retention=policy.retention_days)
+    java:
+      vulnerable: |
+        repository.save(record);
+      secure: |
+        ProtectionPolicy p = policyFor(record.getLevel());
+        repository.save(p.encrypt(record), p.retention());
+    csharp:
+      vulnerable: |
+        _repository.Save(record);
+      secure: |
+        var policy = PolicyFor(record.Classification);
+        _repository.Save(policy.Encrypt(record), policy.Retention);
+
+# ---------------------------------------------------------------------------
+
+- id: V14.2.5
+  facet: Data Protection
+  section: General Data Protection
+  level: 3
+  security_rule: >-
+    Caching must only store responses that have the expected content type
+    and contain no sensitive dynamic content, and the server must return a
+    404 or 302 for non-existent files rather than a different valid file,
+    to prevent Web Cache Deception attacks.
+  vulnerability_pattern: >-
+    A shared cache stores responses based on URL suffix alone, so a
+    request for a profile page with a fake static extension is cached as a
+    public asset and a later visitor is served another user's data.
+  secure_pattern: >-
+    Cache rules key on the actual response content type and exclude
+    dynamic sensitive responses, and the server returns 404 or 302 for
+    unknown paths instead of serving an unrelated valid resource.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if url.endswith(".css"): cache_publicly(response)   # trusts the suffix
+      secure: |
+        if response.content_type == "text/css" and not response.is_dynamic:
+            cache_publicly(response)
+    javascript:
+      vulnerable: |
+        if (req.path.endsWith(".jpg")) res.set("Cache-Control", "public, max-age=86400");
+      secure: |
+        if (res.get("Content-Type") === "image/jpeg" && !res.locals.sensitive)
+          res.set("Cache-Control", "public, max-age=86400");
+    python:
+      vulnerable: |
+        if request.path.endswith(".js"):
+            response.headers["Cache-Control"] = "public, max-age=86400"
+      secure: |
+        if response.content_type == "application/javascript" and not response.is_dynamic:
+            response.headers["Cache-Control"] = "public, max-age=86400"
+
+# ---------------------------------------------------------------------------
+
+- id: V14.2.6
+  facet: Data Protection
+  section: General Data Protection
+  level: 3
+  security_rule: >-
+    The application must return only the minimum sensitive data needed for
+    a feature, such as the last four digits of a card number, and mask any
+    complete sensitive value in the UI unless the user explicitly reveals
+    it.
+  vulnerability_pattern: >-
+    An API or page returns the full sensitive value when only a fragment
+    is needed, so complete card numbers or national IDs are exposed in
+    responses, logs, and the rendered UI.
+  secure_pattern: >-
+    Responses carry only the masked or truncated form of sensitive values,
+    and the full value is returned solely on an explicit, authorised
+    reveal action.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return {"card": card.number}             # full PAN in the response
+      secure: |
+        return {"card": "**** **** **** " + card.number[-4:]}
+    python:
+      vulnerable: |
+        return jsonify(card_number=user.card_number)
+      secure: |
+        return jsonify(card_last4=user.card_number[-4:])
+    javascript:
+      vulnerable: |
+        res.json({ ssn: user.ssn });
+      secure: |
+        res.json({ ssnLast4: user.ssn.slice(-4) });
+    java:
+      vulnerable: |
+        return new CardDto(card.getNumber());
+      secure: |
+        return new CardDto("****" + card.getNumber().substring(card.getNumber().length() - 4));
+    csharp:
+      vulnerable: |
+        return new CardDto { Number = card.Number };
+      secure: |
+        return new CardDto { Last4 = card.Number[^4..] };
+
+# ---------------------------------------------------------------------------
+
+- id: V14.2.7
+  facet: Data Protection
+  section: General Data Protection
+  level: 3
+  security_rule: >-
+    Sensitive information must be subject to retention classification so
+    that outdated or unnecessary data is deleted automatically, on a
+    defined schedule, or when the situation requires.
+  vulnerability_pattern: >-
+    Sensitive records accumulate indefinitely with no retention metadata
+    or deletion job, so personal data lingers far beyond the period it was
+    needed and grows the breach blast radius.
+  secure_pattern: >-
+    Records carry a retention or expiry attribute and a scheduled job
+    deletes or anonymises data once its retention period has elapsed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(record)                             # stored forever
+      secure: |
+        save(record, expires_at=now() + retention_period(record.level))
+        scheduled_job: delete where expires_at < now()
+    python:
+      vulnerable: |
+        db.session.add(AuditEntry(data=payload))
+      secure: |
+        db.session.add(AuditEntry(data=payload,
+                                  delete_after=date.today() + timedelta(days=90)))
+    java:
+      vulnerable: |
+        repository.save(new AuditEntry(payload));
+      secure: |
+        repository.save(new AuditEntry(payload, Instant.now().plus(90, ChronoUnit.DAYS)));
+    csharp:
+      vulnerable: |
+        _db.AuditEntries.Add(new AuditEntry(payload));
+      secure: |
+        _db.AuditEntries.Add(new AuditEntry(payload, DateTime.UtcNow.AddDays(90)));
+
+# ---------------------------------------------------------------------------
+
+- id: V14.2.8
+  facet: Data Protection
+  section: General Data Protection
+  level: 3
+  security_rule: >-
+    Sensitive information must be stripped from the metadata of
+    user-submitted files, such as EXIF geolocation, unless the user has
+    consented to its storage.
+  vulnerability_pattern: >-
+    Uploaded files are stored or re-served with their original metadata
+    intact, so embedded EXIF GPS coordinates, author names, or device
+    details leak the submitter's personal information.
+  secure_pattern: >-
+    File metadata is parsed and sensitive fields are removed before the
+    file is stored or shared, unless the user has explicitly consented to
+    retaining that metadata.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(uploadedImage)                     # EXIF GPS retained
+      secure: |
+        store(stripMetadata(uploadedImage))
+    python:
+      vulnerable: |
+        img = Image.open(upload); img.save(dest)
+      secure: |
+        img = Image.open(upload)
+        clean = Image.new(img.mode, img.size); clean.putdata(list(img.getdata()))
+        clean.save(dest)                         # no EXIF carried over
+    javascript:
+      vulnerable: |
+        fs.writeFileSync(dest, uploadBuffer);
+      secure: |
+        const clean = await sharp(uploadBuffer).rotate().withMetadata(false).toBuffer();
+        fs.writeFileSync(dest, clean);
+    java:
+      vulnerable: |
+        Files.copy(upload.getInputStream(), dest);
+      secure: |
+        BufferedImage img = ImageIO.read(upload.getInputStream());
+        ImageIO.write(img, "jpg", dest.toFile());   // re-encode drops EXIF
+    csharp:
+      vulnerable: |
+        await upload.CopyToAsync(File.Create(dest));
+      secure: |
+        using var img = await Image.LoadAsync(upload.OpenReadStream());
+        img.Metadata.ExifProfile = null;
+        await img.SaveAsJpegAsync(dest);
+
+# ---------------------------------------------------------------------------
+# V14.3 — Client-side Data Protection
+# ---------------------------------------------------------------------------
+
+- id: V14.3.1
+  facet: Data Protection
+  section: Client-side Data Protection
+  level: 1
+  security_rule: >-
+    Authenticated data must be cleared from client storage such as the
+    browser DOM after the client or session is terminated, with the
+    Clear-Site-Data response header used where possible and a client-side
+    fallback for when the server is unreachable.
+  vulnerability_pattern: >-
+    After logout or session expiry, tokens and personal data remain in the
+    DOM, localStorage, or sessionStorage, so the next user of the device
+    can recover them.
+  secure_pattern: >-
+    Logout clears client storage explicitly on the client side and the
+    server sends a Clear-Site-Data header so cached authenticated data is
+    wiped even if one path fails.
+  code_patterns:
+    generic:
+      vulnerable: |
+        on_logout(): redirect("/login")          # client storage left intact
+      secure: |
+        on_logout():
+            clearClientStorage(); set_header("Clear-Site-Data", "\"storage\"")
+    javascript:
+      vulnerable: |
+        function logout() { window.location = "/login"; }
+      secure: |
+        function logout() {
+          localStorage.clear(); sessionStorage.clear();
+          window.location = "/login";
+        }
+    python:
+      vulnerable: |
+        return redirect("/login")                # no Clear-Site-Data sent
+      secure: |
+        resp = redirect("/login")
+        resp.headers["Clear-Site-Data"] = '"cache", "cookies", "storage"'
+        return resp
+    java:
+      vulnerable: |
+        response.sendRedirect("/login");
+      secure: |
+        response.setHeader("Clear-Site-Data", "\"cache\", \"cookies\", \"storage\"");
+        response.sendRedirect("/login");
+    csharp:
+      vulnerable: |
+        return Redirect("/login");
+      secure: |
+        Response.Headers["Clear-Site-Data"] = "\"cache\", \"cookies\", \"storage\"";
+        return Redirect("/login");
+
+# ---------------------------------------------------------------------------
+
+- id: V14.3.2
+  facet: Data Protection
+  section: Client-side Data Protection
+  level: 2
+  security_rule: >-
+    The application must set sufficient anti-caching HTTP response header
+    fields, such as Cache-Control with no-store, so that sensitive data is
+    not cached in browsers.
+  vulnerability_pattern: >-
+    Responses carrying sensitive data are returned without anti-caching
+    headers, so browsers and intermediaries store them on disk where they
+    can be retrieved later.
+  secure_pattern: >-
+    Responses containing sensitive data carry Cache-Control set to
+    no-store so neither the browser nor any intermediary retains a copy.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(sensitiveBody)                   # no Cache-Control header
+      secure: |
+        respond(sensitiveBody, headers={"Cache-Control": "no-store"})
+    python:
+      vulnerable: |
+        return jsonify(account=account_details)
+      secure: |
+        resp = jsonify(account=account_details)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+    javascript:
+      vulnerable: |
+        res.json(accountDetails);
+      secure: |
+        res.set("Cache-Control", "no-store").json(accountDetails);
+    java:
+      vulnerable: |
+        return ResponseEntity.ok(accountDetails);
+      secure: |
+        return ResponseEntity.ok()
+                 .header("Cache-Control", "no-store").body(accountDetails);
+    csharp:
+      vulnerable: |
+        return Ok(accountDetails);
+      secure: |
+        Response.Headers.CacheControl = "no-store";
+        return Ok(accountDetails);
+
+# ---------------------------------------------------------------------------
+
+- id: V14.3.3
+  facet: Data Protection
+  section: Client-side Data Protection
+  level: 2
+  security_rule: >-
+    Data stored in browser storage such as localStorage, sessionStorage,
+    IndexedDB, or cookies must not contain sensitive data, with the sole
+    exception of session tokens.
+  vulnerability_pattern: >-
+    Sensitive values such as personal identifiers, payment data, or API
+    keys are written to localStorage or other browser storage, where any
+    script on the page including injected XSS can read them.
+  secure_pattern: >-
+    Browser storage holds only non-sensitive UI state and, at most,
+    session tokens, while sensitive data stays server-side and is fetched
+    on demand over an authenticated request.
+  code_patterns:
+    generic:
+      vulnerable: |
+        browserStorage.set("ssn", user.ssn)
+      secure: |
+        browserStorage.set("theme", "dark")      # only non-sensitive UI state
+    javascript:
+      vulnerable: |
+        localStorage.setItem("creditCard", card.number);
+      secure: |
+        localStorage.setItem("uiPrefs", JSON.stringify({ theme: "dark" }));

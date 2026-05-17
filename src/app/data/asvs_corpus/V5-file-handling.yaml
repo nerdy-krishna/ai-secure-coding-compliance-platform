@@ -1,0 +1,615 @@
+# OWASP ASVS 5.0 — Chapter V5: File Handling
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V5.1 — File Handling Documentation
+# ---------------------------------------------------------------------------
+
+- id: V5.1.1
+  facet: File Handling
+  section: File Handling Documentation
+  level: 2
+  security_rule: >-
+    Documentation must define, for every upload feature, the permitted
+    file types, expected extensions, and maximum size including unpacked
+    size, and must describe how files are made safe to download and how
+    the application behaves when a malicious file is detected.
+  vulnerability_pattern: >-
+    Upload features have no documented contract for allowed types, sizes,
+    or unpacked limits, so each implementation invents its own ad hoc
+    rules and there is no agreed behaviour when a malicious file is found.
+  secure_pattern: >-
+    A written specification enumerates per-feature allowed types,
+    extensions, and maximum raw and unpacked sizes, and defines the
+    detection and safe-handling behaviour that every upload path follows.
+
+# ---------------------------------------------------------------------------
+# V5.2 — File Upload and Content
+# ---------------------------------------------------------------------------
+
+- id: V5.2.1
+  facet: File Handling
+  section: File Upload and Content
+  level: 1
+  security_rule: >-
+    The application must only accept uploaded files of a size it can
+    process without loss of performance, rejecting oversized uploads
+    before they are buffered or processed to prevent denial of service.
+  vulnerability_pattern: >-
+    Uploaded files are read into memory or written to disk without any
+    size limit, so a single very large upload exhausts memory, disk, or
+    request-processing capacity.
+  secure_pattern: >-
+    A maximum upload size is enforced at the framework or server layer
+    and the request is rejected as soon as the limit is exceeded, before
+    the body is fully buffered.
+  code_patterns:
+    generic:
+      vulnerable: |
+        data = readEntireBody(request)        # no size limit
+      secure: |
+        if contentLength(request) > MAX_UPLOAD_BYTES: reject(413)
+    python:
+      vulnerable: |
+        content = await file.read()           # reads any size into memory
+      secure: |
+        app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # Flask rejects oversize
+    javascript:
+      vulnerable: |
+        app.use(express.raw({ limit: Infinity }));
+      secure: |
+        app.use(multer({ limits: { fileSize: 10 * 1024 * 1024 } }));
+    java:
+      vulnerable: |
+        Part part = request.getPart("file");  // no maxFileSize configured
+      secure: |
+        @MultipartConfig(maxFileSize = 10_485_760, maxRequestSize = 10_485_760)
+    csharp:
+      vulnerable: |
+        var bytes = await new StreamReader(Request.Body).ReadToEndAsync();
+      secure: |
+        [RequestSizeLimit(10_485_760)]
+        public IActionResult Upload(IFormFile file) { /* ... */ }
+
+- id: V5.2.2
+  facet: File Handling
+  section: File Upload and Content
+  level: 1
+  security_rule: >-
+    When the application accepts a file, on its own or inside an archive,
+    it must verify that the extension matches an expected extension and
+    that the file contents correspond to that type, for example by
+    checking magic bytes, re-writing images, or using a validation library.
+  vulnerability_pattern: >-
+    A file is trusted on the basis of its name, extension, or
+    client-supplied content type alone, so a malicious payload renamed to
+    a permitted extension is accepted and later executed or served.
+  secure_pattern: >-
+    The extension is checked against an allowlist and the actual byte
+    content is validated to match the declared type, by inspecting magic
+    bytes or by parsing and re-encoding the file with a type-specific
+    library.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if endsWith(filename, ".png"): save(file)   # trusts the name only
+      secure: |
+        if extAllowed(filename) and sniffType(bytes) == "image/png": save(file)
+    python:
+      vulnerable: |
+        if filename.endswith(".png"):
+            save(upload)
+      secure: |
+        from PIL import Image
+        img = Image.open(upload); img.verify()      # rejects non-image bytes
+    javascript:
+      vulnerable: |
+        if (file.mimetype === "image/png") save(file);   // client-set value
+      secure: |
+        const { ext, mime } = await fileTypeFromBuffer(buf);
+        if (mime === "image/png" && ext === "png") save(buf);
+    java:
+      vulnerable: |
+        if (filename.endsWith(".pdf")) Files.write(dest, bytes);
+      secure: |
+        String detected = new Tika().detect(bytes);
+        if ("application/pdf".equals(detected)) Files.write(dest, bytes);
+    csharp:
+      vulnerable: |
+        if (Path.GetExtension(file.FileName) == ".png") Save(file);
+      secure: |
+        var sig = reader.ReadBytes(8);
+        if (sig.Take(8).SequenceEqual(PngMagic)) Save(file);
+
+- id: V5.2.3
+  facet: File Handling
+  section: File Upload and Content
+  level: 2
+  security_rule: >-
+    Before decompressing a compressed file such as a zip, gz, docx, or
+    odt, the application must check it against a maximum allowed
+    uncompressed size and a maximum number of contained files.
+  vulnerability_pattern: >-
+    An archive is decompressed without checking its uncompressed size or
+    entry count, so a small highly compressed archive expands into a
+    decompression bomb that exhausts memory or disk.
+  secure_pattern: >-
+    Each archive entry's declared uncompressed size is summed and the
+    entry count is tallied against fixed limits before extraction, and
+    extraction is aborted as soon as either limit is exceeded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for entry in archive: extract(entry)        # no size or count cap
+      secure: |
+        if totalUncompressed(archive) > MAX or count(archive) > MAX_FILES: reject()
+    python:
+      vulnerable: |
+        with zipfile.ZipFile(path) as z:
+            z.extractall(dest)
+      secure: |
+        with zipfile.ZipFile(path) as z:
+            total = sum(i.file_size for i in z.infolist())
+            if total > MAX_BYTES or len(z.infolist()) > MAX_FILES: raise ValueError
+    javascript:
+      vulnerable: |
+        fs.createReadStream(path).pipe(unzipper.Extract({ path: dest }));
+      secure: |
+        let total = 0;
+        for (const e of entries) { total += e.uncompressedSize;
+          if (total > MAX || entries.length > MAX_FILES) throw new Error("bomb"); }
+    java:
+      vulnerable: |
+        try (ZipInputStream z = new ZipInputStream(in)) {
+            while ((e = z.getNextEntry()) != null) extract(e); }
+      secure: |
+        long total = 0; int n = 0;
+        for (ZipEntry e : entries) { total += e.getSize(); n++;
+          if (total > MAX || n > MAX_FILES) throw new IOException("zip bomb"); }
+    csharp:
+      vulnerable: |
+        ZipFile.ExtractToDirectory(zipPath, destDir);
+      secure: |
+        var entries = archive.Entries;
+        if (entries.Sum(e => e.Length) > MAX || entries.Count > MAX_FILES)
+            throw new InvalidOperationException("zip bomb");
+
+- id: V5.2.4
+  facet: File Handling
+  section: File Upload and Content
+  level: 3
+  security_rule: >-
+    A per-user storage quota and a maximum number of files per user must
+    be enforced so that one user cannot fill available storage with too
+    many files or excessively large files.
+  vulnerability_pattern: >-
+    Uploads accumulate without any per-user accounting, so one account
+    can store unlimited files and consume all shared storage, denying
+    service to other users.
+  secure_pattern: >-
+    The application tracks each user's current file count and total
+    bytes, and rejects a new upload when accepting it would exceed the
+    configured per-user file-count or storage-byte quota.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(userId, file)                         # no quota accounting
+      secure: |
+        if usedBytes(userId) + size(file) > QUOTA or fileCount(userId) >= MAX:
+            reject(); else store(userId, file)
+    python:
+      vulnerable: |
+        save_file(user.id, upload)
+      secure: |
+        used = db.scalar(select(func.sum(File.size)).where(File.user_id == user.id))
+        if (used or 0) + upload.size > QUOTA_BYTES:
+            raise QuotaExceeded
+    java:
+      vulnerable: |
+        fileRepo.save(new StoredFile(userId, bytes));
+      secure: |
+        long used = fileRepo.totalBytesForUser(userId);
+        if (used + bytes.length > QUOTA_BYTES) throw new QuotaExceededException();
+    csharp:
+      vulnerable: |
+        _db.Files.Add(new StoredFile(userId, bytes));
+      secure: |
+        var used = _db.Files.Where(f => f.UserId == userId).Sum(f => f.Size);
+        if (used + bytes.Length > QuotaBytes) throw new QuotaExceededException();
+
+- id: V5.2.5
+  facet: File Handling
+  section: File Upload and Content
+  level: 3
+  security_rule: >-
+    The application must not allow uploaded compressed files to contain
+    symbolic links unless specifically required, and where required it
+    must enforce an allowlist of permitted symlink targets.
+  vulnerability_pattern: >-
+    An archive is extracted without inspecting entries for symlinks, so a
+    symlink entry can point extraction or later reads at sensitive files
+    outside the intended directory.
+  secure_pattern: >-
+    Each archive entry is inspected and symlink entries are rejected
+    during extraction, or where symlinks are needed their targets are
+    checked against an allowlist before the link is created.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for entry in archive: extract(entry)        # symlink entries honoured
+      secure: |
+        for entry in archive:
+            if isSymlink(entry): reject(); else extract(entry)
+    python:
+      vulnerable: |
+        with tarfile.open(path) as t:
+            t.extractall(dest)
+      secure: |
+        with tarfile.open(path) as t:
+            for m in t.getmembers():
+                if m.issym() or m.islnk(): raise ValueError("symlink in archive")
+            t.extractall(dest)
+    java:
+      vulnerable: |
+        for (ZipEntry e : entries) extract(e);
+      secure: |
+        for (ZipEntry e : entries) {
+            if ((e.getUnixMode() & 0xF000) == 0xA000) throw new IOException("symlink");
+            extract(e); }
+    csharp:
+      vulnerable: |
+        ZipFile.ExtractToDirectory(zipPath, destDir);
+      secure: |
+        foreach (var e in archive.Entries)
+            if ((e.ExternalAttributes >> 16 & 0xF000) == 0xA000)
+                throw new InvalidOperationException("symlink in archive");
+
+- id: V5.2.6
+  facet: File Handling
+  section: File Upload and Content
+  level: 3
+  security_rule: >-
+    The application must reject uploaded images whose pixel dimensions
+    exceed a configured maximum, to prevent pixel flood attacks that
+    consume excessive memory when the image is decoded.
+  vulnerability_pattern: >-
+    An uploaded image is fully decoded into a pixel buffer before its
+    dimensions are checked, so an image declaring enormous width and
+    height exhausts memory during decoding.
+  secure_pattern: >-
+    The image header is read to obtain its width and height, the pixel
+    count is compared against a maximum, and the image is rejected before
+    it is fully decoded into a raster buffer.
+  code_patterns:
+    generic:
+      vulnerable: |
+        img = decodeImage(bytes)                    # decodes before any check
+      secure: |
+        w, h = readImageDimensions(bytes)
+        if w * h > MAX_PIXELS: reject()
+    python:
+      vulnerable: |
+        img = Image.open(upload); img.load()
+      secure: |
+        Image.MAX_IMAGE_PIXELS = 25_000_000         # raises DecompressionBombError
+        img = Image.open(upload); img.load()
+    javascript:
+      vulnerable: |
+        const img = await sharp(buf).toBuffer();
+      secure: |
+        const meta = await sharp(buf).metadata();
+        if (meta.width * meta.height > MAX_PIXELS) throw new Error("pixel flood");
+    java:
+      vulnerable: |
+        BufferedImage img = ImageIO.read(input);
+      secure: |
+        ImageReader r = ImageIO.getImageReaders(input).next();
+        r.setInput(input);
+        if ((long) r.getWidth(0) * r.getHeight(0) > MAX_PIXELS) throw new IOException();
+    csharp:
+      vulnerable: |
+        using var img = Image.Load(stream);
+      secure: |
+        var info = Image.Identify(stream);
+        if ((long) info.Width * info.Height > MaxPixels) throw new InvalidDataException();
+
+# ---------------------------------------------------------------------------
+# V5.3 — File Storage
+# ---------------------------------------------------------------------------
+
+- id: V5.3.1
+  facet: File Handling
+  section: File Storage
+  level: 1
+  security_rule: >-
+    Files uploaded or generated from untrusted input and stored in a
+    publicly served folder must not be executed as server-side program
+    code when requested directly over HTTP.
+  vulnerability_pattern: >-
+    Uploaded files are stored inside a web root where the server maps
+    extensions to handlers, so an uploaded script with an executable
+    extension runs as server-side code when fetched.
+  secure_pattern: >-
+    Uploads are stored outside the web root or in a location with script
+    execution disabled, served only through a controller that streams
+    bytes with a safe content type and never hands them to an interpreter.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(file, "/var/www/html/uploads/" + filename)   # under the web root
+      secure: |
+        save(file, "/srv/data/uploads/" + generatedId)     # outside the web root
+    python:
+      vulnerable: |
+        upload.save(os.path.join("static/uploads", upload.filename))
+      secure: |
+        upload.save(os.path.join("/srv/uploads", uuid4().hex))
+        # served via send_file with an explicit, non-executable mimetype
+    java:
+      vulnerable: |
+        Files.write(Path.of(servletContext.getRealPath("/uploads"), name), bytes);
+      secure: |
+        Files.write(Path.of("/srv/uploads", UUID.randomUUID().toString()), bytes);
+    csharp:
+      vulnerable: |
+        file.SaveAs(Server.MapPath("~/uploads/" + file.FileName));
+      secure: |
+        var path = Path.Combine("/srv/uploads", Guid.NewGuid().ToString());
+        await file.CopyToAsync(File.Create(path));
+
+- id: V5.3.2
+  facet: File Handling
+  section: File Storage
+  level: 1
+  security_rule: >-
+    File paths for file operations must be built from internally
+    generated or trusted data rather than user-submitted filenames, and
+    where user filenames or metadata must be used they must be strictly
+    validated and sanitized to prevent path traversal, LFI, RFI, and SSRF.
+  vulnerability_pattern: >-
+    A user-supplied filename or path is concatenated into a file path, so
+    traversal sequences or absolute paths let an attacker read or write
+    files outside the intended directory or reach remote resources.
+  secure_pattern: >-
+    The application generates its own identifier for storage, or strips
+    directory components and resolves the final path, confirming it stays
+    within the intended base directory before any file operation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        open(baseDir + "/" + userFilename)          # ../ escapes baseDir
+      secure: |
+        path = resolve(baseDir, basename(userFilename))
+        if not path.startsWith(baseDir): reject()
+    python:
+      vulnerable: |
+        path = os.path.join(BASE_DIR, request.args["name"])
+        return open(path).read()
+      secure: |
+        path = (BASE_DIR / request.args["name"]).resolve()
+        if not path.is_relative_to(BASE_DIR): abort(400)
+    javascript:
+      vulnerable: |
+        fs.readFile(path.join(baseDir, req.query.name), cb);
+      secure: |
+        const full = path.resolve(baseDir, req.query.name);
+        if (!full.startsWith(baseDir + path.sep)) return res.sendStatus(400);
+    java:
+      vulnerable: |
+        File f = new File(baseDir, request.getParameter("name"));
+      secure: |
+        Path p = Path.of(baseDir).resolve(name).normalize();
+        if (!p.startsWith(Path.of(baseDir))) throw new SecurityException();
+    csharp:
+      vulnerable: |
+        var path = Path.Combine(baseDir, Request.Query["name"]);
+      secure: |
+        var full = Path.GetFullPath(Path.Combine(baseDir, name));
+        if (!full.StartsWith(baseDir, StringComparison.Ordinal)) throw new();
+
+- id: V5.3.3
+  facet: File Handling
+  section: File Storage
+  level: 3
+  security_rule: >-
+    Server-side file processing such as archive decompression must ignore
+    any path information embedded in the input so that extraction cannot
+    write files outside the target directory, preventing zip slip.
+  vulnerability_pattern: >-
+    Archive entry names are joined onto the destination directory as-is
+    during extraction, so an entry name containing traversal sequences
+    writes a file outside the intended directory — a zip slip.
+  secure_pattern: >-
+    Each entry's name is reduced to a safe basename or the resolved
+    destination path is verified to remain inside the target directory
+    before any byte is written during extraction.
+  code_patterns:
+    generic:
+      vulnerable: |
+        write(destDir + "/" + entry.name, entry.bytes)   # name may be ../../etc
+      secure: |
+        target = resolve(destDir, entry.name)
+        if not target.startsWith(destDir): reject(); else write(target, entry.bytes)
+    python:
+      vulnerable: |
+        for info in z.infolist():
+            open(os.path.join(dest, info.filename), "wb").write(z.read(info))
+      secure: |
+        for info in z.infolist():
+            target = (Path(dest) / info.filename).resolve()
+            if not target.is_relative_to(Path(dest).resolve()): raise ValueError
+    javascript:
+      vulnerable: |
+        fs.writeFileSync(path.join(dest, entry.fileName), entry.getData());
+      secure: |
+        const target = path.resolve(dest, entry.fileName);
+        if (!target.startsWith(dest + path.sep)) throw new Error("zip slip");
+    java:
+      vulnerable: |
+        File out = new File(destDir, entry.getName());
+        Files.copy(zis, out.toPath());
+      secure: |
+        Path target = Path.of(destDir).resolve(entry.getName()).normalize();
+        if (!target.startsWith(Path.of(destDir))) throw new IOException("zip slip");
+    csharp:
+      vulnerable: |
+        entry.ExtractToFile(Path.Combine(destDir, entry.FullName));
+      secure: |
+        var target = Path.GetFullPath(Path.Combine(destDir, entry.FullName));
+        if (!target.StartsWith(destDir, StringComparison.Ordinal)) throw new();
+
+# ---------------------------------------------------------------------------
+# V5.4 — File Download
+# ---------------------------------------------------------------------------
+
+- id: V5.4.1
+  facet: File Handling
+  section: File Download
+  level: 2
+  security_rule: >-
+    The application must validate or ignore user-submitted filenames,
+    including those in JSON, JSONP, or URL parameters, and must specify a
+    filename in the Content-Disposition response header field.
+  vulnerability_pattern: >-
+    A user-supplied filename is used directly to locate the file to serve
+    or is echoed without a Content-Disposition header, allowing path
+    traversal or letting the browser guess an unsafe handling for the file.
+  secure_pattern: >-
+    The download is keyed by a trusted internal identifier, the served
+    filename is validated against an allowlist or sanitized, and a
+    Content-Disposition header sets an explicit attachment filename.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serveFile(baseDir + "/" + request.param("file"))   # no header, no check
+      secure: |
+        f = lookupById(request.param("id"))
+        respond(f.bytes, header="Content-Disposition: attachment; filename=" + f.name)
+    python:
+      vulnerable: |
+        return send_file(os.path.join(DIR, request.args["file"]))
+      secure: |
+        rec = File.query.get_or_404(request.args["id"])
+        return send_file(rec.path, as_attachment=True, download_name=rec.name)
+    javascript:
+      vulnerable: |
+        res.sendFile(path.join(DIR, req.query.file));
+      secure: |
+        const rec = await File.findByPk(req.query.id);
+        res.download(rec.path, rec.name);   // sets Content-Disposition
+    java:
+      vulnerable: |
+        response.getOutputStream().write(read(DIR + req.getParameter("file")));
+      secure: |
+        response.setHeader("Content-Disposition",
+            "attachment; filename=\"" + rec.safeName() + "\"");
+        StreamUtils.copy(rec.open(), response.getOutputStream());
+    csharp:
+      vulnerable: |
+        return PhysicalFile(Path.Combine(Dir, Request.Query["file"]), "application/octet-stream");
+      secure: |
+        var rec = _db.Files.Find(id);
+        return File(rec.Bytes, "application/octet-stream", rec.SafeName);
+
+- id: V5.4.2
+  facet: File Handling
+  section: File Download
+  level: 2
+  security_rule: >-
+    Filenames served in HTTP response header fields or email attachments
+    must be encoded or sanitized, for example following RFC 6266, so they
+    preserve document structure and cannot inject into the response.
+  vulnerability_pattern: >-
+    An untrusted filename is placed unencoded into a Content-Disposition
+    header or attachment name, so quotes, newlines, or non-ASCII bytes
+    break the header structure or enable response splitting.
+  secure_pattern: >-
+    The filename is sanitized of control characters and encoded per RFC
+    6266, using the quoted ASCII fallback together with the filename star
+    UTF-8 form, so it always parses as a single safe header value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        header("Content-Disposition: attachment; filename=" + userName)
+      secure: |
+        header("Content-Disposition: attachment; filename=\""
+               + asciiFallback(userName) + "\"; filename*=UTF-8''" + rfc5987(userName))
+    python:
+      vulnerable: |
+        resp.headers["Content-Disposition"] = f'attachment; filename={name}'
+      secure: |
+        from werkzeug.utils import secure_filename
+        resp.headers["Content-Disposition"] = \
+            f'attachment; filename="{secure_filename(name)}"'
+    javascript:
+      vulnerable: |
+        res.setHeader("Content-Disposition", `attachment; filename=${name}`);
+      secure: |
+        const safe = name.replace(/[\r\n"]/g, "");
+        res.setHeader("Content-Disposition",
+            `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    java:
+      vulnerable: |
+        response.setHeader("Content-Disposition", "attachment; filename=" + name);
+      secure: |
+        ContentDisposition cd = ContentDisposition.attachment()
+            .filename(name, StandardCharsets.UTF_8).build();
+        response.setHeader("Content-Disposition", cd.toString());
+    csharp:
+      vulnerable: |
+        Response.Headers["Content-Disposition"] = "attachment; filename=" + name;
+      secure: |
+        var cd = new ContentDispositionHeaderValue("attachment");
+        cd.SetHttpFileName(name);   // emits RFC 6266 filename and filename*
+        Response.Headers["Content-Disposition"] = cd.ToString();
+
+- id: V5.4.3
+  facet: File Handling
+  section: File Download
+  level: 2
+  security_rule: >-
+    Files obtained from untrusted sources must be scanned by antivirus or
+    malware scanners before they are stored or served, to prevent the
+    application from distributing known malicious content.
+  vulnerability_pattern: >-
+    Untrusted uploads are stored and later served to other users without
+    any malware scan, so the application becomes a distribution channel
+    for known malicious files.
+  secure_pattern: >-
+    Each untrusted file is submitted to an antivirus or malware scanner
+    after upload, quarantined or rejected on a positive result, and only
+    released for download once the scan reports it clean.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(upload); markDownloadable(upload)     # never scanned
+      secure: |
+        if scanForMalware(upload) == "clean": store(upload)
+        else: quarantine(upload)
+    python:
+      vulnerable: |
+        save_file(upload)
+      secure: |
+        result = clamd.ClamdUnixSocket().instream(upload.stream)
+        if result["stream"][0] != "OK": raise MalwareDetected
+        save_file(upload)
+    java:
+      vulnerable: |
+        fileService.store(bytes);
+      secure: |
+        ScanResult r = antivirus.scan(new ByteArrayInputStream(bytes));
+        if (!r.isClean()) throw new MalwareDetectedException();
+        fileService.store(bytes);
+    csharp:
+      vulnerable: |
+        _storage.Save(file);
+      secure: |
+        var result = await _antivirus.ScanAsync(file.OpenReadStream());
+        if (!result.IsClean) throw new MalwareDetectedException();
+        _storage.Save(file);

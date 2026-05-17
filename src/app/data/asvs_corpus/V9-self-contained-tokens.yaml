@@ -1,0 +1,349 @@
+# OWASP ASVS 5.0 — Chapter V9: Self-contained Tokens
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V9.1 — Token source and integrity
+# ---------------------------------------------------------------------------
+
+- id: V9.1.1
+  facet: Self-contained Tokens
+  section: Token source and integrity
+  level: 1
+  security_rule: >-
+    A self-contained token must have its digital signature or MAC verified
+    successfully before any of its claims are read or trusted, so that a
+    tampered or forged token is rejected outright.
+  vulnerability_pattern: >-
+    The application decodes a token and reads its payload without
+    verifying the signature, so an attacker can change claims such as the
+    user id or role and have the modified token accepted.
+  secure_pattern: >-
+    The token is verified against the issuer's signing key, and the call
+    that returns the claims is the same call that checks the signature, so
+    no claim is available until integrity has been confirmed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = decodeTokenPayload(token)     # no signature check
+      secure: |
+        claims = verifyAndDecode(token, signingKey)
+    python:
+      vulnerable: |
+        import jwt
+        claims = jwt.decode(token, options={"verify_signature": False})
+      secure: |
+        claims = jwt.decode(token, key, algorithms=["RS256"])
+    javascript:
+      vulnerable: |
+        const claims = jwt.decode(token);   // decode never verifies
+      secure: |
+        const claims = jwt.verify(token, publicKey, { algorithms: ["RS256"] });
+    java:
+      vulnerable: |
+        Claims c = Jwts.parser().build().parseClaimsJwt(token).getBody();
+      secure: |
+        Claims c = Jwts.parser().verifyWith(publicKey).build()
+                       .parseSignedClaims(token).getPayload();
+    csharp:
+      vulnerable: |
+        var claims = new JwtSecurityTokenHandler().ReadJwtToken(token).Claims;
+      secure: |
+        handler.ValidateToken(token, validationParameters, out var validated);
+
+- id: V9.1.2
+  facet: Self-contained Tokens
+  section: Token source and integrity
+  level: 1
+  security_rule: >-
+    Only signing algorithms on an explicit allowlist may be used to create
+    or verify self-contained tokens; the allowlist must exclude the 'none'
+    algorithm and ideally pin a single algorithm family for the context.
+  vulnerability_pattern: >-
+    Verification trusts the algorithm named in the token header, so an
+    attacker can set it to 'none' or downgrade an asymmetric token to an
+    HMAC verified with the public key, bypassing the signature check.
+  secure_pattern: >-
+    The verifier ignores the header algorithm and accepts only algorithms
+    from a fixed allowlist, so a 'none' or mismatched algorithm token is
+    rejected before its claims are read.
+  code_patterns:
+    generic:
+      vulnerable: |
+        verify(token, key, algorithm=token.header.alg)   # attacker-chosen
+      secure: |
+        verify(token, key, allowedAlgorithms={"RS256"})
+    python:
+      vulnerable: |
+        jwt.decode(token, key, algorithms=["RS256", "HS256", "none"])
+      secure: |
+        jwt.decode(token, public_key, algorithms=["RS256"])
+    javascript:
+      vulnerable: |
+        jwt.verify(token, key);   // algorithm taken from the token header
+      secure: |
+        jwt.verify(token, publicKey, { algorithms: ["RS256"] });
+    java:
+      vulnerable: |
+        Jwts.parser().verifyWith(key).build().parse(token);
+      secure: |
+        Jwts.parser().verifyWith(publicKey)
+            .sig().add(Jwts.SIG.RS256).and().build().parseSignedClaims(token);
+    csharp:
+      vulnerable: |
+        var p = new TokenValidationParameters();   // ValidAlgorithms unset
+      secure: |
+        var p = new TokenValidationParameters { ValidAlgorithms = new[] { "RS256" } };
+
+- id: V9.1.3
+  facet: Self-contained Tokens
+  section: Token source and integrity
+  level: 1
+  security_rule: >-
+    Key material used to validate self-contained tokens must come only
+    from trusted pre-configured sources; for JWS, headers such as 'jku',
+    'x5u', and 'jwk' must be checked against an allowlist of trusted URIs.
+  vulnerability_pattern: >-
+    The verifier fetches the signing key from a location named inside the
+    token, such as a 'jku' or 'x5u' header, so an attacker points it at a
+    key they control and forges a valid signature.
+  secure_pattern: >-
+    The signing key is resolved only from a pre-configured trusted issuer
+    or a JWKS endpoint on an allowlist, and any key-source header in the
+    token is ignored or validated against that allowlist.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = fetchKey(token.header.jku)        # URL controlled by attacker
+      secure: |
+        key = trustedKeys.get(token.header.kid)  # pre-configured key set
+    python:
+      vulnerable: |
+        jwk_url = jwt.get_unverified_header(token)["jku"]
+        key = requests.get(jwk_url).json()
+      secure: |
+        jwks = PyJWKClient("https://issuer.example.com/.well-known/jwks.json")
+        key = jwks.get_signing_key_from_jwt(token).key
+    javascript:
+      vulnerable: |
+        const key = await fetchJwk(jwt.decode(token, { complete: true }).header.jku);
+      secure: |
+        const client = jwksClient({ jwksUri: "https://issuer.example.com/jwks.json" });
+    java:
+      vulnerable: |
+        URL jku = new URL(parseHeader(token).get("jku"));
+        PublicKey key = loadKey(jku);
+      secure: |
+        JwkProvider provider = new UrlJwkProvider("https://issuer.example.com");
+    csharp:
+      vulnerable: |
+        var key = await DownloadKey(ReadHeader(token)["jku"]);
+      secure: |
+        var p = new TokenValidationParameters { IssuerSigningKeys = trustedKeys };
+
+# ---------------------------------------------------------------------------
+# V9.2 — Token content
+# ---------------------------------------------------------------------------
+
+- id: V9.2.1
+  facet: Self-contained Tokens
+  section: Token content
+  level: 1
+  security_rule: >-
+    When a token carries a validity time span, it must be accepted only if
+    the current verification time falls within that span; for JWTs the
+    'nbf' and 'exp' claims must both be checked.
+  vulnerability_pattern: >-
+    Expiry and not-before claims are ignored or verification of them is
+    disabled, so an expired or not-yet-valid token continues to be
+    accepted indefinitely.
+  secure_pattern: >-
+    The verifier evaluates the 'nbf' and 'exp' claims against the current
+    time, with at most a small clock-skew tolerance, and rejects any token
+    outside its declared validity window.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = verify(token, key)        # validity window never checked
+      secure: |
+        claims = verify(token, key, checkExpiry=true, checkNotBefore=true)
+    python:
+      vulnerable: |
+        jwt.decode(token, key, algorithms=["RS256"],
+                   options={"verify_exp": False})
+      secure: |
+        jwt.decode(token, key, algorithms=["RS256"], leeway=30)
+    javascript:
+      vulnerable: |
+        jwt.verify(token, key, { ignoreExpiration: true });
+      secure: |
+        jwt.verify(token, key, { algorithms: ["RS256"], clockTolerance: 30 });
+    java:
+      vulnerable: |
+        Jwts.parser().verifyWith(key).clockSkewSeconds(86400).build();
+      secure: |
+        Jwts.parser().verifyWith(key).clockSkewSeconds(30).build()
+            .parseSignedClaims(token);
+    csharp:
+      vulnerable: |
+        var p = new TokenValidationParameters { ValidateLifetime = false };
+      secure: |
+        var p = new TokenValidationParameters {
+            ValidateLifetime = true, ClockSkew = TimeSpan.FromSeconds(30) };
+
+- id: V9.2.2
+  facet: Self-contained Tokens
+  section: Token content
+  level: 2
+  security_rule: >-
+    A service must confirm a token is the correct type and was issued for
+    the intended purpose before trusting it; for example only access
+    tokens may drive authorization and only ID tokens may prove authn.
+  vulnerability_pattern: >-
+    Any well-signed token is accepted regardless of type, so an ID token
+    is used to make an authorization decision, or a token minted for one
+    purpose is replayed for another.
+  secure_pattern: >-
+    The verifier checks a type indicator — such as the 'typ' header or a
+    purpose claim — and accepts the token only when that type matches the
+    operation being performed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = verify(token, key)
+        authorize(claims.scope)                # type never checked
+      secure: |
+        claims = verify(token, key)
+        require(claims.token_use == "access")
+    python:
+      vulnerable: |
+        claims = jwt.decode(token, key, algorithms=["RS256"])
+        grant_access(claims["scope"])
+      secure: |
+        claims = jwt.decode(token, key, algorithms=["RS256"])
+        if claims.get("token_use") != "access": raise InvalidToken()
+    javascript:
+      vulnerable: |
+        const c = jwt.verify(token, key);
+        authorize(c.scope);
+      secure: |
+        const c = jwt.verify(token, key);
+        if (c.token_use !== "access") throw new Error("wrong token type");
+    java:
+      vulnerable: |
+        Claims c = parse(token);
+        authorize(c.get("scope"));
+      secure: |
+        Claims c = parse(token);
+        if (!"access".equals(c.get("token_use"))) throw new JwtException("type");
+    csharp:
+      vulnerable: |
+        var c = handler.ValidateToken(token, p, out _);
+        Authorize(c.FindFirst("scope"));
+      secure: |
+        if (validated.Claims.First(x => x.Type == "token_use").Value != "access")
+            throw new SecurityTokenException("wrong token type");
+
+- id: V9.2.3
+  facet: Self-contained Tokens
+  section: Token content
+  level: 2
+  security_rule: >-
+    A service must accept only tokens whose audience is itself; for JWTs
+    the 'aud' claim must be validated against an allowlist of audience
+    identifiers defined by the service.
+  vulnerability_pattern: >-
+    The audience claim is not checked, so a token legitimately issued for a
+    different service is replayed against this service and accepted.
+  secure_pattern: >-
+    The verifier compares the token's 'aud' claim against the service's
+    own configured audience identifier and rejects any token whose
+    audience does not match.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = verify(token, key)            # aud claim ignored
+      secure: |
+        claims = verify(token, key, expectedAudience="api.example.com")
+    python:
+      vulnerable: |
+        jwt.decode(token, key, algorithms=["RS256"])
+      secure: |
+        jwt.decode(token, key, algorithms=["RS256"], audience="api.example.com")
+    javascript:
+      vulnerable: |
+        jwt.verify(token, key, { algorithms: ["RS256"] });
+      secure: |
+        jwt.verify(token, key, { algorithms: ["RS256"], audience: "api.example.com" });
+    java:
+      vulnerable: |
+        Jwts.parser().verifyWith(key).build().parseSignedClaims(token);
+      secure: |
+        Jwts.parser().verifyWith(key).requireAudience("api.example.com")
+            .build().parseSignedClaims(token);
+    csharp:
+      vulnerable: |
+        var p = new TokenValidationParameters { ValidateAudience = false };
+      secure: |
+        var p = new TokenValidationParameters {
+            ValidateAudience = true, ValidAudience = "api.example.com" };
+
+- id: V9.2.4
+  facet: Self-contained Tokens
+  section: Token content
+  level: 2
+  security_rule: >-
+    When one issuer signs tokens for several audiences with the same
+    private key, each token must carry an audience restriction uniquely
+    identifying its intended audiences, and dynamically supplied audiences
+    must be validated by the issuer to prevent audience impersonation.
+  vulnerability_pattern: >-
+    An issuer signs tokens for multiple audiences with one key but omits
+    or weakly populates the audience claim, or copies a client-supplied
+    audience without checking it, so a token meant for one audience is
+    accepted by another.
+  secure_pattern: >-
+    Every issued token carries an explicit audience claim that uniquely
+    names its intended recipients, and any audience value provided by a
+    client is validated against a registered allowlist before it is
+    embedded in the token.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = sign({"sub": user}, key)       # no aud, shared signing key
+      secure: |
+        require(requestedAud in registeredAudiences)
+        token = sign({"sub": user, "aud": requestedAud}, key)
+    python:
+      vulnerable: |
+        token = jwt.encode({"sub": user}, key, algorithm="RS256")
+      secure: |
+        if requested_aud not in REGISTERED_AUDIENCES: raise ValueError("aud")
+        token = jwt.encode({"sub": user, "aud": requested_aud}, key,
+                           algorithm="RS256")
+    javascript:
+      vulnerable: |
+        const token = jwt.sign({ sub: user }, key, { algorithm: "RS256" });
+      secure: |
+        if (!registeredAudiences.has(requestedAud)) throw new Error("aud");
+        const token = jwt.sign({ sub: user }, key,
+            { algorithm: "RS256", audience: requestedAud });
+    java:
+      vulnerable: |
+        String t = Jwts.builder().subject(user).signWith(key).compact();
+      secure: |
+        if (!registered.contains(aud)) throw new IllegalArgumentException("aud");
+        String t = Jwts.builder().subject(user).audience().add(aud)
+                       .and().signWith(key).compact();
+    csharp:
+      vulnerable: |
+        var t = new JwtSecurityToken(claims: new[] { new Claim("sub", user) });
+      secure: |
+        if (!Registered.Contains(aud)) throw new ArgumentException("aud");
+        var t = new JwtSecurityToken(audience: aud,
+            claims: new[] { new Claim("sub", user) });

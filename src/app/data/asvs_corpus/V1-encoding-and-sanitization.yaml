@@ -1,0 +1,1298 @@
+# OWASP ASVS 5.0 — Chapter V1: Encoding and Sanitization
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+#
+# STATUS: exemplar in review — V1.1 + V1.2 complete (12 of 30);
+# V1.3–V1.5 to follow after format/quality sign-off.
+
+# ---------------------------------------------------------------------------
+# V1.1 — Encoding and Sanitization Architecture
+# ---------------------------------------------------------------------------
+
+- id: V1.1.1
+  facet: Encoding and Sanitization
+  section: Encoding and Sanitization Architecture
+  level: 2
+  security_rule: >-
+    Untrusted input must be decoded or unescaped into a canonical form
+    exactly once, only when encoded data in that form is expected, and
+    before it is validated, sanitized, or otherwise processed.
+  vulnerability_pattern: >-
+    Input is decoded more than once, or decoded again after it has been
+    validated or sanitized, so a payload that appeared safe when checked
+    is transformed back into a dangerous value before it is used.
+  secure_pattern: >-
+    Input is decoded a single time at the trust boundary, before
+    validation and sanitization, and is never decoded again afterwards.
+  code_patterns:
+    generic:
+      vulnerable: |
+        clean = sanitize(decode(input))
+        use(decode(clean))            # second decode revives the payload
+      secure: |
+        decoded = decode(input)       # decode once, up front
+        use(sanitize(decoded))
+    python:
+      vulnerable: |
+        data = unquote(unquote(request.args["q"]))
+      secure: |
+        data = unquote(request.args["q"])   # single decode before validation
+    javascript:
+      vulnerable: |
+        const value = decodeURIComponent(decodeURIComponent(input));
+      secure: |
+        const value = decodeURIComponent(input);
+    java:
+      vulnerable: |
+        String v = URLDecoder.decode(URLDecoder.decode(in, UTF_8), UTF_8);
+      secure: |
+        String v = URLDecoder.decode(in, StandardCharsets.UTF_8);
+    csharp:
+      vulnerable: |
+        var v = Uri.UnescapeDataString(Uri.UnescapeDataString(input));
+      secure: |
+        var v = Uri.UnescapeDataString(input);
+
+- id: V1.1.2
+  facet: Encoding and Sanitization
+  section: Encoding and Sanitization Architecture
+  level: 2
+  security_rule: >-
+    Output encoding and escaping must be applied as the final step
+    before data reaches the interpreter it is intended for, or be
+    performed by that interpreter itself.
+  vulnerability_pattern: >-
+    Data is encoded early and then further concatenated or transformed
+    before it reaches the interpreter, so the encoding no longer matches
+    the final output context and protection is lost.
+  secure_pattern: >-
+    Encoding is applied at the point of output, immediately before the
+    value is handed to the interpreter, or the interpreter's own
+    parameterized API performs the escaping.
+  code_patterns:
+    generic:
+      vulnerable: |
+        safe = htmlEncode(name)
+        page = "<div title=" + safe + ">"   # re-used in a different context
+      secure: |
+        page = "<div title=\"" + htmlAttributeEncode(name) + "\">"
+    python:
+      vulnerable: |
+        encoded = html.escape(comment)
+        return Markup("<p>" + encoded + "</p>" + raw_footer)
+      secure: |
+        return render_template("comment.html", comment=comment)  # autoescape
+    javascript:
+      vulnerable: |
+        const row = "<td>" + escapeHtml(value) + "</td>" + extra;
+        el.innerHTML = row;
+      secure: |
+        el.textContent = value;   # the DOM API encodes for this context
+    java:
+      vulnerable: |
+        String cell = Encode.forHtml(value);
+        out.print("<td onclick='show(" + cell + ")'>");
+      secure: |
+        out.print("<td onclick='show(" + Encode.forJavaScript(value) + ")'>");
+    csharp:
+      vulnerable: |
+        var s = HttpUtility.HtmlEncode(value);
+        Response.Write("<a href='" + s + "'>");
+      secure: |
+        Response.Write("<a href='" + HttpUtility.UrlEncode(value) + "'>");
+
+# ---------------------------------------------------------------------------
+# V1.2 — Injection Prevention
+# ---------------------------------------------------------------------------
+
+- id: V1.2.1
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 1
+  security_rule: >-
+    Output encoding for an HTTP response, HTML, or XML document must
+    match the exact context the data lands in (HTML element, attribute,
+    comment, CSS, or HTTP header) so it cannot alter document structure.
+  vulnerability_pattern: >-
+    A single generic encoder, or none, is used regardless of where the
+    value is placed, so input that is inert in one context becomes
+    active markup or a structural break in another.
+  secure_pattern: >-
+    A context-aware encoder is selected for each sink — HTML body,
+    attribute, JavaScript, CSS, or URL — and applied where the value is
+    written, ideally by an auto-escaping template engine.
+  code_patterns:
+    generic:
+      vulnerable: |
+        html = "<a href=" + url + " title=" + htmlEncode(title) + ">"
+      secure: |
+        html = "<a href=\"" + urlEncode(url) + "\" title=\""
+             + htmlAttributeEncode(title) + "\">"
+    python:
+      vulnerable: |
+        return HttpResponse("<h1>" + title + "</h1>")
+      secure: |
+        return render(request, "page.html", {"title": title})  # autoescape on
+    javascript:
+      vulnerable: |
+        div.innerHTML = "Welcome " + username;
+      secure: |
+        div.textContent = "Welcome " + username;
+    java:
+      vulnerable: |
+        response.getWriter().write("<p>" + message + "</p>");
+      secure: |
+        response.getWriter().write("<p>" + Encode.forHtml(message) + "</p>");
+    csharp:
+      vulnerable: |
+        Response.Write("<p>" + message + "</p>");
+      secure: |
+        Response.Write("<p>" + HttpUtility.HtmlEncode(message) + "</p>");
+
+- id: V1.2.2
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 1
+  security_rule: >-
+    When URLs are built dynamically, untrusted data must be encoded for
+    its URL context, and only safe protocols may be permitted so that
+    javascript: or data: URLs cannot be introduced.
+  vulnerability_pattern: >-
+    Untrusted data is concatenated into a URL without URL encoding, or a
+    user-controlled value supplies the whole URL or its scheme, allowing
+    a javascript: or data: URL to execute when followed.
+  secure_pattern: >-
+    Query and path values are URL encoded, and the final URL scheme is
+    checked against an allowlist of safe protocols such as https and
+    mailto before the URL is emitted or followed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        link = "/search?q=" + userInput
+        anchor = "<a href=" + userSuppliedUrl + ">"
+      secure: |
+        link = "/search?q=" + urlEncode(userInput)
+        if scheme(userSuppliedUrl) in {"http", "https"}: emit(userSuppliedUrl)
+    python:
+      vulnerable: |
+        url = "/go?next=" + request.args["next"]
+      secure: |
+        from urllib.parse import quote
+        url = "/go?next=" + quote(request.args["next"], safe="")
+    javascript:
+      vulnerable: |
+        anchor.href = userInput;
+      secure: |
+        const u = new URL(userInput, location.origin);
+        if (u.protocol === "https:" || u.protocol === "http:") anchor.href = u.href;
+    java:
+      vulnerable: |
+        String url = "/view?id=" + id;
+      secure: |
+        String url = "/view?id=" + URLEncoder.encode(id, StandardCharsets.UTF_8);
+    csharp:
+      vulnerable: |
+        var url = "/view?id=" + id;
+      secure: |
+        var url = "/view?id=" + Uri.EscapeDataString(id);
+
+- id: V1.2.3
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 1
+  security_rule: >-
+    Output encoding or escaping must be used when JavaScript content,
+    including JSON, is built dynamically, so untrusted data cannot change
+    the structure of the script or document.
+  vulnerability_pattern: >-
+    Untrusted data is concatenated directly into inline script or a JSON
+    string, letting an attacker close the string or block and inject
+    executable JavaScript.
+  secure_pattern: >-
+    Values are passed as data rather than concatenated into code — JSON
+    is produced by a real serializer, and script needing server data
+    reads it from a safely encoded data attribute or element.
+  code_patterns:
+    generic:
+      vulnerable: |
+        script = "var user = '" + name + "';"
+      secure: |
+        script = "var user = " + jsonSerialize(name) + ";"
+    python:
+      vulnerable: |
+        body = "<script>var u='" + name + "'</script>"
+      secure: |
+        body = '<script>var u=' + json.dumps(name) + '</script>'
+    javascript:
+      vulnerable: |
+        const payload = '{"name":"' + name + '"}';
+      secure: |
+        const payload = JSON.stringify({ name });
+    java:
+      vulnerable: |
+        String js = "<script>load('" + id + "')</script>";
+      secure: |
+        String js = "<script>load(" + Encode.forJavaScript(id) + ")</script>";
+    csharp:
+      vulnerable: |
+        var js = "<script>init('" + id + "')</script>";
+      secure: |
+        var js = "<script>init(" + JsonSerializer.Serialize(id) + ")</script>";
+
+- id: V1.2.4
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 1
+  security_rule: >-
+    Data selection and database queries (SQL, HQL, NoSQL, Cypher),
+    including stored procedures, must use parameterized queries, an ORM,
+    or an entity framework so untrusted input cannot alter the query.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated or interpolated into the query
+    string, so the input is parsed as query syntax and an attacker can
+    add clauses, change logic, or read or modify other data.
+  secure_pattern: >-
+    The query text is fixed and untrusted values are supplied only as
+    bound parameters, or an ORM or query builder binds them, so input is
+    always treated as data and never as query structure.
+  code_patterns:
+    generic:
+      vulnerable: |
+        query = "SELECT * FROM users WHERE name = '" + userInput + "'"
+      secure: |
+        query = "SELECT * FROM users WHERE name = ?"
+        execute(query, [userInput])
+    python:
+      vulnerable: |
+        cursor.execute("SELECT * FROM users WHERE id = " + user_id)
+      secure: |
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    javascript:
+      vulnerable: |
+        db.query("SELECT * FROM users WHERE email = '" + email + "'");
+      secure: |
+        db.query("SELECT * FROM users WHERE email = ?", [email]);
+    java:
+      vulnerable: |
+        stmt.executeQuery("SELECT * FROM users WHERE id = " + id);
+      secure: |
+        var ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+        ps.setString(1, id);
+    csharp:
+      vulnerable: |
+        cmd.CommandText = "SELECT * FROM users WHERE id = " + id;
+      secure: |
+        cmd.CommandText = "SELECT * FROM users WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", id);
+
+- id: V1.2.5
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 1
+  security_rule: >-
+    The application must protect against OS command injection by using
+    parameterized OS calls — passing arguments as a vector — or contextual
+    command-line encoding, and must avoid invoking a shell.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into a command string handed to a
+    shell, so shell metacharacters such as semicolons, pipes, or command
+    substitution let an attacker run additional commands.
+  secure_pattern: >-
+    The program is invoked directly with its arguments passed as a list,
+    so the operating system never re-parses them, and no shell is
+    involved unless an argument allowlist is enforced.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run("ping " + host, shell=true)
+      secure: |
+        run(["ping", "-c", "1", host])      # argument vector, no shell
+    python:
+      vulnerable: |
+        os.system("ping " + host)
+      secure: |
+        subprocess.run(["ping", "-c", "1", host])
+    javascript:
+      vulnerable: |
+        child_process.exec("ping " + host);
+      secure: |
+        child_process.execFile("ping", ["-c", "1", host]);
+    java:
+      vulnerable: |
+        Runtime.getRuntime().exec("ping " + host);
+      secure: |
+        new ProcessBuilder("ping", "-c", "1", host).start();
+    csharp:
+      vulnerable: |
+        Process.Start("cmd.exe", "/c ping " + host);
+      secure: |
+        var psi = new ProcessStartInfo("ping");
+        psi.ArgumentList.Add("-n"); psi.ArgumentList.Add("1"); psi.ArgumentList.Add(host);
+
+- id: V1.2.6
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 2
+  security_rule: >-
+    The application must protect against LDAP injection, or implement
+    specific controls that prevent untrusted input from altering an LDAP
+    search filter or distinguished name.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into an LDAP filter or DN, so filter
+    metacharacters such as parentheses, asterisks, or backslashes let an
+    attacker broaden the query or bypass authentication checks.
+  secure_pattern: >-
+    Untrusted values are escaped with the LDAP filter or DN encoder, or
+    bound through a templated search API, so they are always treated as
+    literal values inside the filter.
+  code_patterns:
+    generic:
+      vulnerable: |
+        filter = "(uid=" + username + ")"
+      secure: |
+        filter = "(uid=" + ldapFilterEncode(username) + ")"
+    python:
+      vulnerable: |
+        conn.search(base, "(uid=" + username + ")")
+      secure: |
+        from ldap3.utils.conv import escape_filter_chars
+        conn.search(base, "(uid=" + escape_filter_chars(username) + ")")
+    javascript:
+      vulnerable: |
+        client.search(base, { filter: "(uid=" + username + ")" });
+      secure: |
+        client.search(base, { filter: "(uid=" + ldapEscape.filter`${username}` + ")" });
+    java:
+      vulnerable: |
+        ctx.search(base, "(uid=" + username + ")", controls);
+      secure: |
+        ctx.search(base, "(uid={0})", new Object[]{username}, controls);
+    csharp:
+      vulnerable: |
+        var s = new DirectorySearcher("(uid=" + username + ")");
+      secure: |
+        var s = new DirectorySearcher("(uid=" + LdapEncoder.FilterEncode(username) + ")");
+
+- id: V1.2.7
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 2
+  security_rule: >-
+    The application must protect against XPath injection by using query
+    parameterization or precompiled XPath expressions.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into an XPath expression, so quotes
+    or XPath operators let an attacker change the selection and read
+    nodes they should not reach.
+  secure_pattern: >-
+    The XPath expression is fixed and untrusted values are supplied
+    through variable bindings or a precompiled expression with a variable
+    resolver, never by string concatenation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        expr = "/users/user[name='" + name + "']"
+      secure: |
+        expr = "/users/user[name=$name]"   # bind $name as a variable
+    python:
+      vulnerable: |
+        tree.xpath("/users/user[name='" + name + "']")
+      secure: |
+        tree.xpath("/users/user[name=$name]", name=name)
+    javascript:
+      vulnerable: |
+        doc.evaluate("/users/user[name='" + name + "']", doc, null, t, null);
+      secure: |
+        doc.evaluate("/users/user[name=$name]", doc, resolver, t, null);
+    java:
+      vulnerable: |
+        xpath.evaluate("/users/user[name='" + name + "']", doc);
+      secure: |
+        xpath.setXPathVariableResolver(v -> name);
+        xpath.compile("/users/user[name=$name]").evaluate(doc);
+    csharp:
+      vulnerable: |
+        nav.Select("/users/user[name='" + name + "']");
+      secure: |
+        var e = nav.Compile("/users/user[name=$name]");
+        e.SetContext(varContext);   // $name resolved from a context, not concatenated
+        nav.Select(e);
+
+- id: V1.2.8
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 2
+  security_rule: >-
+    LaTeX processors must be configured securely — for example without
+    the shell-escape flag — and restricted to an allowlist of commands so
+    untrusted content cannot trigger LaTeX injection.
+  vulnerability_pattern: >-
+    Untrusted content is compiled by a LaTeX engine with shell-escape
+    enabled or with dangerous primitives available, letting an attacker
+    run commands or read arbitrary files during compilation.
+  secure_pattern: >-
+    The LaTeX engine runs without shell-escape, in a restricted or
+    sandboxed mode, and untrusted input is confined to an allowlist of
+    safe commands and escaped before inclusion.
+  code_patterns:
+    generic:
+      vulnerable: |
+        compileLatex(userDoc, flags="--shell-escape")
+      secure: |
+        compileLatex(escapeLatex(userDoc), flags="--no-shell-escape")
+    python:
+      vulnerable: |
+        subprocess.run(["pdflatex", "--shell-escape", user_tex])
+      secure: |
+        subprocess.run(["pdflatex", "-no-shell-escape", "-interaction=nonstopmode",
+                        sanitized_tex])
+    java:
+      vulnerable: |
+        new ProcessBuilder("pdflatex", "--shell-escape", userTex).start();
+      secure: |
+        new ProcessBuilder("pdflatex", "-no-shell-escape", sanitizedTex).start();
+    csharp:
+      vulnerable: |
+        Process.Start("pdflatex", "--shell-escape " + userTex);
+      secure: |
+        Process.Start("pdflatex", "-no-shell-escape " + sanitizedTex);
+
+- id: V1.2.9
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 2
+  security_rule: >-
+    The application must escape special characters before placing
+    untrusted input into a regular expression, so they are matched
+    literally and not interpreted as regex metacharacters.
+  vulnerability_pattern: >-
+    Untrusted input is inserted into a regular expression unescaped, so
+    metacharacters change what the pattern matches and can break the
+    intended check or trigger catastrophic backtracking.
+  secure_pattern: >-
+    Untrusted input destined for a regular expression is passed through
+    a regex-quote or escape function so every character is treated as a
+    literal.
+  code_patterns:
+    generic:
+      vulnerable: |
+        pattern = compile("^" + userInput + "$")
+      secure: |
+        pattern = compile("^" + regexEscape(userInput) + "$")
+    python:
+      vulnerable: |
+        re.search(user_term, text)
+      secure: |
+        re.search(re.escape(user_term), text)
+    javascript:
+      vulnerable: |
+        new RegExp(userTerm).test(text);
+      secure: |
+        new RegExp(userTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(text);
+    java:
+      vulnerable: |
+        Pattern.compile(userTerm).matcher(text).find();
+      secure: |
+        Pattern.compile(Pattern.quote(userTerm)).matcher(text).find();
+    csharp:
+      vulnerable: |
+        Regex.IsMatch(text, userTerm);
+      secure: |
+        Regex.IsMatch(text, Regex.Escape(userTerm));
+
+- id: V1.2.10
+  facet: Encoding and Sanitization
+  section: Injection Prevention
+  level: 3
+  security_rule: >-
+    The application must protect against CSV and formula injection by
+    following RFC 4180 escaping and prefixing any field that begins with
+    a formula trigger character with a single quote when exporting.
+  vulnerability_pattern: >-
+    User-controlled values are written into exported CSV or spreadsheet
+    cells unchanged, so a value starting with an equals, plus, minus, or
+    at sign is executed as a formula when the file is opened.
+  secure_pattern: >-
+    Each exported field is RFC 4180 quoted, and any value whose first
+    character is a formula trigger is prefixed with a single quote so the
+    spreadsheet treats it as inert text.
+  code_patterns:
+    generic:
+      vulnerable: |
+        row = name + "," + note          # note may start with = + - or @
+      secure: |
+        row = csvQuote(name) + "," + csvQuote(neutralizeFormula(note))
+    python:
+      vulnerable: |
+        writer.writerow([name, note])
+      secure: |
+        def safe(v): return "'" + v if v[:1] in ("=", "+", "-", "@") else v
+        writer.writerow([safe(name), safe(note)])
+    javascript:
+      vulnerable: |
+        line = [name, note].join(",");
+      secure: |
+        const safe = v => /^[=+\-@]/.test(v) ? "'" + v : v;
+        line = [name, note].map(safe).map(csvQuote).join(",");
+    java:
+      vulnerable: |
+        writer.writeNext(new String[]{ name, note });
+      secure: |
+        String safe = note.matches("^[=+\\-@].*") ? "'" + note : note;
+        writer.writeNext(new String[]{ name, safe });
+    csharp:
+      vulnerable: |
+        sb.AppendLine(name + "," + note);
+      secure: |
+        string Safe(string v) => "=+-@".Contains(v.FirstOrDefault()) ? "'" + v : v;
+        sb.AppendLine(Csv(Safe(name)) + "," + Csv(Safe(note)));
+
+# ---------------------------------------------------------------------------
+# V1.3 — Sanitization
+# ---------------------------------------------------------------------------
+
+- id: V1.3.1
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 1
+  security_rule: >-
+    Untrusted HTML from rich-text or WYSIWYG editors must be sanitized
+    with a well-known, maintained HTML sanitization library before it is
+    stored or rendered.
+  vulnerability_pattern: >-
+    Rich-text HTML submitted by a user is stored and later rendered as
+    raw markup, so embedded script or event-handler attributes execute
+    in the browser of anyone who views it.
+  secure_pattern: >-
+    User HTML is passed through a dedicated sanitizer that strips
+    scripts, event handlers, and unsafe attributes, keeping only an
+    allowlist of formatting tags before storage or rendering.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(userHtml)            # rendered later as raw markup
+      secure: |
+        store(htmlSanitizer.clean(userHtml))
+    python:
+      vulnerable: |
+        return Markup(request.form["bio"])
+      secure: |
+        import nh3
+        return Markup(nh3.clean(request.form["bio"]))
+    javascript:
+      vulnerable: |
+        el.innerHTML = userHtml;
+      secure: |
+        el.innerHTML = DOMPurify.sanitize(userHtml);
+    java:
+      vulnerable: |
+        out.print(userHtml);
+      secure: |
+        out.print(htmlPolicy.sanitize(userHtml));   // OWASP Java HTML Sanitizer
+    csharp:
+      vulnerable: |
+        div.InnerHtml = userHtml;
+      secure: |
+        div.InnerHtml = new HtmlSanitizer().Sanitize(userHtml);
+
+- id: V1.3.2
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 1
+  security_rule: >-
+    The application must avoid dynamic code execution features such as
+    eval or Spring Expression Language, and where unavoidable must
+    strictly sanitize any user input before it is executed.
+  vulnerability_pattern: >-
+    Untrusted input is passed to a dynamic code or expression evaluator,
+    letting an attacker run arbitrary code in the process.
+  secure_pattern: >-
+    Dynamic evaluation is replaced with a safe parser, a lookup table,
+    or a literal evaluator, so untrusted input is interpreted as data
+    and never as code.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = eval(userInput)
+      secure: |
+        result = lookupTable.get(userInput)   # no code path from input
+    python:
+      vulnerable: |
+        value = eval(request.args["expr"])
+      secure: |
+        value = ast.literal_eval(request.args["expr"])
+    javascript:
+      vulnerable: |
+        const obj = eval("(" + userInput + ")");
+      secure: |
+        const obj = JSON.parse(userInput);
+    java:
+      vulnerable: |
+        new SpelExpressionParser().parseExpression(userInput).getValue();
+      secure: |
+        Object v = allowedOps.getOrDefault(userInput, DEFAULT);  // no SpEL
+    csharp:
+      vulnerable: |
+        var r = new DataTable().Compute(userInput, "");
+      secure: |
+        var r = allowedOps.TryGetValue(userInput, out var op) ? op() : null;
+
+- id: V1.3.3
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    Data bound for a potentially dangerous context must be sanitized
+    first — restricted to characters that are safe for that context and
+    trimmed to a sane maximum length.
+  vulnerability_pattern: >-
+    Untrusted data reaches a sensitive sink with no character allowlist
+    and no length bound, so unexpected characters or oversized input
+    drive injection or resource-exhaustion behaviour.
+  secure_pattern: >-
+    The value is reduced to an allowlist of context-safe characters and
+    truncated to a maximum length before it is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        useInContext(rawValue)
+      secure: |
+        useInContext(allowlistFilter(rawValue) truncated to MAX_LEN)
+    python:
+      vulnerable: |
+        ref = request.args["ref"]
+      secure: |
+        ref = re.sub(r"[^A-Za-z0-9_-]", "", request.args["ref"])[:64]
+    javascript:
+      vulnerable: |
+        const ref = req.query.ref;
+      secure: |
+        const ref = req.query.ref.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+    java:
+      vulnerable: |
+        String ref = request.getParameter("ref");
+      secure: |
+        String ref = request.getParameter("ref").replaceAll("[^A-Za-z0-9_-]", "");
+        ref = ref.substring(0, Math.min(ref.length(), 64));
+    csharp:
+      vulnerable: |
+        var refId = Request.Query["ref"].ToString();
+      secure: |
+        var refId = Regex.Replace(Request.Query["ref"], "[^A-Za-z0-9_-]", "");
+        refId = refId[..Math.Min(refId.Length, 64)];
+
+- id: V1.3.4
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    User-supplied SVG content must be validated or sanitized so it
+    contains only tags and attributes that are safe for the application,
+    excluding scripts and foreignObject.
+  vulnerability_pattern: >-
+    An uploaded or pasted SVG is served or inlined unchanged, so script
+    elements, event handlers, or a foreignObject inside it execute when
+    the image is rendered.
+  secure_pattern: >-
+    The SVG is run through a sanitizer configured for the SVG profile
+    that drops scripts, event handlers, and foreignObject, keeping only
+    safe drawing tags and attributes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serve(uploadedSvg)
+      secure: |
+        serve(svgSanitizer.clean(uploadedSvg))   # scripts/foreignObject removed
+    python:
+      vulnerable: |
+        return Response(uploaded_svg, mimetype="image/svg+xml")
+      secure: |
+        clean = nh3.clean(uploaded_svg, tags={"svg", "path", "g", "rect"})
+        return Response(clean, mimetype="image/svg+xml")
+    javascript:
+      vulnerable: |
+        container.innerHTML = uploadedSvg;
+      secure: |
+        container.innerHTML = DOMPurify.sanitize(uploadedSvg,
+            { USE_PROFILES: { svg: true } });
+    java:
+      vulnerable: |
+        out.write(uploadedSvg);
+      secure: |
+        out.write(svgPolicy.sanitize(uploadedSvg));  // allowlist drawing tags
+    csharp:
+      vulnerable: |
+        return Content(uploadedSvg, "image/svg+xml");
+      secure: |
+        var s = new HtmlSanitizer { AllowedTags = { "svg", "path", "g", "rect" } };
+        return Content(s.Sanitize(uploadedSvg), "image/svg+xml");
+
+- id: V1.3.5
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    User-supplied scriptable or expression markup such as Markdown, CSS,
+    XSL stylesheets, or BBCode must be sanitized, or its scriptable
+    features disabled, before it is rendered.
+  vulnerability_pattern: >-
+    Markup languages that can embed scripts, expressions, or remote
+    references are rendered from untrusted input without restriction,
+    so the embedded active content runs in the viewer context.
+  secure_pattern: >-
+    The markup is rendered with scriptable features disabled and the
+    resulting HTML is sanitized, so only inert formatting survives.
+  code_patterns:
+    generic:
+      vulnerable: |
+        html = renderMarkup(userInput)        # raw HTML passthrough allowed
+      secure: |
+        html = htmlSanitizer.clean(renderMarkup(userInput, allowRawHtml=false))
+    python:
+      vulnerable: |
+        html = markdown.markdown(user_text)
+      secure: |
+        html = nh3.clean(markdown.markdown(user_text))
+    javascript:
+      vulnerable: |
+        el.innerHTML = marked.parse(userText);
+      secure: |
+        el.innerHTML = DOMPurify.sanitize(marked.parse(userText));
+    java:
+      vulnerable: |
+        String html = markdownRenderer.render(parser.parse(userText));
+      secure: |
+        String html = htmlPolicy.sanitize(
+            markdownRenderer.render(parser.parse(userText)));
+    csharp:
+      vulnerable: |
+        var html = Markdown.ToHtml(userText);
+      secure: |
+        var html = new HtmlSanitizer().Sanitize(Markdown.ToHtml(userText));
+
+- id: V1.3.6
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    The application must protect against Server-side Request Forgery by
+    validating untrusted URLs against an allowlist of protocols,
+    domains, paths, and ports before using them to call another service.
+  vulnerability_pattern: >-
+    A user-supplied URL or host is fetched server-side without
+    restriction, so an attacker can reach internal services, the cloud
+    metadata endpoint, or non-HTTP schemes.
+  secure_pattern: >-
+    The target URL is parsed and its scheme, host, and port are checked
+    against an allowlist, and internal address ranges are rejected,
+    before any server-side request is made.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = httpGet(userUrl)
+      secure: |
+        if host(userUrl) in ALLOWED_HOSTS: response = httpGet(userUrl)
+    python:
+      vulnerable: |
+        data = requests.get(request.args["url"]).text
+      secure: |
+        host = urlparse(request.args["url"]).hostname
+        if host in ALLOWED_HOSTS:
+            data = requests.get(request.args["url"]).text
+    javascript:
+      vulnerable: |
+        const data = await fetch(req.query.url);
+      secure: |
+        const u = new URL(req.query.url);
+        if (ALLOWED_HOSTS.has(u.hostname)) await fetch(u);
+    java:
+      vulnerable: |
+        var conn = new URL(userUrl).openConnection();
+      secure: |
+        URL u = new URL(userUrl);
+        if (ALLOWED_HOSTS.contains(u.getHost())) u.openConnection();
+    csharp:
+      vulnerable: |
+        var data = await httpClient.GetStringAsync(userUrl);
+      secure: |
+        var u = new Uri(userUrl);
+        if (AllowedHosts.Contains(u.Host)) await httpClient.GetStringAsync(u);
+
+- id: V1.3.7
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    The application must not build templates from untrusted input, and
+    where unavoidable any untrusted value included during template
+    creation must be strictly validated or sanitized.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into a template that is then
+    compiled, so template-engine syntax in the input runs as code on
+    the server.
+  secure_pattern: >-
+    The template text is fixed and trusted, and untrusted values are
+    passed only as render-time data, never concatenated into the
+    template source.
+  code_patterns:
+    generic:
+      vulnerable: |
+        render(compileTemplate("Hello " + userInput))
+      secure: |
+        render(compileTemplate("Hello {{ name }}"), name=userInput)
+    python:
+      vulnerable: |
+        Template("Hi " + request.args["name"]).render()
+      secure: |
+        Template("Hi {{ name }}").render(name=request.args["name"])
+    javascript:
+      vulnerable: |
+        const out = ejs.render("Hi " + name);
+      secure: |
+        const out = ejs.render("Hi <%= name %>", { name });
+    java:
+      vulnerable: |
+        Template t = engine.createTemplate("Hi " + name);
+      secure: |
+        Template t = engine.getTemplate("greeting.ftl");  // fixed, name as model
+    csharp:
+      vulnerable: |
+        var result = Engine.Razor.RunCompile("Hi " + name, "k", null, null);
+      secure: |
+        var result = Engine.Razor.RunCompile("Hi @Model.Name", "k", null,
+                                              new { Name = name });
+
+- id: V1.3.8
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    Untrusted input used in Java Naming and Directory Interface lookups
+    must be sanitized, and JNDI must be configured securely to prevent
+    JNDI injection.
+  vulnerability_pattern: >-
+    An untrusted value is used as a JNDI lookup name, so an attacker can
+    point the lookup at a remote resource and load and run hostile code.
+  secure_pattern: >-
+    The lookup name is checked against an allowlist of known-safe names,
+    and remote class loading is disabled in the JNDI configuration.
+  code_patterns:
+    generic:
+      vulnerable: |
+        resource = jndiLookup(userControlledName)
+      secure: |
+        if userControlledName in ALLOWED_NAMES: resource = jndiLookup(userControlledName)
+    java:
+      vulnerable: |
+        Object o = new InitialContext().lookup(userControlledName);
+      secure: |
+        if (ALLOWED_NAMES.contains(name))
+            o = new InitialContext().lookup(name);   // remote codebase disabled
+
+- id: V1.3.9
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    Content must be sanitized before it is sent to memcache so that
+    control characters cannot inject additional cache commands.
+  vulnerability_pattern: >-
+    Untrusted data is used as a memcache key or value with control
+    characters or whitespace intact, so newline or space characters
+    split the protocol stream into extra commands.
+  secure_pattern: >-
+    Keys and values are validated to reject whitespace and control
+    characters, or are hashed or encoded, before the memcache call.
+  code_patterns:
+    generic:
+      vulnerable: |
+        cache.set(userKey, userValue)
+      secure: |
+        if isClean(userKey): cache.set(userKey, encode(userValue))
+    python:
+      vulnerable: |
+        client.set(user_key, value)
+      secure: |
+        if not re.search(r"\s", user_key):
+            client.set(user_key, value)
+    javascript:
+      vulnerable: |
+        memcached.set(userKey, value, 0, cb);
+      secure: |
+        if (!/\s/.test(userKey)) memcached.set(userKey, value, 0, cb);
+    java:
+      vulnerable: |
+        memcachedClient.set(userKey, 0, value);
+      secure: |
+        if (!userKey.matches(".*\\s.*")) memcachedClient.set(userKey, 0, value);
+    csharp:
+      vulnerable: |
+        cache.Store(StoreMode.Set, userKey, value);
+      secure: |
+        if (!Regex.IsMatch(userKey, "\\s"))
+            cache.Store(StoreMode.Set, userKey, value);
+
+- id: V1.3.10
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    Format strings that could resolve in an unexpected or malicious way
+    must be sanitized or fixed before they are processed.
+  vulnerability_pattern: >-
+    An untrusted value is used as the format string itself, so format
+    specifiers in the input read unintended arguments, crash the
+    process, or in unmanaged code corrupt memory.
+  secure_pattern: >-
+    The format string is a fixed, trusted literal and untrusted values
+    are passed only as arguments to it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        output = format(userControlledFormat, value)
+      secure: |
+        output = format("{}", userValue)        # fixed format, value as arg
+    python:
+      vulnerable: |
+        msg = request.args["tpl"].format(config=CONFIG)
+      secure: |
+        msg = "Hello {name}".format(name=request.args["name"])
+    java:
+      vulnerable: |
+        String s = String.format(userFormat, value);
+      secure: |
+        String s = String.format("%s", userValue);
+    csharp:
+      vulnerable: |
+        var s = string.Format(userFormat, value);
+      secure: |
+        var s = string.Format("{0}", userValue);
+
+- id: V1.3.11
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 2
+  security_rule: >-
+    User input passed to mail systems must be sanitized to protect
+    against SMTP and IMAP injection.
+  vulnerability_pattern: >-
+    Untrusted input is placed into an email header such as the
+    recipient or subject with carriage return or line feed characters
+    intact, so an attacker injects extra headers or message commands.
+  secure_pattern: >-
+    Carriage return and line feed characters are stripped or rejected
+    from any value that becomes part of an email header, ideally by
+    using a mail library that validates headers.
+  code_patterns:
+    generic:
+      vulnerable: |
+        header("To: " + userEmail)
+      secure: |
+        header("To: " + stripCrlf(userEmail))
+    python:
+      vulnerable: |
+        msg["Subject"] = request.form["subject"]
+      secure: |
+        msg["Subject"] = request.form["subject"].replace("\r", "").replace("\n", "")
+    javascript:
+      vulnerable: |
+        transport.sendMail({ to: userEmail, subject: userSubject });
+      secure: |
+        const clean = s => s.replace(/[\r\n]/g, "");
+        transport.sendMail({ to: clean(userEmail), subject: clean(userSubject) });
+    java:
+      vulnerable: |
+        message.setSubject(request.getParameter("subject"));
+      secure: |
+        message.setSubject(request.getParameter("subject")
+            .replaceAll("[\\r\\n]", ""));
+    csharp:
+      vulnerable: |
+        mail.Subject = Request.Form["subject"];
+      secure: |
+        mail.Subject = Request.Form["subject"].Replace("\r", "").Replace("\n", "");
+
+- id: V1.3.12
+  facet: Encoding and Sanitization
+  section: Sanitization
+  level: 3
+  security_rule: >-
+    Regular expressions must be free of constructs that cause
+    exponential backtracking, and untrusted input matched against them
+    must be sanitized or bounded to mitigate ReDoS attacks.
+  vulnerability_pattern: >-
+    A regular expression with nested or overlapping quantifiers is run
+    against untrusted input, so a crafted string forces exponential
+    backtracking and stalls the process.
+  secure_pattern: >-
+    The pattern is rewritten to a linear form, or matched with a
+    non-backtracking engine, and input length is capped so worst-case
+    matching time stays bounded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        match("(a+)+$", untrustedInput)
+      secure: |
+        match("a+$", boundedLength(untrustedInput))    # linear, length-capped
+    python:
+      vulnerable: |
+        re.match(r"(\d+)+$", user_input)
+      secure: |
+        re.match(r"\d+$", user_input[:256])
+    javascript:
+      vulnerable: |
+        /^(\w+\s?)*$/.test(userInput);
+      secure: |
+        /^\w+(\s\w+)*$/.test(userInput.slice(0, 256));
+    java:
+      vulnerable: |
+        Pattern.compile("(a+)+").matcher(userInput).matches();
+      secure: |
+        Pattern.compile("a+").matcher(
+            userInput.substring(0, Math.min(userInput.length(), 256))).matches();
+    csharp:
+      vulnerable: |
+        Regex.IsMatch(userInput, "(a+)+$");
+      secure: |
+        new Regex("a+$", RegexOptions.NonBacktracking,
+                  TimeSpan.FromMilliseconds(100)).IsMatch(userInput);
+
+# ---------------------------------------------------------------------------
+# V1.4 — Memory, String, and Unmanaged Code
+# (ASVS-relevant managed languages are memory-safe; these are seeded
+#  mainly with generic / unmanaged-code patterns, plus integer-overflow
+#  cases that do occur in Java, C#, and JavaScript.)
+# ---------------------------------------------------------------------------
+
+- id: V1.4.1
+  facet: Encoding and Sanitization
+  section: Memory, String, and Unmanaged Code
+  level: 2
+  security_rule: >-
+    Applications using unmanaged code must use memory-safe string
+    handling, bounded memory-copy routines, and safe pointer arithmetic
+    to detect or prevent stack, buffer, and heap overflows.
+  vulnerability_pattern: >-
+    Data is copied into a fixed-size buffer with a routine that does not
+    take the destination size, so input longer than the buffer
+    overflows adjacent memory.
+  secure_pattern: >-
+    Every copy uses a length-bounded routine tied to the destination
+    capacity, or a memory-safe string type, so the write can never
+    exceed the buffer.
+  code_patterns:
+    generic:
+      vulnerable: |
+        char buf[64];
+        strcpy(buf, userInput);          // no bound — overflows past 64 bytes
+      secure: |
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s", userInput);
+
+- id: V1.4.2
+  facet: Encoding and Sanitization
+  section: Memory, String, and Unmanaged Code
+  level: 2
+  security_rule: >-
+    Sign, range, and input validation techniques must be used to
+    prevent integer overflows.
+  vulnerability_pattern: >-
+    An arithmetic operation on untrusted integers is performed without
+    a range check, so the result wraps around and produces a wrong
+    size, index, or amount.
+  secure_pattern: >-
+    Operands are range-checked before the operation, or a checked
+    arithmetic routine that traps on overflow is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        size = count * itemSize       // wraps, then a short buffer is allocated
+        buf = allocate(size)
+      secure: |
+        if count > MAX / itemSize: reject()
+        buf = allocate(count * itemSize)
+    javascript:
+      vulnerable: |
+        const total = a + b;          // a, b near Number.MAX_SAFE_INTEGER
+      secure: |
+        if (a > Number.MAX_SAFE_INTEGER - b) throw new Error("overflow");
+        const total = a + b;
+    java:
+      vulnerable: |
+        int total = count * price;
+      secure: |
+        int total = Math.multiplyExact(count, price);
+    csharp:
+      vulnerable: |
+        int total = count * price;
+      secure: |
+        int total = checked(count * price);
+
+- id: V1.4.3
+  facet: Encoding and Sanitization
+  section: Memory, String, and Unmanaged Code
+  level: 2
+  security_rule: >-
+    Dynamically allocated memory and resources must be released, and
+    references or pointers to freed memory must be cleared, to prevent
+    dangling pointers and use-after-free vulnerabilities.
+  vulnerability_pattern: >-
+    Memory is freed but the pointer to it is kept and used again, so the
+    program reads or writes through a dangling pointer into reallocated
+    memory.
+  secure_pattern: >-
+    The pointer is set to null immediately after the memory is freed, so
+    any later use fails fast instead of touching reused memory.
+  code_patterns:
+    generic:
+      vulnerable: |
+        free(record);
+        log(record->name);          // use-after-free
+      secure: |
+        free(record);
+        record = NULL;              // later use fails fast
+
+# ---------------------------------------------------------------------------
+# V1.5 — Safe Deserialization
+# ---------------------------------------------------------------------------
+
+- id: V1.5.1
+  facet: Encoding and Sanitization
+  section: Safe Deserialization
+  level: 1
+  security_rule: >-
+    XML parsers must use a restrictive configuration with unsafe
+    features such as external entity resolution disabled, to prevent
+    XML External Entity attacks.
+  vulnerability_pattern: >-
+    An XML parser is used with its default configuration, so a document
+    that declares an external entity causes the parser to read local
+    files or make network requests.
+  secure_pattern: >-
+    The parser is configured to disallow document type definitions and
+    external entities, or a hardened XML library is used, before any
+    untrusted XML is parsed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        doc = xmlParser.parse(untrustedXml)        # entities resolved
+      secure: |
+        xmlParser.disableExternalEntities()
+        doc = xmlParser.parse(untrustedXml)
+    python:
+      vulnerable: |
+        tree = lxml.etree.parse(untrusted_xml)
+      secure: |
+        import defusedxml.ElementTree as ET
+        tree = ET.parse(untrusted_xml)
+    javascript:
+      vulnerable: |
+        const doc = new DOMParser().parseFromString(xml, "application/xml");
+      secure: |
+        const doc = parseXml(xml, { resolveExternalEntities: false, dtd: false });
+    java:
+      vulnerable: |
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+      secure: |
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+    csharp:
+      vulnerable: |
+        var doc = new XmlDocument();
+        doc.LoadXml(untrustedXml);
+      secure: |
+        var doc = new XmlDocument { XmlResolver = null };
+        doc.LoadXml(untrustedXml);
+
+- id: V1.5.2
+  facet: Encoding and Sanitization
+  section: Safe Deserialization
+  level: 2
+  security_rule: >-
+    Deserialization of untrusted data must enforce safe input handling
+    such as an allowlist of object types, and mechanisms that are known
+    to be insecure must not be used with untrusted input.
+  vulnerability_pattern: >-
+    Untrusted bytes are deserialized by a mechanism that can instantiate
+    arbitrary types, so a crafted payload builds a gadget chain that
+    runs code during deserialization.
+  secure_pattern: >-
+    Untrusted data is parsed with a data-only format such as JSON into a
+    known target type, or deserialization is restricted to an allowlist
+    of expected classes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        obj = nativeDeserialize(untrustedBytes)
+      secure: |
+        obj = jsonParse(untrustedBytes, intoType=KnownDto)
+    python:
+      vulnerable: |
+        obj = pickle.loads(untrusted_bytes)
+      secure: |
+        obj = json.loads(untrusted_bytes)
+    javascript:
+      vulnerable: |
+        const obj = nodeSerialize.unserialize(untrustedString);
+      secure: |
+        const obj = JSON.parse(untrustedString);
+    java:
+      vulnerable: |
+        Object o = new ObjectInputStream(in).readObject();
+      secure: |
+        ObjectInputStream ois = new ObjectInputStream(in);
+        ois.setObjectInputFilter(allowlistFilter);
+    csharp:
+      vulnerable: |
+        var o = new BinaryFormatter().Deserialize(stream);
+      secure: |
+        var o = JsonSerializer.Deserialize<KnownDto>(stream);
+
+- id: V1.5.3
+  facet: Encoding and Sanitization
+  section: Safe Deserialization
+  level: 3
+  security_rule: >-
+    When several parsers handle the same data type, they must parse
+    consistently and use the same character encoding, so a value cannot
+    be validated by one parser and interpreted differently by another.
+  vulnerability_pattern: >-
+    One parser validates a value and a different parser later
+    interprets the same bytes, so a payload that looks safe to the
+    validator resolves to a dangerous value at the sink.
+  secure_pattern: >-
+    A single canonical parser, with one fixed encoding, is used for both
+    validation and use of a given data type, so what is checked is
+    exactly what is consumed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if validate(strictParse(data)): use(lenientParse(data))
+      secure: |
+        parsed = canonicalParse(data)
+        if validate(parsed): use(parsed)
+    python:
+      vulnerable: |
+        if is_safe(json.loads(body)):
+            forward_to_service(simplejson.loads(body))
+      secure: |
+        parsed = json.loads(body)
+        if is_safe(parsed): forward_to_service(parsed)
+    javascript:
+      vulnerable: |
+        if (isSafe(JSON.parse(body))) downstream(customParse(body));
+      secure: |
+        const parsed = JSON.parse(body);
+        if (isSafe(parsed)) downstream(parsed);
+    java:
+      vulnerable: |
+        if (isSafe(jacksonMapper.readTree(body)))
+            forward(gson.fromJson(body, Map.class));
+      secure: |
+        JsonNode parsed = jacksonMapper.readTree(body);
+        if (isSafe(parsed)) forward(parsed);

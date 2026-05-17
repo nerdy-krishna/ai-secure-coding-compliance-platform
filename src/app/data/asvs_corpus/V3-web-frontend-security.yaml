@@ -1,0 +1,1335 @@
+# OWASP ASVS 5.0 — Chapter V3: Web Frontend Security
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V3.1 — Web Frontend Security Documentation
+# ---------------------------------------------------------------------------
+
+- id: V3.1.1
+  facet: Web Frontend Security
+  section: Web Frontend Security Documentation
+  level: 3
+  security_rule: >-
+    Application documentation must state the browser security features the
+    application depends on, such as HTTPS, HSTS, and Content Security Policy,
+    and must define how the application behaves when those features are
+    unavailable, for example by warning the user or blocking access.
+  vulnerability_pattern: >-
+    The browser security mechanisms the application relies on are never
+    written down, and there is no defined fallback behaviour, so a browser
+    that lacks a feature silently degrades the application's protections.
+  secure_pattern: >-
+    A documented baseline lists every required browser security feature and
+    the application's defined response when one is missing, so degraded
+    environments are detected and handled deliberately.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # No documented browser baseline; behaviour on missing features undefined.
+      secure: |
+        # SECURITY.md: requires HTTPS + HSTS + CSP; missing -> block with warning.
+
+# ---------------------------------------------------------------------------
+# V3.2 — Unintended Content Interpretation
+# ---------------------------------------------------------------------------
+
+- id: V3.2.1
+  facet: Web Frontend Security
+  section: Unintended Content Interpretation
+  level: 1
+  security_rule: >-
+    Controls must stop the browser from rendering an HTTP response in the
+    wrong context — for example an API payload or an uploaded file requested
+    directly — by checking Sec-Fetch request headers, using the CSP sandbox
+    directive, or returning a Content-Disposition attachment.
+  vulnerability_pattern: >-
+    A user-uploaded file or API response is served with a renderable
+    content type and no contextual guard, so requesting it directly lets the
+    browser execute it as a document in the application's origin.
+  secure_pattern: >-
+    Responses that should never be rendered as documents are forced to
+    download with a Content-Disposition attachment header, sandboxed via CSP,
+    or gated on Sec-Fetch headers that confirm the expected request context.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(uploadedFile, contentType=detectedType)   # rendered inline
+      secure: |
+        respond(uploadedFile, headers={"Content-Disposition": "attachment"})
+    python:
+      vulnerable: |
+        return FileResponse(upload_path)
+      secure: |
+        return FileResponse(upload_path, content_disposition_type="attachment")
+    javascript:
+      vulnerable: |
+        res.sendFile(uploadPath);
+      secure: |
+        res.setHeader("Content-Disposition", "attachment");
+        res.sendFile(uploadPath);
+    java:
+      vulnerable: |
+        response.getOutputStream().write(uploadBytes);
+      secure: |
+        response.setHeader("Content-Disposition", "attachment; filename=\"f\"");
+        response.getOutputStream().write(uploadBytes);
+    csharp:
+      vulnerable: |
+        return File(uploadBytes, detectedContentType);
+      secure: |
+        return File(uploadBytes, "application/octet-stream", fileDownloadName: "f");
+
+- id: V3.2.2
+  facet: Web Frontend Security
+  section: Unintended Content Interpretation
+  level: 1
+  security_rule: >-
+    Content meant to be shown as text rather than rendered as markup must be
+    inserted with safe rendering APIs such as createTextNode or textContent
+    so that embedded HTML or JavaScript is displayed literally.
+  vulnerability_pattern: >-
+    Untrusted text is written into the page through innerHTML or an
+    equivalent HTML-parsing sink, so any markup it contains is parsed and any
+    script it contains executes.
+  secure_pattern: >-
+    Text is placed into the DOM with textContent or createTextNode, which
+    treat the value as literal characters and never parse it as HTML.
+  code_patterns:
+    generic:
+      vulnerable: |
+        element.setHtml(userComment)        # parses markup
+      secure: |
+        element.setText(userComment)        # literal text
+    javascript:
+      vulnerable: |
+        el.innerHTML = userComment;
+      secure: |
+        el.textContent = userComment;
+    java:
+      vulnerable: |
+        out.print("<div>" + userComment + "</div>");
+      secure: |
+        out.print("<div>" + Encode.forHtml(userComment) + "</div>");
+    csharp:
+      vulnerable: |
+        literal.Text = userComment;            // Literal renders raw HTML
+      secure: |
+        label.Text = HttpUtility.HtmlEncode(userComment);
+
+- id: V3.2.3
+  facet: Web Frontend Security
+  section: Unintended Content Interpretation
+  level: 3
+  security_rule: >-
+    Client-side JavaScript must avoid DOM clobbering by declaring variables
+    explicitly, type-checking values before use, not storing globals on the
+    document object, and isolating application state in a namespace.
+  vulnerability_pattern: >-
+    Code reads a property such as document.config or window.user without an
+    explicit declaration or type check, so an attacker-injected element with
+    a matching id or name clobbers it with an HTML element reference.
+  secure_pattern: >-
+    Application state lives in explicitly declared variables inside an
+    isolated namespace or module scope, and values are type-checked before
+    use so a clobbered DOM property cannot be mistaken for real data.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if (config.enabled) { ... }          # config may be a clobbered element
+      secure: |
+        const config = App.config;
+        if (typeof config?.enabled === "boolean" && config.enabled) { ... }
+    javascript:
+      vulnerable: |
+        var token = window.authToken || document.authToken;
+      secure: |
+        const token = String(App.state.authToken ?? "");
+        if (token) { ... }
+
+# ---------------------------------------------------------------------------
+# V3.3 — Cookie Setup
+# ---------------------------------------------------------------------------
+
+- id: V3.3.1
+  facet: Web Frontend Security
+  section: Cookie Setup
+  level: 1
+  security_rule: >-
+    Cookies must carry the Secure attribute, and unless the cookie name uses
+    the __Host- prefix it must use the __Secure- prefix, so the cookie is
+    only ever sent over HTTPS.
+  vulnerability_pattern: >-
+    A cookie is set without the Secure attribute and with a plain name, so
+    it is transmitted over plaintext HTTP and a network attacker can read or
+    inject it.
+  secure_pattern: >-
+    The cookie is set with the Secure attribute and a __Host- or __Secure-
+    prefixed name, which browsers only accept when the cookie was set
+    securely over HTTPS.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", value)
+      secure: |
+        setCookie("__Host-session", value, secure=true, path="/")
+    python:
+      vulnerable: |
+        response.set_cookie("session", value)
+      secure: |
+        response.set_cookie("__Host-session", value, secure=True, path="/")
+    javascript:
+      vulnerable: |
+        res.cookie("session", value);
+      secure: |
+        res.cookie("__Host-session", value, { secure: true, path: "/" });
+    java:
+      vulnerable: |
+        response.addCookie(new Cookie("session", value));
+      secure: |
+        ResponseCookie.from("__Host-session", value).secure(true).path("/").build();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", value);
+      secure: |
+        Response.Cookies.Append("__Host-session", value,
+            new CookieOptions { Secure = true, Path = "/" });
+
+- id: V3.3.2
+  facet: Web Frontend Security
+  section: Cookie Setup
+  level: 2
+  security_rule: >-
+    Each cookie's SameSite attribute must be set to a value appropriate to
+    that cookie's purpose so that exposure to clickjacking and cross-site
+    request forgery is limited.
+  vulnerability_pattern: >-
+    A session or state-changing cookie is set with no SameSite attribute, so
+    the browser attaches it to cross-site requests and the application is
+    open to CSRF.
+  secure_pattern: >-
+    The cookie is set with an explicit SameSite value — Strict or Lax for
+    session cookies — so the browser withholds it from unsafe cross-site
+    requests.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", value, secure=true)
+      secure: |
+        setCookie("session", value, secure=true, sameSite="Strict")
+    python:
+      vulnerable: |
+        response.set_cookie("session", value, secure=True)
+      secure: |
+        response.set_cookie("session", value, secure=True, samesite="Strict")
+    javascript:
+      vulnerable: |
+        res.cookie("session", value, { secure: true });
+      secure: |
+        res.cookie("session", value, { secure: true, sameSite: "strict" });
+    java:
+      vulnerable: |
+        ResponseCookie.from("session", value).secure(true).build();
+      secure: |
+        ResponseCookie.from("session", value).secure(true).sameSite("Strict").build();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", value,
+            new CookieOptions { Secure = true });
+      secure: |
+        Response.Cookies.Append("session", value,
+            new CookieOptions { Secure = true, SameSite = SameSiteMode.Strict });
+
+- id: V3.3.3
+  facet: Web Frontend Security
+  section: Cookie Setup
+  level: 2
+  security_rule: >-
+    Cookies must use the __Host- name prefix unless they are explicitly
+    designed to be shared with other hosts, binding the cookie to a single
+    origin with a fixed path and the Secure attribute.
+  vulnerability_pattern: >-
+    A cookie that should belong to one host is given a plain name and a
+    Domain attribute, so a sibling subdomain can read or overwrite it and a
+    subdomain takeover can fixate the session.
+  secure_pattern: >-
+    The cookie name carries the __Host- prefix, set with Secure, path of
+    slash, and no Domain attribute, so the browser scopes it strictly to the
+    issuing host.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", value, domain=".example.com")
+      secure: |
+        setCookie("__Host-session", value, secure=true, path="/")  # no domain
+    python:
+      vulnerable: |
+        response.set_cookie("session", value, domain=".example.com")
+      secure: |
+        response.set_cookie("__Host-session", value, secure=True, path="/")
+    javascript:
+      vulnerable: |
+        res.cookie("session", value, { domain: ".example.com" });
+      secure: |
+        res.cookie("__Host-session", value, { secure: true, path: "/" });
+    java:
+      vulnerable: |
+        ResponseCookie.from("session", value).domain(".example.com").build();
+      secure: |
+        ResponseCookie.from("__Host-session", value).secure(true).path("/").build();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", value,
+            new CookieOptions { Domain = ".example.com" });
+      secure: |
+        Response.Cookies.Append("__Host-session", value,
+            new CookieOptions { Secure = true, Path = "/" });
+
+- id: V3.3.4
+  facet: Web Frontend Security
+  section: Cookie Setup
+  level: 2
+  security_rule: >-
+    Cookies whose value must not be reachable by client-side scripts, such
+    as session tokens, must carry the HttpOnly attribute, and that value
+    must only be delivered to the client through the Set-Cookie header.
+  vulnerability_pattern: >-
+    A session cookie is set without HttpOnly, or the token is also exposed
+    to JavaScript through the page body or a JSON response, so a single XSS
+    flaw can read and exfiltrate it.
+  secure_pattern: >-
+    The session cookie is set with HttpOnly so scripts cannot read it, and
+    the token is only ever sent in the Set-Cookie header and never embedded
+    in markup or an API response body.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", token, secure=true)
+      secure: |
+        setCookie("session", token, secure=true, httpOnly=true)
+    python:
+      vulnerable: |
+        response.set_cookie("session", token, secure=True)
+      secure: |
+        response.set_cookie("session", token, secure=True, httponly=True)
+    javascript:
+      vulnerable: |
+        res.cookie("session", token, { secure: true });
+      secure: |
+        res.cookie("session", token, { secure: true, httpOnly: true });
+    java:
+      vulnerable: |
+        ResponseCookie.from("session", token).secure(true).build();
+      secure: |
+        ResponseCookie.from("session", token).secure(true).httpOnly(true).build();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", token,
+            new CookieOptions { Secure = true });
+      secure: |
+        Response.Cookies.Append("session", token,
+            new CookieOptions { Secure = true, HttpOnly = true });
+
+- id: V3.3.5
+  facet: Web Frontend Security
+  section: Cookie Setup
+  level: 3
+  security_rule: >-
+    When the application writes a cookie, the combined length of its name
+    and value must stay within 4096 bytes so the browser will store the
+    cookie and send it back on later requests.
+  vulnerability_pattern: >-
+    A large value such as a serialized object or a long token is written
+    into a cookie, exceeding the browser's 4096-byte limit, so the cookie is
+    silently dropped and functionality that depends on it breaks.
+  secure_pattern: >-
+    The cookie carries only a short opaque identifier and large state is
+    kept server-side, and the application checks that the cookie name and
+    value together stay under 4096 bytes before setting it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("state", serialize(largeObject))   # may exceed 4096 bytes
+      secure: |
+        id = store(largeObject); setCookie("state", id)   # short id only
+    python:
+      vulnerable: |
+        response.set_cookie("state", json.dumps(large_object))
+      secure: |
+        sid = cache.put(large_object)
+        response.set_cookie("state", sid)   # short server-side key
+    javascript:
+      vulnerable: |
+        res.cookie("state", JSON.stringify(largeObject));
+      secure: |
+        const id = store.put(largeObject);
+        res.cookie("state", id);
+    java:
+      vulnerable: |
+        response.addCookie(new Cookie("state", serialize(largeObject)));
+      secure: |
+        String id = store.put(largeObject);
+        response.addCookie(new Cookie("state", id));
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("state", JsonSerializer.Serialize(largeObject));
+      secure: |
+        var id = store.Put(largeObject);
+        Response.Cookies.Append("state", id);
+
+# ---------------------------------------------------------------------------
+# V3.4 — Browser Security Mechanism Headers
+# ---------------------------------------------------------------------------
+
+- id: V3.4.1
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 1
+  security_rule: >-
+    Every response must include a Strict-Transport-Security header with a
+    max-age of at least one year, and from L2 upward the policy must apply
+    to all subdomains via includeSubDomains.
+  vulnerability_pattern: >-
+    Responses omit the Strict-Transport-Security header, or set a short
+    max-age, so a browser can be downgraded to plaintext HTTP and the first
+    request is exposed to a man-in-the-middle.
+  secure_pattern: >-
+    Every response carries Strict-Transport-Security with a max-age of at
+    least 31536000 seconds and includeSubDomains, so the browser refuses any
+    non-HTTPS connection to the site and its subdomains.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # No Strict-Transport-Security header on responses.
+      secure: |
+        addHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    python:
+      vulnerable: |
+        return response
+      secure: |
+        response.headers["Strict-Transport-Security"] = \
+            "max-age=31536000; includeSubDomains"
+    javascript:
+      vulnerable: |
+        res.send(body);
+      secure: |
+        res.setHeader("Strict-Transport-Security",
+                      "max-age=31536000; includeSubDomains");
+    java:
+      vulnerable: |
+        response.getWriter().write(body);
+      secure: |
+        response.setHeader("Strict-Transport-Security",
+                           "max-age=31536000; includeSubDomains");
+    csharp:
+      vulnerable: |
+        await context.Response.WriteAsync(body);
+      secure: |
+        context.Response.Headers["Strict-Transport-Security"] =
+            "max-age=31536000; includeSubDomains";
+
+- id: V3.4.2
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 1
+  security_rule: >-
+    The CORS Access-Control-Allow-Origin header must be a fixed value or, if
+    derived from the request Origin, validated against an allowlist of
+    trusted origins, and a wildcard origin must never accompany sensitive
+    data.
+  vulnerability_pattern: >-
+    The application reflects the request Origin straight into
+    Access-Control-Allow-Origin, or sends a wildcard alongside credentials,
+    so any site can read authenticated cross-origin responses.
+  secure_pattern: >-
+    The response Origin is checked against an allowlist of trusted origins
+    and only an exact allowed value is echoed back, and wildcard responses
+    never carry sensitive or credentialed data.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setHeader("Access-Control-Allow-Origin", request.origin)
+      secure: |
+        if request.origin in ALLOWED: setHeader("Access-Control-Allow-Origin", request.origin)
+    python:
+      vulnerable: |
+        resp.headers["Access-Control-Allow-Origin"] = request.headers["Origin"]
+      secure: |
+        origin = request.headers.get("Origin")
+        if origin in ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+    javascript:
+      vulnerable: |
+        res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+      secure: |
+        if (ALLOWED.has(req.headers.origin))
+            res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+    java:
+      vulnerable: |
+        response.setHeader("Access-Control-Allow-Origin", request.getHeader("Origin"));
+      secure: |
+        String o = request.getHeader("Origin");
+        if (ALLOWED.contains(o)) response.setHeader("Access-Control-Allow-Origin", o);
+    csharp:
+      vulnerable: |
+        Response.Headers["Access-Control-Allow-Origin"] = Request.Headers["Origin"];
+      secure: |
+        var o = Request.Headers["Origin"].ToString();
+        if (Allowed.Contains(o)) Response.Headers["Access-Control-Allow-Origin"] = o;
+
+- id: V3.4.3
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 2
+  security_rule: >-
+    HTTP responses must include a Content-Security-Policy header that, at a
+    minimum, sets object-src to none and base-uri to none and uses an
+    allowlist, nonces, or hashes to constrain which scripts the browser will
+    execute.
+  vulnerability_pattern: >-
+    Responses ship with no Content-Security-Policy, or a permissive one that
+    allows inline script or unsafe-inline, so an injected script tag runs
+    unhindered.
+  secure_pattern: >-
+    A Content-Security-Policy header is sent on every response with
+    object-src none, base-uri none, and a script-src restricted to a
+    per-response nonce or hash so only trusted scripts execute.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # No Content-Security-Policy header.
+      secure: |
+        addHeader("Content-Security-Policy",
+                  "object-src 'none'; base-uri 'none'; script-src 'nonce-r4nd0m'")
+    python:
+      vulnerable: |
+        return response
+      secure: |
+        response.headers["Content-Security-Policy"] = (
+            "object-src 'none'; base-uri 'none'; script-src 'nonce-" + nonce + "'")
+    javascript:
+      vulnerable: |
+        res.send(html);
+      secure: |
+        res.setHeader("Content-Security-Policy",
+            `object-src 'none'; base-uri 'none'; script-src 'nonce-${nonce}'`);
+    java:
+      vulnerable: |
+        response.getWriter().write(html);
+      secure: |
+        response.setHeader("Content-Security-Policy",
+            "object-src 'none'; base-uri 'none'; script-src 'nonce-" + nonce + "'");
+    csharp:
+      vulnerable: |
+        await context.Response.WriteAsync(html);
+      secure: |
+        context.Response.Headers["Content-Security-Policy"] =
+            $"object-src 'none'; base-uri 'none'; script-src 'nonce-{nonce}'";
+
+- id: V3.4.4
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 2
+  security_rule: >-
+    Every HTTP response must include the X-Content-Type-Options header set
+    to nosniff so the browser never guesses a MIME type and instead trusts
+    the declared Content-Type.
+  vulnerability_pattern: >-
+    Responses omit X-Content-Type-Options, so a browser may sniff an
+    uploaded file or text response into an executable type such as HTML or
+    JavaScript.
+  secure_pattern: >-
+    Every response carries X-Content-Type-Options set to nosniff, so the
+    browser only treats a resource as the type its Content-Type header
+    declares.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # No X-Content-Type-Options header.
+      secure: |
+        addHeader("X-Content-Type-Options", "nosniff")
+    python:
+      vulnerable: |
+        return response
+      secure: |
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    javascript:
+      vulnerable: |
+        res.send(body);
+      secure: |
+        res.setHeader("X-Content-Type-Options", "nosniff");
+    java:
+      vulnerable: |
+        response.getWriter().write(body);
+      secure: |
+        response.setHeader("X-Content-Type-Options", "nosniff");
+    csharp:
+      vulnerable: |
+        await context.Response.WriteAsync(body);
+      secure: |
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+
+- id: V3.4.5
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 2
+  security_rule: >-
+    The application must set a referrer policy, via the Referrer-Policy
+    header or HTML attributes, to keep technically sensitive data such as
+    URL paths, query strings, and internal hostnames out of the Referer
+    header sent to third parties.
+  vulnerability_pattern: >-
+    No referrer policy is set, so the browser sends the full URL including
+    path and query — and for internal apps the hostname — in the Referer
+    header to any external site the user navigates to.
+  secure_pattern: >-
+    A restrictive Referrer-Policy such as strict-origin-when-cross-origin or
+    no-referrer is set so cross-origin requests reveal at most the origin
+    and never the sensitive parts of the URL.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # No Referrer-Policy header.
+      secure: |
+        addHeader("Referrer-Policy", "strict-origin-when-cross-origin")
+    python:
+      vulnerable: |
+        return response
+      secure: |
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    javascript:
+      vulnerable: |
+        res.send(html);
+      secure: |
+        res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    java:
+      vulnerable: |
+        response.getWriter().write(html);
+      secure: |
+        response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    csharp:
+      vulnerable: |
+        await context.Response.WriteAsync(html);
+      secure: |
+        context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+
+- id: V3.4.6
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 2
+  security_rule: >-
+    Every HTTP response must use the Content-Security-Policy frame-ancestors
+    directive so the application cannot be framed by default, with embedding
+    permitted only for explicitly allowed origins; the obsolete
+    X-Frame-Options header must not be relied upon.
+  vulnerability_pattern: >-
+    Responses set no frame-ancestors directive, or rely solely on the
+    obsolete X-Frame-Options header, so the page can be embedded in a hidden
+    frame and used for clickjacking.
+  secure_pattern: >-
+    A Content-Security-Policy frame-ancestors directive is sent on every
+    response, set to none by default and to a specific allowlist of origins
+    only where embedding is genuinely required.
+  code_patterns:
+    generic:
+      vulnerable: |
+        addHeader("X-Frame-Options", "DENY")   # obsolete, not sufficient alone
+      secure: |
+        addHeader("Content-Security-Policy", "frame-ancestors 'none'")
+    python:
+      vulnerable: |
+        response.headers["X-Frame-Options"] = "DENY"
+      secure: |
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    javascript:
+      vulnerable: |
+        res.setHeader("X-Frame-Options", "DENY");
+      secure: |
+        res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    java:
+      vulnerable: |
+        response.setHeader("X-Frame-Options", "DENY");
+      secure: |
+        response.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    csharp:
+      vulnerable: |
+        context.Response.Headers["X-Frame-Options"] = "DENY";
+      secure: |
+        context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none'";
+
+- id: V3.4.7
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 3
+  security_rule: >-
+    The Content-Security-Policy header must specify a reporting location so
+    the browser can deliver violation reports back to the application.
+  vulnerability_pattern: >-
+    The Content-Security-Policy has no report-to or report-uri directive, so
+    the browser silently drops violation reports and policy gaps or attacks
+    go unnoticed.
+  secure_pattern: >-
+    The Content-Security-Policy includes a report-to directive pointing at a
+    configured reporting endpoint, so the application receives and can act
+    on violation reports.
+  code_patterns:
+    generic:
+      vulnerable: |
+        addHeader("Content-Security-Policy", "default-src 'self'")
+      secure: |
+        addHeader("Content-Security-Policy", "default-src 'self'; report-to csp-endpoint")
+    python:
+      vulnerable: |
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
+      secure: |
+        response.headers["Content-Security-Policy"] = \
+            "default-src 'self'; report-to csp-endpoint"
+    javascript:
+      vulnerable: |
+        res.setHeader("Content-Security-Policy", "default-src 'self'");
+      secure: |
+        res.setHeader("Content-Security-Policy",
+                      "default-src 'self'; report-to csp-endpoint");
+    java:
+      vulnerable: |
+        response.setHeader("Content-Security-Policy", "default-src 'self'");
+      secure: |
+        response.setHeader("Content-Security-Policy",
+                           "default-src 'self'; report-to csp-endpoint");
+    csharp:
+      vulnerable: |
+        context.Response.Headers["Content-Security-Policy"] = "default-src 'self'";
+      secure: |
+        context.Response.Headers["Content-Security-Policy"] =
+            "default-src 'self'; report-to csp-endpoint";
+
+- id: V3.4.8
+  facet: Web Frontend Security
+  section: Browser Security Mechanism Headers
+  level: 3
+  security_rule: >-
+    Every response that renders a document, such as a text/html response,
+    must include a Cross-Origin-Opener-Policy header set to same-origin or
+    same-origin-allow-popups to block abuse of shared Window access like
+    tabnabbing.
+  vulnerability_pattern: >-
+    Document responses omit the Cross-Origin-Opener-Policy header, so a page
+    opened by or opening another origin shares a browsing context group and
+    is exposed to tabnabbing and cross-window probing.
+  secure_pattern: >-
+    Every document response sends Cross-Origin-Opener-Policy with
+    same-origin, isolating the page in its own browsing context group and
+    severing the window opener relationship across origins.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # text/html response with no Cross-Origin-Opener-Policy header.
+      secure: |
+        addHeader("Cross-Origin-Opener-Policy", "same-origin")
+    python:
+      vulnerable: |
+        return HTMLResponse(html)
+      secure: |
+        resp = HTMLResponse(html)
+        resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    javascript:
+      vulnerable: |
+        res.type("html").send(html);
+      secure: |
+        res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+        res.type("html").send(html);
+    java:
+      vulnerable: |
+        response.setContentType("text/html");
+      secure: |
+        response.setContentType("text/html");
+        response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    csharp:
+      vulnerable: |
+        context.Response.ContentType = "text/html";
+      secure: |
+        context.Response.ContentType = "text/html";
+        context.Response.Headers["Cross-Origin-Opener-Policy"] = "same-origin";
+
+# ---------------------------------------------------------------------------
+# V3.5 — Browser Origin Separation
+# ---------------------------------------------------------------------------
+
+- id: V3.5.1
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 1
+  security_rule: >-
+    Sensitive state-changing functionality not protected by a CORS preflight
+    must verify that requests originate from the application itself, using
+    anti-forgery tokens or a required non-safelisted header, to defend
+    against cross-site request forgery.
+  vulnerability_pattern: >-
+    A state-changing endpoint relies only on the ambient session cookie and
+    accepts any request that carries it, so an attacker page can forge the
+    request on the victim's behalf.
+  secure_pattern: >-
+    The endpoint requires and validates an anti-forgery token, or a custom
+    header that browsers cannot send cross-site without a preflight, so
+    forged cross-site requests are rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if session.valid: applyChange(request)
+      secure: |
+        if session.valid and csrfTokenValid(request): applyChange(request)
+    python:
+      vulnerable: |
+        @app.post("/transfer")
+        def transfer(): do_transfer()
+      secure: |
+        @app.post("/transfer")
+        def transfer():
+            verify_csrf(request)   # rejects requests lacking a valid token
+            do_transfer()
+    javascript:
+      vulnerable: |
+        app.post("/transfer", (req, res) => doTransfer());
+      secure: |
+        app.post("/transfer", csrfProtection, (req, res) => doTransfer());
+    java:
+      vulnerable: |
+        http.csrf(csrf -> csrf.disable());
+      secure: |
+        http.csrf(csrf -> csrf.csrfTokenRepository(
+            CookieCsrfTokenRepository.withHttpOnlyFalse()));
+    csharp:
+      vulnerable: |
+        public IActionResult Transfer() => DoTransfer();
+      secure: |
+        [ValidateAntiForgeryToken]
+        public IActionResult Transfer() => DoTransfer();
+
+- id: V3.5.2
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 1
+  security_rule: >-
+    When the application relies on the CORS preflight to block disallowed
+    cross-origin use of sensitive functionality, it must be impossible to
+    invoke that functionality with a simple request that does not trigger a
+    preflight.
+  vulnerability_pattern: >-
+    Sensitive functionality accepts a simple request — a form-encoded or
+    plain-text POST — that browsers send cross-site without a preflight, so
+    the assumed CORS protection never engages.
+  secure_pattern: >-
+    The endpoint requires conditions that force a preflight, such as a
+    JSON content type and a custom header, and rejects any request that
+    arrives without those, ensuring the preflight check is always exercised.
+  code_patterns:
+    generic:
+      vulnerable: |
+        accept(request)   # form-encoded POST never triggers a preflight
+      secure: |
+        if request.contentType == "application/json" and request.header("X-Requested-With"):
+            accept(request)
+    python:
+      vulnerable: |
+        @app.post("/api/delete")
+        def delete(): do_delete()
+      secure: |
+        @app.post("/api/delete")
+        def delete():
+            if request.content_type != "application/json": abort(415)
+            if not request.headers.get("X-Requested-With"): abort(403)
+            do_delete()
+    javascript:
+      vulnerable: |
+        app.post("/api/delete", (req, res) => doDelete());
+      secure: |
+        app.post("/api/delete", (req, res) => {
+          if (!req.is("application/json") || !req.get("X-Requested-With"))
+            return res.sendStatus(403);
+          doDelete();
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/api/delete")
+        void delete() { doDelete(); }
+      secure: |
+        @PostMapping(value = "/api/delete", consumes = "application/json")
+        void delete(@RequestHeader("X-Requested-With") String x) { doDelete(); }
+    csharp:
+      vulnerable: |
+        [HttpPost("/api/delete")] public IActionResult Delete() => DoDelete();
+      secure: |
+        [HttpPost("/api/delete"), Consumes("application/json")]
+        public IActionResult Delete([FromHeader(Name="X-Requested-With")] string x)
+            => DoDelete();
+
+- id: V3.5.3
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 1
+  security_rule: >-
+    Sensitive functionality must be reached only through unsafe HTTP methods
+    such as POST, PUT, PATCH, or DELETE, never via safe methods like GET, or
+    alternatively must strictly validate Sec-Fetch request headers.
+  vulnerability_pattern: >-
+    A state-changing action is exposed over GET, so it can be triggered by
+    an image tag, a link, or a prefetch, making cross-site request forgery
+    trivial.
+  secure_pattern: >-
+    State-changing actions are bound only to unsafe methods such as POST or
+    DELETE, or the handler validates Sec-Fetch headers to confirm the
+    request was not a cross-origin navigation or resource load.
+  code_patterns:
+    generic:
+      vulnerable: |
+        route("GET", "/account/delete", deleteAccount)
+      secure: |
+        route("POST", "/account/delete", deleteAccount)
+    python:
+      vulnerable: |
+        @app.get("/account/delete")
+        def delete(): delete_account()
+      secure: |
+        @app.post("/account/delete")
+        def delete(): delete_account()
+    javascript:
+      vulnerable: |
+        app.get("/account/delete", (req, res) => deleteAccount());
+      secure: |
+        app.delete("/account/delete", (req, res) => deleteAccount());
+    java:
+      vulnerable: |
+        @GetMapping("/account/delete")
+        void delete() { deleteAccount(); }
+      secure: |
+        @DeleteMapping("/account/delete")
+        void delete() { deleteAccount(); }
+    csharp:
+      vulnerable: |
+        [HttpGet("/account/delete")] public IActionResult Delete() => DoDelete();
+      secure: |
+        [HttpPost("/account/delete")] public IActionResult Delete() => DoDelete();
+
+- id: V3.5.4
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 2
+  security_rule: >-
+    Separate applications must be hosted on different hostnames so that the
+    same-origin policy and hostname-scoped cookie restrictions isolate one
+    application's documents, scripts, and cookies from another's.
+  vulnerability_pattern: >-
+    Distinct applications share one hostname under different paths, so they
+    fall in the same origin and a flaw in one can read the other's DOM,
+    scripts, and cookies.
+  secure_pattern: >-
+    Each application is deployed on its own hostname, so the browser's
+    same-origin policy and host-scoped cookies keep the applications
+    isolated from one another.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # app.example.com/admin and app.example.com/shop share one origin
+      secure: |
+        # admin.example.com and shop.example.com — separate origins
+
+- id: V3.5.5
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 2
+  security_rule: >-
+    Messages received through the postMessage interface must be discarded
+    when the message origin is not trusted or when the message does not
+    match the expected syntax.
+  vulnerability_pattern: >-
+    A message event handler processes event data without checking
+    event.origin, so any site that holds a window reference can inject
+    commands or data into the application.
+  secure_pattern: >-
+    The handler first checks event.origin against an allowlist of trusted
+    origins and validates the message shape, discarding anything that fails
+    either check.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onMessage(e => handle(e.data))
+      secure: |
+        onMessage(e => { if (e.origin === TRUSTED && validShape(e.data)) handle(e.data); })
+    javascript:
+      vulnerable: |
+        window.addEventListener("message", e => process(e.data));
+      secure: |
+        window.addEventListener("message", e => {
+          if (e.origin !== "https://trusted.example.com") return;
+          if (typeof e.data?.type !== "string") return;
+          process(e.data);
+        });
+
+- id: V3.5.6
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 3
+  security_rule: >-
+    JSONP functionality must not be enabled anywhere in the application, as
+    it allows authorized data to be read cross-origin through Cross-Site
+    Script Inclusion.
+  vulnerability_pattern: >-
+    An endpoint wraps its response in a caller-supplied callback function
+    name and serves it as JavaScript, so any third-party page can include it
+    with a script tag and read the data.
+  secure_pattern: >-
+    The application returns data only as JSON with an application/json
+    content type through CORS-controlled endpoints, and exposes no
+    callback-wrapping JSONP responses.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(request.query.callback + "(" + jsonData + ")")
+      secure: |
+        respond(jsonData, contentType="application/json")
+    python:
+      vulnerable: |
+        return f"{request.args['callback']}({json.dumps(data)})"
+      secure: |
+        return jsonify(data)   # application/json, no callback wrapper
+    javascript:
+      vulnerable: |
+        res.send(`${req.query.callback}(${JSON.stringify(data)})`);
+      secure: |
+        res.json(data);
+    java:
+      vulnerable: |
+        out.write(request.getParameter("callback") + "(" + json + ")");
+      secure: |
+        response.setContentType("application/json");
+        out.write(json);
+    csharp:
+      vulnerable: |
+        return Content($"{Request.Query["callback"]}({json})", "application/javascript");
+      secure: |
+        return Json(data);
+
+- id: V3.5.7
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 3
+  security_rule: >-
+    Data requiring authorization must not be embedded in script resource
+    responses such as JavaScript files, so it cannot be stolen cross-origin
+    via Cross-Site Script Inclusion.
+  vulnerability_pattern: >-
+    Authorized user data is written into a served JavaScript file, for
+    example as a global variable assignment, so a third-party page can
+    include the script and read the data from the global scope.
+  secure_pattern: >-
+    Authorized data is delivered only through non-script endpoints, such as
+    JSON APIs protected by CORS and an XSSI-safe response prefix, and never
+    baked into static or generated script files.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serveScript("var profile = " + jsonOfUser + ";")
+      secure: |
+        serveJson(userProfile, contentType="application/json")
+    python:
+      vulnerable: |
+        return Response("var user=" + json.dumps(user), mimetype="text/javascript")
+      secure: |
+        return jsonify(user)   # JSON endpoint, not a script resource
+    javascript:
+      vulnerable: |
+        res.type("application/javascript").send(`var user=${JSON.stringify(user)}`);
+      secure: |
+        res.json(user);
+    java:
+      vulnerable: |
+        response.setContentType("text/javascript");
+        out.write("var user=" + json);
+      secure: |
+        response.setContentType("application/json");
+        out.write(json);
+    csharp:
+      vulnerable: |
+        return Content($"var user={json}", "application/javascript");
+      secure: |
+        return Json(user);
+
+- id: V3.5.8
+  facet: Web Frontend Security
+  section: Browser Origin Separation
+  level: 3
+  security_rule: >-
+    Authenticated resources such as images, videos, and scripts must be
+    loadable or embeddable on the user's behalf only when intended, enforced
+    by validating Sec-Fetch headers or by a restrictive
+    Cross-Origin-Resource-Policy response header.
+  vulnerability_pattern: >-
+    Authenticated resources are served with no Cross-Origin-Resource-Policy
+    and no Sec-Fetch checks, so any external page can embed them using the
+    victim's ambient session.
+  secure_pattern: >-
+    Authenticated resource responses carry Cross-Origin-Resource-Policy set
+    to same-origin, or the handler validates Sec-Fetch headers, so the
+    browser blocks unintended cross-origin embedding.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(authenticatedImage)   # no Cross-Origin-Resource-Policy
+      secure: |
+        respond(authenticatedImage, headers={"Cross-Origin-Resource-Policy": "same-origin"})
+    python:
+      vulnerable: |
+        return FileResponse(private_image)
+      secure: |
+        return FileResponse(private_image,
+                            headers={"Cross-Origin-Resource-Policy": "same-origin"})
+    javascript:
+      vulnerable: |
+        res.sendFile(privateImage);
+      secure: |
+        res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+        res.sendFile(privateImage);
+    java:
+      vulnerable: |
+        response.getOutputStream().write(imageBytes);
+      secure: |
+        response.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+        response.getOutputStream().write(imageBytes);
+    csharp:
+      vulnerable: |
+        return File(imageBytes, "image/png");
+      secure: |
+        Response.Headers["Cross-Origin-Resource-Policy"] = "same-origin";
+        return File(imageBytes, "image/png");
+
+# ---------------------------------------------------------------------------
+# V3.6 — External Resource Integrity
+# ---------------------------------------------------------------------------
+
+- id: V3.6.1
+  facet: Web Frontend Security
+  section: External Resource Integrity
+  level: 3
+  security_rule: >-
+    Client-side assets hosted externally, such as scripts, stylesheets, or
+    fonts, must be static, versioned, and protected with Subresource
+    Integrity, or there must be a documented security decision justifying
+    each exception.
+  vulnerability_pattern: >-
+    A script or stylesheet is loaded from an external CDN with no integrity
+    attribute, so a CDN compromise or tampering substitutes malicious code
+    that the browser runs in the application's origin.
+  secure_pattern: >-
+    Externally hosted assets are pinned to a specific version and loaded
+    with a Subresource Integrity hash and crossorigin attribute, so the
+    browser refuses any asset whose content does not match the hash.
+  code_patterns:
+    generic:
+      vulnerable: |
+        loadScript("https://cdn.example.com/lib.js")
+      secure: |
+        loadScript("https://cdn.example.com/lib-1.2.3.js", integrity="sha384-...")
+    javascript:
+      vulnerable: |
+        <script src="https://cdn.example.com/lib.js"></script>
+      secure: |
+        <script src="https://cdn.example.com/lib-1.2.3.js"
+                integrity="sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K"
+                crossorigin="anonymous"></script>
+
+# ---------------------------------------------------------------------------
+# V3.7 — Other Browser Security Considerations
+# ---------------------------------------------------------------------------
+
+- id: V3.7.1
+  facet: Web Frontend Security
+  section: Other Browser Security Considerations
+  level: 2
+  security_rule: >-
+    The application must only use client-side technologies that are still
+    supported and considered secure, avoiding obsolete plugins such as
+    Flash, Silverlight, ActiveX, or client-side Java applets.
+  vulnerability_pattern: >-
+    The frontend embeds an obsolete plugin technology such as Flash or
+    Silverlight, which no longer receives security fixes and exposes users
+    to unpatched vulnerabilities.
+  secure_pattern: >-
+    The application is built entirely on supported standard web technologies
+    such as HTML5, CSS, and JavaScript, with no reliance on retired browser
+    plugins.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # Embeds a Flash .swf object for media playback.
+      secure: |
+        # Uses the standard HTML5 video element.
+    javascript:
+      vulnerable: |
+        <embed src="player.swf" type="application/x-shockwave-flash">
+      secure: |
+        <video src="clip.mp4" controls></video>
+
+- id: V3.7.2
+  facet: Web Frontend Security
+  section: Other Browser Security Considerations
+  level: 2
+  security_rule: >-
+    The application must automatically redirect a user to a different
+    hostname or domain only when the destination appears on an allowlist of
+    approved targets.
+  vulnerability_pattern: >-
+    A redirect destination is taken from a request parameter and followed
+    without validation, so an attacker can craft a link that bounces the
+    user to a malicious site under the application's name.
+  secure_pattern: >-
+    The redirect target is checked against an allowlist of approved hosts or
+    is restricted to relative same-site paths, so an unapproved external
+    destination is rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        redirect(request.query.next)
+      secure: |
+        if host(request.query.next) in ALLOWED_HOSTS: redirect(request.query.next)
+    python:
+      vulnerable: |
+        return redirect(request.args["next"])
+      secure: |
+        target = request.args["next"]
+        if urlparse(target).hostname in ALLOWED_HOSTS:
+            return redirect(target)
+        return redirect("/")
+    javascript:
+      vulnerable: |
+        res.redirect(req.query.next);
+      secure: |
+        const u = new URL(req.query.next, BASE);
+        res.redirect(ALLOWED.has(u.hostname) ? u.href : "/");
+    java:
+      vulnerable: |
+        response.sendRedirect(request.getParameter("next"));
+      secure: |
+        String next = request.getParameter("next");
+        response.sendRedirect(ALLOWED.contains(host(next)) ? next : "/");
+    csharp:
+      vulnerable: |
+        return Redirect(Request.Query["next"]);
+      secure: |
+        var next = Request.Query["next"].ToString();
+        return Allowed.Contains(new Uri(next).Host) ? Redirect(next) : Redirect("/");
+
+- id: V3.7.3
+  facet: Web Frontend Security
+  section: Other Browser Security Considerations
+  level: 3
+  security_rule: >-
+    When the application redirects a user to a URL outside its own control,
+    it must show a notification of the external navigation and offer an
+    option to cancel it.
+  vulnerability_pattern: >-
+    The application silently redirects users to external URLs, so a victim
+    cannot tell they are leaving the trusted site and may be carried
+    straight into a phishing page.
+  secure_pattern: >-
+    Outbound links to external destinations route through an interstitial
+    page that names the destination and lets the user confirm or cancel
+    before the browser leaves the application.
+  code_patterns:
+    generic:
+      vulnerable: |
+        redirect(externalUrl)
+      secure: |
+        render("leaving.html", destination=externalUrl)   # confirm or cancel
+    python:
+      vulnerable: |
+        return redirect(external_url)
+      secure: |
+        return render_template("leaving.html", destination=external_url)
+    javascript:
+      vulnerable: |
+        res.redirect(externalUrl);
+      secure: |
+        res.render("leaving", { destination: externalUrl });
+
+- id: V3.7.4
+  facet: Web Frontend Security
+  section: Other Browser Security Considerations
+  level: 3
+  security_rule: >-
+    The application's top-level domain must be submitted to the public HSTS
+    preload list so that browsers enforce TLS for the site from the very
+    first request, independent of the Strict-Transport-Security header.
+  vulnerability_pattern: >-
+    The domain is not on the HSTS preload list, so a brand-new browser's
+    first request to the site can still be made over plaintext HTTP and
+    intercepted before any HSTS header is seen.
+  secure_pattern: >-
+    The Strict-Transport-Security header includes the preload directive with
+    includeSubDomains and a long max-age, and the domain is registered on
+    the public preload list so TLS is enforced from the first request.
+  code_patterns:
+    generic:
+      vulnerable: |
+        addHeader("Strict-Transport-Security", "max-age=31536000")
+      secure: |
+        addHeader("Strict-Transport-Security",
+                  "max-age=63072000; includeSubDomains; preload")  # domain preloaded
+    python:
+      vulnerable: |
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+      secure: |
+        response.headers["Strict-Transport-Security"] = \
+            "max-age=63072000; includeSubDomains; preload"
+    javascript:
+      vulnerable: |
+        res.setHeader("Strict-Transport-Security", "max-age=31536000");
+      secure: |
+        res.setHeader("Strict-Transport-Security",
+                      "max-age=63072000; includeSubDomains; preload");
+    java:
+      vulnerable: |
+        response.setHeader("Strict-Transport-Security", "max-age=31536000");
+      secure: |
+        response.setHeader("Strict-Transport-Security",
+                           "max-age=63072000; includeSubDomains; preload");
+    csharp:
+      vulnerable: |
+        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000";
+      secure: |
+        context.Response.Headers["Strict-Transport-Security"] =
+            "max-age=63072000; includeSubDomains; preload";
+
+- id: V3.7.5
+  facet: Web Frontend Security
+  section: Other Browser Security Considerations
+  level: 3
+  security_rule: >-
+    The application must behave as documented — for example by warning the
+    user or blocking access — when the browser used to reach it does not
+    support the expected security features.
+  vulnerability_pattern: >-
+    The application proceeds normally on a browser that lacks a required
+    security feature, with no detection or fallback, so the user runs in a
+    silently degraded and unprotected state.
+  secure_pattern: >-
+    The application detects whether the browser supports the required
+    security features and follows the documented fallback — warning the user
+    or blocking access — when support is missing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        renderApp()   # no check that required browser features exist
+      secure: |
+        if browserSupportsRequiredFeatures(): renderApp()
+        else: showUnsupportedBrowserWarning()
+    javascript:
+      vulnerable: |
+        startApp();
+      secure: |
+        if (window.isSecureContext && "trustedTypes" in window) startApp();
+        else showUnsupportedBrowserWarning();

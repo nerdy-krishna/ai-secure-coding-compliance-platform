@@ -1,0 +1,827 @@
+# OWASP ASVS 5.0 — Chapter V13: Configuration
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V13.1 — Configuration Documentation
+# ---------------------------------------------------------------------------
+
+- id: V13.1.1
+  facet: Configuration
+  section: Configuration Documentation
+  level: 2
+  security_rule: >-
+    Every communication need of the application must be documented,
+    including all external services it depends on and any case where an
+    end user can supply an external destination the application will then
+    connect to.
+  vulnerability_pattern: >-
+    The application opens outbound connections to services or to
+    user-supplied destinations that are never enumerated anywhere, so no
+    one can reason about the egress surface, dependencies, or SSRF risk.
+  secure_pattern: >-
+    A maintained inventory lists every external service the application
+    talks to and every flow where a user controls a connection target, so
+    the egress surface is known, reviewable, and testable.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # outbound dependencies and user-supplied targets are undocumented
+      secure: |
+        # docs/integrations.md enumerates every external service and
+        # every user-controlled connection target the app may reach
+
+- id: V13.1.2
+  facet: Configuration
+  section: Configuration Documentation
+  level: 3
+  security_rule: >-
+    For each service the application uses, the documentation must define
+    the maximum number of concurrent connections and the application's
+    behavior when that limit is reached, including any fallback or
+    recovery mechanism, to prevent denial of service.
+  vulnerability_pattern: >-
+    Connection pool sizes and exhaustion behavior are left at unknown
+    defaults and undocumented, so a traffic spike silently drains the
+    pool and the application stalls with no defined recovery path.
+  secure_pattern: >-
+    Each service has a documented connection pool limit and a defined,
+    tested response to exhaustion, such as fast failure, a fallback path,
+    or bounded queueing, so overload degrades predictably.
+  code_patterns:
+    generic:
+      vulnerable: |
+        pool = ConnectionPool(service_url)   # no max size, no overflow policy
+      secure: |
+        # documented: max 20 connections, fail-fast on exhaustion
+        pool = ConnectionPool(service_url, max_size=20, overflow="fail_fast")
+    python:
+      vulnerable: |
+        engine = create_engine(DB_URL)
+      secure: |
+        engine = create_engine(DB_URL, pool_size=20, max_overflow=0,
+                                pool_timeout=5)   # documented limits
+    java:
+      vulnerable: |
+        var ds = new HikariDataSource();
+      secure: |
+        var cfg = new HikariConfig();
+        cfg.setMaximumPoolSize(20);          // documented limit
+        cfg.setConnectionTimeout(5000);
+    csharp:
+      vulnerable: |
+        var conn = new SqlConnection(connectionString);
+      secure: |
+        // documented: Max Pool Size + connection timeout
+        var cs = connectionString + ";Max Pool Size=20;Connect Timeout=5";
+
+- id: V13.1.3
+  facet: Configuration
+  section: Configuration Documentation
+  level: 3
+  security_rule: >-
+    The documentation must define resource-management strategies for
+    every external system the application uses — release procedures,
+    timeouts, failure handling, and retry limits with delays and backoff
+    — and mandate short timeouts with disabled or strictly limited retries
+    for synchronous HTTP calls.
+  vulnerability_pattern: >-
+    Outbound calls run with no timeout and unbounded retries, and there
+    is no documented release strategy, so a slow dependency causes
+    cascading delays, leaked handles, and resource exhaustion.
+  secure_pattern: >-
+    Each dependency has a documented strategy with short timeouts,
+    bounded retries using exponential backoff, and explicit release of
+    handles, so a failing dependency degrades quickly and in isolation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = http.get(url)             # no timeout, retries forever
+      secure: |
+        # documented: 3s timeout, max 2 retries, exponential backoff
+        response = http.get(url, timeout=3, retries=2, backoff="exponential")
+    python:
+      vulnerable: |
+        resp = requests.get(url)
+      secure: |
+        resp = requests.get(url, timeout=3)   # short timeout per docs
+    javascript:
+      vulnerable: |
+        const resp = await fetch(url);
+      secure: |
+        const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    java:
+      vulnerable: |
+        var client = HttpClient.newHttpClient();
+      secure: |
+        var client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(3)).build();
+    csharp:
+      vulnerable: |
+        var client = new HttpClient();
+      secure: |
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+
+- id: V13.1.4
+  facet: Configuration
+  section: Configuration Documentation
+  level: 3
+  security_rule: >-
+    The documentation must identify the secrets that are critical to the
+    security of the application and define a rotation schedule for them,
+    driven by the organization's threat model and business requirements.
+  vulnerability_pattern: >-
+    Security-critical secrets are used with no inventory and no rotation
+    schedule, so a leaked or stale credential can remain valid
+    indefinitely and no one knows which secrets matter most.
+  secure_pattern: >-
+    A documented secrets register names each critical secret and assigns
+    it a rotation interval based on risk, so rotation is planned,
+    auditable, and tied to the threat model.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # secrets used ad hoc; no inventory, no rotation schedule
+      secure: |
+        # docs/secrets-register.md: db_password rotate 90d,
+        # signing_key rotate 180d, third_party_api_key rotate 30d
+
+# ---------------------------------------------------------------------------
+# V13.2 — Backend Communication Configuration
+# ---------------------------------------------------------------------------
+
+- id: V13.2.1
+  facet: Configuration
+  section: Backend Communication Configuration
+  level: 2
+  security_rule: >-
+    Communication between backend components that fall outside the
+    standard user session mechanism must be authenticated using
+    individual service accounts, short-lived tokens, or certificates —
+    never unchanging shared credentials such as static passwords or API
+    keys on privileged shared accounts.
+  vulnerability_pattern: >-
+    Backend services authenticate to each other with a long-lived static
+    API key or a shared privileged account, so a single leaked secret
+    grants broad access and rotation or attribution is impossible.
+  secure_pattern: >-
+    Each backend service holds its own identity and authenticates with a
+    short-lived token or client certificate, so credentials expire
+    quickly and every call is attributable to one service.
+  code_patterns:
+    generic:
+      vulnerable: |
+        call_service(headers={"X-API-Key": "static-shared-key"})
+      secure: |
+        token = sts.issue_token(service_identity, ttl="15m")
+        call_service(headers={"Authorization": "Bearer " + token})
+    python:
+      vulnerable: |
+        requests.get(url, headers={"X-API-Key": SHARED_KEY})
+      secure: |
+        token = identity.fetch_token(audience=url, ttl=900)
+        requests.get(url, headers={"Authorization": f"Bearer {token}"})
+    java:
+      vulnerable: |
+        req.header("X-API-Key", SHARED_API_KEY);
+      secure: |
+        String token = stsClient.issueToken(serviceId, Duration.ofMinutes(15));
+        req.header("Authorization", "Bearer " + token);
+    csharp:
+      vulnerable: |
+        client.DefaultRequestHeaders.Add("X-API-Key", SharedApiKey);
+      secure: |
+        var token = await tokenProvider.GetTokenAsync(audience, TimeSpan.FromMinutes(15));
+        client.DefaultRequestHeaders.Authorization = new("Bearer", token);
+
+- id: V13.2.2
+  facet: Configuration
+  section: Backend Communication Configuration
+  level: 2
+  security_rule: >-
+    Communication between backend components — operating system
+    services, APIs, middleware, and data layers — must use accounts
+    granted only the least privileges those interactions require.
+  vulnerability_pattern: >-
+    A backend component connects with an administrative or superuser
+    account when it only needs to read or write a few tables, so a
+    compromise of that component grants attacker-wide access.
+  secure_pattern: >-
+    Each component connects with a dedicated account scoped to exactly
+    the operations and objects it needs, so a compromise is contained to
+    that narrow set of privileges.
+  code_patterns:
+    generic:
+      vulnerable: |
+        db.connect(user="admin", password=pw)   # full DBA rights
+      secure: |
+        db.connect(user="orders_app_ro", password=pw)  # read-only, scoped
+    python:
+      vulnerable: |
+        engine = create_engine("postgresql://postgres:pw@db/app")
+      secure: |
+        engine = create_engine("postgresql://orders_rw:pw@db/app")
+    java:
+      vulnerable: |
+        DriverManager.getConnection(url, "sa", pw);
+      secure: |
+        DriverManager.getConnection(url, "orders_service", pw);
+    csharp:
+      vulnerable: |
+        var cs = "Server=db;User Id=sa;Password=" + pw;
+      secure: |
+        var cs = "Server=db;User Id=orders_service;Password=" + pw;
+
+- id: V13.2.3
+  facet: Configuration
+  section: Backend Communication Configuration
+  level: 2
+  security_rule: >-
+    When a credential must be used for service authentication, it must
+    not be a vendor default such as root/root or admin/admin; default
+    credentials must be changed before the service is reachable.
+  vulnerability_pattern: >-
+    A service is deployed with the credentials it shipped with, so any
+    attacker who knows the well-known default for that product can
+    authenticate immediately.
+  secure_pattern: >-
+    Default credentials are replaced with unique, strong, generated
+    secrets as part of provisioning, and deployment checks fail if a
+    known default is still in place.
+  code_patterns:
+    generic:
+      vulnerable: |
+        connect(host, user="admin", password="admin")
+      secure: |
+        connect(host, user=provisioned_user, password=generated_secret)
+    python:
+      vulnerable: |
+        client = Redis(host="cache", password="redis")
+      secure: |
+        client = Redis(host="cache", password=os.environ["REDIS_PASSWORD"])
+    java:
+      vulnerable: |
+        DriverManager.getConnection(url, "root", "root");
+      secure: |
+        DriverManager.getConnection(url, dbUser, System.getenv("DB_PASSWORD"));
+    csharp:
+      vulnerable: |
+        var cs = "Server=db;User Id=sa;Password=sa";
+      secure: |
+        var cs = $"Server=db;User Id={dbUser};Password={Env(\"DB_PASSWORD\")}";
+
+- id: V13.2.4
+  facet: Configuration
+  section: Backend Communication Configuration
+  level: 2
+  security_rule: >-
+    An allowlist must define the external resources or systems the
+    application may communicate with for outbound requests, data loads,
+    or file access; it may be enforced at the application, web server,
+    firewall, or a combination of layers.
+  vulnerability_pattern: >-
+    The application makes outbound requests to any host derived from
+    input or configuration with no allowlist, so a crafted URL can reach
+    internal services or cloud metadata endpoints via SSRF.
+  secure_pattern: >-
+    Before any outbound connection, the resolved destination is checked
+    against an allowlist of permitted hosts, and anything not on the list
+    is rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        fetch(targetUrl)                     # any host reachable
+      secure: |
+        if host_of(targetUrl) in ALLOWED_HOSTS: fetch(targetUrl)
+        else: reject()
+    python:
+      vulnerable: |
+        resp = requests.get(target_url)
+      secure: |
+        if urlparse(target_url).hostname not in ALLOWED_HOSTS:
+            raise PermissionError("destination not allowlisted")
+        resp = requests.get(target_url, timeout=3)
+    javascript:
+      vulnerable: |
+        const resp = await fetch(targetUrl);
+      secure: |
+        if (!ALLOWED_HOSTS.has(new URL(targetUrl).hostname))
+          throw new Error("destination not allowlisted");
+        const resp = await fetch(targetUrl);
+    java:
+      vulnerable: |
+        var resp = client.send(HttpRequest.newBuilder(URI.create(target)).build(), h);
+      secure: |
+        if (!ALLOWED_HOSTS.contains(URI.create(target).getHost()))
+            throw new SecurityException("destination not allowlisted");
+    csharp:
+      vulnerable: |
+        var resp = await client.GetAsync(targetUrl);
+      secure: |
+        if (!AllowedHosts.Contains(new Uri(targetUrl).Host))
+            throw new InvalidOperationException("destination not allowlisted");
+
+- id: V13.2.5
+  facet: Configuration
+  section: Backend Communication Configuration
+  level: 2
+  security_rule: >-
+    The web or application server itself must be configured with an
+    allowlist of the resources or systems it is permitted to send
+    requests to or load data and files from.
+  vulnerability_pattern: >-
+    The web or application server can issue outbound connections to any
+    destination because no egress allowlist exists at the server or
+    network layer, so a compromised feature can pivot freely.
+  secure_pattern: >-
+    The server or its surrounding network policy restricts egress to an
+    allowlist of approved destinations, so even an application-layer flaw
+    cannot reach arbitrary internal or external systems.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # server permits outbound connections to any host and port
+      secure: |
+        # egress policy: server may connect only to
+        # api.payments.internal:443 and storage.internal:443
+
+- id: V13.2.6
+  facet: Configuration
+  section: Backend Communication Configuration
+  level: 3
+  security_rule: >-
+    When the application connects to separate services, it must follow
+    the documented configuration for each connection — maximum parallel
+    connections, behavior when the limit is reached, connection timeouts,
+    and retry strategy.
+  vulnerability_pattern: >-
+    Connection code ignores the documented per-service settings and runs
+    with library defaults, so the deployed behavior drifts from the
+    reviewed and approved configuration.
+  secure_pattern: >-
+    Each connection is constructed with the documented limits, timeouts,
+    and retry strategy for that service, so runtime behavior matches the
+    approved configuration.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client = ServiceClient(url)          # ignores documented config
+      secure: |
+        client = ServiceClient(url, max_parallel=10, timeout=3,
+                                retries=2)    # matches service docs
+    python:
+      vulnerable: |
+        session = aiohttp.ClientSession()
+      secure: |
+        conn = aiohttp.TCPConnector(limit=10)   # documented parallelism
+        session = aiohttp.ClientSession(connector=conn,
+            timeout=aiohttp.ClientTimeout(total=3))
+    java:
+      vulnerable: |
+        var client = HttpClient.newHttpClient();
+      secure: |
+        var client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(3))   // per documented config
+            .executor(Executors.newFixedThreadPool(10)).build();
+    csharp:
+      vulnerable: |
+        var client = new HttpClient();
+      secure: |
+        var handler = new SocketsHttpHandler { MaxConnectionsPerServer = 10 };
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
+
+# ---------------------------------------------------------------------------
+# V13.3 — Secret Management
+# ---------------------------------------------------------------------------
+
+- id: V13.3.1
+  facet: Configuration
+  section: Secret Management
+  level: 2
+  security_rule: >-
+    Backend secrets must be created, stored, accessed, and destroyed
+    through a secrets management solution such as a key vault, never
+    committed to source code or build artifacts; an L3 application must
+    use a hardware-backed solution such as an HSM.
+  vulnerability_pattern: >-
+    Secrets are hardcoded in source files or baked into build artifacts
+    and container images, so anyone with repository or image access
+    obtains them and rotation requires a rebuild.
+  secure_pattern: >-
+    Secrets are stored in a managed vault and fetched at runtime by the
+    application using its own identity, so source and artifacts stay
+    secret-free and access is centrally controlled and audited.
+  code_patterns:
+    generic:
+      vulnerable: |
+        API_KEY = "sk_live_8f3a2c9e4b71d05a"   # committed to source
+      secure: |
+        API_KEY = vault.get_secret("payments/api_key")
+    python:
+      vulnerable: |
+        STRIPE_KEY = "sk_live_8f3a2c9e4b71d05a"
+      secure: |
+        STRIPE_KEY = vault_client.read("secret/data/stripe")["data"]["key"]
+    javascript:
+      vulnerable: |
+        const apiKey = "sk_live_8f3a2c9e4b71d05a";
+      secure: |
+        const apiKey = await vault.read("secret/data/stripe");
+    java:
+      vulnerable: |
+        String apiKey = "sk_live_8f3a2c9e4b71d05a";
+      secure: |
+        String apiKey = vaultClient.read("secret/data/stripe").get("key");
+    csharp:
+      vulnerable: |
+        const string ApiKey = "sk_live_8f3a2c9e4b71d05a";
+      secure: |
+        var apiKey = await secretClient.GetSecretAsync("stripe-key");
+
+- id: V13.3.2
+  facet: Configuration
+  section: Secret Management
+  level: 2
+  security_rule: >-
+    Access to secret assets must follow the principle of least
+    privilege, so each identity can read only the specific secrets its
+    function requires.
+  vulnerability_pattern: >-
+    Every service or operator can read every secret in the vault because
+    one broad policy grants access to all paths, so any single
+    compromise exposes the full secret store.
+  secure_pattern: >-
+    Vault policies are scoped per identity to only the secret paths that
+    identity needs, so a compromised service or account can read just its
+    own narrow set of secrets.
+  code_patterns:
+    generic:
+      vulnerable: |
+        grant(service, secrets="*")          # read every secret
+      secure: |
+        grant(service="orders", secrets="secret/orders/")  # scoped path
+    python:
+      vulnerable: |
+        policy = {"path": {"secret/*": {"capabilities": ["read"]}}}
+      secure: |
+        policy = {"path": {"secret/data/orders/*": {"capabilities": ["read"]}}}
+
+- id: V13.3.3
+  facet: Configuration
+  section: Secret Management
+  level: 3
+  security_rule: >-
+    All cryptographic operations must be performed inside an isolated
+    security module such as a vault or hardware security module, so key
+    material is never exposed outside that module.
+  vulnerability_pattern: >-
+    Private keys are loaded into application memory to sign or decrypt,
+    so a memory disclosure, crash dump, or compromised process leaks the
+    raw key material.
+  secure_pattern: >-
+    The application sends data to the security module and receives the
+    signature or plaintext back; the key never leaves the module, so a
+    process compromise cannot exfiltrate it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = load_private_key("signing.pem")
+        signature = sign(key, data)
+      secure: |
+        signature = hsm.sign(key_id="signing-key", data=data)  # key stays in HSM
+    python:
+      vulnerable: |
+        key = serialization.load_pem_private_key(open("k.pem","rb").read(), None)
+        sig = key.sign(data, padding.PKCS1v15(), hashes.SHA256())
+      secure: |
+        sig = kms.sign(KeyId="signing-key", Message=data,
+                       SigningAlgorithm="RSASSA_PKCS1_V1_5_SHA_256")["Signature"]
+    java:
+      vulnerable: |
+        PrivateKey key = loadPemKey("signing.pem");
+        sig.initSign(key);
+      secure: |
+        var ks = KeyStore.getInstance("PKCS11");   // key non-extractable in HSM
+        sig.initSign((PrivateKey) ks.getKey("signing-key", null));
+    csharp:
+      vulnerable: |
+        var rsa = RSA.Create();
+        rsa.ImportFromPem(File.ReadAllText("signing.pem"));
+      secure: |
+        var sig = await keyClient.SignAsync("signing-key",
+                      SignatureAlgorithm.RS256, digest);  // key stays in Key Vault
+
+- id: V13.3.4
+  facet: Configuration
+  section: Secret Management
+  level: 3
+  security_rule: >-
+    Secrets must be configured to expire and be rotated on the schedule
+    defined in the application's documentation, so no secret remains
+    valid indefinitely.
+  vulnerability_pattern: >-
+    Secrets are created without an expiry and are never rotated, so a
+    credential leaked years ago is still accepted and the blast radius of
+    any exposure grows without bound.
+  secure_pattern: >-
+    Each secret is created with a defined time-to-live and rotated on the
+    documented interval, so stale or leaked credentials stop being
+    accepted automatically.
+  code_patterns:
+    generic:
+      vulnerable: |
+        vault.put_secret("db/password", value)        # no TTL
+      secure: |
+        vault.put_secret("db/password", value, ttl="90d", rotate=True)
+    python:
+      vulnerable: |
+        client.write("secret/db", password=value)
+      secure: |
+        client.write("database/roles/app", default_ttl="2160h",
+                     max_ttl="2160h")   # rotation enforced by the vault
+    csharp:
+      vulnerable: |
+        await secretClient.SetSecretAsync("db-password", value);
+      secure: |
+        var s = new KeyVaultSecret("db-password", value);
+        s.Properties.ExpiresOn = DateTimeOffset.UtcNow.AddDays(90);
+        await secretClient.SetSecretAsync(s);
+
+# ---------------------------------------------------------------------------
+# V13.4 — Unintended Information Leakage
+# ---------------------------------------------------------------------------
+
+- id: V13.4.1
+  facet: Configuration
+  section: Unintended Information Leakage
+  level: 1
+  security_rule: >-
+    The application must be deployed without source control metadata such
+    as .git or .svn folders, or in a way that those folders are
+    inaccessible both externally and to the application itself.
+  vulnerability_pattern: >-
+    The deployed artifact still contains the .git or .svn directory under
+    the web root, so an attacker can download repository history and
+    recover source code, secrets, and prior versions.
+  secure_pattern: >-
+    The build copies only the application files and excludes version
+    control metadata, or the server blocks access to those folders, so no
+    repository data is ever served.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # deployment copies the whole working tree, including .git
+      secure: |
+        # build stage excludes version-control metadata
+        # .dockerignore: .git, .svn
+    javascript:
+      vulnerable: |
+        app.use(express.static("."));        // serves .git too
+      secure: |
+        app.use(express.static("public", { dotfiles: "deny" }));
+
+- id: V13.4.2
+  facet: Configuration
+  section: Unintended Information Leakage
+  level: 2
+  security_rule: >-
+    Debug modes must be disabled for all components in production
+    environments, so debugging features and verbose internal information
+    are never exposed.
+  vulnerability_pattern: >-
+    A framework or component runs in production with debug mode enabled,
+    so error pages expose stack traces, configuration, and an interactive
+    console an attacker can use.
+  secure_pattern: >-
+    Debug mode is driven by environment configuration and is forced off
+    in production, so users see only generic error pages with no internal
+    detail.
+  code_patterns:
+    generic:
+      vulnerable: |
+        app.run(debug=True)                  # debug on in production
+      secure: |
+        app.run(debug=config.is_development)   # off unless dev environment
+    python:
+      vulnerable: |
+        DEBUG = True
+      secure: |
+        DEBUG = os.environ.get("DJANGO_ENV") == "development"
+    javascript:
+      vulnerable: |
+        app.set("env", "development");
+      secure: |
+        app.set("env", process.env.NODE_ENV || "production");
+    java:
+      vulnerable: |
+        # application.properties
+        server.error.include-stacktrace=always
+      secure: |
+        # application.properties
+        server.error.include-stacktrace=never
+    csharp:
+      vulnerable: |
+        app.UseDeveloperExceptionPage();
+      secure: |
+        if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+        else app.UseExceptionHandler("/error");
+
+- id: V13.4.3
+  facet: Configuration
+  section: Unintended Information Leakage
+  level: 2
+  security_rule: >-
+    Web servers must not expose directory listings to clients unless
+    listing that directory is an explicit and intended feature.
+  vulnerability_pattern: >-
+    A directory under the web root has no index file and the server
+    falls back to auto-generating a listing, revealing file names that
+    were never meant to be discoverable.
+  secure_pattern: >-
+    Directory listing is disabled at the server or framework level, so a
+    request for a directory without an index returns a not-found or
+    forbidden response instead of a file index.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # web server auto-indexes directories with no index file
+      secure: |
+        # autoindex disabled; missing index returns 404
+    javascript:
+      vulnerable: |
+        app.use(serveIndex("/files"));
+      secure: |
+        app.use(express.static("files", { index: false }));
+    java:
+      vulnerable: |
+        # web.xml
+        <init-param><param-name>listings</param-name><param-value>true</param-value></init-param>
+      secure: |
+        # web.xml
+        <init-param><param-name>listings</param-name><param-value>false</param-value></init-param>
+    csharp:
+      vulnerable: |
+        app.UseDirectoryBrowser();
+      secure: |
+        app.UseStaticFiles();   // no UseDirectoryBrowser
+
+- id: V13.4.4
+  facet: Configuration
+  section: Unintended Information Leakage
+  level: 2
+  security_rule: >-
+    The HTTP TRACE method must not be supported in production
+    environments, since it can reflect request data and aid information
+    leakage.
+  vulnerability_pattern: >-
+    The web server answers HTTP TRACE requests, reflecting headers and
+    cookies back to the caller and enabling cross-site tracing style
+    attacks.
+  secure_pattern: >-
+    The server rejects TRACE requests with a method-not-allowed response,
+    so the method is unavailable in production.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # server responds to HTTP TRACE requests
+      secure: |
+        # server denies TRACE: returns 405 Method Not Allowed
+    java:
+      vulnerable: |
+        # default connector — TRACE is accepted
+      secure: |
+        # server.xml connector
+        <Connector allowTrace="false" />
+    csharp:
+      vulnerable: |
+        # default IIS handler list permits TRACEVerbHandler
+      secure: |
+        # web.config
+        <verbs><remove verb="TRACE" /></verbs>
+
+- id: V13.4.5
+  facet: Configuration
+  section: Unintended Information Leakage
+  level: 2
+  security_rule: >-
+    Documentation such as internal API docs and monitoring endpoints must
+    not be exposed unless exposing them is explicit and intended.
+  vulnerability_pattern: >-
+    Generated API documentation or monitoring and metrics endpoints are
+    reachable by anyone in production, revealing internal routes,
+    schemas, and operational data.
+  secure_pattern: >-
+    Documentation and monitoring endpoints are disabled in production or
+    bound to an internal interface behind authentication, so untrusted
+    clients cannot reach them.
+  code_patterns:
+    generic:
+      vulnerable: |
+        expose("/api-docs"); expose("/metrics")   # public in production
+      secure: |
+        if env.is_development: expose("/api-docs")
+        expose("/metrics", bind="internal", auth=required)
+    python:
+      vulnerable: |
+        app = FastAPI()                      # /docs served publicly
+      secure: |
+        app = FastAPI(docs_url=None, openapi_url=None)  # disabled in prod
+    java:
+      vulnerable: |
+        # application.properties
+        management.endpoints.web.exposure.include=*
+      secure: |
+        # application.properties
+        management.endpoints.web.exposure.include=health
+    csharp:
+      vulnerable: |
+        app.UseSwagger(); app.UseSwaggerUI();
+      secure: |
+        if (env.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
+
+- id: V13.4.6
+  facet: Configuration
+  section: Unintended Information Leakage
+  level: 3
+  security_rule: >-
+    The application must not expose detailed version information for
+    backend components, so attackers cannot map deployed software to
+    known vulnerabilities.
+  vulnerability_pattern: >-
+    Responses carry headers or banners that disclose the exact server,
+    framework, or runtime versions, handing an attacker a precise target
+    list of applicable exploits.
+  secure_pattern: >-
+    Version-revealing headers and banners are suppressed or made generic,
+    so responses disclose no exploitable version detail.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # responses include Server and X-Powered-By version banners
+      secure: |
+        # version-revealing response headers stripped or generic
+    javascript:
+      vulnerable: |
+        const app = express();               // sends X-Powered-By: Express
+      secure: |
+        const app = express();
+        app.disable("x-powered-by");
+    java:
+      vulnerable: |
+        # server.xml connector
+        <Connector port="8080" />
+      secure: |
+        # server.xml connector
+        <Connector port="8080" server="web" />
+    csharp:
+      vulnerable: |
+        var builder = WebApplication.CreateBuilder(args);
+      secure: |
+        builder.WebHost.ConfigureKestrel(o => o.AddServerHeader = false);
+
+- id: V13.4.7
+  facet: Configuration
+  section: Unintended Information Leakage
+  level: 3
+  security_rule: >-
+    The web tier must be configured to serve only files with specific,
+    intended extensions, so unintended source code, configuration, or
+    backup files cannot be downloaded.
+  vulnerability_pattern: >-
+    The web server serves any file under the web root by default, so
+    request for files such as config backups, environment files, or
+    source files exposes their contents.
+  secure_pattern: >-
+    The web tier serves an allowlist of known-safe extensions and denies
+    everything else, so unintended file types are never delivered.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # web tier serves every file under the document root
+      secure: |
+        # serve only an allowlist of extensions: html, css, js, png, svg
+    javascript:
+      vulnerable: |
+        app.use(express.static("public"));
+      secure: |
+        const allowed = new Set([".html", ".css", ".js", ".png", ".svg"]);
+        app.use((req, res, next) =>
+          allowed.has(path.extname(req.path)) ? next() : res.sendStatus(404));
+    java:
+      vulnerable: |
+        # all extensions mapped to the default file servlet
+      secure: |
+        # web.xml: map only intended extensions to the static handler
+        <servlet-mapping><url-pattern>*.html</url-pattern></servlet-mapping>
+    csharp:
+      vulnerable: |
+        app.UseStaticFiles();
+      secure: |
+        var provider = new FileExtensionContentTypeProvider();
+        app.UseStaticFiles(new StaticFileOptions {
+            ContentTypeProvider = provider, ServeUnknownFileTypes = false });

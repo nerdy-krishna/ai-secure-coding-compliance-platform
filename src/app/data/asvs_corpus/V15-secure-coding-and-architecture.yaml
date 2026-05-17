@@ -1,0 +1,872 @@
+# OWASP ASVS 5.0 — Chapter V15: Secure Coding and Architecture
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V15.1 — Secure Coding and Architecture Documentation
+# ---------------------------------------------------------------------------
+
+- id: V15.1.1
+  facet: Secure Coding and Architecture
+  section: Secure Coding and Architecture Documentation
+  level: 1
+  security_rule: >-
+    Application documentation must define risk-based remediation time frames
+    for updating third-party components, both when a version has a known
+    vulnerability and for routine library upkeep.
+  vulnerability_pattern: >-
+    No documented policy exists for how quickly vulnerable or outdated
+    dependencies must be replaced, so components linger unpatched for
+    months because nobody owns a deadline.
+  secure_pattern: >-
+    A written policy assigns remediation deadlines by severity — for
+    instance critical within days, lower severity within weeks — and a
+    routine cadence governs general library updates.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no SLA defined; dependency updates happen ad hoc, if ever
+      secure: |
+        # SECURITY-SLA: critical CVE within 7 days, high within 30,
+        # routine dependency refresh every quarter
+
+- id: V15.1.2
+  facet: Secure Coding and Architecture
+  section: Secure Coding and Architecture Documentation
+  level: 2
+  security_rule: >-
+    An inventory catalog such as a software bill of materials must be
+    maintained for every third-party library, recording that each component
+    comes from a predefined, trusted, and actively maintained repository.
+  vulnerability_pattern: >-
+    There is no authoritative list of dependencies in use, so the team
+    cannot answer which components are affected when a new vulnerability is
+    disclosed or whether a library still has upstream support.
+  secure_pattern: >-
+    A machine-readable SBOM is generated on every build, enumerating each
+    direct and transitive component with its version and source, and is
+    stored as a release artifact.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # dependencies installed manually; no SBOM produced
+      secure: |
+        # CI step generates a CycloneDX SBOM and attaches it to the release
+        generate_sbom(format="cyclonedx", output="sbom.json")
+    python:
+      vulnerable: |
+        pip install some-lib   # no lockfile, no recorded provenance
+      secure: |
+        # cyclonedx-py generates the SBOM from the pinned lockfile
+        # subprocess: cyclonedx-py poetry --output-file sbom.json
+        run_sbom_export()
+    javascript:
+      vulnerable: |
+        npm install some-lib   // no SBOM, no recorded source registry
+      secure: |
+        // CI: npx @cyclonedx/cyclonedx-npm --output-file sbom.json
+        generateSbom();
+
+- id: V15.1.3
+  facet: Secure Coding and Architecture
+  section: Secure Coding and Architecture Documentation
+  level: 2
+  security_rule: >-
+    Application documentation must identify time-consuming or
+    resource-demanding functionality and describe how availability is
+    protected when it is overused or when a response outlasts the
+    consumer's timeout.
+  vulnerability_pattern: >-
+    Expensive operations such as report generation or bulk export are
+    undocumented, so no one designs throttling or async handling and a
+    burst of requests exhausts workers or threads.
+  secure_pattern: >-
+    Each heavy operation is documented with its availability strategy —
+    asynchronous processing, queue-backed jobs, per-user concurrency caps —
+    so the design intentionally bounds resource consumption.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # expensive report endpoint runs synchronously, no documented limits
+      secure: |
+        # DOC: /reports is async via job queue; max 2 concurrent jobs per user
+        enqueue_job("build_report", user_id, params)
+
+- id: V15.1.4
+  facet: Secure Coding and Architecture
+  section: Secure Coding and Architecture Documentation
+  level: 3
+  security_rule: >-
+    Application documentation must explicitly highlight third-party
+    libraries considered risky components, so they receive extra scrutiny
+    and review attention.
+  vulnerability_pattern: >-
+    Unmaintained, deprecated, or unusually privileged libraries are treated
+    no differently from any other dependency, so their elevated risk goes
+    unrecognized during reviews and upgrades.
+  secure_pattern: >-
+    A documented register names each risky component with the reason for
+    concern — for example abandoned upstream or native code execution — so
+    reviewers know where to focus.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # all dependencies treated as equally trustworthy
+      secure: |
+        # RISKY-COMPONENTS.md: legacy-xml-parser (unmaintained since 2019),
+        # native-image-codec (parses untrusted input in C)
+
+- id: V15.1.5
+  facet: Secure Coding and Architecture
+  section: Secure Coding and Architecture Documentation
+  level: 3
+  security_rule: >-
+    Application documentation must highlight the parts of the application
+    where dangerous functionality is used, so those code paths get focused
+    review and hardening.
+  vulnerability_pattern: >-
+    Inherently dangerous operations such as deserialization, dynamic code
+    evaluation, or native process execution are scattered through the code
+    with no inventory, so high-risk sinks are easy to overlook.
+  secure_pattern: >-
+    A documented map records every location that uses dangerous
+    functionality, naming the operation and the surrounding mitigations so
+    reviewers and scanners can target them.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # deserialization and dynamic eval scattered, undocumented
+      secure: |
+        # DANGEROUS-FUNCTIONALITY.md: import/parser.py uses native
+        # deserialization on uploaded files (sandboxed, size-capped)
+
+# ---------------------------------------------------------------------------
+# V15.2 — Security Architecture and Dependencies
+# ---------------------------------------------------------------------------
+
+- id: V15.2.1
+  facet: Secure Coding and Architecture
+  section: Security Architecture and Dependencies
+  level: 1
+  security_rule: >-
+    The application must contain only components that are within the
+    documented update and remediation time frames, with no dependency left
+    vulnerable past its deadline.
+  vulnerability_pattern: >-
+    Dependencies with known vulnerabilities remain shipped well past the
+    policy deadline because no automated check fails the build when a
+    component is overdue for remediation.
+  secure_pattern: >-
+    A dependency vulnerability scanner runs in continuous integration and
+    fails the build when any component breaches its remediation window, so
+    overdue components never reach production.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # build never checks dependencies for known CVEs
+      secure: |
+        # CI gate: vulnerability scan fails the build on overdue components
+        fail_build_if(any_dependency_past_remediation_sla())
+    python:
+      vulnerable: |
+        # tests pass even with known-vulnerable packages installed
+      secure: |
+        # CI step: pip-audit --strict   (non-zero exit fails the build)
+        run("pip-audit --strict")
+    javascript:
+      vulnerable: |
+        // CI never audits node_modules for advisories
+      secure: |
+        // CI step: npm audit --audit-level=high   (fails on high+ CVEs)
+        run("npm audit --audit-level=high");
+    java:
+      vulnerable: |
+        // build has no dependency-vulnerability gate
+      secure: |
+        // pom: dependency-check-maven with failBuildOnCVSS configured
+        // mvn org.owasp:dependency-check-maven:check
+        runDependencyCheck();
+    csharp:
+      vulnerable: |
+        // no audit of NuGet packages for known vulnerabilities
+      secure: |
+        // CI step: dotnet list package --vulnerable   (parsed, fails on hits)
+        RunPackageVulnerabilityScan();
+
+- id: V15.2.2
+  facet: Secure Coding and Architecture
+  section: Security Architecture and Dependencies
+  level: 2
+  security_rule: >-
+    The application must implement defenses against loss of availability
+    from time-consuming or resource-demanding functionality, following the
+    documented security decisions for those operations.
+  vulnerability_pattern: >-
+    Expensive operations run synchronously and unbounded, so a small number
+    of concurrent requests ties up every worker and the service becomes
+    unavailable to everyone.
+  secure_pattern: >-
+    Heavy work is offloaded to a queue or background worker, per-user
+    concurrency is capped, and each request has a bounded timeout so one
+    consumer cannot exhaust shared capacity.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = build_huge_report(params)   # blocks a worker, no limit
+        return result
+      secure: |
+        job = enqueue("build_report", params, per_user_limit=2)
+        return accepted(job.id)              # poll for completion
+    python:
+      vulnerable: |
+        @app.post("/export")
+        def export(): return generate_full_export()   # synchronous, unbounded
+      secure: |
+        @app.post("/export")
+        def export(): return {"job": export_task.delay(user.id).id}  # Celery
+    javascript:
+      vulnerable: |
+        app.post("/export", (req, res) => res.send(buildFullExport()));
+      secure: |
+        app.post("/export", (req, res) => {
+          const job = exportQueue.add("export", { userId: req.user.id });
+          res.status(202).json({ jobId: job.id });
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/export")
+        String export() { return buildFullExport(); }   // ties up the thread
+      secure: |
+        @PostMapping("/export")
+        String export() { return jobService.submitExport(userId); }  // async
+    csharp:
+      vulnerable: |
+        [HttpPost("export")]
+        public IActionResult Export() => Ok(BuildFullExport());
+      secure: |
+        [HttpPost("export")]
+        public IActionResult Export() => Accepted(_jobs.QueueExport(userId));
+
+- id: V15.2.3
+  facet: Secure Coding and Architecture
+  section: Security Architecture and Dependencies
+  level: 2
+  security_rule: >-
+    The production environment must include only functionality required for
+    the application to operate, with no test code, sample snippets, or
+    development tooling exposed.
+  vulnerability_pattern: >-
+    Debug endpoints, sample handlers, or development tools ship to
+    production, giving attackers extra attack surface such as stack traces,
+    a console, or unauthenticated test routes.
+  secure_pattern: >-
+    Development-only code is gated behind a build flag or environment check
+    and is excluded from production artifacts, so the deployed application
+    exposes only its intended functionality.
+  code_patterns:
+    generic:
+      vulnerable: |
+        register_route("/debug/console", dev_console)   # always registered
+      secure: |
+        if env != "production":
+            register_route("/debug/console", dev_console)
+    python:
+      vulnerable: |
+        app.run(debug=True)            # debugger and reloader live in prod
+      secure: |
+        app.run(debug=settings.ENV != "production")
+    javascript:
+      vulnerable: |
+        app.use("/test", require("./routes/test"));   // test routes shipped
+      secure: |
+        if (process.env.NODE_ENV !== "production")
+          app.use("/test", require("./routes/test"));
+    java:
+      vulnerable: |
+        // application.properties: management.endpoints.web.exposure.include=*
+      secure: |
+        // application-prod.properties:
+        // management.endpoints.web.exposure.include=health,info
+    csharp:
+      vulnerable: |
+        app.UseDeveloperExceptionPage();   // unconditional
+      secure: |
+        if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+
+- id: V15.2.4
+  facet: Secure Coding and Architecture
+  section: Security Architecture and Dependencies
+  level: 3
+  security_rule: >-
+    Third-party components and all transitive dependencies must be resolved
+    from the expected repository — internal or external — with no exposure
+    to a dependency confusion attack.
+  vulnerability_pattern: >-
+    The package manager resolves a name from whichever registry returns the
+    highest version, so an attacker who publishes a public package matching
+    an internal name can have malicious code pulled into the build.
+  secure_pattern: >-
+    Internal package names are reserved, a single scoped or pinned source
+    is configured per dependency, and lockfiles with integrity hashes
+    guarantee the exact artifact and origin.
+  code_patterns:
+    generic:
+      vulnerable: |
+        install("internal-utils")    # resolved from whichever registry wins
+      secure: |
+        install("@acme/internal-utils", registry=ACME_PRIVATE_REGISTRY)
+    python:
+      vulnerable: |
+        # pip.conf: extra-index-url = https://public.pypi  (name can collide)
+      secure: |
+        # pip.conf: index-url = https://artifactory.acme/simple  (single source)
+        # plus a hash-pinned requirements lockfile
+    javascript:
+      vulnerable: |
+        // package.json: "internal-lib": "^1.0.0"  (unscoped, public-resolvable)
+      secure: |
+        // .npmrc: @acme:registry=https://artifactory.acme
+        // package.json: "@acme/internal-lib": "1.0.0"
+    java:
+      vulnerable: |
+        <!-- maven: relies on a public mirror for an internal artifact -->
+      secure: |
+        <!-- settings.xml: a private repository with a unique groupId
+             namespace; no public fallback for com.acme.internal -->
+    csharp:
+      vulnerable: |
+        <!-- nuget.config: only nuget.org configured for internal packages -->
+      secure: |
+        <!-- nuget.config: packageSourceMapping pins ACME.* to the
+             private feed so public names cannot shadow them -->
+
+- id: V15.2.5
+  facet: Secure Coding and Architecture
+  section: Security Architecture and Dependencies
+  level: 3
+  security_rule: >-
+    Parts of the application documented as dangerous functionality or as
+    using risky components must have additional protections that contain a
+    compromise and stop lateral movement.
+  vulnerability_pattern: >-
+    Risky code such as an untrusted-file parser runs in the same process
+    and trust zone as the rest of the application, so compromising it
+    immediately exposes everything else.
+  secure_pattern: >-
+    Dangerous functionality is isolated through sandboxing, a separate
+    process or container, dropped privileges, or network segmentation so a
+    breach there cannot pivot into the wider application.
+  code_patterns:
+    generic:
+      vulnerable: |
+        parse_untrusted_file(upload)        # in-process, full privileges
+      secure: |
+        run_in_sandbox(parse_untrusted_file, upload,
+                       no_network=True, drop_privileges=True)
+    python:
+      vulnerable: |
+        data = legacy_native_parser.load(upload)   # same process
+      secure: |
+        # delegate to a locked-down worker: no network, read-only FS,
+        # seccomp profile, separate low-privilege container
+        data = sandbox_worker.parse(upload)
+    java:
+      vulnerable: |
+        Object o = riskyDeserializer.read(bytes);  // same JVM, full trust
+      secure: |
+        // run the deserializer in an isolated container with no inbound
+        // network and a non-root user; communicate over a narrow API
+        Object o = isolatedParserClient.read(bytes);
+
+# ---------------------------------------------------------------------------
+# V15.3 — Defensive Coding
+# ---------------------------------------------------------------------------
+
+- id: V15.3.1
+  facet: Secure Coding and Architecture
+  section: Defensive Coding
+  level: 1
+  security_rule: >-
+    The application must return only the required subset of fields from a
+    data object, never serializing an entire object when some fields must
+    not be exposed to the caller.
+  vulnerability_pattern: >-
+    A whole database entity is serialized straight into the response, so
+    sensitive fields such as password hashes, internal flags, or other
+    users' data leak to the client.
+  secure_pattern: >-
+    Responses are built from an explicit output model or projection that
+    lists exactly the fields the caller may see, so new sensitive columns
+    are never exposed by default.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return serialize(userEntity)          # leaks every column
+      secure: |
+        return { "id": user.id, "name": user.name }   # explicit allowlist
+    python:
+      vulnerable: |
+        return jsonify(user.__dict__)         # exposes password_hash, etc.
+      secure: |
+        return UserPublic.model_validate(user).model_dump()  # Pydantic schema
+    javascript:
+      vulnerable: |
+        res.json(await User.findByPk(id));    // returns the whole row
+      secure: |
+        const u = await User.findByPk(id, { attributes: ["id", "name"] });
+        res.json(u);
+    java:
+      vulnerable: |
+        return userRepository.findById(id);   // entity serialized directly
+      secure: |
+        return new UserDto(user.getId(), user.getName());
+    csharp:
+      vulnerable: |
+        return Ok(_db.Users.Find(id));        // full entity in the response
+      secure: |
+        return Ok(new UserDto { Id = u.Id, Name = u.Name });
+
+- id: V15.3.2
+  facet: Secure Coding and Architecture
+  section: Defensive Coding
+  level: 2
+  security_rule: >-
+    When the backend makes calls to external URLs, it must be configured
+    not to follow redirects unless following them is intended
+    functionality.
+  vulnerability_pattern: >-
+    A server-side HTTP client follows redirects automatically, so an
+    attacker-controlled endpoint can redirect the request to an internal
+    address and turn a fetch into a server-side request forgery.
+  secure_pattern: >-
+    The HTTP client is configured to disable redirect following, and any
+    redirect that must be honored is re-validated against the destination
+    allowlist before the next request is made.
+  code_patterns:
+    generic:
+      vulnerable: |
+        fetch(externalUrl)                    # follows redirects by default
+      secure: |
+        fetch(externalUrl, follow_redirects=False)
+    python:
+      vulnerable: |
+        requests.get(user_supplied_url)
+      secure: |
+        requests.get(user_supplied_url, allow_redirects=False)
+    javascript:
+      vulnerable: |
+        await fetch(externalUrl);             // redirect mode defaults to follow
+      secure: |
+        await fetch(externalUrl, { redirect: "error" });
+    java:
+      vulnerable: |
+        HttpClient.newHttpClient().send(req, ofString());  // follows by default
+      secure: |
+        HttpClient.newBuilder().followRedirects(Redirect.NEVER).build()
+                  .send(req, ofString());
+    csharp:
+      vulnerable: |
+        var client = new HttpClient();        // AllowAutoRedirect is true
+      secure: |
+        var client = new HttpClient(new HttpClientHandler {
+          AllowAutoRedirect = false });
+
+- id: V15.3.3
+  facet: Secure Coding and Architecture
+  section: Defensive Coding
+  level: 2
+  security_rule: >-
+    The application must counter mass assignment by limiting the fields
+    each controller action may bind, so a value cannot be inserted or
+    updated when it was never meant to be part of that action.
+  vulnerability_pattern: >-
+    Request payloads are bound directly onto a domain object, so an
+    attacker can add an unexpected field such as a role or balance and have
+    it persisted by an action that should never touch it.
+  secure_pattern: >-
+    Each action binds only an explicit allowlist of fields, typically
+    through a dedicated input model, so unexpected attributes in the
+    request body are ignored.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user.update(request.body)             # binds every field, role too
+      secure: |
+        user.update(pick(request.body, ["name", "email"]))
+    python:
+      vulnerable: |
+        for k, v in request.json.items(): setattr(user, k, v)
+      secure: |
+        data = UserUpdate(**request.json)     # Pydantic model: name, email only
+        user.name, user.email = data.name, data.email
+    javascript:
+      vulnerable: |
+        await User.update(req.body, { where: { id } });
+      secure: |
+        const { name, email } = req.body;
+        await User.update({ name, email }, { where: { id } });
+    java:
+      vulnerable: |
+        @PostMapping("/profile") void save(@RequestBody User user) { ... }
+      secure: |
+        @PostMapping("/profile")
+        void save(@RequestBody ProfileForm form) { ... }  // form: name, email
+    csharp:
+      vulnerable: |
+        public IActionResult Update(User user) { _db.Update(user); }
+      secure: |
+        public IActionResult Update(UpdateProfileDto dto) { /* name, email */ }
+
+- id: V15.3.4
+  facet: Secure Coding and Architecture
+  section: Defensive Coding
+  level: 2
+  security_rule: >-
+    Proxy and middleware components must convey the user's original IP
+    address through trusted data fields the client cannot forge, and the
+    application must use that value for logging and security decisions.
+  vulnerability_pattern: >-
+    The application trusts a client-supplied forwarded-for header verbatim,
+    so an attacker spoofs an arbitrary address and evades IP-based rate
+    limiting, blocklists, and accurate logging.
+  secure_pattern: >-
+    Only headers set by trusted proxies are honored, the number of trusted
+    proxy hops is configured explicitly, and the resulting client address
+    is treated as a hint rather than absolute identity.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client_ip = headers["X-Forwarded-For"]   # fully attacker-controlled
+      secure: |
+        client_ip = trusted_proxy_resolve(headers, trusted_hops=1)
+    python:
+      vulnerable: |
+        ip = request.headers.get("X-Forwarded-For")  # spoofable
+      secure: |
+        # ProxyFix tells the app how many trusted proxies sit in front
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
+        ip = request.remote_addr
+    javascript:
+      vulnerable: |
+        const ip = req.headers["x-forwarded-for"];
+      secure: |
+        app.set("trust proxy", 1);   // count of trusted proxies
+        const ip = req.ip;
+    java:
+      vulnerable: |
+        String ip = request.getHeader("X-Forwarded-For");
+      secure: |
+        // server.forward-headers-strategy=native with a known proxy
+        String ip = request.getRemoteAddr();
+    csharp:
+      vulnerable: |
+        var ip = Request.Headers["X-Forwarded-For"].ToString();
+      secure: |
+        // ForwardedHeadersOptions with KnownProxies / KnownNetworks set
+        var ip = HttpContext.Connection.RemoteIpAddress;
+
+- id: V15.3.5
+  facet: Secure Coding and Architecture
+  section: Defensive Coding
+  level: 2
+  security_rule: >-
+    The application must explicitly ensure variables hold the expected type
+    and must use strict equality and comparison operators to avoid type
+    juggling and type confusion vulnerabilities.
+  vulnerability_pattern: >-
+    Loose comparisons coerce operands before comparing, so values of
+    different types compare as equal and security checks such as token or
+    password matching can be bypassed.
+  secure_pattern: >-
+    Inputs are coerced or validated to a known type, and identity-aware
+    strict comparison operators are used so values only match when both
+    type and value agree.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if (suppliedToken == storedToken) grantAccess()   # loose compare
+      secure: |
+        if (typeof suppliedToken === "string"
+            && constantTimeEquals(suppliedToken, storedToken)) grantAccess()
+    python:
+      vulnerable: |
+        if request.json["is_admin"]:          # any truthy value passes
+            grant_admin()
+      secure: |
+        if request.json.get("is_admin") is True:   # strict identity check
+            grant_admin()
+    javascript:
+      vulnerable: |
+        if (req.body.role == 0) denyAccess();   // "0" and "" also match
+      secure: |
+        if (req.body.role === 0) denyAccess();
+    java:
+      vulnerable: |
+        if (suppliedKey == storedKey) grant();   // reference identity, not value
+      secure: |
+        if (storedKey != null && storedKey.equals(suppliedKey)) grant();
+    csharp:
+      vulnerable: |
+        if (input.Equals(expected)) grant();     // input may be null -> throws
+      secure: |
+        if (string.Equals(input, expected, StringComparison.Ordinal)) grant();
+
+- id: V15.3.6
+  facet: Secure Coding and Architecture
+  section: Defensive Coding
+  level: 2
+  security_rule: >-
+    JavaScript code must be written to prevent prototype pollution, for
+    example by using Map or Set instead of plain object literals for
+    key-value stores driven by untrusted keys.
+  vulnerability_pattern: >-
+    Untrusted keys are assigned onto a plain object or merged recursively,
+    so a key such as the prototype name reaches Object.prototype and
+    poisons every object in the runtime.
+  secure_pattern: >-
+    Untrusted key-value data is held in a Map, or the dangerous keys are
+    rejected and objects are created without a prototype, so writes can
+    never reach the shared prototype chain.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store[userKey] = userValue           # userKey may be __proto__
+      secure: |
+        store.set(userKey, userValue)        # Map keys never touch the prototype
+    javascript:
+      vulnerable: |
+        const opts = {};
+        opts[req.query.key] = req.query.value;   // __proto__ pollutes globally
+      secure: |
+        const opts = new Map();
+        opts.set(req.query.key, req.query.value);
+
+- id: V15.3.7
+  facet: Secure Coding and Architecture
+  section: Defensive Coding
+  level: 2
+  security_rule: >-
+    The application must defend against HTTP parameter pollution,
+    especially when the framework does not distinguish whether a parameter
+    came from the query string, body, cookies, or headers.
+  vulnerability_pattern: >-
+    A parameter supplied more than once, or from more than one location, is
+    silently collapsed or picked inconsistently, so an attacker smuggles a
+    second value past a check that only inspected the first.
+  secure_pattern: >-
+    Parameters are read from one explicit source, duplicate occurrences are
+    rejected or normalized deterministically, and the value is validated to
+    the expected scalar shape before use.
+  code_patterns:
+    generic:
+      vulnerable: |
+        amount = params["amount"]            # ambiguous if sent twice
+      secure: |
+        values = query_all("amount")
+        if len(values) != 1: reject()
+        amount = values[0]
+    python:
+      vulnerable: |
+        amount = request.values["amount"]    # merges args, form, and more
+      secure: |
+        vals = request.args.getlist("amount")
+        if len(vals) != 1: abort(400)
+        amount = vals[0]
+    javascript:
+      vulnerable: |
+        const role = req.query.role;         // an array if sent twice
+      secure: |
+        const role = req.query.role;
+        if (typeof role !== "string") return res.status(400).end();
+    java:
+      vulnerable: |
+        String id = request.getParameter("id");   // first match only, silent
+      secure: |
+        String[] ids = request.getParameterValues("id");
+        if (ids == null || ids.length != 1) { reject(); }
+        String id = ids[0];
+
+# ---------------------------------------------------------------------------
+# V15.4 — Safe Concurrency
+# ---------------------------------------------------------------------------
+
+- id: V15.4.1
+  facet: Secure Coding and Architecture
+  section: Safe Concurrency
+  level: 3
+  security_rule: >-
+    Shared objects accessed by multiple threads — caches, files, in-memory
+    state — must be accessed through thread-safe types or synchronization
+    such as locks or semaphores to prevent race conditions and corruption.
+  vulnerability_pattern: >-
+    Multiple threads read and mutate shared state without synchronization,
+    so interleaved updates corrupt data, lose writes, or expose partially
+    constructed values.
+  secure_pattern: >-
+    Mutable shared state is guarded by a lock for the whole read-modify-write
+    sequence, or replaced with a thread-safe or immutable type, so updates
+    are atomic and consistent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        counter = counter + 1                # racy read-modify-write
+      secure: |
+        with lock:
+            counter = counter + 1
+    python:
+      vulnerable: |
+        cache[key] = compute(key)            # two threads clobber each other
+      secure: |
+        with cache_lock:
+            cache[key] = compute(key)
+    javascript:
+      vulnerable: |
+        counter[0] += 1;                     // shared SharedArrayBuffer, racy
+      secure: |
+        Atomics.add(counter, 0, 1);          // atomic increment
+    java:
+      vulnerable: |
+        private int count;
+        void inc() { count++; }              // not thread-safe
+      secure: |
+        private final AtomicInteger count = new AtomicInteger();
+        void inc() { count.incrementAndGet(); }
+    csharp:
+      vulnerable: |
+        _count++;                            // racy across threads
+      secure: |
+        Interlocked.Increment(ref _count);
+
+- id: V15.4.2
+  facet: Secure Coding and Architecture
+  section: Safe Concurrency
+  level: 3
+  security_rule: >-
+    A check on a resource's state — existence, permissions — and the action
+    that depends on it must be performed as a single atomic operation to
+    prevent time-of-check to time-of-use race conditions.
+  vulnerability_pattern: >-
+    The application checks a resource's state and then acts on it in a
+    separate step, so an attacker changes the resource in the gap and the
+    action proceeds on a different state than was validated.
+  secure_pattern: >-
+    The check and the action are fused into one atomic call that fails if
+    the precondition no longer holds, so there is no window for the
+    resource to change between them.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if exists(path): open(path)          # path may change in between
+      secure: |
+        open_exclusive(path)                 # one call: create-or-fail
+    python:
+      vulnerable: |
+        if not os.path.exists(p):
+            open(p, "w")                     # another process can win the race
+      secure: |
+        fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY)  # atomic
+    javascript:
+      vulnerable: |
+        if (!fs.existsSync(p)) fs.writeFileSync(p, data);
+      secure: |
+        fs.writeFileSync(p, data, { flag: "wx" });   // exclusive create
+    java:
+      vulnerable: |
+        if (!file.exists()) file.createNewFile();
+      secure: |
+        Files.createFile(path);   // atomic; throws if it already exists
+    csharp:
+      vulnerable: |
+        if (!File.Exists(p)) File.WriteAllText(p, data);
+      secure: |
+        using var fs = new FileStream(p, FileMode.CreateNew);  // atomic
+
+- id: V15.4.3
+  facet: Secure Coding and Architecture
+  section: Safe Concurrency
+  level: 3
+  security_rule: >-
+    Locks must be used consistently to avoid deadlock and livelock, and
+    locking logic must stay inside the code that owns the resource so locks
+    cannot be modified by external classes.
+  vulnerability_pattern: >-
+    Locks are acquired in inconsistent orders or exposed for callers to
+    manage, so threads deadlock waiting on each other or external code
+    forgets to release a shared lock.
+  secure_pattern: >-
+    Each resource owns and encapsulates its own lock, acquires multiple
+    locks in a fixed global order, and always releases them in a finally
+    block or scoped construct.
+  code_patterns:
+    generic:
+      vulnerable: |
+        resource.lock                        # caller manages the public lock
+        resource.use()
+      secure: |
+        resource.use()                       # the resource locks internally
+    python:
+      vulnerable: |
+        account.lock.acquire()               # public lock, release may be skipped
+        account.balance -= amount
+      secure: |
+        with account.transfer(amount):       # lock is private to the account
+            pass
+    java:
+      vulnerable: |
+        public final Object lock = new Object();   # exposed; callers synchronize
+      secure: |
+        private final Object lock = new Object();
+        void use() { synchronized (lock) { ... } }  # encapsulated
+    csharp:
+      vulnerable: |
+        public readonly object SyncRoot = new();    # external code can lock it
+      secure: |
+        private readonly object _sync = new();
+        public void Use() { lock (_sync) { ... } }
+
+- id: V15.4.4
+  facet: Secure Coding and Architecture
+  section: Safe Concurrency
+  level: 3
+  security_rule: >-
+    Resource allocation policies must prevent thread starvation by ensuring
+    fair access to resources, for example through bounded thread pools that
+    let lower-priority work proceed within a reasonable time.
+  vulnerability_pattern: >-
+    Threads are created without bound or scheduled unfairly, so a flood of
+    work exhausts capacity and lower-priority or later requests are starved
+    indefinitely.
+  secure_pattern: >-
+    Work runs on a bounded thread pool or executor with a fair queue and
+    backpressure, so capacity is capped and every request gets a turn
+    within a predictable window.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for task in tasks: spawn_thread(task)   # unbounded, starves the system
+      secure: |
+        pool = thread_pool(max_workers=16, fair=True)
+        for task in tasks: pool.submit(task)
+    python:
+      vulnerable: |
+        for t in tasks: threading.Thread(target=t).start()
+      secure: |
+        with ThreadPoolExecutor(max_workers=16) as pool:
+            pool.map(run, tasks)
+    java:
+      vulnerable: |
+        for (Runnable t : tasks) new Thread(t).start();
+      secure: |
+        ExecutorService pool = Executors.newFixedThreadPool(16);
+        tasks.forEach(pool::submit);
+    csharp:
+      vulnerable: |
+        foreach (var t in tasks) new Thread(t).Start();
+      secure: |
+        var opts = new ParallelOptions { MaxDegreeOfParallelism = 16 };
+        Parallel.ForEach(tasks, opts, Run);

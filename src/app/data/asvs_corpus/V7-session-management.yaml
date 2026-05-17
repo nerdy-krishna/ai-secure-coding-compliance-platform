@@ -1,0 +1,915 @@
+# OWASP ASVS 5.0 — Chapter V7: Session Management
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V7.1 — Session Management Documentation
+# ---------------------------------------------------------------------------
+
+- id: V7.1.1
+  facet: Session Management
+  section: Session Management Documentation
+  level: 2
+  security_rule: >-
+    Session inactivity timeout and absolute maximum session lifetime must
+    be documented, justified against the other controls in place, and any
+    deviation from NIST SP 800-63B re-authentication guidance explained.
+  vulnerability_pattern: >-
+    Session timeout values are chosen ad hoc in code or config with no
+    written rationale, so they cannot be reviewed against risk or NIST
+    re-authentication guidance and tend to be far too long.
+  secure_pattern: >-
+    Inactivity and absolute lifetime values are recorded in security
+    documentation with a justification that ties them to the application
+    risk level and to NIST SP 800-63B, and the code reflects those values.
+  code_patterns:
+    generic:
+      vulnerable: |
+        session.timeout = 2592000        # 30 days, no documented rationale
+      secure: |
+        # documented: inactivity 15m, absolute 12h — see SECURITY.md risk note
+        session.inactivity = 900
+        session.absolute = 43200
+
+# ---------------------------------------------------------------------------
+
+- id: V7.1.2
+  facet: Session Management
+  section: Session Management Documentation
+  level: 2
+  security_rule: >-
+    Documentation must define how many concurrent sessions one account may
+    hold and the behavior taken when that limit is reached, such as
+    rejecting the new login or evicting the oldest session.
+  vulnerability_pattern: >-
+    There is no documented or enforced limit on concurrent sessions per
+    account, so a compromised credential can fan out to unlimited parallel
+    sessions and stale sessions accumulate unbounded.
+  secure_pattern: >-
+    A documented maximum number of concurrent sessions per account is
+    enforced, and the defined overflow behavior — reject or evict oldest —
+    is applied consistently when a new login would exceed it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        createSession(userId)            # no count, unlimited parallel sessions
+      secure: |
+        if activeSessions(userId) >= MAX_CONCURRENT:
+            evictOldestSession(userId)   # documented overflow policy
+        createSession(userId)
+    python:
+      vulnerable: |
+        sessions.create(user_id)
+      secure: |
+        if Session.objects.filter(user=user_id, active=True).count() >= MAX_SESSIONS:
+            Session.objects.filter(user=user_id, active=True).earliest("created").delete()
+        sessions.create(user_id)
+
+# ---------------------------------------------------------------------------
+
+- id: V7.1.3
+  facet: Session Management
+  section: Session Management Documentation
+  level: 2
+  security_rule: >-
+    Every system that creates or manages user sessions within a federated
+    identity ecosystem must be documented, along with the controls that
+    coordinate session lifetime, termination, and re-authentication.
+  vulnerability_pattern: >-
+    Federated or single sign-on participants are undocumented, so session
+    lifetime and logout are not coordinated and a session can remain valid
+    at a relying party long after the identity provider session has ended.
+  secure_pattern: >-
+    All federated session participants and their lifetime, termination,
+    and re-authentication controls are documented, so single logout and
+    coordinated expiry can be designed and verified end to end.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # SSO partners and their session rules tracked nowhere
+        acceptAssertion(idpToken)
+      secure: |
+        # documented: IdP + 3 RPs, single-logout endpoints, 8h max — see SSO.md
+        acceptAssertion(idpToken)
+        registerForSingleLogout(rpSessionId)
+
+# ---------------------------------------------------------------------------
+# V7.2 — Fundamental Session Management Security
+# ---------------------------------------------------------------------------
+
+- id: V7.2.1
+  facet: Session Management
+  section: Fundamental Session Management Security
+  level: 1
+  security_rule: >-
+    All session token verification must be performed by a trusted backend
+    service, never by client-side code or by trusting values the client
+    can set.
+  vulnerability_pattern: >-
+    Session validity or the authenticated identity is decided from a
+    client-supplied value such as a cookie flag, header, or hidden field
+    that the client can forge, so authentication is effectively bypassed.
+  secure_pattern: >-
+    The backend looks up the presented session token in its own store or
+    verifies its signature, and derives the user identity solely from that
+    server-side verification.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if request.cookie("is_admin") == "true": grantAccess()
+      secure: |
+        session = backend.verify(request.cookie("session_id"))
+        if session.valid: grantAccess(session.user)
+    python:
+      vulnerable: |
+        user_id = request.headers["X-User-Id"]   # trusted from the client
+      secure: |
+        session = SessionStore.get(request.cookies["sid"])
+        user_id = session.user_id if session and session.valid else None
+    javascript:
+      vulnerable: |
+        const role = req.cookies.role;            // client decides its own role
+      secure: |
+        const session = await store.verify(req.cookies.sid);
+        const role = session?.role;
+    java:
+      vulnerable: |
+        boolean admin = Boolean.parseBoolean(request.getParameter("admin"));
+      secure: |
+        Session s = sessionService.verify(request.getCookie("SID"));
+        boolean admin = s != null && s.isValid() && s.getRole() == ADMIN;
+    csharp:
+      vulnerable: |
+        var userId = Request.Headers["X-User-Id"];
+      secure: |
+        var session = _sessionStore.Verify(Request.Cookies["sid"]);
+        var userId = session?.UserId;
+
+# ---------------------------------------------------------------------------
+
+- id: V7.2.2
+  facet: Session Management
+  section: Fundamental Session Management Security
+  level: 1
+  security_rule: >-
+    Sessions must be represented by dynamically generated self-contained or
+    reference tokens, never by static API secrets or keys reused across
+    sessions.
+  vulnerability_pattern: >-
+    A long-lived static secret or API key is reused to represent a user
+    session, so it cannot be rotated or revoked per session and a single
+    leak compromises every session that ever used it.
+  secure_pattern: >-
+    Each session gets a freshly generated reference or self-contained
+    token at authentication time, distinct per session and revocable
+    independently of any static credential.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sessionToken = STATIC_API_KEY            # same value for everyone
+      secure: |
+        sessionToken = generateSessionToken()    # fresh per session
+    python:
+      vulnerable: |
+        token = settings.SHARED_SESSION_SECRET
+      secure: |
+        token = secrets.token_urlsafe(32)        # dynamic, per-session
+    javascript:
+      vulnerable: |
+        const token = process.env.API_KEY;
+      secure: |
+        const token = crypto.randomBytes(32).toString("base64url");
+    java:
+      vulnerable: |
+        String token = config.getStaticSessionKey();
+      secure: |
+        byte[] raw = new byte[32];
+        new SecureRandom().nextBytes(raw);
+        String token = Base64.getUrlEncoder().encodeToString(raw);
+    csharp:
+      vulnerable: |
+        var token = _config["SharedSessionSecret"];
+      secure: |
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+# ---------------------------------------------------------------------------
+
+- id: V7.2.3
+  facet: Session Management
+  section: Fundamental Session Management Security
+  level: 1
+  security_rule: >-
+    Reference tokens used to represent user sessions must be unique and
+    generated by a cryptographically secure pseudo-random number generator
+    with at least 128 bits of entropy.
+  vulnerability_pattern: >-
+    Session reference tokens are produced from a predictable source such
+    as a counter, timestamp, or a non-cryptographic random function, or
+    are too short, so an attacker can guess or enumerate valid sessions.
+  secure_pattern: >-
+    Session tokens come from a CSPRNG and carry at least 128 bits of
+    entropy, making them unique and infeasible to guess or brute force.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sessionId = "sess-" + (lastId + 1)       # sequential, guessable
+      secure: |
+        sessionId = csprngBytes(16).hex()        # 128 bits of entropy
+    python:
+      vulnerable: |
+        session_id = str(random.randint(0, 999999))
+      secure: |
+        session_id = secrets.token_hex(16)       # 128-bit CSPRNG token
+    javascript:
+      vulnerable: |
+        const sid = Date.now().toString(36);
+      secure: |
+        const sid = crypto.randomBytes(16).toString("hex");
+    java:
+      vulnerable: |
+        String sid = Long.toString(new Random().nextLong());
+      secure: |
+        byte[] b = new byte[16];
+        new SecureRandom().nextBytes(b);
+        String sid = HexFormat.of().formatHex(b);
+    csharp:
+      vulnerable: |
+        var sid = new Random().Next().ToString();
+      secure: |
+        var sid = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+# ---------------------------------------------------------------------------
+
+- id: V7.2.4
+  facet: Session Management
+  section: Fundamental Session Management Security
+  level: 1
+  security_rule: >-
+    On every authentication event, including re-authentication, the
+    application must issue a new session token and terminate the previous
+    one to prevent session fixation.
+  vulnerability_pattern: >-
+    The pre-login session identifier is kept after the user authenticates,
+    so an attacker who planted that identifier beforehand inherits the
+    now-authenticated session.
+  secure_pattern: >-
+    The application discards the old session and generates a fresh session
+    token immediately after successful authentication, so any
+    attacker-fixed identifier becomes useless.
+  code_patterns:
+    generic:
+      vulnerable: |
+        authenticate(user)
+        session.user = user                      # same session id as pre-login
+      secure: |
+        authenticate(user)
+        session.invalidate()                     # drop the anonymous session
+        session = newSession(); session.user = user
+    python:
+      vulnerable: |
+        request.session["user_id"] = user.id     # session id unchanged
+      secure: |
+        from django.contrib.auth import login
+        login(request, user)                     # cycle_key rotates the session
+    javascript:
+      vulnerable: |
+        req.session.userId = user.id;
+      secure: |
+        req.session.regenerate(() => { req.session.userId = user.id; });
+    java:
+      vulnerable: |
+        request.getSession().setAttribute("user", user);
+      secure: |
+        request.changeSessionId();               // new id on authentication
+        request.getSession().setAttribute("user", user);
+    csharp:
+      vulnerable: |
+        HttpContext.Session.SetString("user", user.Id);
+      secure: |
+        await HttpContext.SignOutAsync();        // abandon the old session
+        await HttpContext.SignInAsync(principal);
+
+# ---------------------------------------------------------------------------
+# V7.3 — Session Timeout
+# ---------------------------------------------------------------------------
+
+- id: V7.3.1
+  facet: Session Management
+  section: Session Timeout
+  level: 2
+  security_rule: >-
+    An inactivity timeout must expire idle sessions and force
+    re-authentication, with the timeout value set according to risk
+    analysis and documented security decisions.
+  vulnerability_pattern: >-
+    Sessions never expire from inactivity, or the idle window is far
+    longer than the risk justifies, so an unattended or stolen session
+    stays usable indefinitely.
+  secure_pattern: >-
+    Each session records a last-activity time, and a request after the
+    configured idle window is rejected and the session terminated,
+    requiring the user to re-authenticate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if session.exists: allow()               # no idle check
+      secure: |
+        if now - session.last_activity > IDLE_LIMIT: session.terminate()
+        else: session.last_activity = now; allow()
+    python:
+      vulnerable: |
+        SESSION_COOKIE_AGE = None                 # session never times out
+      secure: |
+        SESSION_COOKIE_AGE = 900                  # 15 min idle
+        SESSION_SAVE_EVERY_REQUEST = True         # slide on activity
+    javascript:
+      vulnerable: |
+        app.use(session({ cookie: {} }));         # no maxAge, no idle expiry
+      secure: |
+        app.use(session({ rolling: true, cookie: { maxAge: 900000 } }));
+    java:
+      vulnerable: |
+        // web.xml session-timeout omitted — container default or never
+      secure: |
+        request.getSession().setMaxInactiveInterval(900);   // 15 min idle
+    csharp:
+      vulnerable: |
+        services.AddSession();                    // default, no idle policy
+      secure: |
+        services.AddSession(o => o.IdleTimeout = TimeSpan.FromMinutes(15));
+
+# ---------------------------------------------------------------------------
+
+- id: V7.3.2
+  facet: Session Management
+  section: Session Timeout
+  level: 2
+  security_rule: >-
+    An absolute maximum session lifetime must force re-authentication once
+    reached, regardless of activity, with the value set by risk analysis
+    and documented security decisions.
+  vulnerability_pattern: >-
+    A session can be kept alive forever by continuous activity because
+    only an inactivity timeout exists, so a long-lived compromised session
+    never has to re-authenticate.
+  secure_pattern: >-
+    Each session records its creation time, and once the absolute lifetime
+    has elapsed the session is terminated and re-authentication required
+    even if the session has been continuously active.
+  code_patterns:
+    generic:
+      vulnerable: |
+        session.last_activity = now              # only idle is tracked
+      secure: |
+        if now - session.created_at > ABSOLUTE_LIMIT: session.terminate()
+    python:
+      vulnerable: |
+        request.session.set_expiry(0)            # expires on browser close only
+      secure: |
+        if time.time() - request.session["created"] > 43200:
+            request.session.flush()              # 12h absolute cap
+    javascript:
+      vulnerable: |
+        req.session.touch();                     // refreshes idle, no hard cap
+      secure: |
+        if (Date.now() - req.session.createdAt > 43200000) req.session.destroy();
+    java:
+      vulnerable: |
+        session.setMaxInactiveInterval(900);     // idle only
+      secure: |
+        long age = System.currentTimeMillis() - (long) session.getAttribute("createdAt");
+        if (age > 43_200_000L) session.invalidate();
+    csharp:
+      vulnerable: |
+        options.IdleTimeout = TimeSpan.FromHours(1);   // idle only
+      secure: |
+        if (DateTime.UtcNow - createdAt > TimeSpan.FromHours(12))
+            await HttpContext.SignOutAsync();
+
+# ---------------------------------------------------------------------------
+# V7.4 — Session Termination
+# ---------------------------------------------------------------------------
+
+- id: V7.4.1
+  facet: Session Management
+  section: Session Termination
+  level: 1
+  security_rule: >-
+    When a session is terminated by logout or expiry, all further use must
+    be denied — reference and stateful sessions are invalidated at the
+    backend, and self-contained tokens are revoked via a denylist, a
+    per-user cutoff time, or a rotated per-user signing key.
+  vulnerability_pattern: >-
+    Logout only clears the client-side cookie while the backend session or
+    issued token stays valid, so a previously captured token continues to
+    authenticate after the user has logged out.
+  secure_pattern: >-
+    Termination deletes or marks invalid the server-side session, or for
+    self-contained tokens records the token in a denylist or advances a
+    per-user cutoff, so the token is rejected on its next use.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def logout(): clearCookie("session")     # backend session still live
+      secure: |
+        def logout():
+            backend.invalidate(session.id)       # or denylist the token
+            clearCookie("session")
+    python:
+      vulnerable: |
+        response.delete_cookie("sessionid")
+      secure: |
+        request.session.flush()                  # destroys server-side session
+        response.delete_cookie("sessionid")
+    javascript:
+      vulnerable: |
+        res.clearCookie("connect.sid");
+      secure: |
+        req.session.destroy(() => res.clearCookie("connect.sid"));
+    java:
+      vulnerable: |
+        response.addCookie(expiredSessionCookie);
+      secure: |
+        request.getSession().invalidate();       // server-side session gone
+    csharp:
+      vulnerable: |
+        Response.Cookies.Delete(".AspNetCore.Session");
+      secure: |
+        HttpContext.Session.Clear();
+        await HttpContext.SignOutAsync();
+
+# ---------------------------------------------------------------------------
+
+- id: V7.4.2
+  facet: Session Management
+  section: Session Termination
+  level: 1
+  security_rule: >-
+    When a user account is disabled or deleted, all of that account's
+    active sessions must be terminated immediately so access ends with the
+    account.
+  vulnerability_pattern: >-
+    Disabling or deleting an account only blocks future logins while
+    existing sessions stay valid, so a departed employee or banned user
+    keeps full access until each session happens to expire.
+  secure_pattern: >-
+    The account disable or delete operation also revokes every active
+    session for that user, for example by deleting their session rows or
+    advancing a per-user token cutoff, ending access at once.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user.active = false                      # live sessions untouched
+      secure: |
+        user.active = false
+        backend.terminateAllSessions(user.id)
+    python:
+      vulnerable: |
+        user.is_active = False; user.save()
+      secure: |
+        user.is_active = False; user.save()
+        Session.objects.filter(user=user).delete()   # kill live sessions
+    javascript:
+      vulnerable: |
+        await users.update(id, { disabled: true });
+      secure: |
+        await users.update(id, { disabled: true });
+        await sessionStore.destroyAllForUser(id);
+    java:
+      vulnerable: |
+        userRepository.disable(userId);
+      secure: |
+        userRepository.disable(userId);
+        sessionRegistry.getAllSessions(userId, false).forEach(SessionInformation::expireNow);
+    csharp:
+      vulnerable: |
+        await _userManager.SetLockoutEnabledAsync(user, true);
+      secure: |
+        await _userManager.SetLockoutEnabledAsync(user, true);
+        await _userManager.UpdateSecurityStampAsync(user);   // invalidates sessions
+
+# ---------------------------------------------------------------------------
+
+- id: V7.4.3
+  facet: Session Management
+  section: Session Termination
+  level: 2
+  security_rule: >-
+    After a successful change or removal of any authentication factor,
+    including password reset and MFA updates, the application must offer to
+    terminate all other active sessions for that account.
+  vulnerability_pattern: >-
+    A password change or MFA update leaves all other sessions alive, so if
+    the change was made to evict an attacker the attacker's existing
+    session simply continues unaffected.
+  secure_pattern: >-
+    On any authentication factor change the application terminates, or
+    offers the user a clear option to terminate, every session other than
+    the current one.
+  code_patterns:
+    generic:
+      vulnerable: |
+        updatePassword(user, newHash)            # other sessions stay live
+      secure: |
+        updatePassword(user, newHash)
+        if userChoseLogoutOthers: backend.terminateOtherSessions(user.id, currentSession)
+    python:
+      vulnerable: |
+        user.set_password(new_password); user.save()
+      secure: |
+        user.set_password(new_password); user.save()
+        update_session_auth_hash(request, user)  # keep current, invalidate others
+    javascript:
+      vulnerable: |
+        await users.setPassword(id, newHash);
+      secure: |
+        await users.setPassword(id, newHash);
+        await sessionStore.destroyAllForUserExcept(id, req.sessionID);
+    java:
+      vulnerable: |
+        userService.changePassword(userId, newHash);
+      secure: |
+        userService.changePassword(userId, newHash);
+        sessionRegistry.getAllSessions(userId, false).stream()
+            .filter(s -> !s.getSessionId().equals(currentId)).forEach(SessionInformation::expireNow);
+    csharp:
+      vulnerable: |
+        await _userManager.ChangePasswordAsync(user, old, newPwd);
+      secure: |
+        await _userManager.ChangePasswordAsync(user, old, newPwd);
+        await _signInManager.RefreshSignInAsync(user);   // rotates stamp, drops others
+
+# ---------------------------------------------------------------------------
+
+- id: V7.4.4
+  facet: Session Management
+  section: Session Termination
+  level: 2
+  security_rule: >-
+    Every authenticated page must give the user easy and visible access to
+    logout functionality.
+  vulnerability_pattern: >-
+    Logout is hidden, hard to reach, or absent on some authenticated
+    views, so users on shared or public devices cannot reliably end their
+    session.
+  secure_pattern: >-
+    A clearly labeled logout control is present and visible on every
+    authenticated page, typically in a persistent header or navigation
+    component.
+  code_patterns:
+    generic:
+      vulnerable: |
+        <nav>Home  Profile  Settings</nav>       <!-- no logout control -->
+      secure: |
+        <nav>Home  Profile  Settings  <a href="/logout">Log out</a></nav>
+    javascript:
+      vulnerable: |
+        function Header() { return <nav><HomeLink/><ProfileLink/></nav>; }
+      secure: |
+        function Header() {
+          return <nav><HomeLink/><ProfileLink/><button onClick={logout}>Log out</button></nav>;
+        }
+
+# ---------------------------------------------------------------------------
+
+- id: V7.4.5
+  facet: Session Management
+  section: Session Termination
+  level: 2
+  security_rule: >-
+    Application administrators must be able to terminate active sessions
+    for an individual user or for all users.
+  vulnerability_pattern: >-
+    There is no administrative way to forcibly end sessions, so during an
+    incident operators cannot evict a compromised account and must wait
+    for sessions to time out.
+  secure_pattern: >-
+    An administrative function can revoke all sessions for a chosen user,
+    and a global variant can revoke every session, by clearing the session
+    store or advancing the relevant token cutoffs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no admin path to end sessions; rely on timeout
+      secure: |
+        def admin_kill_sessions(target):
+            backend.terminateAllSessions(target) if target else backend.terminateEverySession()
+    python:
+      vulnerable: |
+        # admin can disable a user but cannot end their live sessions
+      secure: |
+        def force_logout(user_id=None):
+            qs = Session.objects.all() if user_id is None else Session.objects.filter(user=user_id)
+            qs.delete()
+    javascript:
+      vulnerable: |
+        // no endpoint to revoke sessions
+      secure: |
+        adminRouter.post("/sessions/revoke", (req, res) =>
+          sessionStore.destroyAllForUser(req.body.userId ?? "*").then(() => res.sendStatus(204)));
+    java:
+      vulnerable: |
+        // SessionRegistry not exposed to admins
+      secure: |
+        void revoke(String userId) {
+            sessionRegistry.getAllSessions(userId, false).forEach(SessionInformation::expireNow);
+        }
+    csharp:
+      vulnerable: |
+        // no admin session-revocation action
+      secure: |
+        public async Task RevokeAll(string userId) =>
+            await _userManager.UpdateSecurityStampAsync(await _userManager.FindByIdAsync(userId));
+
+# ---------------------------------------------------------------------------
+# V7.5 — Defenses Against Session Abuse
+# ---------------------------------------------------------------------------
+
+- id: V7.5.1
+  facet: Session Management
+  section: Defenses Against Session Abuse
+  level: 2
+  security_rule: >-
+    Modifying sensitive account attributes that affect authentication —
+    email address, phone number, MFA configuration, or recovery
+    information — must require full re-authentication first.
+  vulnerability_pattern: >-
+    A merely logged-in user can change their email, phone, or MFA settings
+    without proving their identity again, so an attacker on a hijacked
+    session can quietly take over the account recovery path.
+  secure_pattern: >-
+    Before any change to authentication-affecting attributes, the
+    application forces a fresh full authentication and only then applies
+    the change.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if session.valid: updateEmail(user, newEmail)
+      secure: |
+        if not reauthenticated(user, providedCredentials): reject()
+        updateEmail(user, newEmail)
+    python:
+      vulnerable: |
+        @login_required
+        def change_email(request): user.email = request.POST["email"]; user.save()
+      secure: |
+        @login_required
+        def change_email(request):
+            if not user.check_password(request.POST["password"]): return forbidden()
+            user.email = request.POST["email"]; user.save()
+    javascript:
+      vulnerable: |
+        app.post("/account/email", requireLogin, (req, res) => setEmail(req.user, req.body.email));
+      secure: |
+        app.post("/account/email", requireLogin, async (req, res) => {
+          if (!await verifyPassword(req.user, req.body.password)) return res.sendStatus(403);
+          setEmail(req.user, req.body.email);
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/account/phone") void setPhone(@RequestParam String phone) { user.setPhone(phone); }
+      secure: |
+        @PostMapping("/account/phone") void setPhone(@RequestParam String phone, @RequestParam String pwd) {
+            if (!passwordEncoder.matches(pwd, user.getHash())) throw new AccessDeniedException("reauth");
+            user.setPhone(phone);
+        }
+    csharp:
+      vulnerable: |
+        [Authorize] public IActionResult ChangeEmail(string email) { _user.Email = email; return Ok(); }
+      secure: |
+        [Authorize] public async Task<IActionResult> ChangeEmail(string email, string password) {
+            if (!await _signInManager.CheckPasswordSignInAsync(_user, password, false)) return Forbid();
+            _user.Email = email; return Ok();
+        }
+
+# ---------------------------------------------------------------------------
+
+- id: V7.5.2
+  facet: Session Management
+  section: Defenses Against Session Abuse
+  level: 2
+  security_rule: >-
+    Users must be able to view their currently active sessions and, after
+    authenticating again with at least one factor, terminate any or all of
+    them.
+  vulnerability_pattern: >-
+    Users have no way to see where they are logged in or to revoke other
+    sessions, so a user who suspects compromise cannot evict the attacker
+    themselves.
+  secure_pattern: >-
+    The account area lists active sessions with identifying detail, and a
+    revoke action, gated behind a fresh single-factor check, terminates a
+    selected session or all other sessions.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no per-user session list, no self-service revoke
+      secure: |
+        showSessions(listSessions(user.id))
+        on revoke: if reauth(user): backend.terminateSession(chosenId)
+    python:
+      vulnerable: |
+        # account page shows profile only; sessions invisible to the user
+      secure: |
+        def sessions_view(request):
+            return render("sessions.html", {"sessions": Session.objects.filter(user=request.user)})
+        def revoke(request, sid):
+            if request.user.check_password(request.POST["password"]):
+                Session.objects.filter(user=request.user, pk=sid).delete()
+    javascript:
+      vulnerable: |
+        // no /account/sessions route
+      secure: |
+        router.get("/account/sessions", (req, res) => res.json(listSessions(req.user.id)));
+        router.post("/account/sessions/revoke", reauth, (req, res) =>
+          sessionStore.destroy(req.body.sid, () => res.sendStatus(204)));
+    java:
+      vulnerable: |
+        // SessionRegistry never surfaced to the end user
+      secure: |
+        @GetMapping("/account/sessions") List<SessionInfo> mine() { return sessionService.list(currentUser()); }
+        @PostMapping("/account/sessions/{id}/revoke") void revoke(@PathVariable String id) {
+            requireRecentAuth(); sessionService.expire(id);
+        }
+    csharp:
+      vulnerable: |
+        // no UI or API for users to see or kill their sessions
+      secure: |
+        [Authorize] public IActionResult Sessions() => View(_sessionService.List(User.GetId()));
+        [Authorize] public IActionResult Revoke(string id) {
+            RequireRecentAuth(); _sessionService.Expire(id); return RedirectToAction("Sessions");
+        }
+
+# ---------------------------------------------------------------------------
+
+- id: V7.5.3
+  facet: Session Management
+  section: Defenses Against Session Abuse
+  level: 3
+  security_rule: >-
+    Highly sensitive transactions or operations must require further
+    authentication with at least one factor, or a secondary verification
+    step, before they are carried out.
+  vulnerability_pattern: >-
+    A high-value operation such as a large transfer or a destructive
+    administrative action proceeds on the strength of the existing session
+    alone, so a hijacked session can perform it unchecked.
+  secure_pattern: >-
+    Before a high-risk operation the application demands step-up
+    authentication or a secondary verification — a re-entered factor or a
+    one-time confirmation — and only proceeds once it succeeds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if session.valid: transfer(funds, amount)
+      secure: |
+        if amount > HIGH_RISK_THRESHOLD and not stepUpVerified(session): requireStepUp()
+        transfer(funds, amount)
+    python:
+      vulnerable: |
+        @login_required
+        def wire_transfer(request): bank.transfer(request.user, amount)
+      secure: |
+        @login_required
+        def wire_transfer(request):
+            if not otp_verified(request.user, request.POST["otp"]): return require_otp()
+            bank.transfer(request.user, amount)
+    javascript:
+      vulnerable: |
+        app.post("/transfer", requireLogin, (req, res) => bank.transfer(req.user, req.body.amount));
+      secure: |
+        app.post("/transfer", requireLogin, async (req, res) => {
+          if (!await verifyOtp(req.user, req.body.otp)) return res.status(401).json({ stepUp: true });
+          bank.transfer(req.user, req.body.amount);
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/admin/delete-all") void deleteAll() { repo.deleteAll(); }
+      secure: |
+        @PostMapping("/admin/delete-all") void deleteAll(@RequestParam String otp) {
+            if (!mfaService.verify(currentUser(), otp)) throw new AccessDeniedException("step-up required");
+            repo.deleteAll();
+        }
+    csharp:
+      vulnerable: |
+        [Authorize] public IActionResult Payout(decimal amount) { _bank.Payout(amount); return Ok(); }
+      secure: |
+        [Authorize] public async Task<IActionResult> Payout(decimal amount, string otp) {
+            if (!await _mfa.VerifyAsync(User.GetId(), otp)) return Unauthorized(new { stepUp = true });
+            _bank.Payout(amount); return Ok();
+        }
+
+# ---------------------------------------------------------------------------
+# V7.6 — Federated Re-authentication
+# ---------------------------------------------------------------------------
+
+- id: V7.6.1
+  facet: Session Management
+  section: Federated Re-authentication
+  level: 2
+  security_rule: >-
+    Session lifetime and termination between relying parties and identity
+    providers must behave as documented, forcing re-authentication when
+    the maximum time since the last identity provider authentication is
+    reached.
+  vulnerability_pattern: >-
+    The relying party honors only its own local session and ignores when
+    the identity provider last authenticated the user, so a stale federated
+    session persists long past the documented coordinated lifetime.
+  secure_pattern: >-
+    The relying party records the identity provider authentication time
+    from the assertion and forces a fresh federated authentication once
+    the documented maximum age has elapsed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if rpSession.valid: allow()              # IdP auth_time ignored
+      secure: |
+        if now - session.idp_auth_time > MAX_IDP_AGE: redirectToIdpReauth()
+        else: allow()
+    python:
+      vulnerable: |
+        if request.session.get("logged_in"): grant()
+      secure: |
+        if time.time() - request.session["idp_auth_time"] > MAX_IDP_AGE:
+            return redirect(idp_authn_url(prompt="login"))
+        grant()
+    javascript:
+      vulnerable: |
+        if (req.session.user) next();
+      secure: |
+        if (Date.now() / 1000 - req.session.idpAuthTime > MAX_IDP_AGE)
+          return res.redirect(idpAuthUrl({ prompt: "login" }));
+        next();
+    java:
+      vulnerable: |
+        if (session.getAttribute("user") != null) chain.doFilter(req, res);
+      secure: |
+        long authTime = (long) session.getAttribute("idpAuthTime");
+        if (Instant.now().getEpochSecond() - authTime > MAX_IDP_AGE) redirectToIdp(res);
+        else chain.doFilter(req, res);
+    csharp:
+      vulnerable: |
+        if (User.Identity.IsAuthenticated) return Ok();
+      secure: |
+        var authTime = long.Parse(User.FindFirstValue("auth_time"));
+        if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - authTime > MaxIdpAge)
+            return Challenge(new AuthenticationProperties { Items = { ["prompt"] = "login" } });
+
+# ---------------------------------------------------------------------------
+
+- id: V7.6.2
+  facet: Session Management
+  section: Federated Re-authentication
+  level: 2
+  security_rule: >-
+    Creation of a session must require the user's consent or an explicit
+    action, so no new application session is created without user
+    interaction.
+  vulnerability_pattern: >-
+    A federated flow silently mints a new application session from an
+    existing identity provider session without any user action or consent,
+    enabling session injection or unwanted automatic sign-in.
+  secure_pattern: >-
+    Establishing a new application session requires an explicit user
+    action or consent step, so a session is never created purely from
+    background redirects.
+  code_patterns:
+    generic:
+      vulnerable: |
+        on idpRedirect: createSession(idpUser)   # silent, no user action
+      secure: |
+        on idpRedirect:
+            if not userConfirmedSignIn(): showConsentPrompt()
+            else: createSession(idpUser)
+    python:
+      vulnerable: |
+        def sso_callback(request): login(request, idp_user)   # auto, prompt=none
+      secure: |
+        def sso_callback(request):
+            if request.method != "POST":          # require explicit confirm click
+                return render("confirm_signin.html")
+            login(request, idp_user)
+    javascript:
+      vulnerable: |
+        app.get("/sso/callback", (req, res) => { req.session.user = idpUser; res.redirect("/"); });
+      secure: |
+        app.get("/sso/callback", (req, res) => res.render("confirm-signin", { idpUser }));
+        app.post("/sso/confirm", (req, res) => { req.session.user = idpUser; res.redirect("/"); });
+    java:
+      vulnerable: |
+        @GetMapping("/sso/callback") String cb() { sessionService.start(idpUser); return "redirect:/"; }
+      secure: |
+        @GetMapping("/sso/callback") String cb(Model m) { m.addAttribute("idpUser", idpUser); return "confirm"; }
+        @PostMapping("/sso/confirm") String confirm() { sessionService.start(idpUser); return "redirect:/"; }
+    csharp:
+      vulnerable: |
+        public async Task<IActionResult> Callback() { await SignInAsync(idpUser); return Redirect("/"); }
+      secure: |
+        public IActionResult Callback() => View("ConfirmSignIn", idpUser);
+        [HttpPost] public async Task<IActionResult> Confirm() { await SignInAsync(idpUser); return Redirect("/"); }

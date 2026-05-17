@@ -1,0 +1,626 @@
+# OWASP ASVS 5.0 — Chapter V17: WebRTC
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V17.1 — TURN Server
+# ---------------------------------------------------------------------------
+
+- id: V17.1.1
+  facet: WebRTC
+  section: TURN Server
+  level: 2
+  security_rule: >-
+    The TURN relay must refuse to allocate or relay traffic to IP
+    addresses reserved for special purposes — internal, loopback,
+    broadcast, link-local — across both IPv4 and IPv6.
+  vulnerability_pattern: >-
+    The TURN server relays peer traffic to any destination a client
+    requests, so a client can use the relay to reach internal hosts,
+    loopback, or broadcast ranges and pivot into the private network.
+  secure_pattern: >-
+    Each requested relay destination is checked against a denylist of
+    reserved and private address ranges for both IP families, and the
+    allocation is rejected when the target is not a public address.
+  code_patterns:
+    generic:
+      vulnerable: |
+        allocateRelay(client, peerAddress)        # any peer accepted
+      secure: |
+        if isReservedOrPrivate(peerAddress): reject()
+        else: allocateRelay(client, peerAddress)
+    python:
+      vulnerable: |
+        relay.allocate(peer_ip)
+      secure: |
+        import ipaddress
+        addr = ipaddress.ip_address(peer_ip)
+        if addr.is_global: relay.allocate(peer_ip)
+        else: raise PermissionError("non-public relay target")
+    javascript:
+      vulnerable: |
+        turn.allocate(req.peerAddress);
+      secure: |
+        const ip = ipaddr.parse(req.peerAddress);
+        if (ip.range() === "unicast") turn.allocate(req.peerAddress);
+        else throw new Error("reserved relay target");
+    java:
+      vulnerable: |
+        relay.allocate(InetAddress.getByName(peer));
+      secure: |
+        InetAddress a = InetAddress.getByName(peer);
+        if (a.isAnyLocalAddress() || a.isLoopbackAddress()
+            || a.isLinkLocalAddress() || a.isSiteLocalAddress())
+          throw new SecurityException("reserved relay target");
+        relay.allocate(a);
+    csharp:
+      vulnerable: |
+        turn.Allocate(IPAddress.Parse(peer));
+      secure: |
+        var a = IPAddress.Parse(peer);
+        if (IsReservedOrPrivate(a)) throw new SecurityException("reserved target");
+        turn.Allocate(a);
+
+- id: V17.1.2
+  facet: WebRTC
+  section: TURN Server
+  level: 3
+  security_rule: >-
+    The TURN service must bound the number of relay ports and allocations
+    a single user or client can hold so a legitimate account cannot
+    exhaust the server's port pool.
+  vulnerability_pattern: >-
+    The TURN server grants every allocation request without per-user
+    quotas, so one client can open ports until the relay's port range or
+    memory is exhausted and other users are denied service.
+  secure_pattern: >-
+    A per-user and per-IP allocation quota is enforced, idle allocations
+    time out and are reclaimed, and requests beyond the quota are rejected
+    with an error rather than served.
+  code_patterns:
+    generic:
+      vulnerable: |
+        port = allocatePort(user)        # unbounded per user
+      secure: |
+        if activeAllocations(user) >= MAX_PER_USER: rejectQuotaExceeded()
+        else: port = allocatePort(user)
+    python:
+      vulnerable: |
+        ports[user].append(open_relay_port())
+      secure: |
+        if len(ports[user]) >= MAX_PER_USER:
+            raise QuotaExceeded(user)
+        ports[user].append(open_relay_port())
+    javascript:
+      vulnerable: |
+        allocations.get(user).push(openRelayPort());
+      secure: |
+        if (allocations.get(user).length >= MAX_PER_USER)
+          throw new QuotaError(user);
+        allocations.get(user).push(openRelayPort());
+    java:
+      vulnerable: |
+        userPorts.get(user).add(openRelayPort());
+      secure: |
+        if (userPorts.get(user).size() >= MAX_PER_USER)
+          throw new QuotaExceededException(user);
+        userPorts.get(user).add(openRelayPort());
+    csharp:
+      vulnerable: |
+        _ports[user].Add(OpenRelayPort());
+      secure: |
+        if (_ports[user].Count >= MaxPerUser)
+            throw new QuotaExceededException(user);
+        _ports[user].Add(OpenRelayPort());
+
+# ---------------------------------------------------------------------------
+# V17.2 — Media
+# ---------------------------------------------------------------------------
+
+- id: V17.2.1
+  facet: WebRTC
+  section: Media
+  level: 2
+  security_rule: >-
+    The private key for the DTLS certificate must be generated, stored,
+    rotated, and protected according to the organization's documented
+    cryptographic key management policy.
+  vulnerability_pattern: >-
+    The DTLS certificate key is committed to source, left world-readable
+    on disk, or never rotated, so anyone who reads the repository or the
+    host filesystem can impersonate the media server.
+  secure_pattern: >-
+    The DTLS key is generated and held in a secrets manager or hardware
+    keystore with restricted permissions, loaded at runtime, and rotated
+    on the schedule the key management policy defines.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dtlsKey = readFile("./dtls-key.pem")     # key in repo
+      secure: |
+        dtlsKey = secretsManager.get("dtls/media-key")   # managed store
+    python:
+      vulnerable: |
+        key = open("dtls_key.pem").read()
+      secure: |
+        key = boto3.client("secretsmanager").get_secret_value(
+            SecretId="dtls/media-key")["SecretString"]
+    java:
+      vulnerable: |
+        var key = Files.readString(Path.of("dtls_key.pem"));
+      secure: |
+        var key = keyStore.getKey("dtls-media", keyPassword);  // managed keystore
+    csharp:
+      vulnerable: |
+        var key = File.ReadAllText("dtls_key.pem");
+      secure: |
+        var key = await secretClient.GetSecretAsync("dtls-media-key");
+
+- id: V17.2.2
+  facet: WebRTC
+  section: Media
+  level: 2
+  security_rule: >-
+    The media server must negotiate only approved DTLS cipher suites and
+    a secure DTLS-SRTP protection profile, rejecting weak or deprecated
+    algorithms during the handshake.
+  vulnerability_pattern: >-
+    The media server allows any DTLS cipher suite or SRTP protection
+    profile the peer offers, so a downgrade to a weak cipher or a null
+    profile leaves the media stream effectively unprotected.
+  secure_pattern: >-
+    The DTLS context is pinned to a curated list of strong cipher suites
+    and an authenticated SRTP protection profile, and handshakes offering
+    only weaker options are aborted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dtls = newContext()                 # any cipher, any profile
+      secure: |
+        dtls = newContext(ciphers=APPROVED_SUITES,
+                          srtpProfile="SRTP_AEAD_AES_256_GCM")
+    python:
+      vulnerable: |
+        ctx = ssl.SSLContext(ssl.PROTOCOL_DTLS)
+      secure: |
+        ctx = ssl.SSLContext(ssl.PROTOCOL_DTLS)
+        ctx.set_ciphers("ECDHE+AESGCM")
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    javascript:
+      vulnerable: |
+        const pc = new RTCPeerConnection();
+      secure: |
+        const pc = new RTCPeerConnection();
+        pc.getConfiguration().certificates;  // server pins SRTP_AEAD_AES_256_GCM in SDP
+    java:
+      vulnerable: |
+        SSLEngine e = ctx.createSSLEngine();
+      secure: |
+        SSLEngine e = ctx.createSSLEngine();
+        e.setEnabledCipherSuites(APPROVED_SUITES);
+        e.setUseClientMode(false);
+    csharp:
+      vulnerable: |
+        var dtls = new DtlsServerProtocol();
+      secure: |
+        var dtls = new DtlsServerProtocol();
+        server.SetCipherSuites(ApprovedSuites);
+        server.SetSrtpProfile(SrtpProtectionProfile.SRTP_AEAD_AES_256_GCM);
+
+- id: V17.2.3
+  facet: WebRTC
+  section: Media
+  level: 2
+  security_rule: >-
+    The media server must verify SRTP packet authentication tags before
+    accepting RTP, so forged packets cannot inject media or trigger a
+    denial of service.
+  vulnerability_pattern: >-
+    Incoming RTP is processed without checking the SRTP authentication
+    tag, so an attacker can inject spoofed packets that corrupt the
+    stream, insert audio or video, or crash the decoder.
+  secure_pattern: >-
+    Every RTP packet is unprotected through the SRTP context, which
+    verifies the authentication tag, and packets that fail verification
+    are dropped and counted rather than handed to the decoder.
+  code_patterns:
+    generic:
+      vulnerable: |
+        decode(rtpPayload(packet))               # no auth check
+      secure: |
+        clear = srtp.unprotect(packet)           # verifies auth tag
+        if clear: decode(clear) else dropAndCount()
+    python:
+      vulnerable: |
+        decoder.feed(packet.payload)
+      secure: |
+        try:
+            decoder.feed(srtp_session.unprotect(packet))
+        except SrtpAuthError:
+            metrics.dropped += 1
+    javascript:
+      vulnerable: |
+        decoder.decode(packet.payload);
+      secure: |
+        const clear = srtpSession.unprotect(packet);
+        if (clear) decoder.decode(clear); else metrics.authFail++;
+    java:
+      vulnerable: |
+        decoder.decode(packet.getPayload());
+      secure: |
+        byte[] clear = srtpContext.unprotect(packet);
+        if (clear != null) decoder.decode(clear); else dropped.increment();
+    csharp:
+      vulnerable: |
+        decoder.Decode(packet.Payload);
+      secure: |
+        if (srtp.TryUnprotect(packet, out var clear)) decoder.Decode(clear);
+        else Metrics.AuthFailures++;
+
+- id: V17.2.4
+  facet: WebRTC
+  section: Media
+  level: 2
+  security_rule: >-
+    The media server must remain available when it receives malformed
+    SRTP packets, dropping the bad packet and continuing rather than
+    crashing or stalling the stream.
+  vulnerability_pattern: >-
+    A malformed SRTP packet — truncated header, bad length field, or
+    impossible offset — is parsed without bounds checks, causing an
+    unhandled exception or crash that ends the media session.
+  secure_pattern: >-
+    Packet parsing validates lengths and offsets before use, wraps
+    per-packet processing in error handling, and discards any packet that
+    fails validation while keeping the receive loop running.
+  code_patterns:
+    generic:
+      vulnerable: |
+        header = parseSrtp(packet)               # trusts length fields
+      secure: |
+        try: header = parseSrtp(packet)
+        except MalformedPacket: dropAndContinue()
+    python:
+      vulnerable: |
+        hdr = packet[:12]; ssrc = struct.unpack(">I", packet[8:12])[0]
+      secure: |
+        if len(packet) < 12:
+            metrics.malformed += 1; continue
+        ssrc = struct.unpack(">I", packet[8:12])[0]
+    javascript:
+      vulnerable: |
+        const ssrc = buf.readUInt32BE(8);
+      secure: |
+        if (buf.length < 12) { metrics.malformed++; return; }
+        const ssrc = buf.readUInt32BE(8);
+    java:
+      vulnerable: |
+        int ssrc = buf.getInt(8);
+      secure: |
+        if (buf.remaining() < 12) { malformed.increment(); return; }
+        int ssrc = buf.getInt(8);
+    csharp:
+      vulnerable: |
+        int ssrc = BinaryPrimitives.ReadInt32BigEndian(packet.Slice(8));
+      secure: |
+        if (packet.Length < 12) { Metrics.Malformed++; return; }
+        int ssrc = BinaryPrimitives.ReadInt32BigEndian(packet.Slice(8, 4));
+
+- id: V17.2.5
+  facet: WebRTC
+  section: Media
+  level: 3
+  security_rule: >-
+    The media server must keep processing legitimate media during a flood
+    of SRTP packets from valid users, applying rate limiting or pacing so
+    a traffic spike cannot saturate it.
+  vulnerability_pattern: >-
+    The media server processes every inbound SRTP packet with no per-flow
+    rate limit, so a burst from legitimate clients overruns the receive
+    buffers and starves other sessions.
+  secure_pattern: >-
+    Each media flow is rate limited or paced, excess packets are dropped
+    early before expensive decoding, and the server applies backpressure
+    so no single flow can monopolize processing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        processMedia(packet)                     # every packet decoded
+      secure: |
+        if flowLimiter(packet.ssrc).allow(): processMedia(packet)
+        else dropEarly()
+    python:
+      vulnerable: |
+        handle_srtp(packet)
+      secure: |
+        if rate_limiters[packet.ssrc].consume():
+            handle_srtp(packet)
+        else:
+            metrics.throttled += 1
+    javascript:
+      vulnerable: |
+        handleSrtp(packet);
+      secure: |
+        if (limiters.get(packet.ssrc).tryConsume()) handleSrtp(packet);
+        else metrics.throttled++;
+    java:
+      vulnerable: |
+        handleSrtp(packet);
+      secure: |
+        if (limiters.get(packet.getSsrc()).tryAcquire()) handleSrtp(packet);
+        else throttled.increment();
+    csharp:
+      vulnerable: |
+        HandleSrtp(packet);
+      secure: |
+        if (_limiters[packet.Ssrc].TryConsume()) HandleSrtp(packet);
+        else Metrics.Throttled++;
+
+- id: V17.2.6
+  facet: WebRTC
+  section: Media
+  level: 3
+  security_rule: >-
+    The media server must not be vulnerable to the DTLS ClientHello race
+    condition, verified by confirming the implementation is patched or by
+    running the race condition test.
+  vulnerability_pattern: >-
+    The DTLS stack creates and binds handshake state on the first
+    ClientHello before the peer is verified, so racing ClientHello
+    messages can hijack or corrupt a forming media association.
+  secure_pattern: >-
+    The DTLS implementation is a current patched version that uses a
+    stateless HelloVerifyRequest cookie exchange before allocating
+    handshake state, and the race condition test is run to confirm it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        startHandshake(clientHello)              # state bound immediately
+      secure: |
+        sendHelloVerifyRequest(cookie)
+        if validCookie(clientHello): startHandshake(clientHello)
+    python:
+      vulnerable: |
+        dtls = DTLSServer()      # unpatched, no cookie exchange
+      secure: |
+        dtls = DTLSServer(require_cookie_exchange=True)  # patched build
+    java:
+      vulnerable: |
+        DtlsServerProtocol p = new DtlsServerProtocol();  # outdated lib
+      secure: |
+        // pinned to a patched DTLS release with HelloVerifyRequest enforced
+        DtlsServerProtocol p = new DtlsServerProtocol();
+        server.RequireCookieExchange(true);
+    csharp:
+      vulnerable: |
+        var dtls = new DtlsServerProtocol();     // legacy, race-prone
+      secure: |
+        var dtls = new DtlsServerProtocol();     // patched BouncyCastle
+        server.SetRequireCookieExchange(true);
+
+- id: V17.2.7
+  facet: WebRTC
+  section: Media
+  level: 3
+  security_rule: >-
+    Any audio or video recording component attached to the media server
+    must keep processing media during an SRTP packet flood from
+    legitimate users without dropping the recording session.
+  vulnerability_pattern: >-
+    The recording pipeline writes every inbound packet synchronously to
+    storage, so a traffic burst blocks the writer, backs up the receive
+    path, and aborts the recording.
+  secure_pattern: >-
+    The recorder ingests media through a bounded, backpressured queue
+    with an asynchronous writer, so a flood is absorbed or shed gracefully
+    while the recording continues.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeToDisk(packet)                      # synchronous, blocking
+      secure: |
+        if recordQueue.offer(packet): pass       # bounded, async writer
+        else dropOldestAndCount()
+    python:
+      vulnerable: |
+        recording_file.write(packet)
+      secure: |
+        try:
+            record_queue.put_nowait(packet)
+        except queue.Full:
+            metrics.record_dropped += 1
+    javascript:
+      vulnerable: |
+        fs.appendFileSync(path, packet);
+      secure: |
+        if (!recordQueue.push(packet)) metrics.recordDropped++;
+        // async drain writes to disk off the receive path
+    java:
+      vulnerable: |
+        recordingStream.write(packet);
+      secure: |
+        if (!recordQueue.offer(packet)) recordDropped.increment();
+        // dedicated writer thread drains the bounded queue
+    csharp:
+      vulnerable: |
+        _recordingStream.Write(packet);
+      secure: |
+        if (!_recordChannel.Writer.TryWrite(packet)) Metrics.RecordDropped++;
+
+- id: V17.2.8
+  facet: WebRTC
+  section: Media
+  level: 3
+  security_rule: >-
+    The media server must compare the peer's DTLS certificate against the
+    SDP fingerprint attribute and terminate the media stream if the
+    fingerprint does not match.
+  vulnerability_pattern: >-
+    The media server completes the DTLS handshake without checking the
+    peer certificate against the fingerprint signaled in the SDP, so a
+    man in the middle can substitute its own certificate.
+  secure_pattern: >-
+    After the DTLS handshake the peer certificate is hashed with the
+    algorithm named in the SDP fingerprint and compared to the signaled
+    value, and the media stream is dropped on any mismatch.
+  code_patterns:
+    generic:
+      vulnerable: |
+        acceptMedia(dtlsPeerCert)                # fingerprint ignored
+      secure: |
+        if fingerprint(dtlsPeerCert) == sdpFingerprint: acceptMedia()
+        else terminateStream()
+    python:
+      vulnerable: |
+        start_media(session)
+      secure: |
+        digest = hashlib.sha256(peer_cert_der).hexdigest()
+        if digest != sdp_fingerprint:
+            session.terminate()
+        else:
+            start_media(session)
+    javascript:
+      vulnerable: |
+        startMedia(session);
+      secure: |
+        const fp = sha256(peerCertDer);
+        if (fp !== sdpFingerprint) session.terminate();
+        else startMedia(session);
+    java:
+      vulnerable: |
+        startMedia(session);
+      secure: |
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(peerCertDer);
+        if (!Arrays.equals(digest, sdpFingerprint)) session.terminate();
+        else startMedia(session);
+    csharp:
+      vulnerable: |
+        StartMedia(session);
+      secure: |
+        var digest = SHA256.HashData(peerCertDer);
+        if (!digest.SequenceEqual(sdpFingerprint)) session.Terminate();
+        else StartMedia(session);
+
+# ---------------------------------------------------------------------------
+# V17.3 — Signaling
+# ---------------------------------------------------------------------------
+
+- id: V17.3.1
+  facet: WebRTC
+  section: Signaling
+  level: 2
+  security_rule: >-
+    The signaling server must rate limit incoming signaling messages so
+    that a flood of messages cannot stop it from processing legitimate
+    signaling traffic.
+  vulnerability_pattern: >-
+    The signaling server handles every inbound message with no per-client
+    rate limit, so a burst of offers, candidates, or join requests
+    saturates it and blocks legitimate session setup.
+  secure_pattern: >-
+    Each signaling connection is rate limited with a token bucket or
+    sliding window, and messages exceeding the limit are rejected or
+    delayed so legitimate traffic continues to be served.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onSignal(msg) { handleSignal(msg) }      # unbounded
+      secure: |
+        onSignal(msg) {
+          if signalLimiter(client).allow(): handleSignal(msg)
+          else rejectTooManyRequests()
+        }
+    python:
+      vulnerable: |
+        async def on_message(ws, msg):
+            await handle_signal(msg)
+      secure: |
+        async def on_message(ws, msg):
+            if not limiters[ws.id].consume():
+                await ws.send_error("rate_limited"); return
+            await handle_signal(msg)
+    javascript:
+      vulnerable: |
+        ws.on("message", msg => handleSignal(msg));
+      secure: |
+        ws.on("message", msg => {
+          if (!limiters.get(ws.id).tryConsume()) return ws.send(rateLimited);
+          handleSignal(msg);
+        });
+    java:
+      vulnerable: |
+        public void onMessage(Session s, String msg) { handleSignal(msg); }
+      secure: |
+        public void onMessage(Session s, String msg) {
+          if (!limiters.get(s.getId()).tryAcquire()) { sendRateLimited(s); return; }
+          handleSignal(msg);
+        }
+    csharp:
+      vulnerable: |
+        public Task OnMessage(WebSocket ws, string msg) => HandleSignal(msg);
+      secure: |
+        public async Task OnMessage(WebSocket ws, string msg) {
+          if (!_limiters[ws.Id].TryConsume()) { await SendRateLimited(ws); return; }
+          await HandleSignal(msg);
+        }
+
+- id: V17.3.2
+  facet: WebRTC
+  section: Signaling
+  level: 2
+  security_rule: >-
+    The signaling server must validate incoming signaling messages and
+    handle malformed input safely — guarding against integer overflow and
+    buffer overflow — so a bad message cannot cause a denial of service.
+  vulnerability_pattern: >-
+    A malformed signaling message — invalid JSON, missing fields, or an
+    out-of-range numeric value — is parsed and used without validation,
+    causing an unhandled exception or overflow that crashes the server.
+  secure_pattern: >-
+    Every signaling message is parsed against a strict schema with bounds
+    checks on numeric and length fields, and parse or validation failures
+    return an error to the sender while the server keeps running.
+  code_patterns:
+    generic:
+      vulnerable: |
+        msg = parse(raw); route(msg.type, msg.payload)
+      secure: |
+        try: msg = validateSchema(parse(raw))
+        except InvalidMessage: replyError(); return
+        route(msg.type, msg.payload)
+    python:
+      vulnerable: |
+        data = json.loads(raw); route(data["type"], data["payload"])
+      secure: |
+        try:
+            msg = SignalMessage.model_validate_json(raw)  # pydantic, bounded
+        except ValidationError:
+            await ws.send_error("bad_message"); return
+        route(msg.type, msg.payload)
+    javascript:
+      vulnerable: |
+        const m = JSON.parse(raw); route(m.type, m.payload);
+      secure: |
+        const m = signalSchema.safeParse(JSON.parse(raw));  // zod, bounded
+        if (!m.success) return ws.send(badMessage);
+        route(m.data.type, m.data.payload);
+    java:
+      vulnerable: |
+        SignalMessage m = mapper.readValue(raw, SignalMessage.class);
+      secure: |
+        SignalMessage m = mapper.readValue(raw, SignalMessage.class);
+        Set<ConstraintViolation<SignalMessage>> v = validator.validate(m);
+        if (!v.isEmpty()) { sendError(session); return; }
+    csharp:
+      vulnerable: |
+        var m = JsonSerializer.Deserialize<SignalMessage>(raw);
+      secure: |
+        var m = JsonSerializer.Deserialize<SignalMessage>(raw);
+        if (!Validator.TryValidateObject(m, new(m), null, true)) {
+            await SendError(ws); return;
+        }

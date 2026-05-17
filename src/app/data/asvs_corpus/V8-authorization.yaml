@@ -1,0 +1,565 @@
+# OWASP ASVS 5.0 — Chapter V8: Authorization
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for ASVS).
+
+# ---------------------------------------------------------------------------
+# V8.1 — Authorization Documentation
+# ---------------------------------------------------------------------------
+
+- id: V8.1.1
+  facet: Authorization
+  section: Authorization Documentation
+  level: 1
+  security_rule: >-
+    Authorization documentation must define the rules that restrict
+    function-level and data-specific access, expressed in terms of
+    consumer permissions and the attributes of the resource being
+    accessed.
+  vulnerability_pattern: >-
+    Authorization rules exist only as implicit logic scattered through
+    the code, with no written definition of who may invoke which
+    functions or reach which data, so gaps and inconsistencies go
+    unnoticed.
+  secure_pattern: >-
+    A documented authorization model states, for every function and data
+    resource, the consumer permissions and resource attributes required
+    to access it, giving implementation and review a single reference.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # access rules live only in scattered if-checks; nothing written down
+      secure: |
+        # docs/authorization.md enumerates each function and data rule
+        # endpoint=/orders/{id}  perm=order:read  rule=order.owner == subject
+
+- id: V8.1.2
+  facet: Authorization
+  section: Authorization Documentation
+  level: 2
+  security_rule: >-
+    Authorization documentation must define field-level read and write
+    restrictions based on consumer permissions and resource attributes,
+    including rules that depend on other attributes of the object such
+    as its state or status.
+  vulnerability_pattern: >-
+    Field-level access is undocumented, so it is unclear which consumers
+    may read or write each property, and state-dependent rules such as
+    locking fields once a record is approved are never specified.
+  secure_pattern: >-
+    The authorization model documents per-field read and write
+    permissions and any state-conditional rules, so a record's editable
+    fields are well defined for each consumer and each object state.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no record of which fields a role may read or write
+      secure: |
+        # docs: field=salary  read=hr,manager  write=hr
+        # field=status  write=manager  condition=record.state != "approved"
+
+- id: V8.1.3
+  facet: Authorization
+  section: Authorization Documentation
+  level: 3
+  security_rule: >-
+    Application documentation must define the environmental and
+    contextual attributes — such as time of day, user location, IP
+    address, or device — that are used to make authentication and
+    authorization security decisions.
+  vulnerability_pattern: >-
+    The application makes security decisions using contextual signals
+    like IP address or device, but these attributes are undocumented, so
+    reviewers cannot tell which factors are trusted or how they are
+    sourced.
+  secure_pattern: >-
+    Documentation enumerates every environmental and contextual
+    attribute used in security decisions, its source, and how it is
+    validated, so the contextual inputs to authorization are explicit.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # contextual checks on IP and device exist but are never documented
+      secure: |
+        # docs: contextual attrs = {time_of_day, geo_country, source_ip, device_id}
+        # source_ip taken from validated proxy header; device_id from signed cookie
+
+- id: V8.1.4
+  facet: Authorization
+  section: Authorization Documentation
+  level: 3
+  security_rule: >-
+    Authentication and authorization documentation must define how
+    environmental and contextual factors feed decision-making alongside
+    function, data, and field rules, including the attributes evaluated,
+    the risk thresholds, and the resulting actions.
+  vulnerability_pattern: >-
+    Contextual and adaptive authorization behaviour is implemented
+    without documenting the attributes evaluated, the thresholds applied,
+    or the actions taken, so allow, challenge, deny, and step-up paths
+    cannot be reviewed for correctness.
+  secure_pattern: >-
+    Documentation describes the adaptive decision logic — the attributes
+    weighed, the risk thresholds, and the action for each band such as
+    allow, challenge, deny, or step-up authentication.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # adaptive risk logic ships with no written threshold or action table
+      secure: |
+        # docs: risk<30 -> allow; 30..70 -> step-up MFA; >70 -> deny + alert
+        # inputs = {geo_velocity, new_device, ip_reputation}
+
+# ---------------------------------------------------------------------------
+# V8.2 — General Authorization Design
+# ---------------------------------------------------------------------------
+
+- id: V8.2.1
+  facet: Authorization
+  section: General Authorization Design
+  level: 1
+  security_rule: >-
+    Function-level access must be restricted so that only consumers
+    holding the explicit permission for an operation can invoke it,
+    enforced server-side on every request.
+  vulnerability_pattern: >-
+    An endpoint or operation is reachable by any authenticated consumer
+    because no permission is checked, or the check is missing on some
+    routes, allowing function-level access escalation.
+  secure_pattern: >-
+    Every protected operation verifies that the current consumer holds
+    the explicit permission for that function before the action runs,
+    denying by default when the permission is absent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def delete_user(id):
+            db.delete(id)                 # no permission check at all
+      secure: |
+        def delete_user(id):
+            require_permission(subject, "user:delete")
+            db.delete(id)
+    python:
+      vulnerable: |
+        @app.post("/admin/users/{uid}/ban")
+        def ban(uid): users.ban(uid)
+      secure: |
+        @app.post("/admin/users/{uid}/ban")
+        def ban(uid, user=Depends(require_permission("user:ban"))):
+            users.ban(uid)
+    javascript:
+      vulnerable: |
+        app.post("/reports", (req, res) => generateReport(req.body));
+      secure: |
+        app.post("/reports", requirePermission("report:create"),
+                 (req, res) => generateReport(req.body));
+    java:
+      vulnerable: |
+        @PostMapping("/invoices")
+        public void create(@RequestBody Invoice i) { service.create(i); }
+      secure: |
+        @PreAuthorize("hasAuthority('invoice:create')")
+        @PostMapping("/invoices")
+        public void create(@RequestBody Invoice i) { service.create(i); }
+    csharp:
+      vulnerable: |
+        [HttpPost("/payouts")]
+        public IActionResult Create(Payout p) => Ok(_svc.Create(p));
+      secure: |
+        [Authorize(Policy = "payout:create")]
+        [HttpPost("/payouts")]
+        public IActionResult Create(Payout p) => Ok(_svc.Create(p));
+
+- id: V8.2.2
+  facet: Authorization
+  section: General Authorization Design
+  level: 1
+  security_rule: >-
+    Data-specific access must be restricted so that a consumer can only
+    reach the individual data items they are explicitly permitted to,
+    preventing insecure direct object reference and broken object level
+    authorization.
+  vulnerability_pattern: >-
+    A record is fetched by an identifier taken straight from the request
+    and returned without checking that the consumer owns or may access
+    that specific record, so changing the id reveals another consumer's
+    data.
+  secure_pattern: >-
+    Every object lookup is scoped to the consumer's permitted set — the
+    query filters by owner or the retrieved object's ownership is
+    verified against the subject before it is returned.
+  code_patterns:
+    generic:
+      vulnerable: |
+        order = db.get_order(request.id)        # any id works
+        return order
+      secure: |
+        order = db.get_order(request.id)
+        require(order.owner_id == subject.id)
+        return order
+    python:
+      vulnerable: |
+        return db.query(Order).get(order_id)
+      secure: |
+        return db.query(Order).filter_by(id=order_id,
+                                         owner_id=current_user.id).one()
+    javascript:
+      vulnerable: |
+        const doc = await Doc.findById(req.params.id);
+      secure: |
+        const doc = await Doc.findOne({ _id: req.params.id,
+                                        ownerId: req.user.id });
+    java:
+      vulnerable: |
+        Account a = repo.findById(id).orElseThrow();
+      secure: |
+        Account a = repo.findByIdAndOwnerId(id, principal.getId())
+                        .orElseThrow(ForbiddenException::new);
+    csharp:
+      vulnerable: |
+        var inv = await _db.Invoices.FindAsync(id);
+      secure: |
+        var inv = await _db.Invoices
+            .SingleOrDefaultAsync(i => i.Id == id && i.OwnerId == userId);
+
+- id: V8.2.3
+  facet: Authorization
+  section: General Authorization Design
+  level: 2
+  security_rule: >-
+    Field-level access must be restricted so that consumers can only
+    read or write the specific object fields they are explicitly
+    permitted to, preventing broken object property level authorization.
+  vulnerability_pattern: >-
+    The whole request body is bound onto the data object or the whole
+    object is serialized into the response, so consumers can write
+    privileged fields like role or read fields they should not see.
+  secure_pattern: >-
+    Input binding and output serialization use an explicit allowlist of
+    fields per consumer permission, so privileged properties such as
+    role, balance, or internal flags are never mass-assigned or leaked.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user.update(request.body)              # role, is_admin assignable
+      secure: |
+        user.update(pick(request.body, allowed_fields(subject)))
+    python:
+      vulnerable: |
+        for k, v in request.json.items(): setattr(user, k, v)
+      secure: |
+        for k in ("display_name", "email"):
+            if k in request.json: setattr(user, k, request.json[k])
+    javascript:
+      vulnerable: |
+        Object.assign(user, req.body);
+      secure: |
+        const { displayName, email } = req.body;
+        Object.assign(user, { displayName, email });
+    java:
+      vulnerable: |
+        @PutMapping("/me") void update(@RequestBody User body) { repo.save(body); }
+      secure: |
+        @PutMapping("/me") void update(@RequestBody ProfileDto dto) {
+            user.setDisplayName(dto.displayName()); repo.save(user);
+        }
+    csharp:
+      vulnerable: |
+        _mapper.Map(request, user);            // maps every field
+      secure: |
+        user.DisplayName = request.DisplayName;
+        user.Email = request.Email;            // explicit allowlist
+
+- id: V8.2.4
+  facet: Authorization
+  section: General Authorization Design
+  level: 3
+  security_rule: >-
+    Adaptive security controls based on environmental and contextual
+    attributes must drive authentication and authorization decisions as
+    documented, and must be applied both when a new session starts and
+    continuously during an existing session.
+  vulnerability_pattern: >-
+    Contextual risk is evaluated only at login, so a session that began
+    in a low-risk context keeps full access even after the IP, location,
+    or device changes mid-session.
+  secure_pattern: >-
+    Adaptive checks run at session start and are re-evaluated on
+    sensitive actions during the session, so a context change such as a
+    new location triggers re-authentication, step-up, or denial.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if login_ok: start_session()          # context never re-checked
+      secure: |
+        if risky(request_context()):
+            require_step_up(session)           # re-evaluated each request
+    python:
+      vulnerable: |
+        def auth(req): return verify_token(req)
+      secure: |
+        def auth(req):
+            sess = verify_token(req)
+            if context_risk(req) > THRESHOLD: raise StepUpRequired()
+            return sess
+    java:
+      vulnerable: |
+        boolean ok = tokenValid(req);
+      secure: |
+        boolean ok = tokenValid(req)
+            && riskEngine.score(context(req)) < THRESHOLD;
+    csharp:
+      vulnerable: |
+        if (TokenValid(ctx)) Allow();
+      secure: |
+        if (TokenValid(ctx) && _risk.Score(Context(ctx)) < Threshold) Allow();
+        else RequireStepUp();
+
+# ---------------------------------------------------------------------------
+# V8.3 — Operation Level Authorization
+# ---------------------------------------------------------------------------
+
+- id: V8.3.1
+  facet: Authorization
+  section: Operation Level Authorization
+  level: 1
+  security_rule: >-
+    Authorization rules must be enforced at a trusted server-side
+    service layer and must never rely on controls that an untrusted
+    consumer can manipulate, such as client-side JavaScript or hidden
+    fields.
+  vulnerability_pattern: >-
+    Access is gated only in the browser — by hiding a button, a route,
+    or a menu — while the server-side endpoint accepts the request from
+    anyone who calls it directly.
+  secure_pattern: >-
+    The server enforces the authorization check on every request
+    regardless of the client; client-side hiding is treated as a
+    usability hint only and never as a security control.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # UI hides the delete button for non-admins; server has no check
+      secure: |
+        def delete(id):
+            require_permission(subject, "record:delete")   # server enforces
+            db.delete(id)
+    javascript:
+      vulnerable: |
+        if (user.role === "admin") showDeleteButton();   // client gate only
+      secure: |
+        // client may hide UI, but server route still enforces:
+        router.delete("/records/:id", requireRole("admin"), handler);
+    python:
+      vulnerable: |
+        @app.delete("/records/{id}")
+        def delete(id): db.delete(id)         # trusts the hidden UI control
+      secure: |
+        @app.delete("/records/{id}")
+        def delete(id, u=Depends(require_role("admin"))): db.delete(id)
+    java:
+      vulnerable: |
+        @DeleteMapping("/records/{id}")
+        public void del(@PathVariable Long id) { repo.deleteById(id); }
+      secure: |
+        @PreAuthorize("hasRole('ADMIN')")
+        @DeleteMapping("/records/{id}")
+        public void del(@PathVariable Long id) { repo.deleteById(id); }
+    csharp:
+      vulnerable: |
+        [HttpDelete("/records/{id}")]
+        public IActionResult Del(int id) { _db.Delete(id); return Ok(); }
+      secure: |
+        [Authorize(Roles = "Admin")]
+        [HttpDelete("/records/{id}")]
+        public IActionResult Del(int id) { _db.Delete(id); return Ok(); }
+
+- id: V8.3.2
+  facet: Authorization
+  section: Operation Level Authorization
+  level: 3
+  security_rule: >-
+    Changes to the values that authorization decisions depend on must
+    take effect immediately; where self-contained tokens prevent that,
+    mitigating controls must alert on and revert actions taken by a
+    consumer who is no longer authorized.
+  vulnerability_pattern: >-
+    Permissions or roles are embedded in a long-lived self-contained
+    token, so a revoked or downgraded consumer keeps their old access
+    until the token naturally expires.
+  secure_pattern: >-
+    Authorization decisions read from a fresh source of truth, or tokens
+    are short-lived and checked against a revocation list, so permission
+    changes apply at once and stale-token actions are alerted and
+    reverted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        roles = token.claims.roles            # frozen until token expiry
+      secure: |
+        roles = perm_store.current_roles(token.subject)   # live lookup
+    python:
+      vulnerable: |
+        if "admin" in jwt_claims["roles"]: allow()
+      secure: |
+        if revocation.is_revoked(jwt["jti"]): raise Unauthorized()
+        if "admin" in perm_store.roles_for(jwt["sub"]): allow()
+    java:
+      vulnerable: |
+        boolean admin = jwt.getClaim("roles").asList().contains("admin");
+      secure: |
+        boolean admin = !revocationList.contains(jwt.getId())
+            && permissionStore.rolesFor(jwt.getSubject()).contains("admin");
+    csharp:
+      vulnerable: |
+        var admin = User.IsInRole("Admin");   // from token claims only
+      secure: |
+        var admin = !_revoked.Contains(jti)
+            && _perms.RolesFor(userId).Contains("Admin");
+
+- id: V8.3.3
+  facet: Authorization
+  section: Operation Level Authorization
+  level: 3
+  security_rule: >-
+    When a service calls another service on a consumer's behalf,
+    authorization for the downstream object must be based on the
+    originating consumer's permissions, not on the permissions of any
+    intermediary service.
+  vulnerability_pattern: >-
+    An intermediary service forwards a request using its own powerful
+    machine-to-machine credential, so the downstream service authorizes
+    against the service's broad permissions rather than the original
+    consumer's narrower ones.
+  secure_pattern: >-
+    The originating consumer's identity is propagated downstream — by
+    forwarding their token or using a delegation grant — so each service
+    makes permission decisions against the real subject.
+  code_patterns:
+    generic:
+      vulnerable: |
+        downstream.call(data, auth=service_account_token)
+      secure: |
+        downstream.call(data, auth=incoming_consumer_token)
+    python:
+      vulnerable: |
+        requests.get(url, headers={"Authorization": f"Bearer {SERVICE_TOKEN}"})
+      secure: |
+        requests.get(url, headers={"Authorization": request.headers["Authorization"]})
+    javascript:
+      vulnerable: |
+        axios.get(url, { headers: { Authorization: `Bearer ${serviceToken}` } });
+      secure: |
+        axios.get(url, { headers: { Authorization: req.headers.authorization } });
+    java:
+      vulnerable: |
+        headers.setBearerAuth(serviceAccountToken);
+      secure: |
+        headers.setBearerAuth(incomingRequest.getHeader("Authorization"));
+    csharp:
+      vulnerable: |
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", serviceToken);
+      secure: |
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", incomingConsumerToken);
+
+# ---------------------------------------------------------------------------
+# V8.4 — Other Authorization Considerations
+# ---------------------------------------------------------------------------
+
+- id: V8.4.1
+  facet: Authorization
+  section: Other Authorization Considerations
+  level: 2
+  security_rule: >-
+    Multi-tenant applications must enforce cross-tenant controls so that
+    a consumer's operations can never read, modify, or otherwise affect
+    tenants they have no permission to interact with.
+  vulnerability_pattern: >-
+    Queries and operations are scoped only by the object identifier and
+    not by tenant, so a consumer of one tenant can reach another
+    tenant's records by referencing their ids.
+  secure_pattern: >-
+    Every query and mutation is scoped by the consumer's tenant — the
+    tenant id from the authenticated context is an unconditional filter
+    on all data access — so cross-tenant reach is structurally
+    impossible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        record = db.get(record_id)             # tenant ignored
+      secure: |
+        record = db.get(record_id, tenant_id=subject.tenant_id)
+    python:
+      vulnerable: |
+        return db.query(Invoice).filter_by(id=invoice_id).one()
+      secure: |
+        return db.query(Invoice).filter_by(
+            id=invoice_id, tenant_id=current_user.tenant_id).one()
+    javascript:
+      vulnerable: |
+        const row = await Project.findById(req.params.id);
+      secure: |
+        const row = await Project.findOne({ _id: req.params.id,
+                                            tenantId: req.user.tenantId });
+    java:
+      vulnerable: |
+        Order o = orderRepo.findById(id).orElseThrow();
+      secure: |
+        Order o = orderRepo.findByIdAndTenantId(id, principal.getTenantId())
+                          .orElseThrow(ForbiddenException::new);
+    csharp:
+      vulnerable: |
+        var doc = await _db.Documents.FindAsync(id);
+      secure: |
+        var doc = await _db.Documents
+            .SingleOrDefaultAsync(d => d.Id == id && d.TenantId == tenantId);
+
+- id: V8.4.2
+  facet: Authorization
+  section: Other Authorization Considerations
+  level: 3
+  security_rule: >-
+    Access to administrative interfaces must use multiple layers of
+    security — continuous identity verification, device posture
+    assessment, and contextual risk analysis — so that network location
+    or a trusted endpoint is never the sole basis for authorization.
+  vulnerability_pattern: >-
+    The admin interface is protected only by an IP allowlist or by being
+    on the internal network, so anyone who reaches that network or
+    spoofs the source address gains administrative access.
+  secure_pattern: >-
+    Admin access requires layered checks — verified identity with strong
+    authentication, device security posture, and contextual risk
+    scoring — with network location treated as one weak signal among
+    many rather than the gate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if request.ip in INTERNAL_RANGE: allow_admin()
+      secure: |
+        if mfa_verified(subject) and device_trusted(req) and risk(req) < LIMIT:
+            allow_admin()
+    python:
+      vulnerable: |
+        if request.remote_addr.startswith("10."): return admin_panel()
+      secure: |
+        if user.mfa_ok and device_posture_ok(req) and context_risk(req) < LIMIT:
+            return admin_panel()
+    java:
+      vulnerable: |
+        if (ip.startsWith("10.")) return adminView();
+      secure: |
+        if (mfaVerified(user) && deviceTrusted(req)
+                && riskEngine.score(req) < LIMIT) return adminView();
+    csharp:
+      vulnerable: |
+        if (ip.StartsWith("10.")) return AdminPanel();
+      secure: |
+        if (MfaVerified(user) && DeviceTrusted(ctx)
+                && _risk.Score(ctx) < Limit) return AdminPanel();

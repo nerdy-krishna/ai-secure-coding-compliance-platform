@@ -103,9 +103,13 @@ The corpus CSVs are **generated**, never hand-edited:
   per-concern-area markdown under `src/app/data/<framework>_corpus/` —
   edit the markdown, then regenerate with
   `python scripts/build_corpus.py --framework <name> --write`.
-- `asvs_corpus.csv` comes from `src/app/data/asvs_5.0.0_source.csv`
-  (the OWASP ASVS 5.0 export) — regenerate with
-  `python scripts/build_asvs_corpus.py --write`.
+- `asvs_corpus.csv` is rendered from the hand-authored enriched chapter
+  YAML under `src/app/data/asvs_corpus/` (one file per ASVS chapter,
+  each requirement carrying a security rule, vulnerability/secure
+  pattern descriptions, and per-language code samples) — edit the
+  chapter YAML, then regenerate with
+  `python scripts/build_enriched_corpus.py --framework asvs --write`.
+  The authoring format is locked by `asvs_corpus/_ENRICHMENT_SPEC.md`.
 
 Until a corpus is ingested, a scan against the framework still
 completes — its agents simply produce findings without RAG citations.
