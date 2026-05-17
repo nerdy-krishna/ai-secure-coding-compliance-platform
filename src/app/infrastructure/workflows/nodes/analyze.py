@@ -324,6 +324,13 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                     )
                     continue
                 if isinstance(r, dict) and r.get("error"):
+                    # An agent that returned an error dict (e.g. the LLM
+                    # call 400'd and `generate_structured_output`
+                    # surfaced it as `error`) IS a failed invocation —
+                    # count it so the stage-level "every agent failed"
+                    # guard can mark the scan FAILED instead of letting
+                    # it complete with a misleading 0 findings.
+                    file_agent_failures += 1
                     logger.warning(
                         "agent: returned error",
                         extra={
@@ -333,6 +340,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                             "error": str(r.get("error"))[:300],
                         },
                     )
+                    continue
                 file_findings.extend(r.get("findings", []))
                 # The agent returns `fixes` as a separate list of FixResult
                 # objects; collect them directly for the terminal consolidation.

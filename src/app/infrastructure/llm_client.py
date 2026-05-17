@@ -20,7 +20,7 @@ import uuid
 from typing import Any, NamedTuple, Optional, Type, TypeVar
 
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIModel
@@ -58,6 +58,25 @@ class AgentLLMResult(NamedTuple):
 # absorb one bad sample; more burns cost without improving success rates
 # meaningfully against current models.
 _OUTPUT_RETRIES = 2
+
+# Models discovered at runtime to reject tool-based (function-calling)
+# structured output — DeepSeek's reasoner is the known case: it 400s
+# with "does not support this tool_choice". Keyed "provider:model".
+# Once a model lands here, later calls skip straight to prompt-based
+# structured output instead of paying a failed tool call first.
+_PROMPTED_OUTPUT_MODELS: set[str] = set()
+
+
+def _is_tool_choice_unsupported(err: Exception) -> bool:
+    """True when an LLM error means the model can't do tool-based
+    structured output and we should fall back to prompt-based output."""
+    s = str(err).lower()
+    return (
+        "tool_choice" in s
+        or "does not support tool" in s
+        or "function calling" in s
+        or "tool calling" in s
+    )
 
 
 class LLMClient:
@@ -185,18 +204,30 @@ class LLMClient:
             await rate_limiter.acquire(tokens=prompt_tokens_for_budget)
 
         model = self._build_model()
+        model_key = f"{self.provider_name}:{self.db_llm_config.model_name}"
 
-        # Build the agent. Pydantic AI's `system_prompt=` argument is
-        # the stable prefix; when the underlying provider is Anthropic,
-        # Pydantic AI serialises it with cache_control on the Messages
-        # API, preserving our prompt-cache savings from Phase C.
-        agent_kwargs: dict[str, Any] = {
-            "output_type": response_model,
-            "retries": _OUTPUT_RETRIES,
-        }
-        if system_prompt:
-            agent_kwargs["system_prompt"] = system_prompt
-        agent: Agent = Agent(model, **agent_kwargs)
+        def _make_agent(prompted: bool) -> Agent:
+            """Build the Pydantic AI agent.
+
+            `system_prompt=` is the stable cache prefix — on Anthropic
+            Pydantic AI serialises it with cache_control. `prompted`
+            switches structured output from the default tool-based
+            strategy to `PromptedOutput`, which needs no `tool_choice`
+            and works on models (e.g. DeepSeek's reasoner) that reject
+            function calling.
+            """
+            kwargs: dict[str, Any] = {
+                "output_type": (
+                    PromptedOutput(response_model) if prompted else response_model
+                ),
+                "retries": _OUTPUT_RETRIES,
+            }
+            if system_prompt:
+                kwargs["system_prompt"] = system_prompt
+            return Agent(model, **kwargs)
+
+        use_prompted = model_key in _PROMPTED_OUTPUT_MODELS
+        agent: Agent = _make_agent(prompted=use_prompted)
 
         # V14.2.4 / V16.2.5 / V13.4.2: mask prompt payload before logging to
         # prevent PII/secrets reaching Loki when DEBUG is enabled at runtime.
@@ -238,23 +269,54 @@ class LLMClient:
                 logger.warning("Langfuse span open failed: %s", e)
                 span_ctx = None
 
-        try:
-            run_result = await agent.run(prompt)
-            parsed_output_value = run_result.output  # type: ignore[assignment]
-            usage = run_result.usage()
+        def _capture(rr: Any) -> None:
+            """Pull the parsed output + usage off a Pydantic AI run."""
+            nonlocal parsed_output_value, prompt_tokens, completion_tokens
+            nonlocal cache_write_tokens, cache_read_tokens
+            parsed_output_value = rr.output  # type: ignore[assignment]
+            usage = rr.usage()
             prompt_tokens = int(usage.input_tokens or 0)
             completion_tokens = int(usage.output_tokens or 0)
             cache_write_tokens = int(getattr(usage, "cache_write_tokens", 0) or 0)
             cache_read_tokens = int(getattr(usage, "cache_read_tokens", 0) or 0)
+
+        try:
+            _capture(await agent.run(prompt))
         except Exception as e:
-            logger.error(
-                "Pydantic AI run failed (provider=%s, model=%s): %s",
-                self.provider_name,
-                self.db_llm_config.model_name,
-                e,
-                exc_info=True,
-            )
-            error_message = str(e)
+            # A model that rejects tool-based structured output (e.g.
+            # DeepSeek's reasoner: "does not support this tool_choice")
+            # gets one retry with prompt-based output, which needs no
+            # tool call. The model is remembered so later calls skip
+            # the failed tool attempt entirely.
+            if not use_prompted and _is_tool_choice_unsupported(e):
+                logger.warning(
+                    "Model %s rejected tool-based structured output (%s); "
+                    "retrying with prompt-based output.",
+                    model_key,
+                    e,
+                )
+                _PROMPTED_OUTPUT_MODELS.add(model_key)
+                try:
+                    _capture(await _make_agent(prompted=True).run(prompt))
+                except Exception as e2:
+                    logger.error(
+                        "Pydantic AI run failed (prompted retry) "
+                        "(provider=%s, model=%s): %s",
+                        self.provider_name,
+                        self.db_llm_config.model_name,
+                        e2,
+                        exc_info=True,
+                    )
+                    error_message = str(e2)
+            else:
+                logger.error(
+                    "Pydantic AI run failed (provider=%s, model=%s): %s",
+                    self.provider_name,
+                    self.db_llm_config.model_name,
+                    e,
+                    exc_info=True,
+                )
+                error_message = str(e)
 
         end_time = time.perf_counter()
         latency_ms = int((end_time - start_time) * 1000)
