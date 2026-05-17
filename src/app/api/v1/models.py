@@ -482,7 +482,8 @@ class VulnerabilityFindingResponse(BaseModel):
     id: int
     file_path: str
     title: str
-    cwe: str
+    # Populated only by SAST scanners that emit a CWE; null for LLM findings.
+    cwe: Optional[str] = None
     description: str
     severity: str
     line_number: int = Field(..., ge=0)

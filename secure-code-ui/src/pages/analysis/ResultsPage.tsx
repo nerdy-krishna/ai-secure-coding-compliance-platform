@@ -895,16 +895,18 @@ const ResultsPage: React.FC = () => {
                       >
                         {sev}
                       </span>
-                      <span
-                        style={{
-                          fontSize: 10.5,
-                          color: "var(--fg-subtle)",
-                          marginLeft: "auto",
-                        }}
-                        className="mono"
-                      >
-                        {f.cwe}
-                      </span>
+                      {f.cwe && (
+                        <span
+                          style={{
+                            fontSize: 10.5,
+                            color: "var(--fg-subtle)",
+                            marginLeft: "auto",
+                          }}
+                          className="mono"
+                        >
+                          {f.cwe}
+                        </span>
+                      )}
                     </div>
                     <div
                       style={{

@@ -52,10 +52,14 @@ class FixSuggestion(BaseModel):
 
 class VulnerabilityFinding(BaseModel):
     id: Optional[int] = None
-    cwe: str = Field(
+    cwe: Optional[str] = Field(
+        default=None,
         pattern=r"^CWE-\d{1,5}$",
         max_length=10,
-        description="The CWE ID for the vulnerability (e.g., 'CWE-22').",
+        description=(
+            "CWE ID, e.g. 'CWE-22'. Populated only by deterministic SAST "
+            "scanners that emit one; None for LLM-agent findings."
+        ),
     )
     title: str = Field(
         max_length=200,

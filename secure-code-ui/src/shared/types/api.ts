@@ -169,7 +169,8 @@ export interface Finding {
   id: number;
   file_path: string;
   title: string;
-  cwe: string;
+  // Populated only by SAST scanners that emit a CWE; absent for LLM findings.
+  cwe?: string | null;
   description: string;
   severity: string;
   line_number: number;

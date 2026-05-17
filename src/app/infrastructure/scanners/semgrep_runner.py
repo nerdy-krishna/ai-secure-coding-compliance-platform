@@ -116,13 +116,14 @@ def _coerce_severity(raw: str) -> str:
     return _SEMGREP_SEVERITY_MAP.get(raw.upper(), "Low")
 
 
-def _extract_cwe(metadata: _SemgrepMetadata) -> str:
+def _extract_cwe(metadata: _SemgrepMetadata) -> Optional[str]:
     """Pull a `CWE-NN` token out of Semgrep's metadata.cwe field, which
     is sometimes a string, sometimes a list of strings, sometimes None.
+    Returns None when Semgrep's metadata carries no CWE.
     """
     raw = metadata.cwe
     if raw is None:
-        return "CWE-0"
+        return None
     candidates: List[str] = []
     if isinstance(raw, str):
         candidates = [raw]
@@ -132,7 +133,7 @@ def _extract_cwe(metadata: _SemgrepMetadata) -> str:
         match = _CWE_PATTERN.search(candidate)
         if match:
             return f"CWE-{match.group(1)}"
-    return "CWE-0"
+    return None
 
 
 def _semgrep_finding_to_vulnerability(
@@ -212,7 +213,7 @@ def _timeout_finding(staged_dir: Path) -> VulnerabilityFinding:
     when Semgrep exceeds the hard timeout (M6).
     """
     return VulnerabilityFinding(
-        cwe="CWE-0",
+        cwe=None,
         title="Semgrep scanner timed out",
         description=html.escape(
             f"Semgrep exceeded the {SEMGREP_TIMEOUT_SECONDS}s timeout while scanning the project."

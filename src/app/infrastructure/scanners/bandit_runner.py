@@ -142,13 +142,10 @@ def _bandit_finding_to_vulnerability(
         staged = Path(raw.filename)
     file_path = original_paths.get(staged, raw.filename)
 
-    # `CWE-0` is the recognised "no CWE applies" sentinel — keeps the
-    # finding valid against VulnerabilityFinding's regex
-    # (^CWE-\d{1,5}$, max_length=10). The previous fallback string
-    # "CWE-unknown" failed both validators and the result was silently
-    # dropped by the upstream `except (ValidationError, ValueError)`
-    # handler.
-    cwe = f"CWE-{raw.cwe.id}" if raw.cwe and raw.cwe.id is not None else "CWE-0"
+    # Keep the real CWE Bandit emitted; None when its metadata has none.
+    # `cwe` is optional on VulnerabilityFinding — only deterministic
+    # scanners populate it.
+    cwe = f"CWE-{raw.cwe.id}" if raw.cwe and raw.cwe.id is not None else None
     description = html.escape(raw.issue_text)[:DESCRIPTION_MAX_CHARS]
     title = (raw.test_id or "B000").strip()[:50]
 
@@ -209,7 +206,7 @@ def _timeout_finding(staged_dir: Path) -> VulnerabilityFinding:
     when Bandit exceeds the hard timeout (M6).
     """
     return VulnerabilityFinding(
-        cwe="CWE-0",
+        cwe=None,
         title="Bandit scanner timed out",
         description=html.escape(
             f"Bandit exceeded the {BANDIT_TIMEOUT_SECONDS}s timeout while scanning the project."

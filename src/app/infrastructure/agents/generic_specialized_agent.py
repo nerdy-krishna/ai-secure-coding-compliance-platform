@@ -59,7 +59,7 @@ def _format_scanner_findings_block(findings: Optional[List[Any]]) -> str:
     lines: List[str] = []
     for f in findings:
         source = getattr(f, "source", None) or "unknown"
-        cwe = getattr(f, "cwe", None) or "CWE-0"
+        cwe = getattr(f, "cwe", None) or "n/a"
         file_path = getattr(f, "file_path", None) or "?"
         line_number = getattr(f, "line_number", None) or 0
         severity = getattr(f, "severity", None) or "?"
@@ -193,77 +193,8 @@ class InitialAnalysisResponse(BaseModel):
     findings: List[InitialFinding]
 
 
-class CweSelectionResponse(BaseModel):
-    cwe_id: str = Field(
-        description="The most appropriate CWE ID from the provided list, e.g., 'CWE-89'."
-    )
-
-
 class CorrectedSnippet(BaseModel):
     corrected_original_snippet: str
-
-
-async def _get_cwe_from_description(
-    llm_client: LLMClient, finding: InitialFinding
-) -> Optional[str]:
-    """
-    Uses RAG and a constrained LLM call to determine the most accurate CWE.
-    """
-    rag_service = get_rag_service()
-    if not rag_service:
-        return None
-
-    query_text = f"{finding.title}: {finding.description}"
-    try:
-        rag_results = rag_service.query_cwe_collection(
-            query_texts=[query_text], n_results=3
-        )
-
-        ids = rag_results.get("ids", [[]])[0]
-        distances = rag_results.get("distances", [[]])[0]
-        metadatas = rag_results.get("metadatas", [[]])[0]
-
-        if not ids or not distances:
-            return None
-
-        # If the top result is a very close match, use it directly.
-        if distances[0] < 0.25:
-            return ids[0]
-
-        # Otherwise, ask the LLM to choose from the top candidates.
-        candidate_strs = [
-            f"- {id}: {meta.get('name')}" for id, meta in zip(ids, metadatas)
-        ]
-        candidates_text = "\n".join(candidate_strs)
-
-        prompt = f"""
-        Based on the following vulnerability description, select the most appropriate CWE ID from the provided list of candidates.
-
-        VULNERABILITY:
-        Title: {finding.title}
-        Description: {finding.description}
-
-        CANDIDATES:
-        {candidates_text}
-
-        Respond ONLY with a valid JSON object containing the single best 'cwe_id'.
-        """  # nosec B608 — LLM prompt template, not a SQL query; no DB execution path
-        response = await llm_client.generate_structured_output(
-            prompt, CweSelectionResponse
-        )
-        if response.parsed_output and isinstance(
-            response.parsed_output, CweSelectionResponse
-        ):
-            return response.parsed_output.cwe_id
-
-    except Exception:
-        logger.error(
-            "agent: CWE assignment failed",
-            extra={"finding_title": finding.title},
-            exc_info=True,
-        )
-
-    return None
 
 
 # --- Language detection helper (used by the per-doc pattern extractor) ---
@@ -513,7 +444,6 @@ def _resolve_finding_line(
 
 def _build_finding_object(
     initial_finding: "InitialFinding",
-    cwe: Optional[str],
     filename: str,
     agent_name: str,
     file_content: Optional[str] = None,
@@ -568,14 +498,10 @@ def _build_finding_object(
             )
             severity = band
     return VulnerabilityFinding(
-        # Fallback for an agent that returned a finding without a
-        # mappable CWE. The model's `cwe` field is constrained to
-        # `^CWE-\\d{1,5}$` (max 10 chars), so the literal "CWE-Unknown"
-        # (the prior fallback, 11 chars + non-digits) failed validation
-        # and killed every such finding silently. CWE-0 is the
-        # recognised "no CWE applies" sentinel — keeps the row valid
-        # so the user sees the finding and can re-classify later.
-        cwe=cwe or "CWE-0",
+        # LLM-agent findings carry no CWE — the error-prone classification
+        # step was removed. CWE is populated only by deterministic SAST
+        # scanners that emit one (see bandit/semgrep runners).
+        cwe=None,
         title=initial_finding.title,
         description=initial_finding.description,
         severity=severity,
@@ -885,11 +811,8 @@ async def analysis_node(
                 extra={"agent": agent_name, "cost_usd": _llm_accumulated_cost},
             )
             break
-        _llm_call_count += 1  # count CWE classification call
-        cwe = await _get_cwe_from_description(llm_client, initial_finding)
         finding_obj = _build_finding_object(
             initial_finding,
-            cwe,
             filename,
             agent_name,
             file_content=state.get("file_content_for_verification"),
@@ -923,7 +846,7 @@ async def analysis_node(
             else:
                 logger.warning(
                     "agent: discarding fix due to snippet verification failure",
-                    extra={"agent": agent_name, "cwe": cwe},
+                    extra={"agent": agent_name},
                 )
 
         final_findings.append(finding_obj)

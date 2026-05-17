@@ -186,7 +186,7 @@ def _timeout_finding(staged_dir: Path) -> VulnerabilityFinding:
     secret leak and must not trigger the BLOCKED_PRE_LLM short-circuit.
     """
     return VulnerabilityFinding(
-        cwe="CWE-0",
+        cwe=None,
         title="Gitleaks scanner timed out",
         description=html.escape(
             f"Gitleaks exceeded the {GITLEAKS_TIMEOUT_SECONDS}s timeout while scanning the project."
