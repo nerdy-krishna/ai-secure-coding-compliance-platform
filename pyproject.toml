@@ -44,11 +44,10 @@ langgraph = "^1.1.9"
 langgraph-checkpoint-postgres = "^3.0.5"
 # Phase I.2 — LiteLLM as the token-counter + price-table source of truth.
 # Unified tokenizers across providers; community-maintained pricing map at
-# litellm.model_prices_and_context_window. Pinned to ^1.76 because 1.80+
-# exact-pins openai/tiktoken/python-dotenv in ways that clash with
-# langchain-openai 1.2.x; the 1.76 line still uses range constraints
-# (openai>=1.99.5, python-dotenv>=0.2.0, tiktoken>=0.7).
-litellm = "^1.76.0"
+# litellm.model_prices_and_context_window. Floor raised to 1.83.0 to exclude
+# the TeamPCP-backdoored versions 1.82.7 and 1.82.8 (CVE/PyPI quarantine
+# March 2026). 1.83.0 is the first clean release after the incident.
+litellm = "^1.83.0"
 # Phase I.3 — Pydantic AI for node-level structured output with typed
 # validation-retry. No extras — the provider SDKs (openai, anthropic,
 # google-genai) are already present via LangChain; we only need the
