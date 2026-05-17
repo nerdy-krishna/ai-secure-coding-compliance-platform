@@ -1,0 +1,529 @@
+# OWASP Proactive Controls — C3: Validate all Input & Handle Exceptions
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for web application security).
+
+# ---------------------------------------------------------------------------
+# PC-C3.1 — Validate at the trust boundary
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.1
+  facet: Input Validation & Exception Handling
+  section: Validate Input at the Trust Boundary
+  security_rule: >-
+    All input that crosses a trust boundary, including request bodies,
+    headers, query parameters, and inter-service messages, must be
+    validated on the server before it is used, regardless of any
+    client-side checks.
+  vulnerability_pattern: >-
+    Input is accepted and used directly because validation was only
+    performed in the browser or trusted because it came from another
+    internal service, so a crafted request that skips the client reaches
+    the sink unchecked.
+  secure_pattern: >-
+    Every value is re-validated server-side at the boundary where it
+    enters the application, treating client-side validation purely as a
+    usability aid and never as a security control.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(request.body)            # client-side form already validated
+      secure: |
+        data = validateOnServer(request.body)
+        save(data)
+    python:
+      vulnerable: |
+        age = int(request.form["age"])      # trusts the HTML5 number input
+      secure: |
+        age = validate_age(request.form.get("age"))   # server-side check
+    javascript:
+      vulnerable: |
+        app.post("/u", (req, res) => db.save(req.body));
+      secure: |
+        app.post("/u", (req, res) => db.save(userSchema.parse(req.body)));
+    java:
+      vulnerable: |
+        service.update(request.getParameter("age"));
+      secure: |
+        service.update(InputValidator.requireAge(request.getParameter("age")));
+    csharp:
+      vulnerable: |
+        repo.Save(Request.Form["age"]);
+      secure: |
+        repo.Save(InputValidator.RequireAge(Request.Form["age"]));
+
+# ---------------------------------------------------------------------------
+# PC-C3.2 — Syntactic validation
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.2
+  facet: Input Validation & Exception Handling
+  section: Syntactic Validation
+  security_rule: >-
+    Each input must be checked for correct syntax — its data type,
+    length, numeric range, and character set — so that structurally
+    malformed values are rejected before any processing.
+  vulnerability_pattern: >-
+    A value is consumed without checking its type, length, or format, so
+    an oversized string, a non-numeric value, or an out-of-range number
+    triggers errors, resource exhaustion, or unexpected behaviour
+    downstream.
+  secure_pattern: >-
+    The value is verified to match the expected type, to fall within a
+    bounded length and numeric range, and to contain only the expected
+    characters before it is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        quantity = toNumber(input)
+      secure: |
+        quantity = toNumber(input)
+        if not isInteger(quantity) or quantity < 1 or quantity > 999: reject()
+    python:
+      vulnerable: |
+        username = request.form["username"]
+      secure: |
+        username = request.form["username"]
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,32}", username): abort(400)
+    javascript:
+      vulnerable: |
+        const qty = req.body.qty;
+      secure: |
+        const qty = Number(req.body.qty);
+        if (!Number.isInteger(qty) || qty < 1 || qty > 999) return res.sendStatus(400);
+    java:
+      vulnerable: |
+        String name = request.getParameter("username");
+      secure: |
+        String name = request.getParameter("username");
+        if (name == null || !name.matches("[A-Za-z0-9_]{3,32}")) throw new BadRequest();
+    csharp:
+      vulnerable: |
+        var name = Request.Form["username"].ToString();
+      secure: |
+        var name = Request.Form["username"].ToString();
+        if (!Regex.IsMatch(name, "^[A-Za-z0-9_]{3,32}$")) return BadRequest();
+
+# ---------------------------------------------------------------------------
+# PC-C3.3 — Allowlist over denylist
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.3
+  facet: Input Validation & Exception Handling
+  section: Allowlist Validation
+  security_rule: >-
+    Validation must define what is acceptable with an allowlist of known
+    good values or patterns, rather than attempting to enumerate and
+    block known bad values with a denylist.
+  vulnerability_pattern: >-
+    Validation tries to strip or reject a fixed set of dangerous tokens,
+    so any malicious variant the denylist did not anticipate, including
+    encoded or novel forms, passes straight through.
+  secure_pattern: >-
+    The input is compared against an explicit allowlist of permitted
+    values or a strict pattern of permitted characters, and anything not
+    on the allowlist is rejected by default.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if input contains "../" or input contains "<": reject()
+      secure: |
+        if input not in ALLOWED_VALUES: reject()
+    python:
+      vulnerable: |
+        if "DROP" in sort_field.upper(): abort(400)
+      secure: |
+        if sort_field not in {"name", "created_at", "price"}: abort(400)
+    javascript:
+      vulnerable: |
+        if (/script/i.test(color)) return res.sendStatus(400);
+      secure: |
+        if (!["red", "green", "blue"].includes(color)) return res.sendStatus(400);
+    java:
+      vulnerable: |
+        if (sortField.contains(";")) throw new BadRequest();
+      secure: |
+        if (!Set.of("name", "createdAt", "price").contains(sortField))
+            throw new BadRequest();
+    csharp:
+      vulnerable: |
+        if (sortField.Contains(";")) return BadRequest();
+      secure: |
+        var allowed = new[] { "name", "createdAt", "price" };
+        if (!allowed.Contains(sortField)) return BadRequest();
+
+# ---------------------------------------------------------------------------
+# PC-C3.4 — Semantic validation
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.4
+  facet: Input Validation & Exception Handling
+  section: Semantic Validation
+  security_rule: >-
+    Beyond correct syntax, input must be validated for business-context
+    correctness — that the value makes sense for the operation, the
+    state, and the user requesting it.
+  vulnerability_pattern: >-
+    A value is accepted because it is well-formed, but its meaning is
+    never checked against business rules, so a syntactically valid start
+    date after an end date, a negative transfer amount, or a quantity
+    beyond stock is processed.
+  secure_pattern: >-
+    After syntactic checks pass, the value is validated against the
+    business rules of the operation — date ordering, value bounds,
+    referential validity, and the current state of the entity.
+  code_patterns:
+    generic:
+      vulnerable: |
+        scheduleEvent(startDate, endDate)        # both are valid dates
+      secure: |
+        if startDate >= endDate: reject("start must precede end")
+        scheduleEvent(startDate, endDate)
+    python:
+      vulnerable: |
+        account.balance -= transfer_amount
+      secure: |
+        if transfer_amount <= 0 or transfer_amount > account.balance:
+            abort(422, "invalid transfer amount")
+        account.balance -= transfer_amount
+    javascript:
+      vulnerable: |
+        order.quantity = req.body.quantity;
+      secure: |
+        if (req.body.quantity > product.stock)
+            return res.status(422).send("exceeds available stock");
+        order.quantity = req.body.quantity;
+    java:
+      vulnerable: |
+        booking.setDates(start, end);
+      secure: |
+        if (!start.isBefore(end)) throw new UnprocessableEntity("bad date range");
+        booking.setDates(start, end);
+    csharp:
+      vulnerable: |
+        account.Balance -= amount;
+      secure: |
+        if (amount <= 0 || amount > account.Balance)
+            return UnprocessableEntity("invalid amount");
+        account.Balance -= amount;
+
+# ---------------------------------------------------------------------------
+# PC-C3.5 — Schema validation for structured input
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.5
+  facet: Input Validation & Exception Handling
+  section: Schema Validation for Structured Input
+  security_rule: >-
+    Structured input such as JSON or XML payloads must be validated
+    against a strict schema that fixes the allowed fields, types, and
+    constraints, and rejects unknown or extra properties.
+  vulnerability_pattern: >-
+    A request body is deserialized straight onto a domain object or model
+    with no schema, so unexpected or extra fields are bound, enabling
+    mass-assignment of attributes the client should not control.
+  secure_pattern: >-
+    The payload is parsed into a strict typed schema or data-transfer
+    object that declares every permitted field and forbids unknown
+    properties, and only the validated result is mapped to domain state.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user = deserialize(request.body)        # binds every field present
+      secure: |
+        dto = parseWithSchema(request.body, UserSchema)   # unknown fields rejected
+        user = mapAllowedFields(dto)
+    python:
+      vulnerable: |
+        user = User(**request.get_json())
+      secure: |
+        dto = UserCreate.model_validate(request.get_json())   # pydantic, extra=forbid
+        user = User(name=dto.name, email=dto.email)
+    javascript:
+      vulnerable: |
+        const user = { ...req.body };
+      secure: |
+        const dto = userSchema.strict().parse(req.body);   // zod rejects extra keys
+    java:
+      vulnerable: |
+        User user = objectMapper.readValue(body, User.class);
+      secure: |
+        UserDto dto = objectMapper.readValue(body, UserDto.class);
+        Set<ConstraintViolation<UserDto>> v = validator.validate(dto);
+    csharp:
+      vulnerable: |
+        var user = JsonSerializer.Deserialize<User>(body);
+      secure: |
+        var dto = JsonSerializer.Deserialize<UserDto>(body);
+        Validator.ValidateObject(dto, new ValidationContext(dto), true);
+
+# ---------------------------------------------------------------------------
+# PC-C3.6 — Validate, then encode at the sink
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.6
+  facet: Input Validation & Exception Handling
+  section: Validation Complements Output Encoding
+  security_rule: >-
+    Input validation must be treated as a defense-in-depth layer that
+    complements, and never replaces, context-aware output encoding and
+    parameterized queries at each sink.
+  vulnerability_pattern: >-
+    Validation alone is relied on to stop injection, so a value that is
+    valid for its business meaning, such as a name containing an
+    apostrophe, still breaks the SQL or HTML context it is later placed
+    into.
+  secure_pattern: >-
+    Input is validated for correctness on entry and, independently,
+    encoded or parameterized for the specific interpreter at every sink,
+    so neither layer alone is the only protection.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if isValidName(name): query("SELECT ... WHERE n = '" + name + "'")
+      secure: |
+        if isValidName(name): query("SELECT ... WHERE n = ?", [name])
+    python:
+      vulnerable: |
+        if name.isalpha():
+            cursor.execute("SELECT * FROM u WHERE name = '" + name + "'")
+      secure: |
+        if name.isalpha():
+            cursor.execute("SELECT * FROM u WHERE name = %s", (name,))
+    javascript:
+      vulnerable: |
+        if (isValid(name)) el.innerHTML = name;
+      secure: |
+        if (isValid(name)) el.textContent = name;
+    java:
+      vulnerable: |
+        if (valid(name)) stmt.executeQuery("SELECT * FROM u WHERE n='" + name + "'");
+      secure: |
+        if (valid(name)) { var ps = conn.prepareStatement(
+            "SELECT * FROM u WHERE n=?"); ps.setString(1, name); }
+    csharp:
+      vulnerable: |
+        if (Valid(name)) cmd.CommandText = "SELECT * FROM u WHERE n='" + name + "'";
+      secure: |
+        if (Valid(name)) { cmd.CommandText = "SELECT * FROM u WHERE n=@n";
+            cmd.Parameters.AddWithValue("@n", name); }
+
+# ---------------------------------------------------------------------------
+# PC-C3.7 — Handle exceptions without leaking detail
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.7
+  facet: Input Validation & Exception Handling
+  section: Handle Exceptions Securely
+  security_rule: >-
+    Exceptions and errors must be caught and handled so that the user
+    receives a generic message while full diagnostic detail is recorded
+    only in server-side logs.
+  vulnerability_pattern: >-
+    An unhandled exception, or a handler that echoes the exception
+    message or stack trace into the HTTP response, discloses internal
+    paths, library versions, SQL fragments, or other detail useful to an
+    attacker.
+  secure_pattern: >-
+    Errors are caught by a central handler that returns a generic
+    message and a correlation id to the user, and writes the exception
+    type, stack trace, and context only to the server log.
+  code_patterns:
+    generic:
+      vulnerable: |
+        catch (e) { return response(500, e.message + e.stackTrace) }
+      secure: |
+        catch (e) { log.error(e); return response(500, "Unexpected error") }
+    python:
+      vulnerable: |
+        except Exception as e:
+            return jsonify(error=str(e)), 500
+      secure: |
+        except Exception:
+            logger.exception("request failed")
+            return jsonify(error="Internal server error"), 500
+    javascript:
+      vulnerable: |
+        app.use((err, req, res, next) => res.status(500).send(err.stack));
+      secure: |
+        app.use((err, req, res, next) => {
+            logger.error(err); res.status(500).json({ error: "Internal error" });
+        });
+    java:
+      vulnerable: |
+        catch (Exception e) { response.getWriter().write(e.toString()); }
+      secure: |
+        catch (Exception e) { log.error("failed", e);
+            response.sendError(500, "Internal server error"); }
+    csharp:
+      vulnerable: |
+        catch (Exception e) { return StatusCode(500, e.ToString()); }
+      secure: |
+        catch (Exception e) { _logger.LogError(e, "failed");
+            return StatusCode(500, "Internal server error"); }
+
+# ---------------------------------------------------------------------------
+# PC-C3.8 — Fail closed on validation or error
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.8
+  facet: Input Validation & Exception Handling
+  section: Fail Closed on Error
+  security_rule: >-
+    When validation fails or an unexpected exception occurs, the
+    application must default to denying the operation rather than
+    proceeding into an undefined or partially completed state.
+  vulnerability_pattern: >-
+    An error during a security decision is swallowed or treated as a
+    pass, so a failed permission lookup or a thrown validation routine
+    leaves the request proceeding as if the check had succeeded.
+  secure_pattern: >-
+    Any exception or failure inside a validation or authorization path is
+    caught and converted into an explicit denial, so the secure outcome
+    is the default when the result is uncertain.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try { allowed = checkAccess(user) } catch (e) { allowed = true }
+      secure: |
+        try { allowed = checkAccess(user) } catch (e) { allowed = false }
+    python:
+      vulnerable: |
+        try:
+            permitted = has_permission(user, resource)
+        except Exception:
+            permitted = True
+      secure: |
+        try:
+            permitted = has_permission(user, resource)
+        except Exception:
+            logger.exception("authz check failed")
+            permitted = False
+    javascript:
+      vulnerable: |
+        let ok; try { ok = await isAllowed(user); } catch { ok = true; }
+      secure: |
+        let ok; try { ok = await isAllowed(user); } catch { ok = false; }
+    java:
+      vulnerable: |
+        try { granted = authz.check(user); } catch (Exception e) { granted = true; }
+      secure: |
+        try { granted = authz.check(user); }
+        catch (Exception e) { log.error("authz failed", e); granted = false; }
+    csharp:
+      vulnerable: |
+        bool ok; try { ok = Authz.Check(user); } catch { ok = true; }
+      secure: |
+        bool ok; try { ok = Authz.Check(user); }
+        catch (Exception e) { _logger.LogError(e, "authz failed"); ok = false; }
+
+# ---------------------------------------------------------------------------
+# PC-C3.9 — Reject unexpected input rather than silently sanitize
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.9
+  facet: Input Validation & Exception Handling
+  section: Reject Rather Than Silently Repair
+  security_rule: >-
+    When input fails validation it should be rejected with a clear error,
+    rather than silently stripped or transformed, since silent repair can
+    produce a value the caller never intended.
+  vulnerability_pattern: >-
+    Invalid characters are quietly removed and processing continues, so a
+    payload such as one with directory-traversal sequences is mangled
+    into a different but still harmful value instead of being refused.
+  secure_pattern: >-
+    Input that does not satisfy the validation rule is rejected outright
+    with a descriptive error, and only input that already conforms is
+    accepted, so no surprising transformation occurs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        filename = remove(input, "../")        # turns "....//x" into "../x"
+      secure: |
+        if not matches(input, SAFE_NAME_PATTERN): reject()
+        filename = input
+    python:
+      vulnerable: |
+        name = request.args["file"].replace("../", "")
+      secure: |
+        name = request.args["file"]
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", name): abort(400, "invalid filename")
+    javascript:
+      vulnerable: |
+        const file = req.query.file.replace(/\.\.\//g, "");
+      secure: |
+        const file = req.query.file;
+        if (!/^[A-Za-z0-9_.-]+$/.test(file)) return res.status(400).send("invalid");
+    java:
+      vulnerable: |
+        String file = request.getParameter("file").replace("../", "");
+      secure: |
+        String file = request.getParameter("file");
+        if (!file.matches("[A-Za-z0-9_.-]+")) throw new BadRequest("invalid filename");
+    csharp:
+      vulnerable: |
+        var file = Request.Query["file"].ToString().Replace("../", "");
+      secure: |
+        var file = Request.Query["file"].ToString();
+        if (!Regex.IsMatch(file, "^[A-Za-z0-9_.-]+$")) return BadRequest("invalid");
+
+# ---------------------------------------------------------------------------
+# PC-C3.10 — Validate file uploads
+# ---------------------------------------------------------------------------
+
+- id: PC-C3.10
+  facet: Input Validation & Exception Handling
+  section: Validate File Uploads
+  security_rule: >-
+    Uploaded files must be validated for size, declared and detected
+    content type, and a safe extension, and stored under a generated
+    name so untrusted client-supplied metadata cannot drive the outcome.
+  vulnerability_pattern: >-
+    An uploaded file is trusted on its client-supplied filename and
+    content-type header, so an attacker uploads an executable or script
+    disguised with a benign extension, or a huge file that exhausts disk.
+  secure_pattern: >-
+    The upload is bounded in size, its real content type is detected from
+    the bytes and checked against an allowlist, and it is saved under a
+    server-generated name and extension outside any executable path.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(upload.filename, upload.bytes)
+      secure: |
+        if detectType(upload.bytes) in ALLOWED_TYPES and upload.size < MAX:
+            save(generatedName() + safeExt, upload.bytes)
+    python:
+      vulnerable: |
+        file.save(os.path.join(UPLOAD_DIR, file.filename))
+      secure: |
+        kind = filetype.guess(file.stream.read(261))
+        if kind and kind.mime in ALLOWED_MIME:
+            file.save(os.path.join(UPLOAD_DIR, uuid4().hex + "." + kind.extension))
+    javascript:
+      vulnerable: |
+        fs.writeFileSync(path.join(dir, req.file.originalname), req.file.buffer);
+      secure: |
+        const t = await fileTypeFromBuffer(req.file.buffer);
+        if (t && ALLOWED.has(t.mime) && req.file.size < MAX)
+            fs.writeFileSync(path.join(dir, randomUUID() + "." + t.ext), req.file.buffer);
+    java:
+      vulnerable: |
+        file.transferTo(new File(uploadDir, file.getOriginalFilename()));
+      secure: |
+        String mime = tika.detect(file.getInputStream());
+        if (ALLOWED.contains(mime) && file.getSize() < MAX)
+            file.transferTo(new File(uploadDir, UUID.randomUUID() + ext(mime)));
+    csharp:
+      vulnerable: |
+        await file.CopyToAsync(File.Create(Path.Combine(dir, file.FileName)));
+      secure: |
+        var mime = _inspector.DetectMimeType(stream);
+        if (Allowed.Contains(mime) && file.Length < Max)
+            await file.CopyToAsync(File.Create(
+                Path.Combine(dir, Guid.NewGuid() + Ext(mime))));

@@ -1,0 +1,471 @@
+# OWASP Cheat Sheet Series — Domain 01: Injection Prevention
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Source cheat sheets: SQL Injection Prevention, Query Parameterization,
+# OS Command Injection Defense, LDAP Injection Prevention, Cross Site
+# Scripting Prevention, DOM based XSS Prevention, Injection Prevention,
+# Server Side Template Injection (XSS / NoSQL coverage).
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-01.1 — SQL Injection: parameterized queries
+# ---------------------------------------------------------------------------
+
+- id: CS-01.1
+  facet: Injection Prevention
+  section: SQL Injection — Parameterized Queries
+  security_rule: >-
+    SQL statements must be written with fixed text and bound parameters so
+    untrusted input is sent to the database as a value and can never alter
+    the structure or logic of the query.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated or string-formatted into the SQL text,
+    so quote and comment characters let an attacker append clauses, change
+    the WHERE logic, or union in data from other tables.
+  secure_pattern: >-
+    The query text is a constant and every untrusted value is passed as a
+    bound placeholder through a prepared statement, so the database driver
+    keeps input strictly separate from query syntax.
+  code_patterns:
+    generic:
+      vulnerable: |
+        query = "SELECT * FROM accounts WHERE owner = '" + user + "'"
+        execute(query)
+      secure: |
+        query = "SELECT * FROM accounts WHERE owner = ?"
+        execute(query, [user])
+    python:
+      vulnerable: |
+        cursor.execute(f"SELECT * FROM users WHERE email = '{email}'")
+      secure: |
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+    javascript:
+      vulnerable: |
+        db.query("SELECT * FROM users WHERE id = " + req.params.id);
+      secure: |
+        db.query("SELECT * FROM users WHERE id = $1", [req.params.id]);
+    java:
+      vulnerable: |
+        stmt.executeQuery("SELECT * FROM users WHERE name = '" + name + "'");
+      secure: |
+        var ps = conn.prepareStatement("SELECT * FROM users WHERE name = ?");
+        ps.setString(1, name);
+    csharp:
+      vulnerable: |
+        cmd.CommandText = "SELECT * FROM users WHERE name = '" + name + "'";
+      secure: |
+        cmd.CommandText = "SELECT * FROM users WHERE name = @name";
+        cmd.Parameters.AddWithValue("@name", name);
+
+# ---------------------------------------------------------------------------
+# CS-01.2 — SQL identifiers and ORDER BY: allowlist mapping
+# ---------------------------------------------------------------------------
+
+- id: CS-01.2
+  facet: Injection Prevention
+  section: SQL Injection — Identifier and Sort Allowlisting
+  security_rule: >-
+    Table names, column names, and sort directions cannot be bound as
+    parameters, so any such value derived from user input must be mapped
+    through a server-side allowlist of known-valid identifiers.
+  vulnerability_pattern: >-
+    A user-supplied column name, table name, or sort direction is
+    concatenated into the SQL text because placeholders cannot bind
+    identifiers, letting an attacker inject query syntax through that slot.
+  secure_pattern: >-
+    The user value is used only as a key to look up an approved identifier
+    from a fixed allowlist, and a request that does not match the allowlist
+    is rejected before the query is built.
+  code_patterns:
+    generic:
+      vulnerable: |
+        query = "SELECT * FROM logs ORDER BY " + sortColumn
+      secure: |
+        col = ALLOWED_COLUMNS.get(sortColumn) or reject()
+        query = "SELECT * FROM logs ORDER BY " + col
+    python:
+      vulnerable: |
+        cursor.execute(f"SELECT * FROM logs ORDER BY {request.args['sort']}")
+      secure: |
+        col = {"date": "created_at", "name": "user_name"}[request.args["sort"]]
+        cursor.execute(f"SELECT * FROM logs ORDER BY {col}")
+    java:
+      vulnerable: |
+        String sql = "SELECT * FROM logs ORDER BY " + request.getParameter("sort");
+      secure: |
+        Map<String,String> cols = Map.of("date", "created_at", "name", "user_name");
+        String sql = "SELECT * FROM logs ORDER BY " + cols.get(sortKey);
+    csharp:
+      vulnerable: |
+        var sql = "SELECT * FROM logs ORDER BY " + Request.Query["sort"];
+      secure: |
+        var cols = new Dictionary<string,string> { ["date"] = "created_at" };
+        var sql = "SELECT * FROM logs ORDER BY " + cols[sortKey];
+
+# ---------------------------------------------------------------------------
+# CS-01.3 — OS Command Injection: argument vector, no shell
+# ---------------------------------------------------------------------------
+
+- id: CS-01.3
+  facet: Injection Prevention
+  section: OS Command Injection — Argument Vectors
+  security_rule: >-
+    External programs must be invoked directly with their arguments passed
+    as a discrete list, never by handing a constructed command line to a
+    shell interpreter.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into a command string that is then run
+    by a shell, so shell metacharacters such as semicolons, pipes,
+    backticks, and dollar-parentheses let an attacker run extra commands.
+  secure_pattern: >-
+    The executable and each of its arguments are passed as separate list
+    elements directly to the operating system, so no shell parses the
+    string and metacharacters in input stay inert data.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run("tar czf backup.tgz " + path, shell=true)
+      secure: |
+        run(["tar", "czf", "backup.tgz", path])      # argument vector, no shell
+    python:
+      vulnerable: |
+        os.system("nslookup " + domain)
+      secure: |
+        subprocess.run(["nslookup", domain], shell=False)
+    javascript:
+      vulnerable: |
+        child_process.exec("git clone " + repoUrl);
+      secure: |
+        child_process.execFile("git", ["clone", repoUrl]);
+    java:
+      vulnerable: |
+        Runtime.getRuntime().exec("convert " + inputFile + " out.png");
+      secure: |
+        new ProcessBuilder("convert", inputFile, "out.png").start();
+    csharp:
+      vulnerable: |
+        Process.Start("cmd.exe", "/c dir " + folder);
+      secure: |
+        var psi = new ProcessStartInfo("cmd.exe") { UseShellExecute = false };
+        psi.ArgumentList.Add("/c"); psi.ArgumentList.Add("dir"); psi.ArgumentList.Add(folder);
+
+# ---------------------------------------------------------------------------
+# CS-01.4 — LDAP Injection: filter and DN escaping
+# ---------------------------------------------------------------------------
+
+- id: CS-01.4
+  facet: Injection Prevention
+  section: LDAP Injection — Filter and DN Escaping
+  security_rule: >-
+    Untrusted input placed into an LDAP search filter or distinguished
+    name must be escaped with the encoder for that context so it is always
+    treated as a literal value.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into an LDAP filter or DN, so filter
+    metacharacters such as parentheses, asterisks, backslashes, and null
+    bytes let an attacker widen the search or bypass an authentication
+    check.
+  secure_pattern: >-
+    Each untrusted value is passed through the LDAP filter encoder or DN
+    encoder, or bound through a templated search API, before it becomes
+    part of the filter or distinguished name.
+  code_patterns:
+    generic:
+      vulnerable: |
+        filter = "(&(objectClass=user)(uid=" + username + "))"
+      secure: |
+        filter = "(&(objectClass=user)(uid=" + ldapFilterEncode(username) + "))"
+    python:
+      vulnerable: |
+        conn.search(base, "(uid=" + username + ")")
+      secure: |
+        from ldap3.utils.conv import escape_filter_chars
+        conn.search(base, "(uid=" + escape_filter_chars(username) + ")")
+    javascript:
+      vulnerable: |
+        client.search(base, { filter: "(uid=" + username + ")" });
+      secure: |
+        client.search(base, { filter: "(uid=" + ldapEscape.filter`${username}` + ")" });
+    java:
+      vulnerable: |
+        ctx.search(base, "(uid=" + username + ")", controls);
+      secure: |
+        ctx.search(base, "(uid={0})", new Object[]{ username }, controls);
+    csharp:
+      vulnerable: |
+        var s = new DirectorySearcher("(uid=" + username + ")");
+      secure: |
+        var s = new DirectorySearcher("(uid=" + LdapEncoder.FilterEncode(username) + ")");
+
+# ---------------------------------------------------------------------------
+# CS-01.5 — Reflected and stored XSS: context-aware output encoding
+# ---------------------------------------------------------------------------
+
+- id: CS-01.5
+  facet: Injection Prevention
+  section: Cross-Site Scripting — Output Encoding
+  security_rule: >-
+    Untrusted data rendered into an HTML response must be encoded for the
+    exact context it lands in, ideally by an auto-escaping template engine,
+    so it cannot become active markup or script.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into an HTML page or written with a
+    raw-HTML sink, so tags and event handlers in the input are parsed as
+    markup and any embedded script executes in the victim browser.
+  secure_pattern: >-
+    Values are emitted through an auto-escaping template or a
+    context-aware encoder chosen for the sink — HTML body, attribute, or
+    script — so untrusted characters render as inert text.
+  code_patterns:
+    generic:
+      vulnerable: |
+        html = "<div>Hello " + username + "</div>"
+      secure: |
+        html = "<div>Hello " + htmlEncode(username) + "</div>"
+    python:
+      vulnerable: |
+        return HttpResponse("<h1>Results for " + query + "</h1>")
+      secure: |
+        return render(request, "results.html", {"query": query})  # autoescape on
+    javascript:
+      vulnerable: |
+        res.send("<p>Welcome " + req.query.name + "</p>");
+      secure: |
+        res.render("welcome", { name: req.query.name });  # template autoescapes
+    java:
+      vulnerable: |
+        response.getWriter().write("<p>" + comment + "</p>");
+      secure: |
+        response.getWriter().write("<p>" + Encode.forHtml(comment) + "</p>");
+    csharp:
+      vulnerable: |
+        Response.Write("<p>" + comment + "</p>");
+      secure: |
+        Response.Write("<p>" + HttpUtility.HtmlEncode(comment) + "</p>");
+
+# ---------------------------------------------------------------------------
+# CS-01.6 — DOM-based XSS: safe DOM sinks
+# ---------------------------------------------------------------------------
+
+- id: CS-01.6
+  facet: Injection Prevention
+  section: DOM-Based XSS — Safe Sinks
+  security_rule: >-
+    Client-side code must write untrusted data into the DOM only through
+    sinks that treat it as text or as a typed value, never through sinks
+    that parse it as HTML or as code.
+  vulnerability_pattern: >-
+    Untrusted data is assigned to a dangerous DOM sink such as innerHTML,
+    document.write, or is passed to eval, so markup or script in the value
+    is parsed and executed inside the page.
+  secure_pattern: >-
+    The value is assigned through a text-only property such as textContent,
+    or through setAttribute for a non-event attribute, so the browser never
+    interprets it as HTML or executable code.
+  code_patterns:
+    generic:
+      vulnerable: |
+        element.innerHTML = untrustedValue
+      secure: |
+        element.textContent = untrustedValue
+    javascript:
+      vulnerable: |
+        document.getElementById("out").innerHTML = location.hash.slice(1);
+      secure: |
+        document.getElementById("out").textContent = location.hash.slice(1);
+
+# ---------------------------------------------------------------------------
+# CS-01.7 — XPath Injection: variable binding
+# ---------------------------------------------------------------------------
+
+- id: CS-01.7
+  facet: Injection Prevention
+  section: XPath Injection — Parameterized Expressions
+  security_rule: >-
+    XPath expressions evaluated against XML data must be fixed text with
+    untrusted values supplied through variable bindings or a precompiled
+    expression, never assembled by string concatenation.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into an XPath expression, so quotes
+    and XPath operators let an attacker change the node selection and read
+    elements they should not be able to reach.
+  secure_pattern: >-
+    The XPath text is constant and untrusted values are bound as variables
+    through a variable resolver or a precompiled expression, so input is
+    always treated as a literal in the predicate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        expr = "/users/user[name='" + name + "' and pass='" + pw + "']"
+      secure: |
+        expr = "/users/user[name=$name and pass=$pw]"   # bind variables
+    python:
+      vulnerable: |
+        tree.xpath("/users/user[name='" + name + "']")
+      secure: |
+        tree.xpath("/users/user[name=$name]", name=name)
+    java:
+      vulnerable: |
+        xpath.evaluate("/users/user[name='" + name + "']", doc);
+      secure: |
+        xpath.setXPathVariableResolver(v -> name);
+        xpath.compile("/users/user[name=$name]").evaluate(doc);
+    csharp:
+      vulnerable: |
+        nav.Select("/users/user[name='" + name + "']");
+      secure: |
+        var e = nav.Compile("/users/user[name=$name]");
+        e.SetContext(varContext);   // $name resolved from context, not concatenated
+        nav.Select(e);
+
+# ---------------------------------------------------------------------------
+# CS-01.8 — NoSQL Injection: typed values and operator stripping
+# ---------------------------------------------------------------------------
+
+- id: CS-01.8
+  facet: Injection Prevention
+  section: NoSQL Injection — Typed Query Values
+  security_rule: >-
+    NoSQL query values derived from user input must be coerced to their
+    expected scalar type, and query operators must not be accepted from
+    untrusted input, so a request cannot inject query logic.
+  vulnerability_pattern: >-
+    A request body is passed straight into a NoSQL query, so an attacker
+    submits an object containing query operators in place of a scalar and
+    turns an equality check into an always-true comparison.
+  secure_pattern: >-
+    Each query value is explicitly cast to the expected primitive type, or
+    keys beginning with the operator prefix are rejected, so untrusted
+    input can only ever be a literal value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        find({ user: requestBody.user, pass: requestBody.pass })
+      secure: |
+        find({ user: asString(requestBody.user), pass: asString(requestBody.pass) })
+    python:
+      vulnerable: |
+        db.users.find_one({"user": data["user"], "pass": data["pass"]})
+      secure: |
+        db.users.find_one({"user": str(data["user"]), "pass": str(data["pass"])})
+    javascript:
+      vulnerable: |
+        User.findOne({ user: req.body.user, pass: req.body.pass });
+      secure: |
+        User.findOne({ user: String(req.body.user), pass: String(req.body.pass) });
+    java:
+      vulnerable: |
+        coll.find(new Document("user", body.get("user")));
+      secure: |
+        coll.find(new Document("user", String.valueOf(body.get("user"))));
+    csharp:
+      vulnerable: |
+        collection.Find(Builders<User>.Filter.Eq("user", body["user"]));
+      secure: |
+        collection.Find(Builders<User>.Filter.Eq("user", body["user"].ToString()));
+
+# ---------------------------------------------------------------------------
+# CS-01.9 — Server-Side Template Injection: never compile untrusted input
+# ---------------------------------------------------------------------------
+
+- id: CS-01.9
+  facet: Injection Prevention
+  section: Server-Side Template Injection — Fixed Templates
+  security_rule: >-
+    Template source must always be a fixed, trusted string, and untrusted
+    input must be supplied only as render-time data, never concatenated
+    into the template that the engine compiles.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into the template string before it is
+    compiled, so template-engine syntax in the input is evaluated as code
+    and can run on the server.
+  secure_pattern: >-
+    The template is loaded from a fixed file or constant, and untrusted
+    values are passed through the context or model map, so the engine
+    treats them as data placeholders only.
+  code_patterns:
+    generic:
+      vulnerable: |
+        render(compileTemplate("Hello " + userInput))
+      secure: |
+        render(compileTemplate("Hello {{ name }}"), name=userInput)
+    python:
+      vulnerable: |
+        Template("Hi " + request.args["name"]).render()
+      secure: |
+        Template("Hi {{ name }}").render(name=request.args["name"])
+    javascript:
+      vulnerable: |
+        const out = ejs.render("Welcome " + req.query.name);
+      secure: |
+        const out = ejs.render("Welcome <%= name %>", { name: req.query.name });
+    java:
+      vulnerable: |
+        Template t = engine.createTemplate("Hi " + name);
+      secure: |
+        Template t = engine.getTemplate("greeting.ftl");  // fixed, name as model
+    csharp:
+      vulnerable: |
+        var html = Engine.Razor.RunCompile("Hi " + name, "key", null, null);
+      secure: |
+        var html = Engine.Razor.RunCompile("Hi @Model.Name", "key", null,
+                                            new { Name = name });
+
+# ---------------------------------------------------------------------------
+# CS-01.10 — Generic Injection: validate input, escape at every interpreter
+# ---------------------------------------------------------------------------
+
+- id: CS-01.10
+  facet: Injection Prevention
+  section: Injection Prevention — Defense in Depth
+  security_rule: >-
+    Every place where data crosses into an interpreter must use a safe API
+    or context-specific escaping, and input should additionally be
+    validated against an allowlist as a second layer of defense.
+  vulnerability_pattern: >-
+    Untrusted input is passed to an interpreter with no parameterization
+    and no input validation, so a single missing escape anywhere in the
+    path allows the input to be parsed as command, query, or markup syntax.
+  secure_pattern: >-
+    The interpreter is invoked through a parameterized or escaping-aware
+    API, and the input is first validated against an allowlist of expected
+    values, format, type, and length so malformed input is rejected early.
+  code_patterns:
+    generic:
+      vulnerable: |
+        useInInterpreter(rawInput)            # no validation, no escaping
+      secure: |
+        if matchesAllowlist(rawInput): useViaSafeApi(rawInput)
+    python:
+      vulnerable: |
+        run_report(request.args["region"])
+      secure: |
+        region = request.args["region"]
+        if region not in ALLOWED_REGIONS:
+            abort(400)
+        run_report(region)
+    javascript:
+      vulnerable: |
+        lookup(req.query.code);
+      secure: |
+        if (!/^[A-Z]{3}$/.test(req.query.code)) return res.sendStatus(400);
+        lookup(req.query.code);
+    java:
+      vulnerable: |
+        process(request.getParameter("type"));
+      secure: |
+        String type = request.getParameter("type");
+        if (!ALLOWED_TYPES.contains(type)) throw new BadRequestException();
+        process(type);
+    csharp:
+      vulnerable: |
+        Handle(Request.Query["mode"]);
+      secure: |
+        var mode = Request.Query["mode"].ToString();
+        if (!AllowedModes.Contains(mode)) return BadRequest();
+        Handle(mode);

@@ -1,0 +1,521 @@
+# OWASP Proactive Controls — C8: Help the Browser Defend the User
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+#
+# C8 is about response headers, cookie attributes, and embedded-integrity
+# directives the server emits so the browser enforces a defensive posture
+# on behalf of the user. These are server-side concerns shared by every
+# web stack, so most entries fill all five languages.
+
+# ---------------------------------------------------------------------------
+# Content Security Policy
+# ---------------------------------------------------------------------------
+
+- id: PC-C8.1
+  facet: Browser Security
+  section: Content Security Policy
+  security_rule: >-
+    Send a Content-Security-Policy response header on every HTML response
+    so the browser will only load scripts, styles, and other resources
+    from sources the application has explicitly approved.
+  vulnerability_pattern: >-
+    HTML responses are served with no Content-Security-Policy header, so
+    the browser places no restriction on where scripts may load from and
+    any injected markup can pull and run attacker-controlled code.
+  secure_pattern: >-
+    Every HTML response carries a Content-Security-Policy header whose
+    directives restrict script, style, and object sources to a small set
+    of trusted origins, with a default-src fallback of self.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response.setBody(htmlPage)        # no Content-Security-Policy emitted
+      secure: |
+        response.setHeader("Content-Security-Policy",
+                           "default-src 'self'; object-src 'none'")
+    python:
+      vulnerable: |
+        return Response(html, mimetype="text/html")
+      secure: |
+        resp = Response(html, mimetype="text/html")
+        resp.headers["Content-Security-Policy"] = "default-src 'self'; object-src 'none'"
+        return resp
+    javascript:
+      vulnerable: |
+        res.send(htmlPage);
+      secure: |
+        res.set("Content-Security-Policy", "default-src 'self'; object-src 'none'");
+        res.send(htmlPage);
+    java:
+      vulnerable: |
+        response.getWriter().write(htmlPage);
+      secure: |
+        response.setHeader("Content-Security-Policy",
+                           "default-src 'self'; object-src 'none'");
+        response.getWriter().write(htmlPage);
+    csharp:
+      vulnerable: |
+        return Content(htmlPage, "text/html");
+      secure: |
+        Response.Headers["Content-Security-Policy"] = "default-src 'self'; object-src 'none'";
+        return Content(htmlPage, "text/html");
+
+- id: PC-C8.2
+  facet: Browser Security
+  section: Content Security Policy
+  security_rule: >-
+    Build a strict Content-Security-Policy that avoids unsafe-inline and
+    unsafe-eval, preferring per-response nonces or hashes so only the
+    application's own inline scripts are allowed to execute.
+  vulnerability_pattern: >-
+    The Content-Security-Policy permits unsafe-inline or unsafe-eval for
+    scripts, which lets any injected inline script run and removes most
+    of the protection the policy was meant to provide.
+  secure_pattern: >-
+    The policy omits unsafe-inline and unsafe-eval and instead authorizes
+    each legitimate inline script with a fresh per-response nonce or a
+    content hash, so injected markup without that nonce cannot run.
+  code_patterns:
+    generic:
+      vulnerable: |
+        policy = "script-src 'self' 'unsafe-inline'"
+      secure: |
+        nonce = randomNonce()
+        policy = "script-src 'self' 'nonce-" + nonce + "'"
+    python:
+      vulnerable: |
+        resp.headers["Content-Security-Policy"] = "script-src 'self' 'unsafe-inline'"
+      secure: |
+        nonce = secrets.token_urlsafe(16)
+        resp.headers["Content-Security-Policy"] = f"script-src 'self' 'nonce-{nonce}'"
+    javascript:
+      vulnerable: |
+        res.set("Content-Security-Policy", "script-src 'self' 'unsafe-inline'");
+      secure: |
+        const nonce = crypto.randomBytes(16).toString("base64");
+        res.set("Content-Security-Policy", `script-src 'self' 'nonce-${nonce}'`);
+    java:
+      vulnerable: |
+        response.setHeader("Content-Security-Policy", "script-src 'self' 'unsafe-inline'");
+      secure: |
+        String nonce = base64(secureRandom16Bytes());
+        response.setHeader("Content-Security-Policy", "script-src 'self' 'nonce-" + nonce + "'");
+    csharp:
+      vulnerable: |
+        Response.Headers["Content-Security-Policy"] = "script-src 'self' 'unsafe-inline'";
+      secure: |
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+        Response.Headers["Content-Security-Policy"] = $"script-src 'self' 'nonce-{nonce}'";
+
+# ---------------------------------------------------------------------------
+# Security Response Headers
+# ---------------------------------------------------------------------------
+
+- id: PC-C8.3
+  facet: Browser Security
+  section: Security Response Headers
+  security_rule: >-
+    Send X-Content-Type-Options nosniff on responses so the browser
+    honors the declared Content-Type and does not MIME-sniff a response
+    into a more dangerous type such as executable script.
+  vulnerability_pattern: >-
+    Responses are served without X-Content-Type-Options, so a browser may
+    sniff a user-uploaded or text response and execute it as script or
+    HTML, turning inert content into an attack vector.
+  secure_pattern: >-
+    Every response includes X-Content-Type-Options set to nosniff so the
+    browser treats the body strictly as the declared Content-Type and
+    never reinterprets it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serve(content, contentType)       # no X-Content-Type-Options header
+      secure: |
+        response.setHeader("X-Content-Type-Options", "nosniff")
+        serve(content, contentType)
+    python:
+      vulnerable: |
+        return send_file(upload_path)
+      secure: |
+        resp = send_file(upload_path)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+    javascript:
+      vulnerable: |
+        res.sendFile(uploadPath);
+      secure: |
+        res.set("X-Content-Type-Options", "nosniff");
+        res.sendFile(uploadPath);
+    java:
+      vulnerable: |
+        response.getOutputStream().write(fileBytes);
+      secure: |
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.getOutputStream().write(fileBytes);
+    csharp:
+      vulnerable: |
+        return File(fileBytes, contentType);
+      secure: |
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(fileBytes, contentType);
+
+- id: PC-C8.4
+  facet: Browser Security
+  section: Security Response Headers
+  security_rule: >-
+    Send a Strict-Transport-Security header with a long max-age on HTTPS
+    responses so browsers refuse to connect to the site over plain HTTP
+    and resist protocol-downgrade and SSL-stripping attacks.
+  vulnerability_pattern: >-
+    An HTTPS site omits the Strict-Transport-Security header, so a browser
+    will still attempt cleartext HTTP requests and an attacker on the
+    network can downgrade the connection and intercept traffic.
+  secure_pattern: >-
+    HTTPS responses carry Strict-Transport-Security with a max-age of at
+    least one year and includeSubDomains, so the browser pins the site to
+    HTTPS for the lifetime of the policy.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serveOverHttps(page)              # no Strict-Transport-Security header
+      secure: |
+        response.setHeader("Strict-Transport-Security",
+                           "max-age=31536000; includeSubDomains")
+    python:
+      vulnerable: |
+        return Response(page)
+      secure: |
+        resp = Response(page)
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return resp
+    javascript:
+      vulnerable: |
+        res.send(page);
+      secure: |
+        res.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        res.send(page);
+    java:
+      vulnerable: |
+        response.getWriter().write(page);
+      secure: |
+        response.setHeader("Strict-Transport-Security",
+                           "max-age=31536000; includeSubDomains");
+        response.getWriter().write(page);
+    csharp:
+      vulnerable: |
+        return Content(page, "text/html");
+      secure: |
+        Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+        return Content(page, "text/html");
+
+- id: PC-C8.5
+  facet: Browser Security
+  section: Security Response Headers
+  security_rule: >-
+    Send a Referrer-Policy header so the browser limits how much of the
+    originating URL is disclosed to other sites, preventing leakage of
+    paths, query parameters, or tokens through the Referer header.
+  vulnerability_pattern: >-
+    No Referrer-Policy is set, so the browser's default behavior may send
+    the full originating URL, including sensitive path or query data, to
+    third-party sites linked or loaded from the page.
+  secure_pattern: >-
+    A Referrer-Policy such as strict-origin-when-cross-origin or
+    no-referrer is sent, so cross-origin requests reveal at most the
+    origin and never the full URL.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serve(page)                       # no Referrer-Policy header
+      secure: |
+        response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin")
+    python:
+      vulnerable: |
+        return Response(page)
+      secure: |
+        resp = Response(page)
+        resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return resp
+    javascript:
+      vulnerable: |
+        res.send(page);
+      secure: |
+        res.set("Referrer-Policy", "strict-origin-when-cross-origin");
+        res.send(page);
+    java:
+      vulnerable: |
+        response.getWriter().write(page);
+      secure: |
+        response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+        response.getWriter().write(page);
+    csharp:
+      vulnerable: |
+        return Content(page, "text/html");
+      secure: |
+        Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        return Content(page, "text/html");
+
+# ---------------------------------------------------------------------------
+# Clickjacking Defense
+# ---------------------------------------------------------------------------
+
+- id: PC-C8.6
+  facet: Browser Security
+  section: Clickjacking Defense
+  security_rule: >-
+    Prevent the application from being embedded in a frame by an
+    untrusted site, using a Content-Security-Policy frame-ancestors
+    directive backed by the legacy X-Frame-Options header.
+  vulnerability_pattern: >-
+    Pages can be loaded inside an iframe by any site because no
+    frame-ancestors directive and no X-Frame-Options header are sent,
+    allowing a clickjacking overlay to trick users into hidden actions.
+  secure_pattern: >-
+    Responses send a Content-Security-Policy frame-ancestors directive
+    restricting framing to the application's own origin, with
+    X-Frame-Options DENY or SAMEORIGIN as a fallback for older browsers.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serve(page)                       # framing is unrestricted
+      secure: |
+        response.setHeader("Content-Security-Policy", "frame-ancestors 'self'")
+        response.setHeader("X-Frame-Options", "SAMEORIGIN")
+    python:
+      vulnerable: |
+        return Response(page)
+      secure: |
+        resp = Response(page)
+        resp.headers["Content-Security-Policy"] = "frame-ancestors 'self'"
+        resp.headers["X-Frame-Options"] = "SAMEORIGIN"
+        return resp
+    javascript:
+      vulnerable: |
+        res.send(page);
+      secure: |
+        res.set("Content-Security-Policy", "frame-ancestors 'self'");
+        res.set("X-Frame-Options", "SAMEORIGIN");
+        res.send(page);
+    java:
+      vulnerable: |
+        response.getWriter().write(page);
+      secure: |
+        response.setHeader("Content-Security-Policy", "frame-ancestors 'self'");
+        response.setHeader("X-Frame-Options", "SAMEORIGIN");
+        response.getWriter().write(page);
+    csharp:
+      vulnerable: |
+        return Content(page, "text/html");
+      secure: |
+        Response.Headers["Content-Security-Policy"] = "frame-ancestors 'self'";
+        Response.Headers["X-Frame-Options"] = "SAMEORIGIN";
+        return Content(page, "text/html");
+
+# ---------------------------------------------------------------------------
+# Cookie Security Attributes
+# ---------------------------------------------------------------------------
+
+- id: PC-C8.7
+  facet: Browser Security
+  section: Cookie Security Attributes
+  security_rule: >-
+    Set session and authentication cookies with the Secure and HttpOnly
+    attributes so they are sent only over HTTPS and are not readable by
+    client-side JavaScript.
+  vulnerability_pattern: >-
+    A session cookie is issued without the Secure and HttpOnly attributes,
+    so it can travel over cleartext HTTP and be stolen through script
+    injection, exposing the user's session to theft.
+  secure_pattern: >-
+    Session cookies are created with Secure and HttpOnly set, so the
+    browser transmits them only over HTTPS and withholds them from any
+    JavaScript running on the page.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", token)       # no Secure, no HttpOnly
+      secure: |
+        setCookie("session", token, secure=true, httpOnly=true)
+    python:
+      vulnerable: |
+        resp.set_cookie("session", token)
+      secure: |
+        resp.set_cookie("session", token, secure=True, httponly=True)
+    javascript:
+      vulnerable: |
+        res.cookie("session", token);
+      secure: |
+        res.cookie("session", token, { secure: true, httpOnly: true });
+    java:
+      vulnerable: |
+        Cookie c = new Cookie("session", token);
+        response.addCookie(c);
+      secure: |
+        Cookie c = new Cookie("session", token);
+        c.setSecure(true); c.setHttpOnly(true);
+        response.addCookie(c);
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", token);
+      secure: |
+        Response.Cookies.Append("session", token,
+            new CookieOptions { Secure = true, HttpOnly = true });
+
+- id: PC-C8.8
+  facet: Browser Security
+  section: Cookie Security Attributes
+  security_rule: >-
+    Set the SameSite attribute on session cookies, preferring Lax or
+    Strict, so the browser withholds the cookie from cross-site requests
+    and blunts cross-site request forgery.
+  vulnerability_pattern: >-
+    A session cookie is issued with no SameSite attribute, so the browser
+    may attach it to cross-site requests and an attacker page can drive
+    authenticated state-changing actions on the user's behalf.
+  secure_pattern: >-
+    Session cookies declare SameSite as Lax or Strict, so the browser
+    only sends them on same-site requests and forged cross-site requests
+    arrive unauthenticated.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", token, secure=true, httpOnly=true)
+      secure: |
+        setCookie("session", token, secure=true, httpOnly=true, sameSite="Lax")
+    python:
+      vulnerable: |
+        resp.set_cookie("session", token, secure=True, httponly=True)
+      secure: |
+        resp.set_cookie("session", token, secure=True, httponly=True, samesite="Lax")
+    javascript:
+      vulnerable: |
+        res.cookie("session", token, { secure: true, httpOnly: true });
+      secure: |
+        res.cookie("session", token, { secure: true, httpOnly: true, sameSite: "lax" });
+    java:
+      vulnerable: |
+        response.setHeader("Set-Cookie", "session=" + token + "; Secure; HttpOnly");
+      secure: |
+        response.setHeader("Set-Cookie",
+            "session=" + token + "; Secure; HttpOnly; SameSite=Lax");
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", token,
+            new CookieOptions { Secure = true, HttpOnly = true });
+      secure: |
+        Response.Cookies.Append("session", token,
+            new CookieOptions { Secure = true, HttpOnly = true,
+                                SameSite = SameSiteMode.Lax });
+
+# ---------------------------------------------------------------------------
+# Cross-Origin Resource Sharing
+# ---------------------------------------------------------------------------
+
+- id: PC-C8.9
+  facet: Browser Security
+  section: Cross-Origin Resource Sharing
+  security_rule: >-
+    Configure CORS so Access-Control-Allow-Origin reflects only an
+    allowlist of trusted origins, and never combine a wildcard origin or
+    blindly reflected Origin with credentialed requests.
+  vulnerability_pattern: >-
+    The server reflects the request Origin into Access-Control-Allow-Origin
+    or returns a wildcard while also allowing credentials, so any site can
+    make authenticated cross-origin calls and read the responses.
+  secure_pattern: >-
+    The request Origin is checked against an explicit allowlist and only a
+    matching trusted origin is echoed back, with Allow-Credentials set
+    only for those origins and never alongside a wildcard.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setHeader("Access-Control-Allow-Origin", requestOrigin)
+        setHeader("Access-Control-Allow-Credentials", "true")
+      secure: |
+        if requestOrigin in ALLOWED_ORIGINS:
+            setHeader("Access-Control-Allow-Origin", requestOrigin)
+            setHeader("Access-Control-Allow-Credentials", "true")
+    python:
+      vulnerable: |
+        resp.headers["Access-Control-Allow-Origin"] = request.headers["Origin"]
+      secure: |
+        origin = request.headers.get("Origin")
+        if origin in ALLOWED_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+    javascript:
+      vulnerable: |
+        res.set("Access-Control-Allow-Origin", req.headers.origin);
+      secure: |
+        if (ALLOWED_ORIGINS.has(req.headers.origin))
+            res.set("Access-Control-Allow-Origin", req.headers.origin);
+    java:
+      vulnerable: |
+        response.setHeader("Access-Control-Allow-Origin", request.getHeader("Origin"));
+      secure: |
+        String origin = request.getHeader("Origin");
+        if (ALLOWED_ORIGINS.contains(origin))
+            response.setHeader("Access-Control-Allow-Origin", origin);
+    csharp:
+      vulnerable: |
+        Response.Headers["Access-Control-Allow-Origin"] = Request.Headers["Origin"];
+      secure: |
+        var origin = Request.Headers["Origin"].ToString();
+        if (AllowedOrigins.Contains(origin))
+            Response.Headers["Access-Control-Allow-Origin"] = origin;
+
+# ---------------------------------------------------------------------------
+# Subresource Integrity
+# ---------------------------------------------------------------------------
+
+- id: PC-C8.10
+  facet: Browser Security
+  section: Subresource Integrity
+  security_rule: >-
+    When loading scripts or stylesheets from a third-party host such as a
+    CDN, add a Subresource Integrity hash and crossorigin attribute so the
+    browser refuses to run the resource if it has been tampered with.
+  vulnerability_pattern: >-
+    A script or stylesheet is included from an external CDN with no
+    integrity attribute, so if that CDN is compromised the browser will
+    fetch and execute attacker-modified code without detection.
+  secure_pattern: >-
+    External script and link tags carry an integrity attribute holding a
+    cryptographic hash of the expected file plus a crossorigin attribute,
+    so the browser blocks the resource on any content mismatch.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tag = "<script src=" + cdnUrl + "></script>"
+      secure: |
+        tag = "<script src=\"" + cdnUrl + "\" integrity=\"sha384-" + hash
+            + "\" crossorigin=\"anonymous\"></script>"
+    javascript:
+      vulnerable: |
+        document.body.innerHTML += `<script src="${cdnUrl}"></script>`;
+      secure: |
+        const s = document.createElement("script");
+        s.src = cdnUrl; s.integrity = sriHash; s.crossOrigin = "anonymous";
+        document.body.appendChild(s);
+    python:
+      vulnerable: |
+        tag = f'<script src="{cdn_url}"></script>'
+      secure: |
+        tag = (f'<script src="{cdn_url}" integrity="{sri_hash}" '
+               f'crossorigin="anonymous"></script>')
+    java:
+      vulnerable: |
+        String tag = "<script src=\"" + cdnUrl + "\"></script>";
+      secure: |
+        String tag = "<script src=\"" + cdnUrl + "\" integrity=\"" + sriHash
+            + "\" crossorigin=\"anonymous\"></script>";
+    csharp:
+      vulnerable: |
+        var tag = $"<script src=\"{cdnUrl}\"></script>";
+      secure: |
+        var tag = $"<script src=\"{cdnUrl}\" integrity=\"{sriHash}\" " +
+                  "crossorigin=\"anonymous\"></script>";

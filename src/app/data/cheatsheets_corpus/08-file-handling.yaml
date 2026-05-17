@@ -1,0 +1,605 @@
+# OWASP Cheat Sheet Series — File Handling domain
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Source cheat sheets: File Upload, Unrestricted File Upload, Path Traversal,
+# Server-Side Request Forgery Prevention (file-fetch facets), Insecure Direct
+# Object Reference (file-access facet).
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per language
+# (generic + the applicable subset of Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-08.1 — Path Traversal in File Reads and Writes
+# ---------------------------------------------------------------------------
+
+- id: CS-08.1
+  facet: File Handling
+  section: Path Traversal Prevention
+  security_rule: >-
+    A user-supplied filename must never be concatenated onto a base
+    directory directly; resolve the combined path to its canonical form
+    and confirm it still lies inside the intended base directory.
+  vulnerability_pattern: >-
+    A request parameter is joined onto a server directory and opened
+    without canonicalization, so dot-dot segments or an absolute path let
+    an attacker read or write files outside the intended directory.
+  secure_pattern: >-
+    The combined path is resolved to its absolute canonical form and
+    checked to confirm it still starts with the canonical base directory
+    before the file is opened.
+  code_patterns:
+    generic:
+      vulnerable: |
+        path = baseDir + "/" + userFilename
+        open(path)
+      secure: |
+        resolved = canonicalize(join(baseDir, userFilename))
+        if not resolved.startsWith(canonicalize(baseDir)): reject()
+        open(resolved)
+    python:
+      vulnerable: |
+        path = os.path.join(UPLOAD_DIR, request.args["name"])
+        return open(path).read()
+      secure: |
+        base = os.path.realpath(UPLOAD_DIR)
+        path = os.path.realpath(os.path.join(base, request.args["name"]))
+        if os.path.commonpath([base, path]) != base: abort(403)
+    javascript:
+      vulnerable: |
+        const file = path.join(UPLOAD_DIR, req.query.name);
+        res.sendFile(file);
+      secure: |
+        const file = path.resolve(UPLOAD_DIR, req.query.name);
+        if (!file.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) return res.sendStatus(403);
+        res.sendFile(file);
+    java:
+      vulnerable: |
+        File f = new File(UPLOAD_DIR, request.getParameter("name"));
+        return Files.readAllBytes(f.toPath());
+      secure: |
+        Path base = Paths.get(UPLOAD_DIR).toRealPath();
+        Path f = base.resolve(request.getParameter("name")).normalize();
+        if (!f.startsWith(base)) throw new SecurityException("traversal");
+    csharp:
+      vulnerable: |
+        var path = Path.Combine(UploadDir, Request.Query["name"]);
+        return File(System.IO.File.ReadAllBytes(path), "application/octet-stream");
+      secure: |
+        var baseDir = Path.GetFullPath(UploadDir);
+        var path = Path.GetFullPath(Path.Combine(baseDir, Request.Query["name"]));
+        if (!path.StartsWith(baseDir + Path.DirectorySeparatorChar)) return Forbid();
+
+# ---------------------------------------------------------------------------
+# CS-08.2 — Validate Upload File Type by Content, Not Extension
+# ---------------------------------------------------------------------------
+
+- id: CS-08.2
+  facet: File Handling
+  section: Upload Content-Type Validation
+  security_rule: >-
+    The accepted type of an uploaded file must be confirmed from its
+    actual content, such as magic bytes or a server-side type detector,
+    and matched against an allowlist; the client-supplied extension and
+    Content-Type header must never be trusted.
+  vulnerability_pattern: >-
+    Upload validation relies only on the file extension or the
+    browser-supplied Content-Type, so an attacker renames an executable
+    or script and it passes the check.
+  secure_pattern: >-
+    The file content is inspected to detect its real type, the detected
+    type is checked against an allowlist of permitted types, and the
+    extension is then derived from that verified type.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if userFilename.endsWith(".jpg"): save(upload)
+      secure: |
+        detected = detectTypeFromContent(upload.bytes)
+        if detected in ALLOWED_TYPES: save(upload)
+    python:
+      vulnerable: |
+        if file.filename.endswith((".png", ".jpg")):
+            file.save(dest)
+      secure: |
+        import magic
+        mime = magic.from_buffer(file.read(2048), mime=True)
+        if mime in {"image/png", "image/jpeg"}: file.save(dest)
+    javascript:
+      vulnerable: |
+        if (req.file.mimetype === "image/png") fs.writeFileSync(dest, req.file.buffer);
+      secure: |
+        const { fileTypeFromBuffer } = await import("file-type");
+        const t = await fileTypeFromBuffer(req.file.buffer);
+        if (t && ["image/png", "image/jpeg"].includes(t.mime)) fs.writeFileSync(dest, req.file.buffer);
+    java:
+      vulnerable: |
+        if (part.getSubmittedFileName().endsWith(".pdf")) save(part);
+      secure: |
+        String type = new Tika().detect(part.getInputStream());
+        if ("application/pdf".equals(type)) save(part);
+    csharp:
+      vulnerable: |
+        if (Path.GetExtension(file.FileName) == ".png") SaveFile(file);
+      secure: |
+        var inspector = new FileFormatInspector();
+        var fmt = inspector.DetermineFileFormat(file.OpenReadStream());
+        if (fmt is Png or Jpeg) SaveFile(file);
+
+# ---------------------------------------------------------------------------
+# CS-08.3 — Generate Server-Side Filenames for Stored Uploads
+# ---------------------------------------------------------------------------
+
+- id: CS-08.3
+  facet: File Handling
+  section: Upload Filename Handling
+  security_rule: >-
+    Uploaded files must be stored under a server-generated name, never
+    the raw client-supplied filename, so attacker-controlled path
+    segments, special characters, and double extensions cannot influence
+    where or how the file is written.
+  vulnerability_pattern: >-
+    The client-supplied filename is used verbatim as the storage name, so
+    embedded path separators, null bytes, or a misleading double
+    extension change the write location or later interpretation.
+  secure_pattern: >-
+    A fresh random identifier is generated server-side for the stored
+    file, the extension is taken from the verified content type, and the
+    original name is kept only as a display label in metadata.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(join(uploadDir, upload.clientFilename))
+      secure: |
+        storedName = randomId() + "." + extensionFor(verifiedType)
+        save(join(uploadDir, storedName))
+    python:
+      vulnerable: |
+        file.save(os.path.join(UPLOAD_DIR, file.filename))
+      secure: |
+        stored = f"{uuid.uuid4().hex}.{ext_for(verified_type)}"
+        file.save(os.path.join(UPLOAD_DIR, stored))
+    javascript:
+      vulnerable: |
+        fs.writeFileSync(path.join(UPLOAD_DIR, req.file.originalname), req.file.buffer);
+      secure: |
+        const stored = `${crypto.randomUUID()}.${extFor(verifiedType)}`;
+        fs.writeFileSync(path.join(UPLOAD_DIR, stored), req.file.buffer);
+    java:
+      vulnerable: |
+        part.write(UPLOAD_DIR + "/" + part.getSubmittedFileName());
+      secure: |
+        String stored = UUID.randomUUID() + "." + extFor(verifiedType);
+        Files.copy(part.getInputStream(), Paths.get(UPLOAD_DIR, stored));
+    csharp:
+      vulnerable: |
+        var dest = Path.Combine(UploadDir, file.FileName);
+      secure: |
+        var stored = $"{Guid.NewGuid():N}.{ExtFor(verifiedType)}";
+        var dest = Path.Combine(UploadDir, stored);
+
+# ---------------------------------------------------------------------------
+# CS-08.4 — Store Uploads Outside the Web Root with No Execute Permission
+# ---------------------------------------------------------------------------
+
+- id: CS-08.4
+  facet: File Handling
+  section: Upload Storage Location
+  security_rule: >-
+    Uploaded files must be stored outside the web server document root,
+    or in a location the server will not execute, so an uploaded script
+    can never be requested and run as server-side code.
+  vulnerability_pattern: >-
+    Uploads are written into a directory the web server serves and can
+    execute, so an attacker uploads a script file and then requests its
+    URL to run code on the server.
+  secure_pattern: >-
+    Uploads are written to a path outside the document root and served
+    only through a controller that streams the bytes, with script
+    execution disabled for any upload directory.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(join(webRoot, "uploads", filename))   # served and executed
+      secure: |
+        save(join(PRIVATE_STORAGE, filename))       # outside web root
+        serveViaController(fileId)
+    python:
+      vulnerable: |
+        file.save(os.path.join("static/uploads", stored_name))
+      secure: |
+        file.save(os.path.join("/srv/private_uploads", stored_name))
+        # downloads go through an authenticated send_file controller
+    java:
+      vulnerable: |
+        part.write(getServletContext().getRealPath("/uploads") + "/" + stored);
+      secure: |
+        Files.copy(part.getInputStream(), Paths.get("/srv/private_uploads", stored));
+    csharp:
+      vulnerable: |
+        var dest = Path.Combine(env.WebRootPath, "uploads", stored);
+      secure: |
+        var dest = Path.Combine("/srv/private_uploads", stored);
+        // FileResult action streams the file after an authorization check
+
+# ---------------------------------------------------------------------------
+# CS-08.5 — Enforce Upload Size Limits
+# ---------------------------------------------------------------------------
+
+- id: CS-08.5
+  facet: File Handling
+  section: Upload Size Limits
+  security_rule: >-
+    Every upload endpoint must enforce a maximum request and file size at
+    the framework or server layer, so an oversized upload is rejected
+    early and cannot exhaust memory or disk.
+  vulnerability_pattern: >-
+    An upload handler reads the whole request body into memory or onto
+    disk with no size cap, so a very large or endless upload exhausts
+    memory, fills the disk, or stalls the worker.
+  secure_pattern: >-
+    A maximum content length is configured on the framework or server so
+    requests exceeding it are rejected before the body is fully read or
+    buffered.
+  code_patterns:
+    generic:
+      vulnerable: |
+        body = readEntireBody(request)      # no size cap
+      secure: |
+        if contentLength(request) > MAX_UPLOAD: reject(413)
+        body = readEntireBody(request)
+    python:
+      vulnerable: |
+        data = request.files["f"].read()
+      secure: |
+        app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 413 past 10 MB
+        data = request.files["f"].read()
+    javascript:
+      vulnerable: |
+        const upload = multer({ dest: "uploads/" });
+      secure: |
+        const upload = multer({ dest: "uploads/", limits: { fileSize: 10 * 1024 * 1024 } });
+    java:
+      vulnerable: |
+        @MultipartConfig
+        public class UploadServlet extends HttpServlet { }
+      secure: |
+        @MultipartConfig(maxFileSize = 10_485_760, maxRequestSize = 10_485_760)
+        public class UploadServlet extends HttpServlet { }
+    csharp:
+      vulnerable: |
+        public IActionResult Upload(IFormFile file) { /* no limit */ }
+      secure: |
+        [RequestSizeLimit(10_485_760)]
+        public IActionResult Upload(IFormFile file) { }
+
+# ---------------------------------------------------------------------------
+# CS-08.6 — Set Safe Response Headers When Serving User Files
+# ---------------------------------------------------------------------------
+
+- id: CS-08.6
+  facet: File Handling
+  section: Serving Downloads Safely
+  security_rule: >-
+    When user-supplied files are served back, the response must set a
+    Content-Disposition of attachment, send the verified content type
+    rather than a guessed one, and send X-Content-Type-Options nosniff so
+    the browser cannot reinterpret the file as active content.
+  vulnerability_pattern: >-
+    A stored file is served inline with a missing or attacker-influenced
+    content type and no nosniff header, so the browser sniffs it as HTML
+    and runs embedded script as stored cross-site scripting.
+  secure_pattern: >-
+    Downloads are returned with Content-Disposition attachment, the
+    server-verified content type, and X-Content-Type-Options nosniff, so
+    the browser downloads the file instead of rendering it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(body=fileBytes)             # inline, sniffable, no type
+      secure: |
+        respond(body=fileBytes, contentType=verifiedType,
+                disposition="attachment", nosniff=true)
+    python:
+      vulnerable: |
+        return send_file(path)
+      secure: |
+        resp = send_file(path, mimetype=verified_type, as_attachment=True)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+    javascript:
+      vulnerable: |
+        res.sendFile(filePath);
+      secure: |
+        res.set("X-Content-Type-Options", "nosniff");
+        res.type(verifiedType).attachment(displayName).sendFile(filePath);
+    java:
+      vulnerable: |
+        response.getOutputStream().write(fileBytes);
+      secure: |
+        response.setContentType(verifiedType);
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Content-Disposition", "attachment; filename=\"file\"");
+    csharp:
+      vulnerable: |
+        return File(fileBytes, "text/html");
+      secure: |
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(fileBytes, verifiedType, displayName);  // FileResult sends attachment
+
+# ---------------------------------------------------------------------------
+# CS-08.7 — Decompress Archives Defensively (Zip Slip and Zip Bomb)
+# ---------------------------------------------------------------------------
+
+- id: CS-08.7
+  facet: File Handling
+  section: Archive Extraction Safety
+  security_rule: >-
+    When extracting an uploaded archive, each entry's destination path
+    must be validated to stay inside the extraction directory, and the
+    total entry count and uncompressed size must be capped to prevent
+    Zip Slip path traversal and decompression-bomb attacks.
+  vulnerability_pattern: >-
+    Archive entries are extracted using their stored names without
+    checking the resolved path or the expanding size, so a crafted entry
+    name escapes the directory or a tiny archive expands to exhaust disk.
+  secure_pattern: >-
+    Each entry name is resolved against the extraction root and rejected
+    if it escapes, and extraction stops once a cap on entry count or
+    cumulative uncompressed bytes is reached.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for entry in archive: writeFile(join(destDir, entry.name), entry.data)
+      secure: |
+        target = canonicalize(join(destDir, entry.name))
+        if not target.startsWith(destDir) or totalBytes > MAX: reject()
+        writeFile(target, entry.data)
+    python:
+      vulnerable: |
+        with zipfile.ZipFile(upload) as z: z.extractall(dest)
+      secure: |
+        base = os.path.realpath(dest)
+        for m in z.infolist():
+            p = os.path.realpath(os.path.join(base, m.filename))
+            if not p.startswith(base + os.sep) or m.file_size > MAX: raise ValueError
+            z.extract(m, base)
+    java:
+      vulnerable: |
+        Path out = destDir.resolve(entry.getName());
+        Files.copy(zip, out);
+      secure: |
+        Path out = destDir.resolve(entry.getName()).normalize();
+        if (!out.startsWith(destDir) || entry.getSize() > MAX) throw new IOException("unsafe entry");
+        Files.copy(zip, out);
+    csharp:
+      vulnerable: |
+        entry.ExtractToFile(Path.Combine(destDir, entry.FullName));
+      secure: |
+        var full = Path.GetFullPath(Path.Combine(destDir, entry.FullName));
+        if (!full.StartsWith(destDir + Path.DirectorySeparatorChar) || entry.Length > Max)
+            throw new IOException("unsafe entry");
+        entry.ExtractToFile(full);
+
+# ---------------------------------------------------------------------------
+# CS-08.8 — Authorize Every File Access (No Insecure Direct Object Reference)
+# ---------------------------------------------------------------------------
+
+- id: CS-08.8
+  facet: File Handling
+  section: File Access Authorization
+  security_rule: >-
+    Every download or file-access request must verify that the
+    authenticated caller is permitted to access that specific file;
+    presenting a valid file identifier must never be sufficient on its
+    own to retrieve it.
+  vulnerability_pattern: >-
+    A file is looked up and returned by an identifier taken from the
+    request with no ownership or permission check, so an attacker
+    enumerates or guesses identifiers to read other users' files.
+  secure_pattern: >-
+    The file record is loaded and an authorization check confirms the
+    current user owns or is granted access to it before the bytes are
+    streamed back.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return readFile(lookup(request.fileId))
+      secure: |
+        rec = lookup(request.fileId)
+        if rec.ownerId != currentUser.id and not isShared(rec, currentUser): reject(403)
+        return readFile(rec.path)
+    python:
+      vulnerable: |
+        doc = Document.query.get(request.args["id"])
+        return send_file(doc.path)
+      secure: |
+        doc = Document.query.get_or_404(request.args["id"])
+        if doc.owner_id != current_user.id: abort(403)
+        return send_file(doc.path)
+    javascript:
+      vulnerable: |
+        const doc = await Document.findById(req.params.id);
+        res.sendFile(doc.path);
+      secure: |
+        const doc = await Document.findById(req.params.id);
+        if (!doc || doc.ownerId !== req.user.id) return res.sendStatus(403);
+        res.sendFile(doc.path);
+    java:
+      vulnerable: |
+        Document doc = repo.findById(id);
+        return Files.readAllBytes(Paths.get(doc.getPath()));
+      secure: |
+        Document doc = repo.findById(id).orElseThrow();
+        if (!doc.getOwnerId().equals(currentUser.getId())) throw new AccessDeniedException("");
+        return Files.readAllBytes(Paths.get(doc.getPath()));
+    csharp:
+      vulnerable: |
+        var doc = _db.Documents.Find(id);
+        return File(System.IO.File.ReadAllBytes(doc.Path), doc.ContentType);
+      secure: |
+        var doc = _db.Documents.Find(id);
+        if (doc is null || doc.OwnerId != User.GetId()) return Forbid();
+        return File(System.IO.File.ReadAllBytes(doc.Path), doc.ContentType);
+
+# ---------------------------------------------------------------------------
+# CS-08.9 — Block Server-Side Request Forgery via the file: Scheme
+# ---------------------------------------------------------------------------
+
+- id: CS-08.9
+  facet: File Handling
+  section: SSRF and Local File Disclosure
+  security_rule: >-
+    When the application fetches a user-supplied URL, the parsed scheme
+    must be checked against an allowlist of safe network protocols, so a
+    file scheme or other local-resource scheme cannot be used to read
+    files off the server.
+  vulnerability_pattern: >-
+    A user-supplied URL is passed to a fetch routine that also honors the
+    file scheme, so an attacker supplies a file URL and the routine
+    returns the contents of a local file.
+  secure_pattern: >-
+    The URL is parsed and its scheme is compared against an allowlist of
+    http and https, with file and other local schemes rejected before
+    any fetch is attempted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        content = fetch(userUrl)            # file scheme honored
+      secure: |
+        if scheme(userUrl) not in {"http", "https"}: reject()
+        content = fetch(userUrl)
+    python:
+      vulnerable: |
+        data = urllib.request.urlopen(request.args["url"]).read()
+      secure: |
+        scheme = urlparse(request.args["url"]).scheme
+        if scheme not in ("http", "https"): abort(400)
+        data = requests.get(request.args["url"], timeout=5).content
+    javascript:
+      vulnerable: |
+        const body = await fetch(req.query.url).then(r => r.text());
+      secure: |
+        const u = new URL(req.query.url);
+        if (u.protocol !== "http:" && u.protocol !== "https:") return res.sendStatus(400);
+        const body = await fetch(u).then(r => r.text());
+    java:
+      vulnerable: |
+        InputStream in = new URL(userUrl).openStream();
+      secure: |
+        URL u = new URL(userUrl);
+        if (!Set.of("http", "https").contains(u.getProtocol())) throw new IOException("scheme");
+        InputStream in = u.openStream();
+    csharp:
+      vulnerable: |
+        var body = await httpClient.GetStringAsync(userUrl);
+      secure: |
+        var u = new Uri(userUrl);
+        if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)
+            return BadRequest();
+        var body = await httpClient.GetStringAsync(u);
+
+# ---------------------------------------------------------------------------
+# CS-08.10 — Reject Null Bytes and Control Characters in Filename Input
+# ---------------------------------------------------------------------------
+
+- id: CS-08.10
+  facet: File Handling
+  section: Filename Input Validation
+  security_rule: >-
+    Filenames received from a user must be validated against a strict
+    allowlist of characters and rejected if they contain null bytes,
+    control characters, or path separators, before the value is used in
+    any filesystem operation.
+  vulnerability_pattern: >-
+    A filename is used in a filesystem path without rejecting embedded
+    null bytes or separators, so a null byte truncates the path past an
+    appended extension or a separator redirects the operation.
+  secure_pattern: >-
+    The filename is matched against a strict allowlist regular expression
+    and any value containing a null byte, control character, or path
+    separator is rejected before the path is built.
+  code_patterns:
+    generic:
+      vulnerable: |
+        open(baseDir + "/" + userFilename + ".txt")
+      secure: |
+        if not matches(userFilename, "^[A-Za-z0-9_-]{1,64}$"): reject()
+        open(baseDir + "/" + userFilename + ".txt")
+    python:
+      vulnerable: |
+        path = os.path.join(BASE, request.args["name"])
+      secure: |
+        name = request.args["name"]
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name): abort(400)
+        path = os.path.join(BASE, name)
+    javascript:
+      vulnerable: |
+        const file = path.join(BASE, req.query.name);
+      secure: |
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(req.query.name)) return res.sendStatus(400);
+        const file = path.join(BASE, req.query.name);
+    java:
+      vulnerable: |
+        Path p = Paths.get(BASE, request.getParameter("name"));
+      secure: |
+        String name = request.getParameter("name");
+        if (!name.matches("[A-Za-z0-9_-]{1,64}")) throw new IllegalArgumentException();
+        Path p = Paths.get(BASE, name);
+    csharp:
+      vulnerable: |
+        var path = Path.Combine(BaseDir, Request.Query["name"]);
+      secure: |
+        var name = Request.Query["name"].ToString();
+        if (!Regex.IsMatch(name, "^[A-Za-z0-9_-]{1,64}$")) return BadRequest();
+        var path = Path.Combine(BaseDir, name);
+
+# ---------------------------------------------------------------------------
+# CS-08.11 — Scan Uploaded Files for Malware Before Use
+# ---------------------------------------------------------------------------
+
+- id: CS-08.11
+  facet: File Handling
+  section: Upload Malware Scanning
+  security_rule: >-
+    Uploaded files must be quarantined and scanned by an anti-malware
+    engine before they are made available for download or processing, so
+    a hosted file cannot be used to distribute malware to other users.
+  vulnerability_pattern: >-
+    An uploaded file is immediately moved into active storage and offered
+    for download with no malware scan, so the application becomes a
+    distribution point for an infected file.
+  secure_pattern: >-
+    The upload is written to a quarantine area, scanned by an
+    anti-malware engine, and only promoted to active storage after the
+    scan returns clean.
+  code_patterns:
+    generic:
+      vulnerable: |
+        moveToPublicStorage(upload)
+      secure: |
+        saveToQuarantine(upload)
+        if antivirusScan(upload) == "clean": moveToPublicStorage(upload)
+    python:
+      vulnerable: |
+        file.save(os.path.join(PUBLIC_DIR, stored))
+      secure: |
+        file.save(os.path.join(QUARANTINE_DIR, stored))
+        if clamd.ClamdUnixSocket().scan(quarantine_path)[quarantine_path][0] == "OK":
+            shutil.move(quarantine_path, os.path.join(PUBLIC_DIR, stored))
+    java:
+      vulnerable: |
+        Files.copy(part.getInputStream(), Paths.get(PUBLIC_DIR, stored));
+      secure: |
+        Path q = Paths.get(QUARANTINE_DIR, stored);
+        Files.copy(part.getInputStream(), q);
+        if (antivirus.scan(q).isClean()) Files.move(q, Paths.get(PUBLIC_DIR, stored));
+    csharp:
+      vulnerable: |
+        await file.CopyToAsync(System.IO.File.Create(Path.Combine(PublicDir, stored)));
+      secure: |
+        var q = Path.Combine(QuarantineDir, stored);
+        await file.CopyToAsync(System.IO.File.Create(q));
+        if ((await _antivirus.ScanAsync(q)).IsClean) System.IO.File.Move(q, Path.Combine(PublicDir, stored));

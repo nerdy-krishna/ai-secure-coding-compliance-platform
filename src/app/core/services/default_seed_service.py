@@ -1330,26 +1330,71 @@ _AI_AGENT_DEFINITIONS: List[Dict[str, Any]] = [
 ]
 
 
+# Proactive Controls / Cheatsheets agents key RAG retrieval on the
+# `concern_area` facet (one per control / domain), so each agent
+# retrieves only its own slice of the enriched bundled corpus. The
+# values match the `facet` tag on every corpus entry.
+_PC_CONCERN_AREAS: Dict[str, str] = {
+    "AccessControlAgent": "Access Control",
+    "CryptographyAgent": "Cryptographic Practices",
+    "InputValidationAgent": "Input Validation & Exception Handling",
+    "SecureDesignAgent": "Secure Design & Threat Modeling",
+    "SecureConfigurationAgent": "Secure Configuration",
+    "ComponentSecurityAgent": "Component Security",
+    "DigitalIdentityAgent": "Digital Identity",
+    "BrowserSecurityAgent": "Browser Security",
+    "LoggingMonitoringAgent": "Security Logging & Monitoring",
+    "SsrfAgent": "Server-Side Request Forgery Prevention",
+}
+_CS_CONCERN_AREAS: Dict[str, str] = {
+    "InjectionAgent": "Injection Prevention",
+    "AuthenticationAgent": "Authentication",
+    "SessionManagementAgent": "Session Management",
+    "AuthorizationAgent": "Authorization",
+    "CryptographyAgent": "Cryptography",
+    "TransportSecurityAgent": "Transport Layer Security",
+    "InputValidationAgent": "Input Validation",
+    "FileHandlingAgent": "File Handling",
+    "ErrorLoggingAgent": "Error Handling & Logging",
+    "ApiSecurityAgent": "API Security",
+}
+
+
 def _framework_roster(
-    specs: List[Dict[str, Any]], framework: str, prefix: str
+    specs: List[Dict[str, Any]],
+    framework: str,
+    prefix: str,
+    concern_areas: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """Expand a per-framework spec list into dedicated `Agent` definitions.
 
     Each spec's bare concern name is prefixed with `prefix` (e.g.
     `AccessControlAgent` → `AsvsAccessControlAgent`) and tagged with a
     single-element `applicable_frameworks`. Keeping the specs prefix-free
-    lets the three AppSec rosters share concern names without colliding
-    on the unique `Agent.name`.
+    lets the AppSec rosters share concern names without colliding on the
+    unique `Agent.name`.
+
+    When `concern_areas` is given (Proactive Controls / Cheatsheets), the
+    spec's bare name is looked up there and the resulting `concern_area`
+    is AND-ed onto the agent's `metadata_filter`, so the agent retrieves
+    only its own domain's slice of the bundled corpus.
     """
-    return [
-        {
-            "name": prefix + spec["name"],
-            "description": spec["description"],
-            "domain_query": spec["domain_query"],
-            "applicable_frameworks": [framework],
-        }
-        for spec in specs
-    ]
+    roster: List[Dict[str, Any]] = []
+    for spec in specs:
+        domain_query = spec["domain_query"]
+        if concern_areas:
+            metadata_filter = dict(domain_query.get("metadata_filter") or {})
+            metadata_filter["concern_area"] = [concern_areas[spec["name"]]]
+            domain_query = {**domain_query, "metadata_filter": metadata_filter}
+        roster.append(
+            {
+                "name": prefix + spec["name"],
+                "description": spec["description"],
+                "domain_query": domain_query,
+                "applicable_frameworks": [framework],
+            }
+        )
+    return roster
 
 
 # The full default agent roster — 17 ASVS + 10 Proactive Controls + 10
@@ -1357,8 +1402,12 @@ def _framework_roster(
 # two framework-native AI agents.
 AGENT_DEFINITIONS: List[Dict[str, Any]] = (
     _framework_roster(_ASVS_AGENT_SPECS, "asvs", "Asvs")
-    + _framework_roster(_PC_AGENT_SPECS, "proactive_controls", "ProactiveControls")
-    + _framework_roster(_CS_AGENT_SPECS, "cheatsheets", "Cheatsheets")
+    + _framework_roster(
+        _PC_AGENT_SPECS, "proactive_controls", "ProactiveControls", _PC_CONCERN_AREAS
+    )
+    + _framework_roster(
+        _CS_AGENT_SPECS, "cheatsheets", "Cheatsheets", _CS_CONCERN_AREAS
+    )
     + _framework_roster(_CWE_AGENT_SPECS, "cwe_essentials", "Cwe")
     + _framework_roster(_ISVS_AGENT_SPECS, "isvs", "Isvs")
     + _AI_AGENT_DEFINITIONS

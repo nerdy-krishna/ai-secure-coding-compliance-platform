@@ -1,0 +1,570 @@
+# OWASP Cheat Sheet Series — Domain 04: Authorization
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Source cheat sheets: Authorization, Access Control, Insecure Direct Object
+# Reference Prevention, and related guidance.
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-04.1 — Enforce authorization server-side on every request
+# ---------------------------------------------------------------------------
+
+- id: CS-04.1
+  facet: Authorization
+  section: Server-Side Enforcement
+  security_rule: >-
+    Authorization decisions must be enforced on the server for every request
+    that reaches a protected resource or action, never delegated to the
+    client or to hidden UI elements.
+  vulnerability_pattern: >-
+    Access is gated only by hiding a link or menu in the UI while the
+    underlying endpoint performs no permission check, so anyone who knows or
+    guesses the route can invoke it directly.
+  secure_pattern: >-
+    Every protected endpoint runs an explicit server-side permission check
+    before performing the action, and the UI hiding is treated only as a
+    convenience layer, not a security control.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if uiShowsAdminButton: deleteUser(targetId)   # no server check
+      secure: |
+        requirePermission(currentUser, "user:delete")
+        deleteUser(targetId)
+    python:
+      vulnerable: |
+        @app.post("/admin/users/{uid}/delete")
+        def delete(uid): repo.delete(uid)
+      secure: |
+        @app.post("/admin/users/{uid}/delete")
+        def delete(uid, user=Depends(require_role("admin"))):
+            repo.delete(uid)
+    javascript:
+      vulnerable: |
+        app.post("/admin/users/:id", (req, res) => repo.delete(req.params.id));
+      secure: |
+        app.post("/admin/users/:id", requireRole("admin"),
+                 (req, res) => repo.delete(req.params.id));
+    java:
+      vulnerable: |
+        @PostMapping("/admin/users/{id}")
+        void delete(@PathVariable String id) { repo.delete(id); }
+      secure: |
+        @PreAuthorize("hasRole('ADMIN')")
+        @PostMapping("/admin/users/{id}")
+        void delete(@PathVariable String id) { repo.delete(id); }
+    csharp:
+      vulnerable: |
+        [HttpPost("admin/users/{id}")]
+        public IActionResult Delete(string id) { _repo.Delete(id); return Ok(); }
+      secure: |
+        [Authorize(Roles = "Admin")]
+        [HttpPost("admin/users/{id}")]
+        public IActionResult Delete(string id) { _repo.Delete(id); return Ok(); }
+
+# ---------------------------------------------------------------------------
+# CS-04.2 — Deny by default
+# ---------------------------------------------------------------------------
+
+- id: CS-04.2
+  facet: Authorization
+  section: Deny by Default
+  security_rule: >-
+    Access control must deny every request unless an explicit rule grants it,
+    so newly added routes and unmapped actions are inaccessible until a
+    permission is deliberately assigned.
+  vulnerability_pattern: >-
+    The authorization layer allows requests by default and only blocks routes
+    that appear on a denylist, so any endpoint the developer forgot to list
+    is reachable by everyone.
+  secure_pattern: >-
+    The authorization layer rejects every request that does not match an
+    explicit allow rule, and a missing or unrecognised mapping results in a
+    denied response rather than an open one.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if route in BLOCKED_ROUTES: deny()
+        else: allow()                       # unknown routes fall through
+      secure: |
+        rule = POLICY.get(route)
+        if rule and rule.permits(user): allow()
+        else: deny()
+    python:
+      vulnerable: |
+        if path in PROTECTED:
+            check_auth()
+        proceed()
+      secure: |
+        rule = POLICY.get(path)
+        if rule is None or not rule.allows(user):
+            abort(403)
+        proceed()
+    javascript:
+      vulnerable: |
+        const blocked = ["/admin"];
+        if (!blocked.includes(req.path)) return next();
+      secure: |
+        const rule = policy[req.path];
+        if (!rule || !rule.allows(req.user)) return res.sendStatus(403);
+        next();
+    java:
+      vulnerable: |
+        http.authorizeHttpRequests(a -> a
+            .requestMatchers("/admin/**").authenticated());
+      secure: |
+        http.authorizeHttpRequests(a -> a
+            .requestMatchers("/admin/**").hasRole("ADMIN")
+            .anyRequest().denyAll());
+    csharp:
+      vulnerable: |
+        services.AddAuthorization();   // endpoints without [Authorize] are open
+      secure: |
+        services.AddAuthorization(o =>
+            o.FallbackPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser().Build());
+
+# ---------------------------------------------------------------------------
+# CS-04.3 — Prevent Insecure Direct Object References (IDOR)
+# ---------------------------------------------------------------------------
+
+- id: CS-04.3
+  facet: Authorization
+  section: Insecure Direct Object Reference Prevention
+  security_rule: >-
+    When a request names a specific record by identifier, the server must
+    verify that the current user is permitted to access that exact record,
+    not merely that they are authenticated.
+  vulnerability_pattern: >-
+    A record is fetched directly by an identifier taken from the request,
+    with no check that it belongs to the caller, so changing the identifier
+    exposes another user's data.
+  secure_pattern: >-
+    The query is scoped to the current user, or an ownership check is run
+    after the fetch, so an identifier belonging to someone else returns a
+    not-found or forbidden response.
+  code_patterns:
+    generic:
+      vulnerable: |
+        order = db.find(Order, requestId)
+        return order
+      secure: |
+        order = db.find(Order, requestId)
+        if order.ownerId != currentUser.id: deny()
+        return order
+    python:
+      vulnerable: |
+        invoice = Invoice.query.get(request.args["id"])
+        return invoice.to_json()
+      secure: |
+        invoice = Invoice.query.filter_by(
+            id=request.args["id"], owner_id=current_user.id).first_or_404()
+        return invoice.to_json()
+    javascript:
+      vulnerable: |
+        const doc = await Doc.findById(req.params.id);
+        res.json(doc);
+      secure: |
+        const doc = await Doc.findOne({ _id: req.params.id, ownerId: req.user.id });
+        if (!doc) return res.sendStatus(404);
+        res.json(doc);
+    java:
+      vulnerable: |
+        Account acct = accountRepo.findById(id).orElseThrow();
+        return acct;
+      secure: |
+        Account acct = accountRepo
+            .findByIdAndOwnerId(id, currentUser.getId())
+            .orElseThrow(NotFoundException::new);
+        return acct;
+    csharp:
+      vulnerable: |
+        var record = await _db.Records.FindAsync(id);
+        return Ok(record);
+      secure: |
+        var record = await _db.Records
+            .FirstOrDefaultAsync(r => r.Id == id && r.OwnerId == userId);
+        return record is null ? NotFound() : Ok(record);
+
+# ---------------------------------------------------------------------------
+# CS-04.4 — Use indirect or unpredictable object references
+# ---------------------------------------------------------------------------
+
+- id: CS-04.4
+  facet: Authorization
+  section: Indirect Object References
+  security_rule: >-
+    Identifiers exposed to clients should be unpredictable, or mapped through
+    a per-session indirection table, so that enumeration alone does not let an
+    attacker reference resources they were never shown.
+  vulnerability_pattern: >-
+    Resources are addressed by sequential integer keys exposed directly in
+    URLs or forms, so an attacker can walk the identifier space and probe for
+    records belonging to others.
+  secure_pattern: >-
+    The client sees a random opaque identifier such as a UUID, or a
+    per-session reference map translates a client-facing handle to the real
+    key only for resources the user is allowed to see.
+  code_patterns:
+    generic:
+      vulnerable: |
+        url = "/doc/" + str(sequentialId)
+      secure: |
+        url = "/doc/" + randomUuid()        # opaque, non-enumerable handle
+    python:
+      vulnerable: |
+        return redirect(f"/report/{report.id}")   # id is an autoincrement int
+      secure: |
+        token = session_ref_map.add(report.id)    # per-session indirection
+        return redirect(f"/report/{token}")
+    javascript:
+      vulnerable: |
+        res.redirect(`/file/${file.id}`);          // numeric primary key
+      secure: |
+        const ref = crypto.randomUUID();
+        sessionRefs.set(ref, file.id);
+        res.redirect(`/file/${ref}`);
+    java:
+      vulnerable: |
+        @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+        private Long id;
+      secure: |
+        @Id
+        private UUID id = UUID.randomUUID();   // unpredictable public key
+    csharp:
+      vulnerable: |
+        public int Id { get; set; }            // sequential, exposed in routes
+      secure: |
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+# ---------------------------------------------------------------------------
+# CS-04.5 — Enforce least privilege
+# ---------------------------------------------------------------------------
+
+- id: CS-04.5
+  facet: Authorization
+  section: Least Privilege
+  security_rule: >-
+    Every user, service, and process must be granted only the minimum
+    permissions required for its function, and elevated rights must be scoped
+    narrowly rather than handed out broadly.
+  vulnerability_pattern: >-
+    A single coarse role or an administrative account is reused for routine
+    operations, so a compromise of that identity grants far more access than
+    the task ever required.
+  secure_pattern: >-
+    Permissions are split into fine-grained capabilities and assigned to the
+    specific role or service identity that needs them, and routine work runs
+    under a low-privilege account.
+  code_patterns:
+    generic:
+      vulnerable: |
+        serviceAccount.grant("superadmin")     # used for one nightly report
+      secure: |
+        serviceAccount.grant("report:read")    # only the capability needed
+    python:
+      vulnerable: |
+        conn = connect(user="postgres", password=ROOT_PW)   # report job
+      secure: |
+        conn = connect(user="report_ro", password=RO_PW)    # read-only role
+    javascript:
+      vulnerable: |
+        const token = issueToken(user, { scopes: ["*"] });
+      secure: |
+        const token = issueToken(user, { scopes: ["orders:read"] });
+    java:
+      vulnerable: |
+        @PreAuthorize("hasRole('ADMIN')")
+        void exportReport() { ... }
+      secure: |
+        @PreAuthorize("hasAuthority('report:export')")
+        void exportReport() { ... }
+    csharp:
+      vulnerable: |
+        [Authorize(Roles = "Admin")]
+        public IActionResult ViewReport() { ... }
+      secure: |
+        [Authorize(Policy = "CanExportReports")]
+        public IActionResult ViewReport() { ... }
+
+# ---------------------------------------------------------------------------
+# CS-04.6 — Validate authorization on function and method calls
+# ---------------------------------------------------------------------------
+
+- id: CS-04.6
+  facet: Authorization
+  section: Function-Level Access Control
+  security_rule: >-
+    Authorization must be checked at the function or business-logic layer, so
+    that sensitive operations are protected even when invoked through a route,
+    a job, or another internal caller.
+  vulnerability_pattern: >-
+    Permission checks live only in a controller or middleware, so a sensitive
+    function reached through a different controller, an API, or a background
+    task runs with no access control.
+  secure_pattern: >-
+    The sensitive operation itself verifies the caller's permission, so the
+    same guard applies regardless of which entry point triggered the call.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def transferFunds(src, dst, amount): doTransfer(src, dst, amount)
+      secure: |
+        def transferFunds(actor, src, dst, amount):
+            requirePermission(actor, src, "account:transfer")
+            doTransfer(src, dst, amount)
+    python:
+      vulnerable: |
+        def archive_project(project_id):
+            Project.query.get(project_id).archive()
+      secure: |
+        def archive_project(actor, project_id):
+            project = Project.query.get(project_id)
+            authorize(actor, project, "archive")
+            project.archive()
+    javascript:
+      vulnerable: |
+        function publishArticle(id) { return repo.setStatus(id, "live"); }
+      secure: |
+        function publishArticle(actor, id) {
+          authorize(actor, "article:publish");
+          return repo.setStatus(id, "live");
+        }
+    java:
+      vulnerable: |
+        public void closeTicket(Long id) { ticketRepo.close(id); }
+      secure: |
+        @PreAuthorize("hasPermission(#id, 'Ticket', 'close')")
+        public void closeTicket(Long id) { ticketRepo.close(id); }
+    csharp:
+      vulnerable: |
+        public void DeleteRecord(int id) => _repo.Delete(id);
+      secure: |
+        public async Task DeleteRecord(ClaimsPrincipal user, int id) {
+            var rec = await _repo.Get(id);
+            await _authz.AuthorizeOrThrow(user, rec, "Delete");
+            _repo.Delete(id);
+        }
+
+# ---------------------------------------------------------------------------
+# CS-04.7 — Prevent privilege escalation via mass assignment
+# ---------------------------------------------------------------------------
+
+- id: CS-04.7
+  facet: Authorization
+  section: Mass Assignment and Privilege Fields
+  security_rule: >-
+    Security-relevant fields such as role, owner, or account status must
+    never be bound directly from request input, so a user cannot escalate
+    their own privileges by adding extra parameters.
+  vulnerability_pattern: >-
+    A request body is bound wholesale onto a domain object, so a caller can
+    include a privileged field like role or is_admin and have it persisted
+    even though the form never offered it.
+  secure_pattern: >-
+    Input is bound only to an explicit allowlist of editable fields, and
+    privileged attributes are set by server logic after a separate
+    authorization check.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user.update(requestBody)            # requestBody includes role=admin
+      secure: |
+        user.update(pick(requestBody, ["name", "email"]))
+    python:
+      vulnerable: |
+        for k, v in request.json.items():
+            setattr(user, k, v)
+      secure: |
+        for k in ("name", "email"):
+            if k in request.json: setattr(user, k, request.json[k])
+    javascript:
+      vulnerable: |
+        Object.assign(user, req.body);
+        await user.save();
+      secure: |
+        const { name, email } = req.body;
+        await user.update({ name, email });
+    java:
+      vulnerable: |
+        @PostMapping("/profile")
+        void update(@ModelAttribute User user) { repo.save(user); }
+      secure: |
+        @InitBinder
+        void bind(WebDataBinder b) { b.setAllowedFields("name", "email"); }
+    csharp:
+      vulnerable: |
+        [HttpPost] public IActionResult Update(User user) { _db.Update(user); }
+      secure: |
+        [HttpPost] public IActionResult Update(ProfileDto dto) {
+            var u = _db.Users.Find(dto.Id);
+            u.Name = dto.Name; u.Email = dto.Email; _db.SaveChanges();
+        }
+
+# ---------------------------------------------------------------------------
+# CS-04.8 — Re-verify authorization on every step of multi-stage workflows
+# ---------------------------------------------------------------------------
+
+- id: CS-04.8
+  facet: Authorization
+  section: Workflow and State Transition Checks
+  security_rule: >-
+    In a multi-step workflow, each step must independently verify both the
+    caller's permission and that the prior steps were completed, so a stage
+    cannot be reached out of order or by an unauthorized user.
+  vulnerability_pattern: >-
+    Authorization is checked only at the start of a workflow and later steps
+    trust a client-supplied flag, so an attacker can jump straight to a final
+    step such as confirming a payment or shipping an order.
+  secure_pattern: >-
+    Each step re-checks the caller's permission and reads the workflow state
+    from the server, rejecting any request whose recorded stage does not allow
+    the requested transition.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if request.step == "confirm": finalizeOrder(orderId)
+      secure: |
+        order = load(orderId)
+        if order.stage != "PAYMENT_OK": deny()
+        requirePermission(user, order, "confirm")
+        finalizeOrder(order)
+    python:
+      vulnerable: |
+        if request.form["stage"] == "ship":
+            order.ship()
+      secure: |
+        order = Order.query.get(oid)
+        if order.status != "PAID" or not can(user, order, "ship"): abort(403)
+        order.ship()
+    javascript:
+      vulnerable: |
+        if (req.body.step === "checkout") completeCheckout(cartId);
+      secure: |
+        const cart = await Cart.findById(cartId);
+        if (cart.stage !== "address-confirmed" || cart.userId !== req.user.id)
+          return res.sendStatus(409);
+        completeCheckout(cart);
+    java:
+      vulnerable: |
+        if ("APPROVE".equals(req.getStep())) loan.approve();
+      secure: |
+        Loan loan = loanRepo.findById(id).orElseThrow();
+        if (loan.getState() != REVIEWED || !authz.can(user, loan, "approve"))
+            throw new ForbiddenException();
+        loan.approve();
+    csharp:
+      vulnerable: |
+        if (model.Step == "Finalize") _service.Finalize(appId);
+      secure: |
+        var app = await _db.Applications.FindAsync(appId);
+        if (app.State != State.Verified || !await _authz.Can(user, app, "finalize"))
+            return Forbid();
+        _service.Finalize(app);
+
+# ---------------------------------------------------------------------------
+# CS-04.9 — Centralize authorization logic
+# ---------------------------------------------------------------------------
+
+- id: CS-04.9
+  facet: Authorization
+  section: Centralized Authorization Component
+  security_rule: >-
+    Authorization decisions should be made by a single, well-tested component
+    that all code paths call, rather than by ad-hoc inline checks scattered
+    across controllers.
+  vulnerability_pattern: >-
+    Permission logic is copy-pasted inline at many call sites, so the rules
+    drift apart over time and a single missed or incorrect copy silently
+    opens a hole.
+  secure_pattern: >-
+    A central authorization service exposes one decision function that every
+    protected path calls, so the rule is defined once, tested once, and
+    applied consistently.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if user.role == "mgr" or user.role == "admin": allow()   # repeated
+      secure: |
+        if authz.can(user, resource, action): allow()            # one decision point
+    python:
+      vulnerable: |
+        if current_user.is_admin or current_user.id == doc.owner_id:
+            return doc
+      secure: |
+        from app.security import authorize
+        authorize(current_user, doc, "read")
+        return doc
+    javascript:
+      vulnerable: |
+        if (user.role === "admin" || user.team === doc.team) return doc;
+      secure: |
+        const { can } = require("./authz");
+        if (!can(user, "read", doc)) throw new ForbiddenError();
+        return doc;
+    java:
+      vulnerable: |
+        if (user.isAdmin() || user.getId().equals(doc.getOwnerId())) { ... }
+      secure: |
+        authorizationService.check(user, doc, Action.READ);
+    csharp:
+      vulnerable: |
+        if (user.IsInRole("Admin") || doc.OwnerId == user.Id) { ... }
+      secure: |
+        await _authorizationService.AuthorizeAsync(user, doc, "Read");
+
+# ---------------------------------------------------------------------------
+# CS-04.10 — Validate context and ownership in API and microservice calls
+# ---------------------------------------------------------------------------
+
+- id: CS-04.10
+  facet: Authorization
+  section: API and Service-to-Service Authorization
+  security_rule: >-
+    Backend services and APIs must authorize the end-user context of each
+    request and must not assume that a request arriving from a trusted network
+    or an upstream gateway is already authorized.
+  vulnerability_pattern: >-
+    An internal service trusts any caller on the private network or any
+    request carrying a service token, so a compromised peer or a forged header
+    can act as any user without an access check.
+  secure_pattern: >-
+    Each service validates the propagated end-user identity and re-applies the
+    resource-level authorization check itself, treating the network and
+    upstream callers as untrusted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if request.fromInternalNetwork: trustUser(request.headerUserId)
+      secure: |
+        identity = verifyToken(request.bearerToken)
+        requirePermission(identity, request.resource, request.action)
+    python:
+      vulnerable: |
+        user_id = request.headers["X-User-Id"]   # set by anyone on the network
+      secure: |
+        claims = verify_jwt(request.headers["Authorization"])
+        user_id = claims["sub"]
+    javascript:
+      vulnerable: |
+        const userId = req.headers["x-user-id"];
+      secure: |
+        const claims = jwt.verify(bearer(req), PUBLIC_KEY);
+        const userId = claims.sub;
+    java:
+      vulnerable: |
+        String userId = request.getHeader("X-User-Id");
+      secure: |
+        Jws<Claims> jws = Jwts.parser().verifyWith(key).build()
+            .parseSignedClaims(bearer(request));
+        String userId = jws.getPayload().getSubject();
+    csharp:
+      vulnerable: |
+        var userId = Request.Headers["X-User-Id"].ToString();
+      secure: |
+        var principal = _tokenValidator.Validate(BearerToken(Request));
+        var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier);

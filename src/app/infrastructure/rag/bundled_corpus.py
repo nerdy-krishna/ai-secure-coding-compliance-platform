@@ -32,6 +32,11 @@ BUNDLED_CORPORA: Dict[str, Dict[str, str]] = {
     "cwe_essentials": {"csv": "cwe_essentials_corpus.csv", "facet": "concern_area"},
     "isvs": {"csv": "isvs_corpus.csv", "facet": "concern_area"},
     "asvs": {"csv": "asvs_corpus.csv", "facet": "control_family"},
+    "proactive_controls": {
+        "csv": "proactive_controls_corpus.csv",
+        "facet": "concern_area",
+    },
+    "cheatsheets": {"csv": "cheatsheets_corpus.csv", "facet": "concern_area"},
 }
 
 

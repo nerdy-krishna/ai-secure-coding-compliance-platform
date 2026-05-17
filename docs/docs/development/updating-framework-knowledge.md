@@ -62,19 +62,20 @@ Ingestion runs in-process for now (no separate worker container).
 The UI shows a spinner + the `rag_jobs` row's progress percentage.
 Large Git repos (hundreds of files) can take a couple of minutes.
 
-## Bundled corpora (ASVS, CWE Essentials, ISVS)
+## Bundled corpora
 
-Three frameworks ship their RAG corpus inside the repository rather than
-fetching it from an upstream Git repo:
+Five frameworks ship their enriched RAG corpus inside the repository
+rather than fetching it from an upstream Git repo:
 
-- **OWASP ASVS** — ~345 verification requirements, from the OWASP ASVS
-  5.0 CSV.
-- **CWE Essentials** — 14 concern-areas, content grounded in the MITRE
-  CWE Top 25 (2025).
-- **OWASP ISVS** — 7 concern-areas, content grounded in the OWASP IoT
-  Security Verification Standard.
+- **OWASP ASVS** — 345 verification requirements across 17 chapters.
+- **CWE Essentials** — 78 entries (one per CWE) across 14 concern-areas,
+  grounded in the MITRE CWE Top 25 (2025).
+- **OWASP ISVS** — 50 entries across 7 concern-areas, grounded in the
+  OWASP IoT Security Verification Standard.
+- **OWASP Proactive Controls** — 95 entries across the 10 controls.
+- **OWASP Cheatsheets** — 112 entries across 10 domains.
 
-For all three, the framework, its agents, and their prompt templates are
+For all five, the framework, its agents, and their prompt templates are
 created automatically by the seed (and by the data migration for
 existing deployments).
 
@@ -114,7 +115,7 @@ docker compose exec app python scripts/ingest_bundled_corpora.py
 This is idempotent — it replaces a framework's documents rather than
 duplicating them.
 
-The corpus CSVs are **generated**, never hand-edited. All three are
+The corpus CSVs are **generated**, never hand-edited. All five are
 rendered from hand-authored enriched YAML by the same harness,
 `scripts/build_enriched_corpus.py`:
 
@@ -125,6 +126,10 @@ rendered from hand-authored enriched YAML by the same harness,
   one entry per CWE).
 - `isvs_corpus.csv` — from per-concern-area YAML under
   `src/app/data/isvs_corpus/`.
+- `proactive_controls_corpus.csv` — from per-control YAML under
+  `src/app/data/proactive_controls_corpus/` (one file per C1-C10).
+- `cheatsheets_corpus.csv` — from per-domain YAML under
+  `src/app/data/cheatsheets_corpus/`.
 
 Each entry carries a security rule, vulnerability/secure pattern
 descriptions, and per-language code samples. Edit the YAML, then

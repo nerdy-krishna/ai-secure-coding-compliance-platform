@@ -1,0 +1,464 @@
+# OWASP Proactive Controls — C4: Address Security from the Start
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# C4 covers secure design and threat modeling: building security into the
+# architecture from the outset rather than bolting it on. Each entry: a
+# security_rule (the principle), a vulnerability_pattern and secure_pattern
+# (concept descriptions — no '*' or '[' — these feed the agent's generic
+# fallback), and short seed-sized code_patterns. Many practices here are
+# architectural, so generic-only entries are expected and correct.
+
+# ---------------------------------------------------------------------------
+# PC-C4.1 — Threat Modeling
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.1
+  facet: Secure Design & Threat Modeling
+  section: Threat Modeling
+  security_rule: >-
+    Each feature or change must be threat-modeled during design to
+    identify assets, trust boundaries, attackers, and likely attacks, so
+    that mitigations are designed in rather than discovered in production.
+  vulnerability_pattern: >-
+    A feature is built straight from functional requirements with no
+    structured analysis of who might attack it or how, so entire classes
+    of abuse are never considered until an incident reveals them.
+  secure_pattern: >-
+    The design is examined with a method such as STRIDE before coding,
+    enumerating data flows and trust boundaries, ranking threats by risk,
+    and recording the mitigation chosen for each one.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # design doc: "add file upload endpoint" — no threat analysis
+        feature = build(functional_requirements_only)
+      secure: |
+        # design doc lists assets, trust boundaries, STRIDE threats + mitigations
+        feature = build(functional_requirements, threat_model.mitigations)
+
+# ---------------------------------------------------------------------------
+# PC-C4.2 — Secure Defaults
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.2
+  facet: Secure Design & Threat Modeling
+  section: Secure Defaults
+  security_rule: >-
+    The default state of every option, feature, and account must be the
+    most secure one, so a system is safe out of the box and reducing
+    security is always a deliberate, explicit choice.
+  vulnerability_pattern: >-
+    Features ship enabled, permissive, or with well-known credentials by
+    default, so any deployment that does not actively harden itself is
+    exposed, and most deployments never harden.
+  secure_pattern: >-
+    Every default is the locked-down value — features off, access denied,
+    no preset credentials — and an operator must consciously opt in to
+    relax a setting after understanding the consequence.
+  code_patterns:
+    generic:
+      vulnerable: |
+        config = { debug: true, registration_open: true, tls_required: false }
+      secure: |
+        config = { debug: false, registration_open: false, tls_required: true }
+    python:
+      vulnerable: |
+        def create_account(name, is_admin=True, mfa_enabled=False):
+      secure: |
+        def create_account(name, is_admin=False, mfa_enabled=True):
+    javascript:
+      vulnerable: |
+        const app = express();   // no security middleware enabled by default
+      secure: |
+        const app = express();
+        app.use(helmet());       // secure headers on by default
+    java:
+      vulnerable: |
+        Cookie c = new Cookie("session", id);   // not secure, not httpOnly
+      secure: |
+        Cookie c = new Cookie("session", id);
+        c.setHttpOnly(true); c.setSecure(true);
+    csharp:
+      vulnerable: |
+        services.AddSession(o => { });   // cookie defaults left permissive
+      secure: |
+        services.AddSession(o => {
+            o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy = CookieSecurePolicy.Always; });
+
+# ---------------------------------------------------------------------------
+# PC-C4.3 — Defense in Depth
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.3
+  facet: Secure Design & Threat Modeling
+  section: Defense in Depth
+  security_rule: >-
+    Security must rely on multiple independent, layered controls so that
+    the failure or bypass of any single control does not by itself lead
+    to a compromise.
+  vulnerability_pattern: >-
+    A single control, often a client-side check or one server guard, is
+    the only thing standing between an attacker and a sensitive
+    operation, so one bypass exposes everything behind it.
+  secure_pattern: >-
+    Independent controls are stacked at different layers — client
+    feedback, server-side authorization, parameterized data access, and
+    database permissions — so an attacker must defeat each one in turn.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if uiHidDeleteButton: deleteRecord(id)   # UI is the only gate
+      secure: |
+        if user.canDelete(id):                   # server authz
+            deleteRecordWithRowLevelSecurity(id) # plus DB-enforced ownership
+    python:
+      vulnerable: |
+        @app.post("/admin/purge")
+        def purge():  # relies on the link being hidden in the menu
+            db.purge_all()
+      secure: |
+        @app.post("/admin/purge")
+        @require_role("admin")                # layer 1: route guard
+        def purge():
+            if not current_user.confirmed_step_up():  # layer 2: step-up auth
+                abort(403)
+            db.purge_all()                    # layer 3: DB role lacks others' rows
+    java:
+      vulnerable: |
+        public void transfer(Account to, long amount) { ledger.move(to, amount); }
+      secure: |
+        @PreAuthorize("hasRole('TELLER')")            // layer 1
+        public void transfer(Account to, long amount) {
+            limitGuard.check(amount);                  // layer 2: business limit
+            ledger.move(to, amount);                   // layer 3: DB constraints
+        }
+    csharp:
+      vulnerable: |
+        public IActionResult Delete(int id) => Ok(_repo.Delete(id));
+      secure: |
+        [Authorize(Roles = "Admin")]                   // layer 1
+        public IActionResult Delete(int id) {
+            if (!_repo.OwnedByTenant(id, TenantId)) return Forbid(); // layer 2
+            return Ok(_repo.Delete(id));                // layer 3: scoped repo
+        }
+
+# ---------------------------------------------------------------------------
+# PC-C4.4 — Trust Boundary Enforcement
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.4
+  facet: Secure Design & Threat Modeling
+  section: Trust Boundary Enforcement
+  security_rule: >-
+    Every point where data or control crosses from a less trusted zone
+    to a more trusted one must be an explicit checkpoint that validates,
+    authenticates, and authorizes what is crossing.
+  vulnerability_pattern: >-
+    Data that originated outside the trust boundary — from a client, a
+    third-party API, or a queue — is consumed deep in the system as if it
+    were internally generated, so no component re-checks it.
+  secure_pattern: >-
+    Untrusted input is validated and authorized at the boundary where it
+    enters, and trust level is treated as a property of the data so
+    inner layers never assume a value is safe just because it arrived.
+  code_patterns:
+    generic:
+      vulnerable: |
+        price = request.body.price            # client-supplied
+        chargeCard(price)                      # used as if trusted
+      secure: |
+        item = catalog.lookup(request.body.itemId)  # re-derive at the boundary
+        chargeCard(item.serverSidePrice)
+    python:
+      vulnerable: |
+        def handler(event):
+            user_role = event["headers"]["X-Role"]   # caller-controlled header
+            if user_role == "admin": do_admin()
+      secure: |
+        def handler(event):
+            user = verify_jwt(event["headers"]["Authorization"])  # boundary check
+            if user.role == "admin": do_admin()
+    javascript:
+      vulnerable: |
+        const total = req.body.cartTotal;     // trusts the browser
+        saveOrder(total);
+      secure: |
+        const total = await recomputeTotal(req.body.cartItemIds); // server-derived
+        saveOrder(total);
+    java:
+      vulnerable: |
+        int qty = Integer.parseInt(req.getParameter("qty"));
+        warehouse.ship(qty);                  // no bound enforced at entry
+      secure: |
+        int qty = validateRange(req.getParameter("qty"), 1, MAX_QTY); // at boundary
+        warehouse.ship(qty);
+    csharp:
+      vulnerable: |
+        public void Import(OrderDto dto) => _orders.Save(dto); // dto trusted whole
+      secure: |
+        public void Import(OrderDto dto) {
+            var clean = _validator.ValidateAndAuthorize(dto, User); // boundary gate
+            _orders.Save(clean);
+        }
+
+# ---------------------------------------------------------------------------
+# PC-C4.5 — Least Privilege Architecture
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.5
+  facet: Secure Design & Threat Modeling
+  section: Least Privilege Architecture
+  security_rule: >-
+    Every component, service account, and process must be granted only
+    the minimum permissions and resource access needed for its function,
+    so a compromise of one part cannot reach far beyond it.
+  vulnerability_pattern: >-
+    Services run as a privileged or shared account with broad database,
+    cloud, or filesystem rights, so any flaw in that service gives an
+    attacker far more reach than the service itself ever needed.
+  secure_pattern: >-
+    Each component runs under its own narrowly scoped identity, granted
+    exactly the read or write rights it uses, so blast radius is confined
+    to that component's legitimate scope.
+  code_patterns:
+    generic:
+      vulnerable: |
+        db_user = "root"            # app connects as full DBA
+      secure: |
+        db_user = "orders_svc"      # GRANT only SELECT,INSERT on orders.*
+    python:
+      vulnerable: |
+        engine = create_engine("postgresql://postgres:pw@db/app")  # superuser
+      secure: |
+        engine = create_engine("postgresql://orders_ro:pw@db/app") # scoped role
+    java:
+      vulnerable: |
+        // container runs as root, mounts the whole host /data
+        new ProcessBuilder("/app/run.sh").start();
+      secure: |
+        // Dockerfile: USER appuser ; volume mounted read-only, scoped to /data/app
+        new ProcessBuilder("/app/run.sh").start();
+    csharp:
+      vulnerable: |
+        var cred = new DefaultAzureCredential();  // app identity has Owner role
+      secure: |
+        var cred = new ManagedIdentityCredential(); // identity scoped to one Blob container
+
+# ---------------------------------------------------------------------------
+# PC-C4.6 — Fail Securely
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.6
+  facet: Secure Design & Threat Modeling
+  section: Fail Securely
+  security_rule: >-
+    When an operation errors, times out, or reaches an unexpected state,
+    the system must fall back to a denied and safe condition rather than
+    granting access or continuing as if the operation had succeeded.
+  vulnerability_pattern: >-
+    An exception or timeout in a security check is caught and treated as
+    success, or a default branch grants access, so a failure in the
+    control becomes an open door instead of a closed one.
+  secure_pattern: >-
+    Security decisions default to deny — an unhandled state, an exception,
+    or a timeout in an authorization or validation step results in the
+    request being rejected and the error logged.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try: allowed = authz.check(user, resource)
+        except: allowed = true            # error opens access
+      secure: |
+        try: allowed = authz.check(user, resource)
+        except: allowed = false           # error denies access
+    python:
+      vulnerable: |
+        def is_allowed(user, doc):
+            try:
+                return policy.evaluate(user, doc)
+            except Exception:
+                return True               # fails open
+      secure: |
+        def is_allowed(user, doc):
+            try:
+                return policy.evaluate(user, doc)
+            except Exception:
+                log.exception("authz error")
+                return False              # fails closed
+    javascript:
+      vulnerable: |
+        let ok;
+        try { ok = await verifyToken(t); } catch { ok = true; }
+      secure: |
+        let ok = false;
+        try { ok = await verifyToken(t); } catch (e) { logger.error(e); }
+    java:
+      vulnerable: |
+        boolean granted;
+        try { granted = acl.permit(user, res); }
+        catch (Exception e) { granted = true; }
+      secure: |
+        boolean granted = false;
+        try { granted = acl.permit(user, res); }
+        catch (Exception e) { log.error("acl failure", e); }
+    csharp:
+      vulnerable: |
+        bool ok;
+        try { ok = _authz.Check(user, res); } catch { ok = true; }
+      secure: |
+        bool ok = false;
+        try { ok = _authz.Check(user, res); }
+        catch (Exception e) { _log.LogError(e, "authz failure"); }
+
+# ---------------------------------------------------------------------------
+# PC-C4.7 — Minimize Attack Surface
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.7
+  facet: Secure Design & Threat Modeling
+  section: Minimize Attack Surface
+  security_rule: >-
+    Only the features, endpoints, ports, parameters, and dependencies
+    actually required must be exposed; everything unused must be removed
+    or disabled so it cannot be attacked.
+  vulnerability_pattern: >-
+    Debug endpoints, sample applications, unused admin consoles, verbose
+    parameters, or dormant dependencies remain reachable in production,
+    each adding code that can be exploited but is never exercised.
+  secure_pattern: >-
+    The deployed system exposes a deliberately minimal surface — debug
+    and demo routes stripped, optional features off, ports closed, and
+    unused dependencies pruned from the build.
+  code_patterns:
+    generic:
+      vulnerable: |
+        routes = [api, adminConsole, debugShell, sampleApp]   # all shipped
+      secure: |
+        routes = [api]                  # debug/demo routes excluded from prod build
+    python:
+      vulnerable: |
+        app.run(host="0.0.0.0", debug=True)   # debugger/console exposed
+      secure: |
+        app.run(host="127.0.0.1", debug=False)
+    javascript:
+      vulnerable: |
+        if (true) app.use("/debug", debugRouter);  // always mounted
+      secure: |
+        if (process.env.NODE_ENV !== "production") app.use("/debug", debugRouter);
+    java:
+      vulnerable: |
+        management.endpoints.web.exposure.include=*   # all actuators exposed
+      secure: |
+        management.endpoints.web.exposure.include=health
+    csharp:
+      vulnerable: |
+        app.UseDeveloperExceptionPage();   // unconditional, leaks stack traces
+      secure: |
+        if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+
+# ---------------------------------------------------------------------------
+# PC-C4.8 — Separation of Concerns and Privilege Tiers
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.8
+  facet: Secure Design & Threat Modeling
+  section: Separation of Concerns and Privilege Tiers
+  security_rule: >-
+    Code that handles different sensitivity levels or privilege tiers
+    must be separated into distinct components or layers, so high-value
+    operations are isolated and cannot be reached through low-value paths.
+  vulnerability_pattern: >-
+    Presentation, business logic, and privileged administrative actions
+    live tangled in one layer, so an attacker who reaches the low-trust
+    entry point can also invoke high-trust operations beside it.
+  secure_pattern: >-
+    Privileged operations are factored into a separate module or service
+    behind their own authorization boundary, distinct from the
+    user-facing layer, with a narrow, explicit interface between tiers.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # one controller mixes public reads and privileged config writes
+        handle(request) -> { readProfile(); rotateSigningKeys(); }
+      secure: |
+        publicApi.handle(request)        # user-tier service
+        adminApi.handle(request)         # separate service, own authz boundary
+    python:
+      vulnerable: |
+        @app.route("/do/<action>")
+        def do(action):
+            globals()[action]()          # public route can call admin functions
+      secure: |
+        # admin actions live in a separate blueprint, mounted behind auth
+        app.register_blueprint(admin_bp, url_prefix="/admin")  # @before_request authz
+    java:
+      vulnerable: |
+        class AppService { void viewOrder() {} void resetAllPasswords() {} }
+      secure: |
+        class OrderService { void viewOrder() {} }            // user tier
+        class AdminService { void resetAllPasswords() {} }    // privileged tier
+
+# ---------------------------------------------------------------------------
+# PC-C4.9 — Document Security Decisions and Assumptions
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.9
+  facet: Secure Design & Threat Modeling
+  section: Document Security Decisions and Assumptions
+  security_rule: >-
+    Security-relevant design decisions, trust assumptions, and accepted
+    risks must be written down alongside the design, so reviewers and
+    future maintainers can see what the system depends on to stay safe.
+  vulnerability_pattern: >-
+    Security assumptions live only in a developer's head — for example
+    that an input is always validated upstream — so a later change
+    silently breaks the assumption and reopens a vulnerability.
+  secure_pattern: >-
+    Each control records the threat it addresses and the assumption it
+    relies on, in an architecture decision record or inline note, so the
+    contract is visible and a change that violates it is caught in review.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def render(html): write(html)   # silently assumes caller sanitized html
+      secure: |
+        # SECURITY: caller MUST pass sanitizer-cleaned HTML (threat: stored XSS)
+        def render(sanitized_html): write(sanitized_html)
+    python:
+      vulnerable: |
+        def store_token(t):
+            cache[t.id] = t              # assumes t was issued by us — unstated
+      secure: |
+        def store_token(t):
+            # SECURITY ASSUMPTION: t is signature-verified by verify_jwt() upstream.
+            # ADR-021 records this trust boundary.
+            cache[t.id] = t
+
+# ---------------------------------------------------------------------------
+# PC-C4.10 — Secure Design Review Before Implementation
+# ---------------------------------------------------------------------------
+
+- id: PC-C4.10
+  facet: Secure Design & Threat Modeling
+  section: Secure Design Review Before Implementation
+  security_rule: >-
+    Designs for security-significant features must pass a security review
+    before implementation begins, so flawed architecture is corrected on
+    paper rather than after it is built and deployed.
+  vulnerability_pattern: >-
+    A feature touching authentication, payments, or sensitive data goes
+    straight from idea to code with no security checkpoint, so a flawed
+    design is only questioned once it is expensive to change.
+  secure_pattern: >-
+    Security-significant work passes a gated design review — threat model
+    and mitigations examined and signed off — before any implementation,
+    making rework cheap and catching design-level flaws early.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # workflow: idea -> code -> ship   (no design gate)
+        pipeline = [idea, code, ship]
+      secure: |
+        # workflow: idea -> threat model -> security design review -> code -> ship
+        pipeline = [idea, threat_model, security_design_review, code, ship]

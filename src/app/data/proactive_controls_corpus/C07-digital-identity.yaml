@@ -1,0 +1,531 @@
+# OWASP Proactive Controls — C7: Implement Digital Identity
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+#
+# C7 covers authentication levels, multi-factor authentication, password
+# storage, session management, secure tokens, and credential recovery.
+
+# ---------------------------------------------------------------------------
+# PC-C7.1 — Authentication Assurance Levels
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.1
+  facet: Digital Identity
+  section: Authentication Assurance Levels
+  security_rule: >-
+    The authentication strength required for an operation must match the
+    sensitivity of that operation, so that high-value actions demand a
+    higher assurance level than routine ones.
+  vulnerability_pattern: >-
+    A single weak authentication step, such as a password alone, grants
+    access to every operation regardless of risk, so a low-assurance login
+    is enough to perform high-value actions like changing payout details.
+  secure_pattern: >-
+    Sensitive operations require step-up authentication that proves a
+    higher assurance level, and the application checks the level reached
+    by the current session before allowing the action.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if loggedIn(user): transferFunds(request)
+      secure: |
+        if assuranceLevel(session) >= AAL2: transferFunds(request)
+        else: requireStepUp()
+    python:
+      vulnerable: |
+        if request.user.is_authenticated:
+            do_wire_transfer(request)
+      secure: |
+        if request.session.get("aal", 1) >= 2:
+            do_wire_transfer(request)
+        else:
+            return redirect("step_up_mfa")
+    javascript:
+      vulnerable: |
+        if (req.user) processPayout(req.body);
+      secure: |
+        if (req.session.aal >= 2) processPayout(req.body);
+        else res.redirect("/auth/step-up");
+    java:
+      vulnerable: |
+        if (session.getAttribute("user") != null) transfer(request);
+      secure: |
+        if (Integer.parseInt(session.getAttribute("aal").toString()) >= 2)
+            transfer(request);
+        else response.sendRedirect("/auth/step-up");
+    csharp:
+      vulnerable: |
+        if (User.Identity.IsAuthenticated) Transfer(model);
+      secure: |
+        if (HttpContext.Session.GetInt32("aal") >= 2) Transfer(model);
+        else return RedirectToAction("StepUp", "Auth");
+
+# ---------------------------------------------------------------------------
+# PC-C7.2 — Password Storage with Adaptive Hashing
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.2
+  facet: Digital Identity
+  section: Password Storage
+  security_rule: >-
+    Passwords must be stored only as salted hashes produced by a modern
+    adaptive, memory-hard hashing function, never in plaintext, reversible
+    encryption, or a fast general-purpose hash.
+  vulnerability_pattern: >-
+    Passwords are stored in plaintext, encrypted reversibly, or hashed
+    with a fast unsalted digest such as MD5 or SHA-256, so a database
+    breach exposes the credentials to rapid offline cracking.
+  secure_pattern: >-
+    Each password is run through an adaptive hash such as Argon2id,
+    scrypt, or bcrypt with a per-user salt and tuned work factor, so
+    stored values resist offline brute-force attacks.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(user, sha256(password))
+      secure: |
+        store(user, argon2id(password, salt, workFactor))
+    python:
+      vulnerable: |
+        user.password = hashlib.sha256(password.encode()).hexdigest()
+      secure: |
+        from argon2 import PasswordHasher
+        user.password = PasswordHasher().hash(password)
+    javascript:
+      vulnerable: |
+        user.password = crypto.createHash("sha256").update(password).digest("hex");
+      secure: |
+        user.password = await argon2.hash(password, { type: argon2.argon2id });
+    java:
+      vulnerable: |
+        user.setPassword(DigestUtils.sha256Hex(password));
+      secure: |
+        user.setPassword(new Argon2PasswordEncoder().encode(password));
+    csharp:
+      vulnerable: |
+        user.Password = Convert.ToHexString(SHA256.HashData(bytes));
+      secure: |
+        user.Password = Argon2.Hash(password);   // Isopoh.Cryptography.Argon2
+
+# ---------------------------------------------------------------------------
+# PC-C7.3 — Constant-Time Credential Verification
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.3
+  facet: Digital Identity
+  section: Password Storage
+  security_rule: >-
+    Verifying a submitted password must use the hashing library's own
+    verify routine so the comparison runs in constant time and reveals
+    nothing through timing differences.
+  vulnerability_pattern: >-
+    A password or token is verified with an ordinary equality check that
+    returns as soon as the first differing byte is found, so response
+    timing leaks how much of the secret was guessed correctly.
+  secure_pattern: >-
+    Verification uses the adaptive hash library's verify function, or a
+    constant-time comparison routine, so the time taken does not depend
+    on how many bytes match.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if storedHash == hash(submitted): grantAccess()
+      secure: |
+        if constantTimeVerify(storedHash, submitted): grantAccess()
+    python:
+      vulnerable: |
+        if user.password == hashlib.sha256(submitted.encode()).hexdigest():
+            login(user)
+      secure: |
+        if PasswordHasher().verify(user.password, submitted):
+            login(user)
+    javascript:
+      vulnerable: |
+        if (user.token === providedToken) grant();
+      secure: |
+        if (crypto.timingSafeEqual(Buffer.from(user.token),
+            Buffer.from(providedToken))) grant();
+    java:
+      vulnerable: |
+        if (storedHash.equals(hash(submitted))) login();
+      secure: |
+        if (encoder.matches(submitted, user.getPassword())) login();
+    csharp:
+      vulnerable: |
+        if (user.Token == provided) Grant();
+      secure: |
+        if (CryptographicOperations.FixedTimeEquals(
+            stored, providedBytes)) Grant();
+
+# ---------------------------------------------------------------------------
+# PC-C7.4 — Multi-Factor Authentication
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.4
+  facet: Digital Identity
+  section: Multi-Factor Authentication
+  security_rule: >-
+    A second authentication factor must be verified server-side on every
+    login before a session is granted, and the factor check must not be
+    skippable by the client.
+  vulnerability_pattern: >-
+    The second factor is requested but its verification is performed only
+    on the client, or the server issues the session before the factor is
+    confirmed, so an attacker who knows the password can skip the step.
+  secure_pattern: >-
+    The server validates the second factor — for example a TOTP code or
+    a WebAuthn assertion — against the stored secret and issues an
+    authenticated session only after that check succeeds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if passwordOk(user): issueSession(user)   # MFA only enforced in the UI
+      secure: |
+        if passwordOk(user) and verifyTotp(user.secret, code):
+            issueSession(user)
+    python:
+      vulnerable: |
+        if check_password(user, pw):
+            return create_session(user)
+      secure: |
+        import pyotp
+        if check_password(user, pw) and pyotp.TOTP(user.totp_secret).verify(code):
+            return create_session(user)
+    javascript:
+      vulnerable: |
+        if (await bcrypt.compare(pw, user.hash)) startSession(user);
+      secure: |
+        if (await bcrypt.compare(pw, user.hash) &&
+            speakeasy.totp.verify({ secret: user.totpSecret, token: code }))
+          startSession(user);
+    java:
+      vulnerable: |
+        if (passwordEncoder.matches(pw, user.getHash())) login(user);
+      secure: |
+        if (passwordEncoder.matches(pw, user.getHash())
+            && totpVerifier.isValidCode(user.getTotpSecret(), code))
+          login(user);
+    csharp:
+      vulnerable: |
+        if (signInManager.CheckPassword(user, pw)) SignIn(user);
+      secure: |
+        if (signInManager.CheckPassword(user, pw) &&
+            totp.VerifyTotp(user.TotpSecret, code, out _)) SignIn(user);
+
+# ---------------------------------------------------------------------------
+# PC-C7.5 — Secure Session Lifecycle
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.5
+  facet: Digital Identity
+  section: Session Management
+  security_rule: >-
+    Session identifiers must be regenerated on any change of privilege,
+    such as login, and invalidated server-side on logout, so a fixed or
+    stale identifier cannot be reused.
+  vulnerability_pattern: >-
+    The same session identifier is kept across login, or logout only
+    clears the client cookie without destroying the server-side session,
+    so a captured identifier remains valid and enables session fixation.
+  secure_pattern: >-
+    The framework regenerates the session identifier when the user
+    authenticates and fully destroys the server-side session on logout,
+    so each privilege boundary gets a fresh, single-use identifier.
+  code_patterns:
+    generic:
+      vulnerable: |
+        login(user)                       # session id unchanged from pre-login
+      secure: |
+        regenerateSessionId()
+        login(user)
+    python:
+      vulnerable: |
+        request.session["user_id"] = user.id
+      secure: |
+        request.session.cycle_key()       # new session id on login
+        request.session["user_id"] = user.id
+    javascript:
+      vulnerable: |
+        req.session.userId = user.id;
+      secure: |
+        req.session.regenerate(() => { req.session.userId = user.id; });
+    java:
+      vulnerable: |
+        request.getSession().setAttribute("user", user);
+      secure: |
+        request.changeSessionId();        // Servlet 3.1 fixation protection
+        request.getSession().setAttribute("user", user);
+    csharp:
+      vulnerable: |
+        HttpContext.Session.SetString("user", user.Id);
+      secure: |
+        await HttpContext.SignInAsync(principal);   // ASP.NET rotates the auth cookie
+        HttpContext.Session.SetString("user", user.Id);
+
+# ---------------------------------------------------------------------------
+# PC-C7.6 — Hardened Session Cookies
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.6
+  facet: Digital Identity
+  section: Session Management
+  security_rule: >-
+    Session cookies must be issued with the HttpOnly, Secure, and
+    SameSite attributes so they cannot be read by scripts, sent over
+    plaintext connections, or attached to cross-site requests.
+  vulnerability_pattern: >-
+    A session cookie is set without the HttpOnly, Secure, or SameSite
+    attributes, so client script can steal it, it can travel over HTTP,
+    and it rides along on cross-site requests enabling CSRF.
+  secure_pattern: >-
+    The cookie is created with HttpOnly to block script access, Secure to
+    confine it to HTTPS, and SameSite set to Lax or Strict to prevent
+    cross-site submission.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", id)
+      secure: |
+        setCookie("session", id, httpOnly=true, secure=true, sameSite="Lax")
+    python:
+      vulnerable: |
+        response.set_cookie("session", sid)
+      secure: |
+        response.set_cookie("session", sid, httponly=True, secure=True,
+                             samesite="Lax")
+    javascript:
+      vulnerable: |
+        res.cookie("session", sid);
+      secure: |
+        res.cookie("session", sid, { httpOnly: true, secure: true,
+                                     sameSite: "lax" });
+    java:
+      vulnerable: |
+        response.addCookie(new Cookie("session", sid));
+      secure: |
+        ResponseCookie c = ResponseCookie.from("session", sid)
+            .httpOnly(true).secure(true).sameSite("Lax").build();
+        response.addHeader("Set-Cookie", c.toString());
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", sid);
+      secure: |
+        Response.Cookies.Append("session", sid, new CookieOptions {
+            HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
+
+# ---------------------------------------------------------------------------
+# PC-C7.7 — Secure Token Generation
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.7
+  facet: Digital Identity
+  section: Secure Tokens
+  security_rule: >-
+    Session identifiers, password-reset tokens, and similar secrets must
+    be generated by a cryptographically secure random source with enough
+    entropy to make guessing infeasible.
+  vulnerability_pattern: >-
+    A token is built from a predictable source such as a counter, a
+    timestamp, or a non-cryptographic random generator, so an attacker
+    can predict or enumerate valid token values.
+  secure_pattern: >-
+    Tokens are drawn from a cryptographically secure random generator
+    with at least 128 bits of entropy and encoded for safe transport,
+    so each value is unpredictable and effectively unguessable.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = md5(userId + currentTime())
+      secure: |
+        token = base64url(secureRandomBytes(32))
+    python:
+      vulnerable: |
+        token = str(random.randint(0, 999999))
+      secure: |
+        import secrets
+        token = secrets.token_urlsafe(32)
+    javascript:
+      vulnerable: |
+        const token = Math.random().toString(36).slice(2);
+      secure: |
+        const token = crypto.randomBytes(32).toString("base64url");
+    java:
+      vulnerable: |
+        String token = Long.toString(new Random().nextLong());
+      secure: |
+        byte[] b = new byte[32];
+        new SecureRandom().nextBytes(b);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(b);
+    csharp:
+      vulnerable: |
+        var token = new Random().Next().ToString();
+      secure: |
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+# ---------------------------------------------------------------------------
+# PC-C7.8 — JWT Signature and Algorithm Verification
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.8
+  facet: Digital Identity
+  section: Secure Tokens
+  security_rule: >-
+    When stateless tokens such as JWTs are used, every token must have
+    its signature verified with a fixed expected algorithm, and the none
+    algorithm and client-supplied algorithm choices must be rejected.
+  vulnerability_pattern: >-
+    A JWT is decoded without verifying the signature, or the algorithm is
+    taken from the token header, so an attacker can forge claims or
+    present an unsigned token with the none algorithm.
+  secure_pattern: >-
+    The token is verified with the application's key against a fixed,
+    explicitly listed algorithm, and issuer, audience, and expiry claims
+    are validated before any claim is trusted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        claims = decodeJwt(token)             # signature not checked
+      secure: |
+        claims = verifyJwt(token, key, expectedAlg="RS256")
+    python:
+      vulnerable: |
+        claims = jwt.decode(token, options={"verify_signature": False})
+      secure: |
+        claims = jwt.decode(token, key, algorithms=["RS256"],
+                            audience=AUD, issuer=ISS)
+    javascript:
+      vulnerable: |
+        const claims = jwt.decode(token);
+      secure: |
+        const claims = jwt.verify(token, publicKey,
+            { algorithms: ["RS256"], audience: AUD, issuer: ISS });
+    java:
+      vulnerable: |
+        Claims c = Jwts.parser().parseClaimsJwt(token).getBody();
+      secure: |
+        Claims c = Jwts.parser().verifyWith(publicKey)
+            .requireIssuer(ISS).build().parseSignedClaims(token).getPayload();
+    csharp:
+      vulnerable: |
+        var claims = new JwtSecurityTokenHandler().ReadJwtToken(token);
+      secure: |
+        new JwtSecurityTokenHandler().ValidateToken(token, new TokenValidationParameters {
+            ValidAlgorithms = new[] { "RS256" }, IssuerSigningKey = key,
+            ValidateIssuer = true }, out _);
+
+# ---------------------------------------------------------------------------
+# PC-C7.9 — Secure Credential Recovery
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.9
+  facet: Digital Identity
+  section: Credential Recovery
+  security_rule: >-
+    Password recovery must send a single-use, time-limited, random token
+    over a side channel rather than revealing or emailing the existing
+    password, and the token must be invalidated once used.
+  vulnerability_pattern: >-
+    Account recovery emails the existing password, exposes a security
+    question answer, or issues a reset token that does not expire and
+    can be reused, so the recovery path becomes the weakest entry point.
+  secure_pattern: >-
+    Recovery generates a high-entropy single-use token with a short
+    expiry, delivers it out of band, and consumes the token on first use
+    so it cannot be replayed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        email(user, "Your password is: " + user.password)
+      secure: |
+        token = newResetToken(expiresIn=15min, singleUse=true)
+        email(user, resetLink(token))
+    python:
+      vulnerable: |
+        send_mail(user.email, f"Your password is {user.password}")
+      secure: |
+        token = secrets.token_urlsafe(32)
+        save_reset(user, token, expires=now() + timedelta(minutes=15))
+        send_mail(user.email, reset_link(token))
+    javascript:
+      vulnerable: |
+        sendMail(user.email, `Your password: ${user.password}`);
+      secure: |
+        const token = crypto.randomBytes(32).toString("base64url");
+        await saveReset(user.id, token, { expiresIn: 900 });
+        sendMail(user.email, resetLink(token));
+    java:
+      vulnerable: |
+        mailer.send(user.getEmail(), "Password: " + user.getPassword());
+      secure: |
+        String token = tokenGenerator.create();
+        resetRepo.save(new ResetToken(user, token, Instant.now().plusSeconds(900)));
+        mailer.send(user.getEmail(), resetLink(token));
+    csharp:
+      vulnerable: |
+        emailSender.Send(user.Email, $"Your password is {user.Password}");
+      secure: |
+        var token = await userManager.GeneratePasswordResetTokenAsync(user);
+        emailSender.Send(user.Email, ResetLink(token));
+
+# ---------------------------------------------------------------------------
+# PC-C7.10 — Authentication Throttling and Generic Errors
+# ---------------------------------------------------------------------------
+
+- id: PC-C7.10
+  facet: Digital Identity
+  section: Authentication Hardening
+  security_rule: >-
+    Authentication endpoints must throttle or lock out repeated failures
+    and return the same generic error for every failure cause, so
+    credentials cannot be brute-forced or enumerated.
+  vulnerability_pattern: >-
+    Login accepts unlimited attempts and returns distinct messages such
+    as user not found versus wrong password, so an attacker can both
+    enumerate valid accounts and brute-force passwords without limit.
+  secure_pattern: >-
+    Failed attempts are counted and rate-limited or locked per account
+    and source, and every failure returns one identical generic message
+    so the cause is never disclosed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if not user: return "No such user"
+        if not passwordOk: return "Wrong password"
+      secure: |
+        if failedAttempts(account, ip) > LIMIT: reject("Too many attempts")
+        if not authenticated: return "Invalid username or password"
+    python:
+      vulnerable: |
+        if user is None:
+            return "Account does not exist", 404
+      secure: |
+        if not limiter.allow(ip, username):
+            return "Too many attempts, try later", 429
+        if not authenticated:
+            return "Invalid username or password", 401
+    javascript:
+      vulnerable: |
+        if (!user) return res.status(404).send("Unknown account");
+      secure: |
+        if (await tooManyFailures(ip, username))
+          return res.status(429).send("Too many attempts");
+        if (!ok) return res.status(401).send("Invalid username or password");
+    java:
+      vulnerable: |
+        if (user == null) return "User not found";
+      secure: |
+        if (loginAttempts.exceeded(ip, username))
+            return "Too many attempts";
+        if (!ok) return "Invalid username or password";
+    csharp:
+      vulnerable: |
+        if (user == null) return Content("No account with that email");
+      secure: |
+        if (lockout.IsLockedOut(username))
+            return Content("Too many attempts");
+        if (!ok) return Content("Invalid username or password");

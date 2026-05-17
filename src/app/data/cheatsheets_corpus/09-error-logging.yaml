@@ -1,0 +1,562 @@
+# OWASP Cheat Sheet Series — Domain 09: Error Handling & Logging
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Source cheat sheets: Error Handling, Logging, Logging Vocabulary.
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-09.1 — Generic error responses
+# ---------------------------------------------------------------------------
+
+- id: CS-09.1
+  facet: Error Handling & Logging
+  section: Generic Error Responses
+  security_rule: >-
+    Error responses returned to a client must be generic and free of
+    internal detail; stack traces, exception messages, and source paths
+    must never reach the user.
+  vulnerability_pattern: >-
+    An unhandled exception is rendered straight into the HTTP response,
+    so the caller receives a stack trace, a SQL error, or a file path
+    that reveals the framework, schema, and internal layout.
+  secure_pattern: >-
+    Exceptions are caught at the boundary, logged in full on the server,
+    and the client receives a short generic message and a correlation
+    identifier with no internal detail.
+  code_patterns:
+    generic:
+      vulnerable: |
+        catch (e) { respond(500, e.stackTrace) }
+      secure: |
+        catch (e) { log(e); respond(500, "An error occurred. Ref: " + id) }
+    python:
+      vulnerable: |
+        return Response(str(exc) + traceback.format_exc(), status=500)
+      secure: |
+        logger.exception("request failed")
+        return JSONResponse({"error": "internal_error"}, status_code=500)
+    javascript:
+      vulnerable: |
+        app.use((err, req, res, next) => res.status(500).send(err.stack));
+      secure: |
+        app.use((err, req, res, next) => {
+          logger.error(err); res.status(500).json({ error: "internal_error" });
+        });
+    java:
+      vulnerable: |
+        catch (Exception e) { resp.getWriter().write(e.toString()); }
+      secure: |
+        catch (Exception e) { log.error("failed", e);
+          resp.sendError(500, "Internal error"); }
+    csharp:
+      vulnerable: |
+        catch (Exception ex) { return Content(ex.ToString()); }
+      secure: |
+        catch (Exception ex) { _logger.LogError(ex, "failed");
+          return Problem("Internal error"); }
+
+# ---------------------------------------------------------------------------
+# CS-09.2 — Disable debug mode in production
+# ---------------------------------------------------------------------------
+
+- id: CS-09.2
+  facet: Error Handling & Logging
+  section: Production Error Configuration
+  security_rule: >-
+    Debug, development, and verbose-error modes must be disabled in
+    production so the framework's interactive error pages and detailed
+    diagnostics are never served to end users.
+  vulnerability_pattern: >-
+    The application runs in production with debug mode left on, so the
+    framework serves interactive tracebacks, environment dumps, and in
+    some frameworks a live console to anyone who triggers an error.
+  secure_pattern: >-
+    Debug mode is forced off in production builds and configuration, so
+    failures fall through to a generic custom error page while full
+    detail is written only to server-side logs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        config.debug = true        # left on in the production deployment
+      secure: |
+        config.debug = false       # generic error page in production
+    python:
+      vulnerable: |
+        app.run(debug=True)
+      secure: |
+        app.run(debug=False)       # DEBUG=False also set in settings
+    javascript:
+      vulnerable: |
+        app.set("env", "development");
+      secure: |
+        process.env.NODE_ENV = "production";  // detailed errors suppressed
+    java:
+      vulnerable: |
+        server.error.include-stacktrace=always
+      secure: |
+        server.error.include-stacktrace=never
+    csharp:
+      vulnerable: |
+        app.UseDeveloperExceptionPage();
+      secure: |
+        if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+        else app.UseExceptionHandler("/error");
+
+# ---------------------------------------------------------------------------
+# CS-09.3 — Fail securely (default deny on error)
+# ---------------------------------------------------------------------------
+
+- id: CS-09.3
+  facet: Error Handling & Logging
+  section: Fail Securely
+  security_rule: >-
+    Security decisions must fail closed: when an authorization, validation,
+    or verification step throws, the outcome must be denial, never an
+    implicit grant.
+  vulnerability_pattern: >-
+    A permission or token check is wrapped so that an exception is
+    swallowed and execution continues, leaving an authorized flag at its
+    permissive default and granting access on failure.
+  secure_pattern: >-
+    The security flag defaults to denied and is set to allowed only on an
+    explicit successful check; any exception leaves it denied and the
+    request is rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        allowed = true
+        try { allowed = checkAccess(user) } catch (e) { /* ignored */ }
+      secure: |
+        allowed = false
+        try { allowed = checkAccess(user) } catch (e) { allowed = false }
+    python:
+      vulnerable: |
+        try: ok = verify_token(t)
+        except Exception: ok = True
+      secure: |
+        try: ok = verify_token(t)
+        except Exception: ok = False
+    javascript:
+      vulnerable: |
+        let ok = true;
+        try { ok = await verify(token); } catch { /* swallow */ }
+      secure: |
+        let ok = false;
+        try { ok = await verify(token); } catch { ok = false; }
+    java:
+      vulnerable: |
+        boolean ok = true;
+        try { ok = authz.check(user); } catch (Exception e) { }
+      secure: |
+        boolean ok = false;
+        try { ok = authz.check(user); } catch (Exception e) { ok = false; }
+    csharp:
+      vulnerable: |
+        bool ok = true;
+        try { ok = Authz.Check(user); } catch { }
+      secure: |
+        bool ok = false;
+        try { ok = Authz.Check(user); } catch { ok = false; }
+
+# ---------------------------------------------------------------------------
+# CS-09.4 — Never log secrets or sensitive data
+# ---------------------------------------------------------------------------
+
+- id: CS-09.4
+  facet: Error Handling & Logging
+  section: Sensitive Data in Logs
+  security_rule: >-
+    Logs must never contain passwords, session tokens, API keys, full
+    payment card numbers, or other secrets; sensitive fields must be
+    omitted or masked before any log call.
+  vulnerability_pattern: >-
+    A whole request body, credential object, or header set is logged
+    verbatim, so passwords, bearer tokens, and card numbers land in log
+    files and any downstream log aggregator.
+  secure_pattern: >-
+    Only non-sensitive fields are logged, and known secret fields are
+    redacted or replaced with a masked placeholder before the value
+    reaches the logger.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("login attempt: " + credentials)
+      secure: |
+        log.info("login attempt for user: " + credentials.username)
+    python:
+      vulnerable: |
+        logger.info("payload: %s", request.json)
+      secure: |
+        safe = {k: v for k, v in request.json.items() if k != "password"}
+        logger.info("payload: %s", safe)
+    javascript:
+      vulnerable: |
+        logger.info("body", req.body);
+      secure: |
+        logger.info("body", { ...req.body, password: "[REDACTED]" });
+    java:
+      vulnerable: |
+        log.info("auth header: {}", request.getHeader("Authorization"));
+      secure: |
+        log.info("auth present: {}", request.getHeader("Authorization") != null);
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("login {@Dto}", loginDto);
+      secure: |
+        _logger.LogInformation("login {User}", loginDto.Username);
+
+# ---------------------------------------------------------------------------
+# CS-09.5 — Neutralize untrusted data before logging (log injection)
+# ---------------------------------------------------------------------------
+
+- id: CS-09.5
+  facet: Error Handling & Logging
+  section: Log Injection Prevention
+  security_rule: >-
+    Untrusted data written to logs must have carriage return and line
+    feed characters removed or encoded so an attacker cannot forge log
+    entries or break log parsing.
+  vulnerability_pattern: >-
+    A user-supplied value containing newline characters is concatenated
+    into a log message, so the attacker injects a fake second log line
+    or corrupts a downstream log parser.
+  secure_pattern: >-
+    Newline and other control characters are stripped or encoded from
+    untrusted values before they are logged, or a structured logger that
+    encodes fields is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("user search: " + userInput)
+      secure: |
+        log.info("user search: " + stripCrlf(userInput))
+    python:
+      vulnerable: |
+        logger.info("login failed for %s", username)
+      secure: |
+        logger.info("login failed for %s",
+                    username.replace("\r", "").replace("\n", ""))
+    javascript:
+      vulnerable: |
+        logger.info("search term: " + req.query.q);
+      secure: |
+        logger.info("search term: " + req.query.q.replace(/[\r\n]/g, ""));
+    java:
+      vulnerable: |
+        log.info("user input: " + userInput);
+      secure: |
+        log.info("user input: {}", userInput.replaceAll("[\\r\\n]", "_"));
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("user input: " + userInput);
+      secure: |
+        _logger.LogInformation("user input: {Input}",
+            userInput.Replace("\r", "").Replace("\n", ""));
+
+# ---------------------------------------------------------------------------
+# CS-09.6 — Log security-relevant events
+# ---------------------------------------------------------------------------
+
+- id: CS-09.6
+  facet: Error Handling & Logging
+  section: Security Event Logging
+  security_rule: >-
+    Security-relevant events — authentication success and failure, access
+    control denials, input validation failures, and privilege changes —
+    must be logged with enough context to support detection and forensics.
+  vulnerability_pattern: >-
+    Authentication failures, authorization denials, and other security
+    events occur silently, so there is no record an attacker can be
+    detected from and no audit trail after an incident.
+  secure_pattern: >-
+    Each security-relevant event is logged at an appropriate level with
+    the actor, action, outcome, and a timestamp, using a consistent
+    event vocabulary across the application.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if (!authenticated) return reject()       # no record of the failure
+      secure: |
+        if (!authenticated) { log.warn("authn_fail user=" + id); return reject() }
+    python:
+      vulnerable: |
+        if not user.check_password(pw):
+            return error("bad credentials")
+      secure: |
+        if not user.check_password(pw):
+            logger.warning("authn_fail user=%s ip=%s", user.id, client_ip)
+            return error("bad credentials")
+    javascript:
+      vulnerable: |
+        if (!hasRole(user, "admin")) return res.sendStatus(403);
+      secure: |
+        if (!hasRole(user, "admin")) {
+          logger.warn("authz_fail", { user: user.id, route: req.path });
+          return res.sendStatus(403);
+        }
+    java:
+      vulnerable: |
+        if (!authorized) throw new AccessDeniedException();
+      secure: |
+        if (!authorized) { log.warn("authz_fail user={} resource={}", uid, res);
+          throw new AccessDeniedException(); }
+    csharp:
+      vulnerable: |
+        if (!result.Succeeded) return Unauthorized();
+      secure: |
+        if (!result.Succeeded) {
+          _logger.LogWarning("authn_fail user={User}", model.Username);
+          return Unauthorized();
+        }
+
+# ---------------------------------------------------------------------------
+# CS-09.7 — Do not swallow exceptions silently
+# ---------------------------------------------------------------------------
+
+- id: CS-09.7
+  facet: Error Handling & Logging
+  section: Empty Catch Blocks
+  security_rule: >-
+    Caught exceptions must be handled or logged; an empty catch block
+    that discards an error hides failures and security-relevant faults
+    from operators.
+  vulnerability_pattern: >-
+    An exception is caught and the catch block does nothing, so a failed
+    integrity check, a partial write, or a security fault disappears with
+    no log entry and no alert.
+  secure_pattern: >-
+    Every catch block either recovers meaningfully or logs the exception
+    with context, so no failure passes unobserved and operators can act
+    on it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try { riskyOperation() } catch (e) { }
+      secure: |
+        try { riskyOperation() } catch (e) { log.error("operation failed", e) }
+    python:
+      vulnerable: |
+        try:
+            process(record)
+        except Exception:
+            pass
+      secure: |
+        try:
+            process(record)
+        except Exception:
+            logger.exception("record processing failed")
+    javascript:
+      vulnerable: |
+        try { await save(); } catch (e) {}
+      secure: |
+        try { await save(); } catch (e) { logger.error("save failed", e); }
+    java:
+      vulnerable: |
+        try { parse(input); } catch (ParseException e) { }
+      secure: |
+        try { parse(input); }
+        catch (ParseException e) { log.error("parse failed", e); }
+    csharp:
+      vulnerable: |
+        try { Process(); } catch (Exception) { }
+      secure: |
+        try { Process(); }
+        catch (Exception ex) { _logger.LogError(ex, "process failed"); }
+
+# ---------------------------------------------------------------------------
+# CS-09.8 — Protect log files (confidentiality and integrity)
+# ---------------------------------------------------------------------------
+
+- id: CS-09.8
+  facet: Error Handling & Logging
+  section: Log Storage Protection
+  security_rule: >-
+    Log files and log stores must have restrictive permissions, be
+    protected against tampering and deletion, and never be served from a
+    web-accessible location.
+  vulnerability_pattern: >-
+    Logs are written under the web root or with world-readable and
+    world-writable permissions, so an attacker can read sensitive trails
+    over HTTP or alter and erase evidence of an attack.
+  secure_pattern: >-
+    Logs are written outside the web root, owned by a dedicated account
+    with least-privilege file permissions, and shipped to an append-only
+    or write-once central store.
+  code_patterns:
+    generic:
+      vulnerable: |
+        logPath = "/var/www/html/app/app.log"   # under the web root
+      secure: |
+        logPath = "/var/log/app/app.log"        # outside web root, mode 0640
+    python:
+      vulnerable: |
+        open("/var/www/app/debug.log", "a")
+      secure: |
+        fd = os.open("/var/log/app/app.log", os.O_WRONLY | os.O_APPEND, 0o640)
+    java:
+      vulnerable: |
+        new FileHandler("webapps/app/logs/app.log");
+      secure: |
+        Files.setPosixFilePermissions(Path.of("/var/log/app/app.log"),
+            PosixFilePermissions.fromString("rw-r-----"));
+    csharp:
+      vulnerable: |
+        File.AppendAllText("wwwroot/logs/app.log", entry);
+      secure: |
+        File.AppendAllText("/var/log/app/app.log", entry);  // outside wwwroot
+
+# ---------------------------------------------------------------------------
+# CS-09.9 — Use a centralized error handler
+# ---------------------------------------------------------------------------
+
+- id: CS-09.9
+  facet: Error Handling & Logging
+  section: Centralized Error Handling
+  security_rule: >-
+    Error handling must be centralized in a single application-wide
+    handler so logging, response shaping, and disclosure controls are
+    applied consistently rather than per call site.
+  vulnerability_pattern: >-
+    Each route handles errors its own way, so some leak detail, some
+    forget to log, and some return inconsistent status codes, leaving
+    gaps an attacker can map and exploit.
+  secure_pattern: >-
+    A single registered handler or middleware catches unhandled errors,
+    logs them uniformly, and emits one consistent generic response shape
+    for the whole application.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # each route has its own ad hoc try/catch and response format
+      secure: |
+        registerGlobalErrorHandler(uniformLogAndRespond)
+    python:
+      vulnerable: |
+        @app.route("/x")
+        def x():
+            try: ...
+            except Exception as e: return str(e), 500
+      secure: |
+        @app.exception_handler(Exception)
+        async def handle(request, exc):
+            logger.exception("unhandled"); return JSONResponse(
+                {"error": "internal_error"}, status_code=500)
+    javascript:
+      vulnerable: |
+        router.get("/x", (req, res) => { try {} catch (e) { res.send(e); } });
+      secure: |
+        app.use((err, req, res, next) => {
+          logger.error(err); res.status(500).json({ error: "internal_error" });
+        });
+    java:
+      vulnerable: |
+        catch (Exception e) { return ResponseEntity.status(500).body(e.getMessage()); }
+      secure: |
+        @ControllerAdvice
+        class GlobalErrorHandler {
+          @ExceptionHandler(Exception.class) ResponseEntity<?> handle(Exception e) {
+            log.error("unhandled", e); return ResponseEntity.status(500).build(); }
+        }
+    csharp:
+      vulnerable: |
+        catch (Exception ex) { return StatusCode(500, ex.Message); }
+      secure: |
+        app.UseExceptionHandler("/error");  // single handler for the whole app
+
+# ---------------------------------------------------------------------------
+# CS-09.10 — Include correlation context, not PII, in log entries
+# ---------------------------------------------------------------------------
+
+- id: CS-09.10
+  facet: Error Handling & Logging
+  section: Log Entry Content
+  security_rule: >-
+    Log entries must carry enough context to trace a request — a
+    correlation identifier, timestamp, and event type — while excluding
+    personal data and secrets that are not needed for the record.
+  vulnerability_pattern: >-
+    Log lines dump full personal records to gain context, so names,
+    emails, addresses, and identifiers accumulate in logs and widen the
+    blast radius of any log breach.
+  secure_pattern: >-
+    Entries reference a request by a correlation identifier and a stable
+    surrogate key, so a trace can be reconstructed without storing the
+    personal data itself in the log.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("processed order for " + customer.fullProfile)
+      secure: |
+        log.info("processed order corrId=" + corrId + " custId=" + customer.id)
+    python:
+      vulnerable: |
+        logger.info("user updated: %s", user.__dict__)
+      secure: |
+        logger.info("user updated id=%s corr=%s", user.id, correlation_id)
+    javascript:
+      vulnerable: |
+        logger.info("checkout", { customer });
+      secure: |
+        logger.info("checkout", { corrId, customerId: customer.id });
+    java:
+      vulnerable: |
+        log.info("order: {}", customer);
+      secure: |
+        MDC.put("corrId", corrId);
+        log.info("order processed custId={}", customer.getId());
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("order {@Customer}", customer);
+      secure: |
+        using (_logger.BeginScope("{CorrId}", corrId))
+            _logger.LogInformation("order processed {CustId}", customer.Id);
+
+# ---------------------------------------------------------------------------
+# CS-09.11 — Validate input before logging it as a typed field
+# ---------------------------------------------------------------------------
+
+- id: CS-09.11
+  facet: Error Handling & Logging
+  section: Structured Logging
+  security_rule: >-
+    Prefer structured logging where untrusted values are attached as
+    discrete fields rather than concatenated into the message string, so
+    the logging framework encodes them and forgery is prevented.
+  vulnerability_pattern: >-
+    Untrusted values are interpolated directly into a free-text log
+    message, so the value can mimic the log format, and downstream
+    parsers and dashboards misattribute or are confused by it.
+  secure_pattern: >-
+    The message template is a fixed literal and untrusted values are
+    passed as named parameters, so the logging framework treats them as
+    encoded data fields and the message format stays trusted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("event=login user=" + userInput + " result=ok")
+      secure: |
+        log("event=login result=ok", fields={"user": userInput})
+    python:
+      vulnerable: |
+        logger.info(f"login user={username} result=ok")
+      secure: |
+        logger.info("login result=ok", extra={"user": username})
+    javascript:
+      vulnerable: |
+        logger.info(`login user=${username} result=ok`);
+      secure: |
+        logger.info("login result=ok", { user: username });
+    java:
+      vulnerable: |
+        log.info("login user=" + username + " result=ok");
+      secure: |
+        log.info("login result=ok user={}", username);
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("login user=" + username + " result=ok");
+      secure: |
+        _logger.LogInformation("login result=ok user={User}", username);

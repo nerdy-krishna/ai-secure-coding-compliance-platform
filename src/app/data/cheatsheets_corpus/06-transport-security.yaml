@@ -1,0 +1,575 @@
+# OWASP Cheat Sheet Series — Domain 06: Transport Layer Security
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Source cheat sheets: Transport Layer Security, TLS Cipher String,
+# HTTP Strict Transport Security (HSTS), and related transport-protection
+# guidance.
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# where the practice has a
+# real code sink).
+
+# ---------------------------------------------------------------------------
+# CS-06.1 — Enforce TLS on Every Connection
+# ---------------------------------------------------------------------------
+
+- id: CS-06.1
+  facet: Transport Layer Security
+  section: Enforce TLS on Every Connection
+  security_rule: >-
+    All connections that carry application data, including internal
+    service-to-service calls, must use TLS so traffic is never exposed
+    in cleartext on any network segment.
+  vulnerability_pattern: >-
+    A client or server is configured to talk over plain HTTP or an
+    unencrypted socket, so credentials, session tokens, and data travel
+    the network in cleartext and can be read or modified in transit.
+  secure_pattern: >-
+    Every endpoint is reached over an https or otherwise TLS-wrapped URL,
+    and the transport library is given a TLS-enabled scheme so the
+    connection is encrypted end to end.
+  code_patterns:
+    generic:
+      vulnerable: |
+        connect("http://api.internal/orders")
+      secure: |
+        connect("https://api.internal/orders")
+    python:
+      vulnerable: |
+        resp = requests.get("http://api.example.com/data")
+      secure: |
+        resp = requests.get("https://api.example.com/data")
+    javascript:
+      vulnerable: |
+        const r = await fetch("http://api.example.com/data");
+      secure: |
+        const r = await fetch("https://api.example.com/data");
+    java:
+      vulnerable: |
+        URL url = new URL("http://api.example.com/data");
+      secure: |
+        URL url = new URL("https://api.example.com/data");
+    csharp:
+      vulnerable: |
+        var r = await http.GetAsync("http://api.example.com/data");
+      secure: |
+        var r = await http.GetAsync("https://api.example.com/data");
+
+# ---------------------------------------------------------------------------
+# CS-06.2 — Redirect HTTP to HTTPS
+# ---------------------------------------------------------------------------
+
+- id: CS-06.2
+  facet: Transport Layer Security
+  section: Redirect HTTP to HTTPS
+  security_rule: >-
+    Any request that arrives over plain HTTP must be permanently
+    redirected to the equivalent HTTPS URL so users and clients never
+    continue an exchange on an unencrypted channel.
+  vulnerability_pattern: >-
+    The server answers HTTP requests with real content instead of
+    redirecting, so a user who types a bare hostname or follows an old
+    link transacts entirely over an unencrypted connection.
+  secure_pattern: >-
+    An HTTP listener exists only to issue a permanent redirect to the
+    matching https URL, so every real exchange happens over TLS.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if request.scheme == "http": serveContent(request)
+      secure: |
+        if request.scheme == "http": redirect301("https://" + host + path)
+    python:
+      vulnerable: |
+        @app.before_request
+        def check(): pass            # http requests served as-is
+      secure: |
+        @app.before_request
+        def force_https():
+            if not request.is_secure:
+                return redirect(request.url.replace("http://", "https://"), 301)
+    javascript:
+      vulnerable: |
+        app.use((req, res, next) => next());   // http handled normally
+      secure: |
+        app.use((req, res, next) =>
+            req.secure ? next()
+                       : res.redirect(301, "https://" + req.headers.host + req.url));
+    java:
+      vulnerable: |
+        // no transport-guarantee constraint configured
+      secure: |
+        <security-constraint><user-data-constraint>
+          <transport-guarantee>CONFIDENTIAL</transport-guarantee>
+        </user-data-constraint></security-constraint>
+    csharp:
+      vulnerable: |
+        app.UseRouting();            // no https redirection
+      secure: |
+        app.UseHttpsRedirection();
+        app.UseRouting();
+
+# ---------------------------------------------------------------------------
+# CS-06.3 — HTTP Strict Transport Security
+# ---------------------------------------------------------------------------
+
+- id: CS-06.3
+  facet: Transport Layer Security
+  section: HTTP Strict Transport Security
+  security_rule: >-
+    Responses must carry a Strict-Transport-Security header with a long
+    max-age and includeSubDomains so browsers refuse any future plaintext
+    connection to the site and its subdomains.
+  vulnerability_pattern: >-
+    No HSTS header is sent, or it carries a very short max-age, so a
+    browser will still attempt an initial plaintext request that an
+    attacker can intercept and downgrade.
+  secure_pattern: >-
+    Every HTTPS response includes a Strict-Transport-Security header with
+    a max-age of at least one year and includeSubDomains, and the site is
+    submitted to the browser preload list.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # response sent with no Strict-Transport-Security header
+      secure: |
+        setHeader("Strict-Transport-Security",
+                  "max-age=63072000; includeSubDomains; preload")
+    python:
+      vulnerable: |
+        resp = make_response(body)            # no HSTS header
+      secure: |
+        resp.headers["Strict-Transport-Security"] = \
+            "max-age=63072000; includeSubDomains; preload"
+    javascript:
+      vulnerable: |
+        res.send(body);                       // no HSTS header
+      secure: |
+        app.use(helmet.hsts({ maxAge: 63072000, includeSubDomains: true,
+                              preload: true }));
+    java:
+      vulnerable: |
+        response.getWriter().write(body);     // no HSTS header
+      secure: |
+        response.setHeader("Strict-Transport-Security",
+            "max-age=63072000; includeSubDomains; preload");
+    csharp:
+      vulnerable: |
+        // no UseHsts() in the pipeline
+      secure: |
+        app.UseHsts();   // configure HstsOptions: MaxAge 730 days, IncludeSubDomains
+
+# ---------------------------------------------------------------------------
+# CS-06.4 — Use Only Modern TLS Protocol Versions
+# ---------------------------------------------------------------------------
+
+- id: CS-06.4
+  facet: Transport Layer Security
+  section: Use Only Modern TLS Protocol Versions
+  security_rule: >-
+    Servers and clients must negotiate only TLS 1.2 or TLS 1.3 and must
+    disable SSLv2, SSLv3, TLS 1.0, and TLS 1.1, which contain known
+    weaknesses.
+  vulnerability_pattern: >-
+    The TLS stack is left at a default that still permits legacy
+    protocol versions, so an attacker can force a downgrade to a version
+    with exploitable cryptographic flaws.
+  secure_pattern: >-
+    A minimum protocol version of TLS 1.2 is set explicitly, with TLS 1.3
+    preferred, and every obsolete SSL or early TLS version is turned off.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tlsContext(minVersion=SSLv3)
+      secure: |
+        tlsContext(minVersion=TLS1_2)
+    python:
+      vulnerable: |
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)        # legacy versions allowed
+      secure: |
+        ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    javascript:
+      vulnerable: |
+        https.createServer({ key, cert }, app);       # default min version
+      secure: |
+        https.createServer({ key, cert, minVersion: "TLSv1.2" }, app);
+    java:
+      vulnerable: |
+        SSLContext ctx = SSLContext.getInstance("TLS");
+      secure: |
+        SSLContext ctx = SSLContext.getInstance("TLSv1.3");
+    csharp:
+      vulnerable: |
+        var opts = new SslServerAuthenticationOptions();   // OS default
+      secure: |
+        var opts = new SslServerAuthenticationOptions {
+            EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13 };
+
+# ---------------------------------------------------------------------------
+# CS-06.5 — Configure Strong Cipher Suites
+# ---------------------------------------------------------------------------
+
+- id: CS-06.5
+  facet: Transport Layer Security
+  section: Configure Strong Cipher Suites
+  security_rule: >-
+    TLS must be configured to offer only strong cipher suites that
+    provide forward secrecy and authenticated encryption, and to reject
+    export-grade, NULL, anonymous, RC4, and 3DES ciphers.
+  vulnerability_pattern: >-
+    The cipher list is left at a permissive default or explicitly
+    includes weak suites, so a connection can negotiate a cipher with no
+    forward secrecy or with a broken algorithm.
+  secure_pattern: >-
+    The cipher suite list is restricted to modern AEAD suites using
+    ephemeral key exchange, and weak or legacy ciphers are removed
+    entirely from the allowed set.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tlsContext(ciphers="DEFAULT:!NONE")
+      secure: |
+        tlsContext(ciphers="ECDHE+AESGCM:ECDHE+CHACHA20")
+    python:
+      vulnerable: |
+        ctx.set_ciphers("ALL:@SECLEVEL=0")
+      secure: |
+        ctx.set_ciphers("ECDHE+AESGCM:ECDHE+CHACHA20")
+    javascript:
+      vulnerable: |
+        https.createServer({ key, cert, ciphers: "ALL" }, app);
+      secure: |
+        https.createServer({ key, cert, honorCipherOrder: true,
+            ciphers: "TLS_AES_256_GCM_SHA384:ECDHE-RSA-AES256-GCM-SHA384" }, app);
+    java:
+      vulnerable: |
+        engine.setEnabledCipherSuites(engine.getSupportedCipherSuites());
+      secure: |
+        engine.setEnabledCipherSuites(new String[]{
+            "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384" });
+    csharp:
+      vulnerable: |
+        var opts = new SslServerAuthenticationOptions();   // all OS ciphers
+      secure: |
+        var opts = new SslServerAuthenticationOptions {
+            CipherSuitesPolicy = new CipherSuitesPolicy(new[] {
+                TlsCipherSuite.TLS_AES_256_GCM_SHA384 }) };
+
+# ---------------------------------------------------------------------------
+# CS-06.6 — Validate Server Certificates
+# ---------------------------------------------------------------------------
+
+- id: CS-06.6
+  facet: Transport Layer Security
+  section: Validate Server Certificates
+  security_rule: >-
+    A TLS client must verify that the server certificate chains to a
+    trusted authority, is within its validity period, and has not been
+    revoked, and must never disable certificate verification.
+  vulnerability_pattern: >-
+    A client disables or ignores certificate verification, so any
+    attacker presenting a self-signed or forged certificate can
+    transparently intercept the supposedly secure connection.
+  secure_pattern: >-
+    Certificate verification is left enabled with the system or a pinned
+    trust store, so a connection fails closed whenever the server cannot
+    present a valid, trusted certificate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tlsConnect(host, verifyCertificate=false)
+      secure: |
+        tlsConnect(host, verifyCertificate=true)
+    python:
+      vulnerable: |
+        requests.get("https://api.example.com", verify=False)
+      secure: |
+        requests.get("https://api.example.com", verify=True)
+    javascript:
+      vulnerable: |
+        const agent = new https.Agent({ rejectUnauthorized: false });
+      secure: |
+        const agent = new https.Agent({ rejectUnauthorized: true });
+    java:
+      vulnerable: |
+        ctx.init(null, new TrustManager[]{ trustEverythingManager }, null);
+      secure: |
+        ctx.init(null, null, null);   // default JVM trust store, full validation
+    csharp:
+      vulnerable: |
+        handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
+      secure: |
+        handler.ServerCertificateCustomValidationCallback = null;   // default checks
+
+# ---------------------------------------------------------------------------
+# CS-06.7 — Verify Certificate Hostname
+# ---------------------------------------------------------------------------
+
+- id: CS-06.7
+  facet: Transport Layer Security
+  section: Verify Certificate Hostname
+  security_rule: >-
+    A TLS client must confirm that the hostname it connected to matches a
+    name in the certificate's subjectAltName, so a valid certificate for
+    one host cannot be used to impersonate another.
+  vulnerability_pattern: >-
+    The client trusts any certificate that chains to a trusted authority
+    without checking the hostname, so an attacker uses a legitimate
+    certificate for a domain they control to intercept other hosts.
+  secure_pattern: >-
+    Hostname verification is enabled so the requested host must appear in
+    the certificate's subjectAltName entries before the handshake is
+    accepted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tlsConnect(host, checkHostname=false)
+      secure: |
+        tlsConnect(host, checkHostname=true)
+    python:
+      vulnerable: |
+        ctx.check_hostname = False
+      secure: |
+        ctx.check_hostname = True
+    javascript:
+      vulnerable: |
+        tls.connect({ host, checkServerIdentity: () => undefined });
+      secure: |
+        tls.connect({ host });   // default checkServerIdentity enforces the name
+    java:
+      vulnerable: |
+        conn.setHostnameVerifier((hostname, session) -> true);
+      secure: |
+        conn.setHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier());
+    csharp:
+      vulnerable: |
+        handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
+      secure: |
+        handler.ServerCertificateCustomValidationCallback =
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator is null
+            ? null : null;   // leave null so the name and chain are both checked
+
+# ---------------------------------------------------------------------------
+# CS-06.8 — Mark Cookies as Secure
+# ---------------------------------------------------------------------------
+
+- id: CS-06.8
+  facet: Transport Layer Security
+  section: Mark Cookies as Secure
+  security_rule: >-
+    Cookies that carry session or sensitive data must set the Secure
+    attribute so the browser only ever transmits them over an encrypted
+    HTTPS connection.
+  vulnerability_pattern: >-
+    A session cookie is issued without the Secure attribute, so the
+    browser will attach it to a plaintext HTTP request and an attacker on
+    the network can capture it.
+  secure_pattern: >-
+    Every sensitive cookie is set with the Secure attribute, and usually
+    HttpOnly as well, so it is confined to encrypted connections.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", token)
+      secure: |
+        setCookie("session", token, secure=true, httpOnly=true)
+    python:
+      vulnerable: |
+        resp.set_cookie("session", token)
+      secure: |
+        resp.set_cookie("session", token, secure=True, httponly=True)
+    javascript:
+      vulnerable: |
+        res.cookie("session", token);
+      secure: |
+        res.cookie("session", token, { secure: true, httpOnly: true });
+    java:
+      vulnerable: |
+        Cookie c = new Cookie("session", token);
+      secure: |
+        Cookie c = new Cookie("session", token);
+        c.setSecure(true); c.setHttpOnly(true);
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("session", token);
+      secure: |
+        Response.Cookies.Append("session", token,
+            new CookieOptions { Secure = true, HttpOnly = true });
+
+# ---------------------------------------------------------------------------
+# CS-06.9 — Do Not Mix Secure and Insecure Content
+# ---------------------------------------------------------------------------
+
+- id: CS-06.9
+  facet: Transport Layer Security
+  section: Do Not Mix Secure and Insecure Content
+  security_rule: >-
+    An HTTPS page must load all of its scripts, stylesheets, images, and
+    other resources over HTTPS, so no part of the page can be tampered
+    with or stripped of its protection.
+  vulnerability_pattern: >-
+    An HTTPS page references a script or stylesheet over plain HTTP, so
+    an attacker can modify that active resource and undermine the
+    security of the whole page.
+  secure_pattern: >-
+    Every subresource is referenced with an https or protocol-relative
+    secure URL, and a Content-Security-Policy directive blocks or
+    upgrades any remaining insecure request.
+  code_patterns:
+    generic:
+      vulnerable: |
+        <script src="http://cdn.example.com/app.js"></script>
+      secure: |
+        <script src="https://cdn.example.com/app.js"></script>
+    javascript:
+      vulnerable: |
+        const s = document.createElement("script");
+        s.src = "http://cdn.example.com/app.js";
+      secure: |
+        const s = document.createElement("script");
+        s.src = "https://cdn.example.com/app.js";
+
+# ---------------------------------------------------------------------------
+# CS-06.10 — Protect Private Keys and Certificates
+# ---------------------------------------------------------------------------
+
+- id: CS-06.10
+  facet: Transport Layer Security
+  section: Protect Private Keys and Certificates
+  security_rule: >-
+    TLS private keys must be generated with sufficient strength, stored
+    with restrictive permissions or in a secret manager, and never
+    committed to source control or shipped in build artifacts.
+  vulnerability_pattern: >-
+    A TLS private key is checked into the repository or stored
+    world-readable on disk, so anyone who reads it can impersonate the
+    server or decrypt captured traffic.
+  secure_pattern: >-
+    The private key is loaded at runtime from a secret manager or a file
+    with owner-only permissions, and the key material itself is kept out
+    of version control and logs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = readFile("./server.key")        # committed alongside the code
+      secure: |
+        key = secretManager.get("tls/server-key")
+    python:
+      vulnerable: |
+        ctx.load_cert_chain("server.crt", "committed_server.key")
+      secure: |
+        key_path = os.environ["TLS_KEY_PATH"]   # owner-only file outside the repo
+        ctx.load_cert_chain(os.environ["TLS_CERT_PATH"], key_path)
+    java:
+      vulnerable: |
+        ks.load(new FileInputStream("src/main/resources/keystore.jks"), pw);
+      secure: |
+        ks.load(new FileInputStream(System.getenv("TLS_KEYSTORE_PATH")),
+                secretManager.get("tls/keystore-pw").toCharArray());
+    csharp:
+      vulnerable: |
+        var cert = new X509Certificate2("server.pfx", "hardcoded-password");
+      secure: |
+        var cert = new X509Certificate2(
+            Environment.GetEnvironmentVariable("TLS_PFX_PATH"),
+            secretManager.Get("tls/pfx-password"));
+
+# ---------------------------------------------------------------------------
+# CS-06.11 — Verify Peers in mutual TLS
+# ---------------------------------------------------------------------------
+
+- id: CS-06.11
+  facet: Transport Layer Security
+  section: Verify Peers in Mutual TLS
+  security_rule: >-
+    When mutual TLS is used to authenticate clients, the server must
+    require and verify a client certificate against a trusted authority,
+    rather than treating client authentication as optional.
+  vulnerability_pattern: >-
+    A server that relies on client certificates configures them as
+    optional or skips the verification step, so a client with no valid
+    certificate is still allowed to connect and is treated as trusted.
+  secure_pattern: >-
+    The server is set to require a client certificate and to reject the
+    handshake when the presented certificate is missing, untrusted, or
+    expired.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tlsServer(clientAuth="optional")
+      secure: |
+        tlsServer(clientAuth="required", clientCa=trustedCaBundle)
+    python:
+      vulnerable: |
+        ctx.verify_mode = ssl.CERT_OPTIONAL
+      secure: |
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_verify_locations("client-ca.pem")
+    javascript:
+      vulnerable: |
+        tls.createServer({ key, cert, requestCert: true });
+      secure: |
+        tls.createServer({ key, cert, ca: clientCa,
+                           requestCert: true, rejectUnauthorized: true });
+    java:
+      vulnerable: |
+        sslEngine.setWantClientAuth(true);
+      secure: |
+        sslEngine.setNeedClientAuth(true);
+    csharp:
+      vulnerable: |
+        var opts = new SslServerAuthenticationOptions {
+            ClientCertificateRequired = false };
+      secure: |
+        var opts = new SslServerAuthenticationOptions {
+            ClientCertificateRequired = true };
+
+# ---------------------------------------------------------------------------
+# CS-06.12 — Use TLS for Database and Backend Connections
+# ---------------------------------------------------------------------------
+
+- id: CS-06.12
+  facet: Transport Layer Security
+  section: Use TLS for Database and Backend Connections
+  security_rule: >-
+    Connections to databases, caches, message brokers, and other backend
+    services must be encrypted with TLS and verify the server
+    certificate, just like public-facing connections.
+  vulnerability_pattern: >-
+    A database or broker connection string disables SSL or sets the SSL
+    mode to a non-verifying value, so backend credentials and query data
+    cross the internal network in cleartext.
+  secure_pattern: >-
+    The connection requires TLS and verifies the server certificate
+    against a configured authority, so backend traffic is encrypted and
+    authenticated end to end.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dbConnect(host, sslMode="disable")
+      secure: |
+        dbConnect(host, sslMode="verify-full", sslRootCert=caBundle)
+    python:
+      vulnerable: |
+        psycopg.connect("host=db dbname=app sslmode=disable")
+      secure: |
+        psycopg.connect("host=db dbname=app sslmode=verify-full "
+                         "sslrootcert=/etc/ssl/ca.pem")
+    javascript:
+      vulnerable: |
+        new Pool({ host: "db", ssl: false });
+      secure: |
+        new Pool({ host: "db", ssl: { rejectUnauthorized: true, ca: caPem } });
+    java:
+      vulnerable: |
+        var url = "jdbc:postgresql://db/app?ssl=false";
+      secure: |
+        var url = "jdbc:postgresql://db/app?ssl=true&sslmode=verify-full";
+    csharp:
+      vulnerable: |
+        var cs = "Host=db;Database=app;SSL Mode=Disable";
+      secure: |
+        var cs = "Host=db;Database=app;SSL Mode=VerifyFull;Root Certificate=ca.pem";

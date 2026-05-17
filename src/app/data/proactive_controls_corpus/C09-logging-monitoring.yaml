@@ -1,0 +1,497 @@
+# OWASP Proactive Controls — C9: Implement Security Logging and Monitoring
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+#
+# Covers the distinct practices of C9: log security-relevant events,
+# keep sensitive data out of logs, prevent log injection, protect log
+# integrity, log with enough context, fail safely on logging errors,
+# centralize and monitor logs, and alert on suspicious activity.
+
+# ---------------------------------------------------------------------------
+# Security event coverage
+# ---------------------------------------------------------------------------
+
+- id: PC-C9.1
+  facet: Security Logging & Monitoring
+  section: Log Security-Relevant Events
+  security_rule: >-
+    Security-relevant events such as authentication successes and
+    failures, access-control denials, input-validation failures, and
+    privilege changes must be logged so incidents can be detected and
+    investigated.
+  vulnerability_pattern: >-
+    Authentication, authorization, and other security-relevant outcomes
+    happen silently, so a failed login burst, a privilege escalation, or
+    an access denial leaves no record and goes unnoticed.
+  secure_pattern: >-
+    Every security-relevant decision emits a structured log event that
+    records the actor, the action, the outcome, and enough context to
+    support detection and investigation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if not check_password(user, pw):
+            return error("invalid credentials")     # silent failure
+      secure: |
+        if not check_password(user, pw):
+            log.warning("auth.login.failure", user=user.id, ip=client_ip)
+            return error("invalid credentials")
+    python:
+      vulnerable: |
+        if not authenticate(username, password):
+            raise HTTPException(401)
+      secure: |
+        if not authenticate(username, password):
+            logger.warning("auth.login.failure user=%s ip=%s", username, request.client.host)
+            raise HTTPException(401)
+    javascript:
+      vulnerable: |
+        if (!user) return res.status(401).end();
+      secure: |
+        if (!user) {
+          logger.warn("auth.login.failure", { username, ip: req.ip });
+          return res.status(401).end();
+        }
+    java:
+      vulnerable: |
+        if (!authService.login(username, password)) {
+            return Response.status(401).build();
+        }
+      secure: |
+        if (!authService.login(username, password)) {
+            log.warn("auth.login.failure user={} ip={}", username, request.getRemoteAddr());
+            return Response.status(401).build();
+        }
+    csharp:
+      vulnerable: |
+        if (!await _signIn.PasswordSignInAsync(user, pw, false, false).Succeeded)
+            return Unauthorized();
+      secure: |
+        if (!(await _signIn.PasswordSignInAsync(user, pw, false, false)).Succeeded) {
+            _logger.LogWarning("auth.login.failure user={User} ip={Ip}", user, ip);
+            return Unauthorized();
+        }
+
+# ---------------------------------------------------------------------------
+# Sensitive data exclusion
+# ---------------------------------------------------------------------------
+
+- id: PC-C9.2
+  facet: Security Logging & Monitoring
+  section: Keep Sensitive Data Out of Logs
+  security_rule: >-
+    Logs must never contain passwords, session tokens, API keys, full
+    payment-card numbers, or other secrets, because log stores are widely
+    accessible and long-lived.
+  vulnerability_pattern: >-
+    A whole request body, credential object, or exception detail is
+    written to the log verbatim, so passwords, tokens, or card numbers
+    end up persisted in plaintext where many people can read them.
+  secure_pattern: >-
+    Sensitive fields are removed, masked, or redacted before any value is
+    logged, and only non-sensitive identifiers and metadata are recorded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("login attempt: " + serialize(requestBody))   # includes password
+      secure: |
+        log.info("login attempt", user=requestBody.username)    # secret omitted
+    python:
+      vulnerable: |
+        logger.info("login payload: %s", request.json)
+      secure: |
+        logger.info("login attempt user=%s", request.json.get("username"))
+    javascript:
+      vulnerable: |
+        logger.info(`login body: ${JSON.stringify(req.body)}`);
+      secure: |
+        logger.info("login attempt", { username: req.body.username });
+    java:
+      vulnerable: |
+        log.info("credentials: {}", credentials);
+      secure: |
+        log.info("login attempt user={}", credentials.getUsername());
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("Login request: {Body}", JsonSerializer.Serialize(model));
+      secure: |
+        _logger.LogInformation("Login attempt user={User}", model.Username);
+
+- id: PC-C9.3
+  facet: Security Logging & Monitoring
+  section: Mask Personal and Regulated Data
+  security_rule: >-
+    Personally identifiable and regulated data must be masked,
+    truncated, or hashed before logging so log retention does not become
+    an uncontrolled copy of sensitive records.
+  vulnerability_pattern: >-
+    Full personal identifiers such as email addresses, national ID
+    numbers, or card numbers are logged in clear, so the log store holds
+    regulated data with weaker controls than the primary database.
+  secure_pattern: >-
+    A masking helper reduces personal identifiers to a partial or hashed
+    form before they reach the logger, keeping enough to correlate
+    without storing the full value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("charged card " + cardNumber)
+      secure: |
+        log.info("charged card " + maskCard(cardNumber))   # last 4 digits only
+    python:
+      vulnerable: |
+        logger.info("payment for ssn=%s", ssn)
+      secure: |
+        logger.info("payment for ssn=%s", "***-**-" + ssn[-4:])
+    javascript:
+      vulnerable: |
+        logger.info(`user email ${email}`);
+      secure: |
+        logger.info("user", { emailHash: sha256(email) });
+    java:
+      vulnerable: |
+        log.info("card={}", cardNumber);
+      secure: |
+        log.info("card=****{}", cardNumber.substring(cardNumber.length() - 4));
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("Card {Card}", cardNumber);
+      secure: |
+        _logger.LogInformation("Card ****{Last4}", cardNumber[^4..]);
+
+# ---------------------------------------------------------------------------
+# Log injection prevention
+# ---------------------------------------------------------------------------
+
+- id: PC-C9.4
+  facet: Security Logging & Monitoring
+  section: Prevent Log Injection
+  security_rule: >-
+    Untrusted input must be neutralized before it is written to a log so
+    that newline and control characters cannot forge log entries or
+    corrupt the log stream.
+  vulnerability_pattern: >-
+    User-controlled text is concatenated straight into a log line, so
+    carriage return or line feed characters in the input let an attacker
+    inject fake entries and mislead anyone reading the log.
+  secure_pattern: >-
+    Untrusted values are passed as structured parameters to the logger,
+    or have their newline and control characters stripped or encoded,
+    before the log entry is written.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("search query: " + userInput)
+      secure: |
+        log.info("search query", query=stripNewlines(userInput))
+    python:
+      vulnerable: |
+        logger.info("user searched for " + request.args["q"])
+      secure: |
+        safe_q = request.args["q"].replace("\r", "").replace("\n", "")
+        logger.info("user searched for %s", safe_q)
+    javascript:
+      vulnerable: |
+        logger.info("comment posted: " + req.body.text);
+      secure: |
+        logger.info("comment posted", { text: req.body.text.replace(/[\r\n]/g, " ") });
+    java:
+      vulnerable: |
+        log.info("username " + request.getParameter("name"));
+      secure: |
+        log.info("username {}", request.getParameter("name").replaceAll("[\\r\\n]", "_"));
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("Search term: " + Request.Query["q"]);
+      secure: |
+        _logger.LogInformation("Search term: {Term}", Request.Query["q"]);
+
+# ---------------------------------------------------------------------------
+# Log integrity and tamper resistance
+# ---------------------------------------------------------------------------
+
+- id: PC-C9.5
+  facet: Security Logging & Monitoring
+  section: Protect Log Integrity
+  security_rule: >-
+    Application code must not be able to overwrite, truncate, or delete
+    its own logs; log files and stores must be append-only and shipped
+    promptly to a separate protected destination.
+  vulnerability_pattern: >-
+    Logs are written to a file the application can rewrite or truncate,
+    so an attacker who gains code execution or file access can erase the
+    evidence of their activity.
+  secure_pattern: >-
+    Logs are opened in append-only mode and streamed to a separate,
+    access-restricted aggregator that the application cannot modify after
+    the fact.
+  code_patterns:
+    generic:
+      vulnerable: |
+        logFile = open("app.log", mode="write")   # truncates on open
+      secure: |
+        logFile = open("app.log", mode="append")  # plus ship to remote store
+    python:
+      vulnerable: |
+        handler = logging.FileHandler("app.log", mode="w")
+      secure: |
+        handler = logging.handlers.SysLogHandler(address=("log-collector", 514))
+    javascript:
+      vulnerable: |
+        const stream = fs.createWriteStream("app.log");        // truncates
+      secure: |
+        const stream = fs.createWriteStream("app.log", { flags: "a" });
+    java:
+      vulnerable: |
+        FileWriter w = new FileWriter("app.log");              // overwrites
+      secure: |
+        FileWriter w = new FileWriter("app.log", true);        // append mode
+    csharp:
+      vulnerable: |
+        var fs = new FileStream("app.log", FileMode.Create);
+      secure: |
+        var fs = new FileStream("app.log", FileMode.Append, FileAccess.Write);
+
+# ---------------------------------------------------------------------------
+# Log context and quality
+# ---------------------------------------------------------------------------
+
+- id: PC-C9.6
+  facet: Security Logging & Monitoring
+  section: Log With Sufficient Context
+  security_rule: >-
+    Each log event must carry enough context — a synchronized timestamp,
+    a request or correlation identifier, the actor, the action, and the
+    outcome — to reconstruct what happened during an investigation.
+  vulnerability_pattern: >-
+    Log lines are bare messages with no timestamp, no actor, and no
+    request identifier, so events cannot be ordered, attributed, or
+    correlated across services during an incident.
+  secure_pattern: >-
+    Events are emitted as structured records with a timestamp, a
+    correlation identifier, the actor, the action, and the outcome, so
+    they can be searched and stitched together.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("user updated")
+      secure: |
+        log.info("user.update", actor=user.id, target=target.id,
+                 outcome="success", correlation_id=cid)
+    python:
+      vulnerable: |
+        logger.info("deleted record")
+      secure: |
+        logger.info("record.delete actor=%s record=%s cid=%s",
+                    current_user.id, record_id, correlation_id_var.get())
+    javascript:
+      vulnerable: |
+        logger.info("payment processed");
+      secure: |
+        logger.info("payment.processed", { actor: user.id, amount, cid: req.id });
+    java:
+      vulnerable: |
+        log.info("role changed");
+      secure: |
+        log.info("role.change actor={} target={} newRole={} cid={}",
+                 actor.getId(), target.getId(), newRole, MDC.get("correlationId"));
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("Settings saved");
+      secure: |
+        _logger.LogInformation("settings.update actor={Actor} cid={Cid}",
+            user.Id, HttpContext.TraceIdentifier);
+
+- id: PC-C9.7
+  facet: Security Logging & Monitoring
+  section: Fail Safely on Logging Errors
+  security_rule: >-
+    A failure in the logging subsystem must not crash the request or be
+    silently swallowed; logging errors should be handled and surfaced so
+    a loss of visibility is itself detected.
+  vulnerability_pattern: >-
+    A logging call that throws is left to abort the surrounding request,
+    or is caught and discarded, so either the feature breaks or the
+    application goes blind without anyone knowing.
+  secure_pattern: >-
+    Logging is wrapped so a failure is contained, falls back to an
+    alternate sink, and emits its own signal that log delivery is
+    degraded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try: remoteLog.send(event)
+        except: pass                       # logging failure hidden
+      secure: |
+        try: remoteLog.send(event)
+        except LogError: localFallback.write(event); alert("log_delivery_degraded")
+    python:
+      vulnerable: |
+        remote_handler.emit(record)        # exception propagates to the request
+      secure: |
+        try:
+            remote_handler.emit(record)
+        except Exception:
+            fallback_handler.emit(record)
+            metrics.increment("log.delivery.failure")
+    javascript:
+      vulnerable: |
+        await logShipper.send(event);      // unhandled rejection aborts handler
+      secure: |
+        try { await logShipper.send(event); }
+        catch { localLogger.error("log.delivery.failure", event); }
+    java:
+      vulnerable: |
+        remoteAppender.append(event);      // throws, request fails
+      secure: |
+        try { remoteAppender.append(event); }
+        catch (LogException e) { fallbackAppender.append(event); metrics.mark("log.fail"); }
+    csharp:
+      vulnerable: |
+        await _logShipper.SendAsync(evt);
+      secure: |
+        try { await _logShipper.SendAsync(evt); }
+        catch (Exception) { _fallback.Write(evt); _metrics.Increment("log.delivery.failure"); }
+
+# ---------------------------------------------------------------------------
+# Centralization, monitoring, and alerting
+# ---------------------------------------------------------------------------
+
+- id: PC-C9.8
+  facet: Security Logging & Monitoring
+  section: Centralize Logs for Monitoring
+  security_rule: >-
+    Logs from every service instance must be shipped to a central
+    aggregator in a consistent structured format so they can be searched,
+    correlated, and monitored as one stream.
+  vulnerability_pattern: >-
+    Each instance writes free-form logs only to its own local disk, so
+    there is no single place to search, correlation across services is
+    impossible, and logs are lost when the instance is recycled.
+  secure_pattern: >-
+    Every instance emits structured events to a shared log aggregator,
+    giving one queryable, durable stream that monitoring and alerting can
+    run against.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeLine("/var/log/app.log", message)        # local disk only
+      secure: |
+        logAggregator.emit(structuredEvent)           # central, structured
+    python:
+      vulnerable: |
+        logging.basicConfig(filename="/var/log/app.log")
+      secure: |
+        handler = logging.handlers.SysLogHandler(address=("log-collector", 514))
+        logging.getLogger().addHandler(JsonFormatterHandler(handler))
+    javascript:
+      vulnerable: |
+        const logger = winston.createLogger({ transports: [new winston.transports.File({ filename: "app.log" })] });
+      secure: |
+        const logger = winston.createLogger({ transports: [new winston.transports.Http({ host: "log-collector" })] });
+    java:
+      vulnerable: |
+        <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+      secure: |
+        <appender name="AGG" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+    csharp:
+      vulnerable: |
+        Log.Logger = new LoggerConfiguration().WriteTo.File("app.log").CreateLogger();
+      secure: |
+        Log.Logger = new LoggerConfiguration().WriteTo.Seq("http://log-collector").CreateLogger();
+
+- id: PC-C9.9
+  facet: Security Logging & Monitoring
+  section: Monitor and Alert on Suspicious Activity
+  security_rule: >-
+    Centralized logs must be actively monitored, and automated alerts
+    must fire on suspicious patterns such as repeated authentication
+    failures, access-control denials, or input-validation spikes.
+  vulnerability_pattern: >-
+    Logs are collected but never watched, so an attack such as a
+    credential-stuffing burst is recorded but no one is notified until
+    long after the damage is done.
+  secure_pattern: >-
+    Detection rules run continuously over the log stream and raise an
+    alert to an on-call channel when a suspicious threshold is crossed,
+    so response can begin in near real time.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.warning("auth.login.failure", user=user.id)   # recorded, never watched
+      secure: |
+        failures = counter.increment("auth.fail." + clientIp)
+        if failures > THRESHOLD: alerting.notify("possible credential stuffing", ip=clientIp)
+    python:
+      vulnerable: |
+        logger.warning("auth.login.failure user=%s", username)
+      secure: |
+        logger.warning("auth.login.failure user=%s", username)
+        if cache.incr(f"authfail:{client_ip}") > 10:
+            alerts.send("brute_force_suspected", ip=client_ip)
+    javascript:
+      vulnerable: |
+        logger.warn("auth.login.failure", { username });
+      secure: |
+        logger.warn("auth.login.failure", { username });
+        if (await redis.incr(`authfail:${ip}`) > 10) alerts.notify("brute_force_suspected", { ip });
+    java:
+      vulnerable: |
+        log.warn("auth.login.failure user={}", username);
+      secure: |
+        log.warn("auth.login.failure user={}", username);
+        if (failureCounter.incrementAndGet(ip) > 10) alertService.notify("brute_force_suspected", ip);
+    csharp:
+      vulnerable: |
+        _logger.LogWarning("auth.login.failure user={User}", username);
+      secure: |
+        _logger.LogWarning("auth.login.failure user={User}", username);
+        if (_cache.Increment($"authfail:{ip}") > 10)
+            await _alerts.NotifyAsync("brute_force_suspected", ip);
+
+- id: PC-C9.10
+  facet: Security Logging & Monitoring
+  section: Retain Logs for Investigation
+  security_rule: >-
+    Logs must be retained for a defined period that supports incident
+    investigation and any regulatory requirement, and rotation must not
+    silently discard entries before that window elapses.
+  vulnerability_pattern: >-
+    Log files rotate on size with only a day or two kept, so by the time
+    a breach is discovered the relevant entries have already been
+    overwritten and the investigation has no data.
+  secure_pattern: >-
+    A retention policy keeps logs for the required investigation window
+    on durable storage, with rotation and archival sized so older entries
+    survive long enough to be useful.
+  code_patterns:
+    generic:
+      vulnerable: |
+        rotateLogs(keep=2, by="size")              # two files, then discarded
+      secure: |
+        rotateLogs(keep=90, by="day", archiveTo=durableStore)
+    python:
+      vulnerable: |
+        RotatingFileHandler("app.log", maxBytes=10_000_000, backupCount=1)
+      secure: |
+        TimedRotatingFileHandler("app.log", when="midnight", backupCount=90)
+    javascript:
+      vulnerable: |
+        new transports.File({ filename: "app.log", maxsize: 1e7, maxFiles: 1 });
+      secure: |
+        new DailyRotateFile({ filename: "app-%DATE%.log", maxFiles: "90d" });
+    java:
+      vulnerable: |
+        <maxHistory>1</maxHistory>
+      secure: |
+        <maxHistory>90</maxHistory>   <!-- plus archive to durable storage -->
+    csharp:
+      vulnerable: |
+        .WriteTo.File("app.log", rollingInterval: RollingInterval.Day, retainedFileCountLimit: 1)
+      secure: |
+        .WriteTo.File("app.log", rollingInterval: RollingInterval.Day, retainedFileCountLimit: 90)

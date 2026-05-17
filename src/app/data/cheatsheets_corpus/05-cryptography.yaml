@@ -1,0 +1,588 @@
+# OWASP Cheat Sheet Series — Domain 05: Cryptography
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Drawn from the OWASP Cryptographic Storage, Key Management, Secrets
+# Management, Password Storage, and Transport Layer Security cheat sheets.
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-05.1 — Strong, Modern Cryptographic Algorithms
+# ---------------------------------------------------------------------------
+
+- id: CS-05.1
+  facet: Cryptography
+  section: Strong, Modern Cryptographic Algorithms
+  security_rule: >-
+    Use only current, peer-reviewed cryptographic algorithms and modes —
+    such as AES with an authenticated mode for symmetric encryption — and
+    never roll your own cipher.
+  vulnerability_pattern: >-
+    The application encrypts data with a broken or deprecated algorithm
+    such as DES, RC4, or Blowfish, or uses a custom homemade cipher, so
+    the ciphertext can be recovered by a well-known attack.
+  secure_pattern: >-
+    Sensitive data is encrypted with a modern, widely vetted algorithm
+    such as AES-256 in an authenticated mode, using a maintained
+    cryptography library rather than a hand-written implementation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ciphertext = encrypt(data, algorithm="DES", key)
+      secure: |
+        ciphertext = encrypt(data, algorithm="AES-256-GCM", key)
+    python:
+      vulnerable: |
+        from Crypto.Cipher import DES
+        cipher = DES.new(key, DES.MODE_ECB)
+      secure: |
+        from cryptography.fernet import Fernet
+        cipher = Fernet(key)            # AES-128-CBC + HMAC, vetted
+    javascript:
+      vulnerable: |
+        const c = crypto.createCipheriv("des-ecb", key, null);
+      secure: |
+        const c = crypto.createCipheriv("aes-256-gcm", key, iv);
+    java:
+      vulnerable: |
+        Cipher c = Cipher.getInstance("DES");
+      secure: |
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+    csharp:
+      vulnerable: |
+        using var des = DES.Create();
+      secure: |
+        using var aes = new AesGcm(key, AesGcm.TagByteSizes.MaxSize);
+
+# ---------------------------------------------------------------------------
+# CS-05.2 — Authenticated Encryption Modes
+# ---------------------------------------------------------------------------
+
+- id: CS-05.2
+  facet: Cryptography
+  section: Authenticated Encryption Modes
+  security_rule: >-
+    Encrypt with an authenticated mode such as GCM or ChaCha20-Poly1305,
+    or pair encryption with a separate MAC, so any tampering with the
+    ciphertext is detected before it is decrypted.
+  vulnerability_pattern: >-
+    Data is encrypted with an unauthenticated mode such as ECB or CBC
+    with no integrity check, so an attacker can flip bits or reorder
+    blocks and the change goes undetected, enabling padding-oracle and
+    bit-flipping attacks.
+  secure_pattern: >-
+    An authenticated encryption mode is used so decryption fails loudly
+    on any modification, and the authentication tag is verified before
+    the plaintext is trusted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ciphertext = aesCbc(data, key, iv)        # no integrity tag
+      secure: |
+        ciphertext, tag = aesGcm(data, key, iv)   # verified on decrypt
+    python:
+      vulnerable: |
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        ct = cipher.encrypt(pad(data))
+      secure: |
+        aes = AESGCM(key)
+        ct = aes.encrypt(nonce, data, associated_data)
+    javascript:
+      vulnerable: |
+        const c = crypto.createCipheriv("aes-256-cbc", key, iv);
+      secure: |
+        const c = crypto.createCipheriv("aes-256-gcm", key, iv);
+        // ... later: c.getAuthTag() stored and verified on decrypt
+    java:
+      vulnerable: |
+        Cipher c = Cipher.getInstance("AES/CBC/PKCS5Padding");
+      secure: |
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        c.init(ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+    csharp:
+      vulnerable: |
+        using var aes = Aes.Create();        // CBC, no auth tag
+      secure: |
+        using var aes = new AesGcm(key, 16);
+        aes.Encrypt(nonce, plaintext, ciphertext, tag);
+
+# ---------------------------------------------------------------------------
+# CS-05.3 — Cryptographically Secure Random Number Generation
+# ---------------------------------------------------------------------------
+
+- id: CS-05.3
+  facet: Cryptography
+  section: Cryptographically Secure Random Number Generation
+  security_rule: >-
+    Generate keys, tokens, salts, IVs, and session identifiers with a
+    cryptographically secure random number generator, never with a
+    general-purpose or seedable pseudo-random function.
+  vulnerability_pattern: >-
+    Security-sensitive values are produced by a fast non-cryptographic
+    PRNG such as a standard random function, so an attacker who observes
+    a few outputs can predict subsequent values.
+  secure_pattern: >-
+    All security-sensitive random values are drawn from the platform
+    cryptographically secure RNG, which is unpredictable and seeded from
+    a strong entropy source.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = random()              # predictable, non-cryptographic
+      secure: |
+        token = secureRandomBytes(32)
+    python:
+      vulnerable: |
+        import random
+        token = random.randint(0, 2**128)
+      secure: |
+        import secrets
+        token = secrets.token_hex(32)
+    javascript:
+      vulnerable: |
+        const token = Math.random().toString(36).slice(2);
+      secure: |
+        const token = crypto.randomBytes(32).toString("hex");
+    java:
+      vulnerable: |
+        long token = new Random().nextLong();
+      secure: |
+        byte[] token = new byte[32];
+        SecureRandom.getInstanceStrong().nextBytes(token);
+    csharp:
+      vulnerable: |
+        var token = new Random().Next();
+      secure: |
+        var token = RandomNumberGenerator.GetBytes(32);
+
+# ---------------------------------------------------------------------------
+# CS-05.4 — Password Storage with a Strong Adaptive Hash
+# ---------------------------------------------------------------------------
+
+- id: CS-05.4
+  facet: Cryptography
+  section: Password Storage with a Strong Adaptive Hash
+  security_rule: >-
+    Store user passwords with a slow, salted, adaptive hashing function
+    such as Argon2id, scrypt, or bcrypt, never with a fast general-purpose
+    hash or in plaintext.
+  vulnerability_pattern: >-
+    Passwords are stored in plaintext, encrypted reversibly, or hashed
+    with a fast unsalted digest such as MD5 or SHA-256, so a database
+    leak exposes credentials to rapid offline cracking.
+  secure_pattern: >-
+    Each password is run through a memory-hard adaptive hash with a
+    unique random salt and a tuned work factor, and only the resulting
+    hash string is stored.
+  code_patterns:
+    generic:
+      vulnerable: |
+        store(user, sha256(password))
+      secure: |
+        store(user, argon2id(password))   # salted, memory-hard, tuned
+    python:
+      vulnerable: |
+        digest = hashlib.md5(password.encode()).hexdigest()
+      secure: |
+        from argon2 import PasswordHasher
+        digest = PasswordHasher().hash(password)
+    javascript:
+      vulnerable: |
+        const digest = crypto.createHash("sha256").update(password).digest("hex");
+      secure: |
+        const digest = await argon2.hash(password, { type: argon2.argon2id });
+    java:
+      vulnerable: |
+        String digest = DigestUtils.sha256Hex(password);
+      secure: |
+        String digest = new Argon2PasswordEncoder().encode(password);
+    csharp:
+      vulnerable: |
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+      secure: |
+        var digest = BCrypt.Net.BCrypt.HashPassword(password, workFactor: 12);
+
+# ---------------------------------------------------------------------------
+# CS-05.5 — Constant-Time Comparison of Secrets
+# ---------------------------------------------------------------------------
+
+- id: CS-05.5
+  facet: Cryptography
+  section: Constant-Time Comparison of Secrets
+  security_rule: >-
+    Compare secrets, MACs, password hashes, and tokens with a
+    constant-time comparison routine so the time taken does not leak how
+    many leading characters matched.
+  vulnerability_pattern: >-
+    A secret is checked with an ordinary equality operator that returns
+    as soon as the first differing byte is found, so an attacker can
+    measure response time and recover the secret one byte at a time.
+  secure_pattern: >-
+    The comparison uses a fixed-time routine that always inspects every
+    byte regardless of where a mismatch occurs, so timing reveals
+    nothing about the secret.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if providedMac == expectedMac: accept()
+      secure: |
+        if constantTimeEquals(providedMac, expectedMac): accept()
+    python:
+      vulnerable: |
+        if provided_token == expected_token:
+            grant()
+      secure: |
+        import hmac
+        if hmac.compare_digest(provided_token, expected_token):
+            grant()
+    javascript:
+      vulnerable: |
+        if (providedMac === expectedMac) accept();
+      secure: |
+        if (crypto.timingSafeEqual(Buffer.from(providedMac),
+                                   Buffer.from(expectedMac))) accept();
+    java:
+      vulnerable: |
+        if (providedMac.equals(expectedMac)) accept();
+      secure: |
+        if (MessageDigest.isEqual(providedMac, expectedMac)) accept();
+    csharp:
+      vulnerable: |
+        if (providedMac == expectedMac) Accept();
+      secure: |
+        if (CryptographicOperations.FixedTimeEquals(providedMac,
+                                                    expectedMac)) Accept();
+
+# ---------------------------------------------------------------------------
+# CS-05.6 — No Hardcoded Keys or Secrets in Source Code
+# ---------------------------------------------------------------------------
+
+- id: CS-05.6
+  facet: Cryptography
+  section: No Hardcoded Keys or Secrets in Source Code
+  security_rule: >-
+    Cryptographic keys, API tokens, and passwords must never be
+    embedded in source code or committed to version control; load them
+    at runtime from a secret manager or injected environment.
+  vulnerability_pattern: >-
+    A key, password, or API token is written as a literal in the source
+    file, so anyone with read access to the repository or a decompiled
+    binary obtains the secret permanently.
+  secure_pattern: >-
+    Secrets are kept outside the codebase in a dedicated secret manager
+    or environment configuration and resolved at runtime, so the
+    repository contains only references, never the values.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = "9f8c2a1b4d6e7f0a9f8c2a1b4d6e7f0a"
+      secure: |
+        key = secretManager.get("data-encryption-key")
+    python:
+      vulnerable: |
+        API_KEY = "sk_live_EXAMPLE_NOT_A_REAL_KEY"
+      secure: |
+        API_KEY = os.environ["STRIPE_API_KEY"]
+    javascript:
+      vulnerable: |
+        const dbPassword = "P@ssw0rd-prod-2024";
+      secure: |
+        const dbPassword = process.env.DB_PASSWORD;
+    java:
+      vulnerable: |
+        String secret = "hunter2-jwt-signing-secret";
+      secure: |
+        String secret = System.getenv("JWT_SIGNING_SECRET");
+    csharp:
+      vulnerable: |
+        const string ConnString = "Server=db;Password=Sup3rSecret;";
+      secure: |
+        var connString = Configuration["ConnectionStrings:Db"];
+
+# ---------------------------------------------------------------------------
+# CS-05.7 — Key Separation and Lifecycle Management
+# ---------------------------------------------------------------------------
+
+- id: CS-05.7
+  facet: Cryptography
+  section: Key Separation and Lifecycle Management
+  security_rule: >-
+    Use a distinct key for each cryptographic purpose, store keys
+    separately from the data they protect, and support rotation so a
+    key can be retired and replaced without losing access to old data.
+  vulnerability_pattern: >-
+    One static key is reused for encryption, signing, and token
+    generation, is stored next to the ciphertext, and has no rotation
+    path, so a single compromise exposes everything with no recovery.
+  secure_pattern: >-
+    Each function gets its own key derived or provisioned independently,
+    keys live in a managed store apart from the data, and a key
+    identifier is recorded with each record so rotation is possible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        encrypt(data, MASTER_KEY); sign(token, MASTER_KEY)
+      secure: |
+        encrypt(data, kms.key("enc-v3")); sign(token, kms.key("sign-v1"))
+    python:
+      vulnerable: |
+        ct = aesgcm_encrypt(data, MASTER_KEY)
+      secure: |
+        key_id, key = kms.current_data_key()
+        record.key_id = key_id
+        ct = aesgcm_encrypt(data, key)
+    java:
+      vulnerable: |
+        byte[] ct = encrypt(data, masterKey);
+      secure: |
+        DataKey dk = kms.generateDataKey("enc-purpose");
+        record.setKeyId(dk.id());
+        byte[] ct = encrypt(data, dk.plaintext());
+    csharp:
+      vulnerable: |
+        var ct = Encrypt(data, _masterKey);
+      secure: |
+        var dk = await _kms.GetDataKeyAsync("enc-purpose");
+        record.KeyId = dk.Id;
+        var ct = Encrypt(data, dk.Plaintext);
+
+# ---------------------------------------------------------------------------
+# CS-05.8 — Unique, Non-Reused Initialization Vectors and Nonces
+# ---------------------------------------------------------------------------
+
+- id: CS-05.8
+  facet: Cryptography
+  section: Unique, Non-Reused Initialization Vectors and Nonces
+  security_rule: >-
+    Generate a fresh, unpredictable IV or nonce for every encryption
+    operation and never reuse one with the same key; store it alongside
+    the ciphertext for decryption.
+  vulnerability_pattern: >-
+    A fixed or zero IV is hardcoded, or the same nonce is reused across
+    messages with one key, which leaks plaintext relationships and, for
+    GCM, allows forgery of the authentication tag.
+  secure_pattern: >-
+    A new random IV or nonce is produced from a secure RNG for each
+    operation and prepended to the ciphertext, so no key and nonce pair
+    is ever repeated.
+  code_patterns:
+    generic:
+      vulnerable: |
+        iv = bytes(16)                       # constant zero IV reused
+        ct = aesGcm(data, key, iv)
+      secure: |
+        iv = secureRandomBytes(12)
+        ct = iv + aesGcm(data, key, iv)
+    python:
+      vulnerable: |
+        iv = b"\x00" * 12
+        ct = AESGCM(key).encrypt(iv, data, None)
+      secure: |
+        iv = os.urandom(12)
+        ct = iv + AESGCM(key).encrypt(iv, data, None)
+    javascript:
+      vulnerable: |
+        const iv = Buffer.alloc(12, 0);
+      secure: |
+        const iv = crypto.randomBytes(12);
+    java:
+      vulnerable: |
+        byte[] iv = new byte[12];            // all zeros
+      secure: |
+        byte[] iv = new byte[12];
+        SecureRandom.getInstanceStrong().nextBytes(iv);
+    csharp:
+      vulnerable: |
+        var nonce = new byte[12];            // all zeros
+      secure: |
+        var nonce = RandomNumberGenerator.GetBytes(12);
+
+# ---------------------------------------------------------------------------
+# CS-05.9 — Proper Key Derivation from Passwords
+# ---------------------------------------------------------------------------
+
+- id: CS-05.9
+  facet: Cryptography
+  section: Proper Key Derivation from Passwords
+  security_rule: >-
+    Derive encryption keys from passwords or passphrases with a
+    purpose-built key derivation function such as PBKDF2, scrypt, or
+    Argon2, using a random salt and a high iteration or cost parameter.
+  vulnerability_pattern: >-
+    A password is used directly as a key, or run through a single fast
+    hash, so the resulting key has low entropy and is quickly recovered
+    by brute force.
+  secure_pattern: >-
+    A dedicated key derivation function stretches the password with a
+    unique salt and a deliberately slow work factor, producing a key of
+    the required length that resists offline guessing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = sha256(password)               # fast, no salt, no stretching
+      secure: |
+        key = pbkdf2(password, randomSalt, iterations=600000, length=32)
+    python:
+      vulnerable: |
+        key = hashlib.sha256(password.encode()).digest()
+      secure: |
+        key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 600000, 32)
+    javascript:
+      vulnerable: |
+        const key = crypto.createHash("sha256").update(password).digest();
+      secure: |
+        const key = crypto.pbkdf2Sync(password, salt, 600000, 32, "sha256");
+    java:
+      vulnerable: |
+        byte[] key = MessageDigest.getInstance("SHA-256").digest(pw.getBytes());
+      secure: |
+        var spec = new PBEKeySpec(pw.toCharArray(), salt, 600000, 256);
+        byte[] key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                                     .generateSecret(spec).getEncoded();
+    csharp:
+      vulnerable: |
+        var key = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+      secure: |
+        var key = Rfc2898DeriveBytes.Pbkdf2(password, salt, 600000,
+                                            HashAlgorithmName.SHA256, 32);
+
+# ---------------------------------------------------------------------------
+# CS-05.10 — Strong TLS Configuration for Data in Transit
+# ---------------------------------------------------------------------------
+
+- id: CS-05.10
+  facet: Cryptography
+  section: Strong TLS Configuration for Data in Transit
+  security_rule: >-
+    Protect data in transit with TLS 1.2 or higher, disable obsolete
+    protocol versions and weak cipher suites, and always validate the
+    server certificate chain and hostname.
+  vulnerability_pattern: >-
+    A connection uses an outdated protocol such as SSLv3 or TLS 1.0, or
+    certificate and hostname verification is turned off, so traffic can
+    be downgraded, intercepted, or read by a machine-in-the-middle.
+  secure_pattern: >-
+    The client and server negotiate a modern TLS version with strong
+    cipher suites only, and certificate chain and hostname validation is
+    left enabled so the peer identity is confirmed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        connect(host, tlsVersion="SSLv3", verifyCertificate=false)
+      secure: |
+        connect(host, tlsVersion="TLS1.2+", verifyCertificate=true)
+    python:
+      vulnerable: |
+        requests.get(url, verify=False)
+      secure: |
+        ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        requests.get(url, verify=True)
+    javascript:
+      vulnerable: |
+        https.get({ host, rejectUnauthorized: false }, cb);
+      secure: |
+        https.get({ host, minVersion: "TLSv1.2", rejectUnauthorized: true }, cb);
+    java:
+      vulnerable: |
+        sslContext.init(null, new TrustManager[]{ trustAllCerts }, null);
+      secure: |
+        SSLContext ctx = SSLContext.getInstance("TLSv1.3");
+        ctx.init(null, null, null);   // default trust + hostname checks
+    csharp:
+      vulnerable: |
+        handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
+      secure: |
+        handler.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+
+# ---------------------------------------------------------------------------
+# CS-05.11 — Encrypt Sensitive Data at Rest
+# ---------------------------------------------------------------------------
+
+- id: CS-05.11
+  facet: Cryptography
+  section: Encrypt Sensitive Data at Rest
+  security_rule: >-
+    Identify regulated and sensitive data such as credentials, tokens,
+    payment details, and personal information, and encrypt it at rest so
+    a storage or backup compromise does not expose plaintext.
+  vulnerability_pattern: >-
+    Sensitive fields are written to the database, files, or backups in
+    plaintext, so anyone who obtains a copy of the storage medium reads
+    the data directly.
+  secure_pattern: >-
+    Sensitive fields are encrypted before they are persisted, using a
+    key held in a separate managed store, so stored bytes and backups
+    are useless without access to the key.
+  code_patterns:
+    generic:
+      vulnerable: |
+        db.save(user.ssn, plaintextSsn)
+      secure: |
+        db.save(user.ssn, encrypt(plaintextSsn, dataKey))
+    python:
+      vulnerable: |
+        user.ssn = request.form["ssn"]
+        session.add(user)
+      secure: |
+        user.ssn = Fernet(data_key).encrypt(request.form["ssn"].encode())
+        session.add(user)
+    java:
+      vulnerable: |
+        statement.setString(1, creditCardNumber);
+      secure: |
+        statement.setBytes(1, encryptor.encrypt(creditCardNumber));
+    csharp:
+      vulnerable: |
+        entity.AccountNumber = model.AccountNumber;
+      secure: |
+        entity.AccountNumber = _protector.Protect(model.AccountNumber);
+
+# ---------------------------------------------------------------------------
+# CS-05.12 — Detect and Prevent Secrets Leaking into Logs and Errors
+# ---------------------------------------------------------------------------
+
+- id: CS-05.12
+  facet: Cryptography
+  section: Detect and Prevent Secrets Leaking into Logs and Errors
+  security_rule: >-
+    Keys, tokens, passwords, and other secrets must never be written to
+    logs, error messages, stack traces, or telemetry; redact or omit
+    them before any diagnostic output.
+  vulnerability_pattern: >-
+    A request body, configuration object, or exception that contains a
+    secret is logged verbatim, so the secret is persisted in plaintext
+    in log files and forwarded to log aggregation systems.
+  secure_pattern: >-
+    Secret-bearing values are masked or stripped before logging, and log
+    statements reference only non-sensitive identifiers, so diagnostic
+    output never contains a usable credential.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("auth request: " + requestBody)
+      secure: |
+        log.info("auth request for user " + userId)   # no secret fields
+    python:
+      vulnerable: |
+        logger.info("login payload: %s", request.json)
+      secure: |
+        logger.info("login attempt for user_id=%s", user_id)
+    javascript:
+      vulnerable: |
+        console.log("config loaded", config);   // includes apiKey
+      secure: |
+        console.log("config loaded", { ...config, apiKey: "REDACTED" });
+    java:
+      vulnerable: |
+        log.info("connecting with {}", connectionString);
+      secure: |
+        log.info("connecting to host {}", dbHost);
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("Token issued: {Token}", jwt);
+      secure: |
+        _logger.LogInformation("Token issued for user {UserId}", userId);

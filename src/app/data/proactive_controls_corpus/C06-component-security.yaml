@@ -1,0 +1,430 @@
+# OWASP Proactive Controls — C6: Keep your Components Secure
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for web app security).
+#
+# C6 covers the supply-chain hygiene practices an application team owns:
+# knowing every component in use, watching those components for known
+# vulnerabilities, sourcing them from trusted places, pinning and
+# verifying what is installed, removing what is unused, and patching
+# promptly when an advisory lands.
+
+# ---------------------------------------------------------------------------
+# PC-C6.1 — Component Inventory and SBOM
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.1
+  facet: Component Security
+  section: Component Inventory and SBOM
+  security_rule: >-
+    Maintain a complete, machine-readable inventory of every component
+    the application depends on — including transitive dependencies — so
+    that exposure to a newly disclosed vulnerability can be answered
+    quickly and accurately.
+  vulnerability_pattern: >-
+    The team has no authoritative list of the libraries shipped with the
+    application, so when an advisory is published nobody can tell whether
+    the affected component is in use or which versions are deployed.
+  secure_pattern: >-
+    A Software Bill of Materials is generated automatically as part of
+    the build, capturing direct and transitive dependencies with exact
+    versions, and is stored as a build artifact for every release.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # build produces only the binary, no record of what went into it
+        package_app()
+      secure: |
+        package_app()
+        generate_sbom(format="cyclonedx", output="sbom.json")  # archived per release
+    python:
+      vulnerable: |
+        # no dependency manifest captured at build time
+        poetry build
+      secure: |
+        poetry build
+        cyclonedx-py poetry --output-format json --of sbom.json
+    javascript:
+      vulnerable: |
+        npm run build   # no inventory of the installed tree
+      secure: |
+        npm run build
+        npx @cyclonedx/cyclonedx-npm --output-file sbom.json
+    java:
+      vulnerable: |
+        <!-- pom.xml builds a jar with no component manifest -->
+        <plugin><artifactId>maven-jar-plugin</artifactId></plugin>
+      secure: |
+        <plugin>
+          <groupId>org.cyclonedx</groupId><artifactId>cyclonedx-maven-plugin</artifactId>
+        </plugin>
+    csharp:
+      vulnerable: |
+        dotnet build   # no bill of materials emitted
+      secure: |
+        dotnet build
+        dotnet CycloneDX MyApp.csproj -o sbom
+
+# ---------------------------------------------------------------------------
+# PC-C6.2 — Known-Vulnerability Scanning
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.2
+  facet: Component Security
+  section: Known-Vulnerability Scanning
+  security_rule: >-
+    Continuously scan every dependency against known-vulnerability
+    databases in CI, and fail the build when a component with a known
+    exploitable flaw is introduced.
+  vulnerability_pattern: >-
+    Dependencies are installed and shipped without ever being checked
+    against a vulnerability database, so libraries with publicly known
+    CVEs reach production unnoticed.
+  secure_pattern: >-
+    A composition-analysis scanner runs on every build and pull request,
+    compares the dependency tree to advisory feeds, and blocks the
+    pipeline when a vulnerable component is detected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        install_dependencies()      # no advisory check before shipping
+      secure: |
+        install_dependencies()
+        run_dependency_audit(fail_on="high")   # CI gate
+    python:
+      vulnerable: |
+        # CI installs requirements with no audit step
+        pip install -r requirements.txt
+      secure: |
+        pip install -r requirements.txt
+        pip-audit --strict        # non-zero exit fails the build
+    javascript:
+      vulnerable: |
+        npm ci    # no audit; vulnerable packages pass through
+      secure: |
+        npm ci
+        npm audit --audit-level=high
+    java:
+      vulnerable: |
+        mvn package    # no dependency vulnerability check
+      secure: |
+        mvn org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7
+    csharp:
+      vulnerable: |
+        dotnet restore   # restores packages with no vulnerability scan
+      secure: |
+        dotnet restore
+        dotnet list package --vulnerable --include-transitive
+
+# ---------------------------------------------------------------------------
+# PC-C6.3 — Pin Versions and Verify Integrity
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.3
+  facet: Component Security
+  section: Pin Versions and Verify Integrity
+  security_rule: >-
+    Pin every dependency to an exact version and verify its integrity
+    with a recorded hash, so builds are reproducible and a tampered or
+    swapped package is rejected.
+  vulnerability_pattern: >-
+    Dependencies are declared with floating ranges and no integrity
+    hashes, so each install can silently pull a different or malicious
+    artifact and builds are not reproducible.
+  secure_pattern: >-
+    Versions are locked exactly and a lockfile records a cryptographic
+    hash for each artifact, and the package manager verifies that hash
+    on every install.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dependency "logger" version ">=1.0"     # floating, no hash
+      secure: |
+        dependency "logger" version "==1.4.2" hash "sha256:9f1c..."
+    python:
+      vulnerable: |
+        # requirements.txt
+        requests>=2
+      secure: |
+        # requirements.txt — exact pin plus hash, installed with --require-hashes
+        requests==2.32.3 --hash=sha256:70761c...
+    javascript:
+      vulnerable: |
+        npm install requests   # mutates package.json with a caret range
+      secure: |
+        npm ci   # installs strictly from package-lock.json with integrity hashes
+    java:
+      vulnerable: |
+        <dependency><groupId>com.lib</groupId><artifactId>x</artifactId>
+          <version>LATEST</version></dependency>
+      secure: |
+        <dependency><groupId>com.lib</groupId><artifactId>x</artifactId>
+          <version>3.1.4</version></dependency>   <!-- exact, no LATEST/RELEASE -->
+    csharp:
+      vulnerable: |
+        <PackageReference Include="Lib" Version="*" />
+      secure: |
+        <PackageReference Include="Lib" Version="3.1.4" />
+        <!-- packages.lock.json committed; restore with --locked-mode -->
+
+# ---------------------------------------------------------------------------
+# PC-C6.4 — Source Components from Trusted Repositories
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.4
+  facet: Component Security
+  section: Source Components from Trusted Repositories
+  security_rule: >-
+    Obtain components only from official, trusted repositories over
+    secure connections, and prefer signed packages so a man-in-the-middle
+    or typosquatted artifact cannot be substituted.
+  vulnerability_pattern: >-
+    Packages are fetched over plain HTTP or from arbitrary unverified
+    registries and mirrors, so an attacker on the network or a rogue
+    mirror can deliver a malicious artifact.
+  secure_pattern: >-
+    The package manager is configured to use the official registry over
+    HTTPS, signature or provenance verification is enabled, and unknown
+    sources are not trusted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        registry = "http://mirror.example.net/packages"   # plain HTTP, unverified
+      secure: |
+        registry = "https://registry.official.example/"   # HTTPS, signatures on
+    python:
+      vulnerable: |
+        pip install --index-url http://internal-mirror/simple pkg
+      secure: |
+        pip install --index-url https://pypi.org/simple --require-hashes -r reqs.txt
+    javascript:
+      vulnerable: |
+        npm config set registry http://unverified-mirror.local/
+      secure: |
+        npm config set registry https://registry.npmjs.org/
+        npm install --foreground-scripts=false   # provenance checked via npm audit signatures
+    java:
+      vulnerable: |
+        <repository><url>http://repo.unknown.example/maven</url></repository>
+      secure: |
+        <repository><url>https://repo.maven.apache.org/maven2</url></repository>
+    csharp:
+      vulnerable: |
+        <add key="mirror" value="http://nuget.unverified.local/v3/index.json" />
+      secure: |
+        <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+        <!-- signatureValidationMode = require -->
+
+# ---------------------------------------------------------------------------
+# PC-C6.5 — Remove Unused Dependencies
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.5
+  facet: Component Security
+  section: Remove Unused Dependencies
+  security_rule: >-
+    Remove unused, unneeded, and redundant dependencies and features so
+    the attack surface is no larger than the functionality the
+    application actually uses.
+  vulnerability_pattern: >-
+    Libraries that were added for an experiment or an old feature remain
+    declared and installed, so their code and any vulnerability in it is
+    shipped even though nothing calls them.
+  secure_pattern: >-
+    Dependency manifests are periodically audited for entries the code no
+    longer imports, and unused libraries and optional features are
+    removed from the build.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dependencies = ["core", "legacy-xml", "old-charts"]  # last two unused
+      secure: |
+        dependencies = ["core"]   # unused entries pruned after audit
+    python:
+      vulnerable: |
+        # requirements.txt keeps a parser no module imports anymore
+        defusedxml
+        unused-legacy-lib==0.3
+      secure: |
+        # only what the code imports remains; verified with deptry
+        deptry .   # flags unused/missing dependencies
+    javascript:
+      vulnerable: |
+        // package.json still lists moment though the app moved to date-fns
+        "dependencies": { "moment": "^2.29", "date-fns": "^3.6" }
+      secure: |
+        npx depcheck    # report unused deps, then npm uninstall moment
+    java:
+      vulnerable: |
+        <!-- pom.xml declares commons-collections, nothing references it -->
+        <dependency><artifactId>commons-collections</artifactId></dependency>
+      secure: |
+        mvn dependency:analyze   # lists "Unused declared dependencies" to remove
+    csharp:
+      vulnerable: |
+        <PackageReference Include="Newtonsoft.Json" />  <!-- replaced by System.Text.Json -->
+      secure: |
+        <!-- stale PackageReference removed; dotnet build warns on unused with analyzers -->
+        <PackageReference Include="System.Text.Json" Version="8.0.4" />
+
+# ---------------------------------------------------------------------------
+# PC-C6.6 — Prompt Patching of Vulnerable Components
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.6
+  facet: Component Security
+  section: Prompt Patching of Vulnerable Components
+  security_rule: >-
+    Apply security updates to vulnerable components promptly through an
+    established, time-bound patching process, treating a known-vulnerable
+    dependency as a defect to be fixed on a schedule.
+  vulnerability_pattern: >-
+    A dependency stays pinned at a version with a known vulnerability for
+    months because there is no owner or deadline for updating it, leaving
+    a fixed and public flaw exploitable in production.
+  secure_pattern: >-
+    Advisory feeds are monitored, automated update pull requests are
+    raised for vulnerable dependencies, and patches are merged and
+    deployed within a defined service-level window.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dependency "tls-lib" version "==1.0.1"   # CVE fixed in 1.0.2, never bumped
+      secure: |
+        dependency "tls-lib" version "==1.0.2"   # patched within the SLA window
+    python:
+      vulnerable: |
+        # requirements.txt left at a version pip-audit flags
+        cryptography==41.0.0
+      secure: |
+        # bumped to the patched release; Dependabot raises the PR automatically
+        cryptography==42.0.4
+    javascript:
+      vulnerable: |
+        // package.json frozen on a release with an open advisory
+        "ws": "8.11.0"
+      secure: |
+        "ws": "8.17.1"   // npm audit fix applied, lockfile updated
+    java:
+      vulnerable: |
+        <dependency><groupId>org.apache.logging.log4j</groupId>
+          <artifactId>log4j-core</artifactId><version>2.14.1</version></dependency>
+      secure: |
+        <dependency><groupId>org.apache.logging.log4j</groupId>
+          <artifactId>log4j-core</artifactId><version>2.23.1</version></dependency>
+    csharp:
+      vulnerable: |
+        <PackageReference Include="System.Net.Http" Version="4.3.0" />
+      secure: |
+        <PackageReference Include="System.Net.Http" Version="4.3.4" />
+
+# ---------------------------------------------------------------------------
+# PC-C6.7 — Avoid Unmaintained and End-of-Life Components
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.7
+  facet: Component Security
+  section: Avoid Unmaintained and End-of-Life Components
+  security_rule: >-
+    Prefer actively maintained components and replace dependencies and
+    runtimes that have reached end of life, because abandoned code stops
+    receiving security fixes even when new flaws are found.
+  vulnerability_pattern: >-
+    The application depends on a library or runtime that is no longer
+    maintained or has passed its end-of-life date, so future
+    vulnerabilities in it will never be patched by the upstream project.
+  secure_pattern: >-
+    Components are checked for maintenance status and end-of-life dates,
+    and unmaintained dependencies are migrated to a supported,
+    actively-developed alternative before support ends.
+  code_patterns:
+    generic:
+      vulnerable: |
+        runtime = "framework 2.x"   # vendor announced end-of-life last year
+      secure: |
+        runtime = "framework 6.x"   # current LTS, security support active
+    python:
+      vulnerable: |
+        # Dockerfile pins an end-of-life interpreter
+        FROM python:3.7-slim
+      secure: |
+        FROM python:3.12-slim   # supported release receiving security fixes
+    javascript:
+      vulnerable: |
+        // package.json depends on the deprecated 'request' library
+        "request": "^2.88.2"
+      secure: |
+        // migrated to a maintained client
+        "undici": "^6.19.2"
+    java:
+      vulnerable: |
+        <!-- targets an end-of-life JDK -->
+        <maven.compiler.release>8</maven.compiler.release>
+      secure: |
+        <maven.compiler.release>21</maven.compiler.release>   <!-- current LTS -->
+    csharp:
+      vulnerable: |
+        <TargetFramework>netcoreapp3.1</TargetFramework>  <!-- out of support -->
+      secure: |
+        <TargetFramework>net8.0</TargetFramework>          <!-- LTS, supported -->
+
+# ---------------------------------------------------------------------------
+# PC-C6.8 — Subscribe to Security Advisories for Components in Use
+# ---------------------------------------------------------------------------
+
+- id: PC-C6.8
+  facet: Component Security
+  section: Subscribe to Security Advisories
+  security_rule: >-
+    Monitor security advisories and vulnerability feeds for every
+    component in the inventory so that newly disclosed flaws are noticed
+    and acted on instead of being discovered by an attacker first.
+  vulnerability_pattern: >-
+    No one watches advisory feeds for the libraries in use, so the team
+    only learns of a relevant vulnerability long after disclosure, often
+    through an incident rather than a notification.
+  secure_pattern: >-
+    Automated advisory monitoring is wired into the repository or
+    pipeline, raising alerts or update pull requests whenever a component
+    in the inventory is named in a new advisory.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # no subscription to advisory feeds for the dependency inventory
+        deploy()
+      secure: |
+        # advisory monitoring enabled; alerts on any CVE affecting a used component
+        enable_dependency_alerts(inventory="sbom.json")
+    python:
+      vulnerable: |
+        # no scheduled advisory check; CVEs noticed by accident
+        pass
+      secure: |
+        # .github/dependabot.yml
+        updates:
+          - package-ecosystem: "pip"
+            schedule: { interval: "daily" }
+    javascript:
+      vulnerable: |
+        // repository has no security advisory automation
+      secure: |
+        // .github/dependabot.yml
+        updates:
+          - package-ecosystem: "npm"
+            schedule: { interval: "daily" }
+    java:
+      vulnerable: |
+        <!-- no scheduled OWASP dependency-check run -->
+      secure: |
+        <!-- nightly CI job -->
+        mvn org.owasp:dependency-check-maven:check
+    csharp:
+      vulnerable: |
+        # no automated NuGet advisory monitoring
+      secure: |
+        # scheduled CI step surfaces newly disclosed advisories
+        dotnet list package --vulnerable --include-transitive

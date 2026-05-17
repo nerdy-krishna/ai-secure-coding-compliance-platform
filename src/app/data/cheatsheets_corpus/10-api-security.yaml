@@ -1,0 +1,647 @@
+# OWASP Cheat Sheet Series — Domain 10: API Security
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Drawn from the OWASP REST Security, GraphQL, Microservices Security,
+# Web Service Security, and REST Assessment cheat sheets.
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-10.1 — Authentication of API requests
+# ---------------------------------------------------------------------------
+
+- id: CS-10.1
+  facet: API Security
+  section: API Authentication
+  security_rule: >-
+    Every non-public API endpoint must require a verified credential such
+    as a signed token or API key, and the credential must be checked on the
+    server for each request rather than assumed from a prior step.
+  vulnerability_pattern: >-
+    An API route trusts a client-supplied identifier or an unverified header
+    to decide who the caller is, so anyone who knows or guesses the value is
+    treated as an authenticated user.
+  secure_pattern: >-
+    The request carries a credential that the server cryptographically
+    verifies on every call, and the caller identity is derived only from
+    that verified credential.
+  code_patterns:
+    generic:
+      vulnerable: |
+        userId = request.header("X-User-Id")      # client asserts identity
+        return data_for(userId)
+      secure: |
+        claims = verifyToken(request.header("Authorization"))
+        return data_for(claims.subject)
+    python:
+      vulnerable: |
+        @app.get("/me")
+        def me(): return profile(request.headers["X-User-Id"])
+      secure: |
+        @app.get("/me")
+        def me(user=Depends(current_user)): return profile(user.id)
+    javascript:
+      vulnerable: |
+        app.get("/me", (req, res) => res.json(profile(req.headers["x-user-id"])));
+      secure: |
+        app.get("/me", requireAuth, (req, res) => res.json(profile(req.user.id)));
+    java:
+      vulnerable: |
+        String uid = request.getHeader("X-User-Id");
+        return profile(uid);
+      secure: |
+        var auth = (JwtAuthenticationToken) SecurityContextHolder
+            .getContext().getAuthentication();
+        return profile(auth.getName());
+    csharp:
+      vulnerable: |
+        var uid = Request.Headers["X-User-Id"].ToString();
+        return Profile(uid);
+      secure: |
+        [Authorize]
+        public IActionResult Me() => Ok(Profile(User.FindFirstValue(ClaimTypes.NameIdentifier)));
+
+# ---------------------------------------------------------------------------
+# CS-10.2 — Object-level authorization
+# ---------------------------------------------------------------------------
+
+- id: CS-10.2
+  facet: API Security
+  section: Broken Object Level Authorization
+  security_rule: >-
+    Before returning or modifying a record identified in the request, the
+    API must confirm the authenticated caller is allowed to access that
+    specific object, not merely that they are logged in.
+  vulnerability_pattern: >-
+    An endpoint fetches a record by an identifier taken straight from the
+    request path or body without checking ownership, so changing the
+    identifier lets a caller read or alter another user's data.
+  secure_pattern: >-
+    The query is scoped to the authenticated caller, or an explicit
+    ownership check is run, so a record is only returned when it belongs to
+    or is shared with that caller.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return db.find(Order, request.path("id"))      # any id works
+      secure: |
+        order = db.find(Order, request.path("id"))
+        if order.owner_id != currentUser.id: deny()
+    python:
+      vulnerable: |
+        return db.query(Invoice).get(invoice_id)
+      secure: |
+        return db.query(Invoice).filter_by(
+            id=invoice_id, owner_id=current_user.id).one()
+    javascript:
+      vulnerable: |
+        const doc = await Doc.findById(req.params.id);
+      secure: |
+        const doc = await Doc.findOne({ _id: req.params.id, ownerId: req.user.id });
+    java:
+      vulnerable: |
+        return orderRepo.findById(id).orElseThrow();
+      secure: |
+        return orderRepo.findByIdAndOwnerId(id, currentUser.getId())
+            .orElseThrow(ForbiddenException::new);
+    csharp:
+      vulnerable: |
+        return await _db.Orders.FindAsync(id);
+      secure: |
+        return await _db.Orders.SingleOrDefaultAsync(
+            o => o.Id == id && o.OwnerId == userId);
+
+# ---------------------------------------------------------------------------
+# CS-10.3 — Function-level authorization
+# ---------------------------------------------------------------------------
+
+- id: CS-10.3
+  facet: API Security
+  section: Broken Function Level Authorization
+  security_rule: >-
+    Administrative and privileged API operations must enforce a role or
+    permission check on the server, and must not rely on the client hiding
+    the endpoint or omitting it from a menu.
+  vulnerability_pattern: >-
+    A sensitive operation such as a delete or a role change is exposed as an
+    API route whose only protection is that the normal UI does not link to
+    it, so any caller who sends the request succeeds.
+  secure_pattern: >-
+    Each privileged route is guarded by an explicit server-side role or
+    permission check, applied centrally so no handler can be reached without
+    it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        route("DELETE", "/users/{id}", deleteUser)     # no role gate
+      secure: |
+        route("DELETE", "/users/{id}", requireRole("admin"), deleteUser)
+    python:
+      vulnerable: |
+        @app.delete("/users/{uid}")
+        def remove(uid): users.delete(uid)
+      secure: |
+        @app.delete("/users/{uid}")
+        def remove(uid, admin=Depends(require_admin)): users.delete(uid)
+    javascript:
+      vulnerable: |
+        router.delete("/users/:id", (req, res) => removeUser(req.params.id));
+      secure: |
+        router.delete("/users/:id", requireRole("admin"),
+            (req, res) => removeUser(req.params.id));
+    java:
+      vulnerable: |
+        @DeleteMapping("/users/{id}")
+        void remove(@PathVariable Long id) { service.delete(id); }
+      secure: |
+        @PreAuthorize("hasRole('ADMIN')")
+        @DeleteMapping("/users/{id}")
+        void remove(@PathVariable Long id) { service.delete(id); }
+    csharp:
+      vulnerable: |
+        [HttpDelete("users/{id}")]
+        public IActionResult Remove(int id) { _svc.Delete(id); return Ok(); }
+      secure: |
+        [Authorize(Roles = "Admin")]
+        [HttpDelete("users/{id}")]
+        public IActionResult Remove(int id) { _svc.Delete(id); return Ok(); }
+
+# ---------------------------------------------------------------------------
+# CS-10.4 — Mass assignment / over-binding of request payloads
+# ---------------------------------------------------------------------------
+
+- id: CS-10.4
+  facet: API Security
+  section: Mass Assignment
+  security_rule: >-
+    API endpoints must bind only the fields a caller is permitted to set,
+    so client-supplied JSON cannot write protected attributes such as a role
+    flag, an account balance, or an ownership field.
+  vulnerability_pattern: >-
+    The whole request body is copied onto a domain object or persisted
+    directly, so an attacker adds extra fields like isAdmin or balance and
+    the API silently accepts them.
+  secure_pattern: >-
+    Input is bound into an explicit data transfer object that exposes only
+    the editable fields, and protected attributes are set separately by
+    trusted server code.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user.update(request.jsonBody())          # binds every field sent
+      secure: |
+        user.update(pick(request.jsonBody(), {"name", "email"}))
+    python:
+      vulnerable: |
+        user = User(**request.json)
+      secure: |
+        data = UserUpdate(**request.json)         # pydantic model, allowed fields only
+        user = User(name=data.name, email=data.email)
+    javascript:
+      vulnerable: |
+        Object.assign(user, req.body);
+      secure: |
+        const { name, email } = req.body;
+        Object.assign(user, { name, email });
+    java:
+      vulnerable: |
+        public User save(@RequestBody User user) { return repo.save(user); }
+      secure: |
+        public User save(@RequestBody UserDto dto) {
+            return repo.save(new User(dto.name(), dto.email()));
+        }
+    csharp:
+      vulnerable: |
+        public IActionResult Save([FromBody] User user) => Ok(_repo.Save(user));
+      secure: |
+        public IActionResult Save([FromBody] UserUpdateDto dto)
+            => Ok(_repo.Save(new User { Name = dto.Name, Email = dto.Email }));
+
+# ---------------------------------------------------------------------------
+# CS-10.5 — Rate limiting and resource quotas
+# ---------------------------------------------------------------------------
+
+- id: CS-10.5
+  facet: API Security
+  section: Rate Limiting and Resource Consumption
+  security_rule: >-
+    APIs must enforce rate limits and resource quotas per client so a
+    single caller cannot exhaust capacity, brute-force credentials, or run
+    up unbounded cost.
+  vulnerability_pattern: >-
+    An endpoint accepts unlimited requests per caller, so an attacker can
+    brute-force tokens, scrape data at scale, or drive a denial of service
+    with a simple loop.
+  secure_pattern: >-
+    Each caller is bucketed by API key, token, or address and throttled
+    once a configured request rate is exceeded, with the limit applied
+    before expensive work begins.
+  code_patterns:
+    generic:
+      vulnerable: |
+        route("POST", "/login", login)              # no throttle
+      secure: |
+        route("POST", "/login", rateLimit(perKey="ip", max=5, window="1m"), login)
+    python:
+      vulnerable: |
+        @app.post("/login")
+        def login(): ...
+      secure: |
+        @app.post("/login")
+        @limiter.limit("5/minute")
+        def login(): ...
+    javascript:
+      vulnerable: |
+        app.post("/login", loginHandler);
+      secure: |
+        const limit = rateLimit({ windowMs: 60_000, max: 5 });
+        app.post("/login", limit, loginHandler);
+    java:
+      vulnerable: |
+        @PostMapping("/login")
+        ResponseEntity<?> login(@RequestBody Creds c) { ... }
+      secure: |
+        @RateLimiter(name = "login")
+        @PostMapping("/login")
+        ResponseEntity<?> login(@RequestBody Creds c) { ... }
+    csharp:
+      vulnerable: |
+        [HttpPost("login")]
+        public IActionResult Login(Creds c) { ... }
+      secure: |
+        [EnableRateLimiting("login")]
+        [HttpPost("login")]
+        public IActionResult Login(Creds c) { ... }
+
+# ---------------------------------------------------------------------------
+# CS-10.6 — Content type enforcement and safe response typing
+# ---------------------------------------------------------------------------
+
+- id: CS-10.6
+  facet: API Security
+  section: Content Type Handling
+  security_rule: >-
+    REST endpoints must validate the request Content-Type, accept only the
+    media types they actually parse, and return responses with an explicit
+    safe Content-Type so a JSON body is never rendered as active markup.
+  vulnerability_pattern: >-
+    An API parses a request body regardless of its declared media type, or
+    serializes JSON without setting Content-Type, so a browser may sniff the
+    response as HTML and execute embedded script.
+  secure_pattern: >-
+    The endpoint rejects request bodies whose Content-Type is not on its
+    accepted list, and every response sets application/json with a nosniff
+    header so the body is treated strictly as data.
+  code_patterns:
+    generic:
+      vulnerable: |
+        body = parseAnything(request.rawBody())
+        respond(json)                                 # no Content-Type set
+      secure: |
+        if request.contentType() != "application/json": reject(415)
+        respond(json, contentType="application/json", nosniff=true)
+    python:
+      vulnerable: |
+        data = json.loads(request.data)
+        return Response(json.dumps(out))
+      secure: |
+        if request.mimetype != "application/json": abort(415)
+        return jsonify(out)            # sets application/json
+    javascript:
+      vulnerable: |
+        app.use(bodyParser.text({ type: "*/*" }));
+        res.send(JSON.stringify(out));
+      secure: |
+        app.use(express.json({ type: "application/json" }));
+        res.type("application/json").json(out);
+    java:
+      vulnerable: |
+        @PostMapping("/items")
+        Item create(@RequestBody String raw) { ... }
+      secure: |
+        @PostMapping(value = "/items", consumes = "application/json",
+                     produces = "application/json")
+        Item create(@RequestBody ItemDto dto) { ... }
+    csharp:
+      vulnerable: |
+        [HttpPost("items")]
+        public IActionResult Create() { var raw = ReadBody(); ... }
+      secure: |
+        [HttpPost("items")]
+        [Consumes("application/json")]
+        public IActionResult Create([FromBody] ItemDto dto) => Ok(dto);
+
+# ---------------------------------------------------------------------------
+# CS-10.7 — CORS configuration
+# ---------------------------------------------------------------------------
+
+- id: CS-10.7
+  facet: API Security
+  section: Cross-Origin Resource Sharing
+  security_rule: >-
+    Cross-Origin Resource Sharing must permit only an explicit allowlist of
+    trusted origins, and a wildcard origin must never be combined with
+    credentialed requests.
+  vulnerability_pattern: >-
+    The API reflects the request Origin back into the allowed origin header,
+    or sends a wildcard while also allowing credentials, so any website can
+    read authenticated responses on the victim's behalf.
+  secure_pattern: >-
+    The allowed origin is selected from a fixed allowlist after comparing
+    the request Origin, and credentialed responses are returned only for
+    those known origins.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setHeader("Access-Control-Allow-Origin", request.header("Origin"))
+        setHeader("Access-Control-Allow-Credentials", "true")
+      secure: |
+        if request.header("Origin") in ALLOWED_ORIGINS:
+            setHeader("Access-Control-Allow-Origin", request.header("Origin"))
+    python:
+      vulnerable: |
+        CORS(app, origins="*", supports_credentials=True)
+      secure: |
+        CORS(app, origins=["https://app.example.com"], supports_credentials=True)
+    javascript:
+      vulnerable: |
+        app.use(cors({ origin: true, credentials: true }));
+      secure: |
+        app.use(cors({ origin: ["https://app.example.com"], credentials: true }));
+    java:
+      vulnerable: |
+        config.addAllowedOrigin("*");
+        config.setAllowCredentials(true);
+      secure: |
+        config.setAllowedOrigins(List.of("https://app.example.com"));
+        config.setAllowCredentials(true);
+    csharp:
+      vulnerable: |
+        policy.AllowAnyOrigin().AllowCredentials();
+      secure: |
+        policy.WithOrigins("https://app.example.com").AllowCredentials();
+
+# ---------------------------------------------------------------------------
+# CS-10.8 — GraphQL query depth and complexity limits
+# ---------------------------------------------------------------------------
+
+- id: CS-10.8
+  facet: API Security
+  section: GraphQL Query Cost Controls
+  security_rule: >-
+    A GraphQL API must bound query depth, complexity, and the size of
+    paginated lists, so a deeply nested or amplified query cannot exhaust
+    the server.
+  vulnerability_pattern: >-
+    The GraphQL server executes any query a client sends, so recursive
+    nesting of related fields amplifies into millions of resolver calls and
+    stalls or crashes the service.
+  secure_pattern: >-
+    The schema is served behind a validation rule that rejects queries past
+    a maximum depth or complexity score, and list fields require bounded
+    pagination arguments.
+  code_patterns:
+    generic:
+      vulnerable: |
+        execute(schema, clientQuery)                  # no depth or cost limit
+      secure: |
+        execute(schema, clientQuery, validators=[maxDepth(7), maxComplexity(1000)])
+    python:
+      vulnerable: |
+        schema.execute(client_query)
+      secure: |
+        schema.execute(client_query,
+            validation_rules=[depth_limit_validator(7)])
+    javascript:
+      vulnerable: |
+        const server = new ApolloServer({ schema });
+      secure: |
+        const server = new ApolloServer({ schema,
+            validationRules: [depthLimit(7), costLimit({ maxCost: 1000 })] });
+    java:
+      vulnerable: |
+        GraphQL.newGraphQL(schema).build();
+      secure: |
+        GraphQL.newGraphQL(schema)
+            .instrumentation(new MaxQueryDepthInstrumentation(7))
+            .build();
+    csharp:
+      vulnerable: |
+        services.AddGraphQLServer().AddSchema(schema);
+      secure: |
+        services.AddGraphQLServer().AddSchema(schema)
+            .ModifyRequestOptions(o => o.Complexity.MaximumAllowed = 1000);
+
+# ---------------------------------------------------------------------------
+# CS-10.9 — GraphQL introspection and error verbosity in production
+# ---------------------------------------------------------------------------
+
+- id: CS-10.9
+  facet: API Security
+  section: GraphQL Schema Exposure
+  security_rule: >-
+    In production a GraphQL API should disable schema introspection and
+    return generic error messages, so the full schema and internal
+    implementation details are not handed to attackers.
+  vulnerability_pattern: >-
+    Introspection stays enabled and resolver exceptions are returned
+    verbatim, so an attacker maps the entire schema and reads stack traces
+    that reveal internal types and queries.
+  secure_pattern: >-
+    Introspection is turned off outside development and an error formatter
+    replaces internal exception detail with a generic message while logging
+    the real error server-side.
+  code_patterns:
+    generic:
+      vulnerable: |
+        server = graphqlServer(schema, introspection=true, debug=true)
+      secure: |
+        server = graphqlServer(schema, introspection=false,
+                               formatError=genericMessage)
+    python:
+      vulnerable: |
+        app.add_url_rule("/graphql", view_func=GraphQLView.as_view(
+            "graphql", schema=schema))
+      secure: |
+        app.add_url_rule("/graphql", view_func=GraphQLView.as_view(
+            "graphql", schema=schema, middleware=[DisableIntrospection()]))
+    javascript:
+      vulnerable: |
+        new ApolloServer({ schema, introspection: true });
+      secure: |
+        new ApolloServer({ schema, introspection: false,
+            formatError: () => ({ message: "Internal error" }) });
+    java:
+      vulnerable: |
+        GraphQL.newGraphQL(schema).build();
+      secure: |
+        GraphQL.newGraphQL(schema)
+            .instrumentation(NoIntrospectionGraphqlFieldVisibility.NO_INTROSPECTION_FIELD_VISIBILITY
+                .let(v -> new FieldVisibilitySchemaTransformation()))
+            .build();
+    csharp:
+      vulnerable: |
+        services.AddGraphQLServer().AddSchema(schema);
+      secure: |
+        services.AddGraphQLServer().AddSchema(schema)
+            .DisableIntrospection(!env.IsDevelopment());
+
+# ---------------------------------------------------------------------------
+# CS-10.10 — Service-to-service authentication in microservices
+# ---------------------------------------------------------------------------
+
+- id: CS-10.10
+  facet: API Security
+  section: Microservice Trust Boundaries
+  security_rule: >-
+    Internal microservices must authenticate every inbound call with a
+    verifiable service credential, rather than trusting that traffic on a
+    private network already came from a peer service.
+  vulnerability_pattern: >-
+    An internal service accepts any request reaching it because it sits
+    behind the gateway, so a compromised pod or a misrouted request invokes
+    it with no identity check.
+  secure_pattern: >-
+    Each call carries a short-lived service token or mutual TLS identity
+    that the receiver verifies, so only authenticated peer services can
+    invoke an internal endpoint.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if request.fromInternalNetwork(): handle(request)   # network trust only
+      secure: |
+        if verifyServiceToken(request.header("Authorization")): handle(request)
+    python:
+      vulnerable: |
+        @app.post("/internal/charge")
+        def charge(): process()
+      secure: |
+        @app.post("/internal/charge")
+        def charge(svc=Depends(verify_service_jwt)): process()
+    javascript:
+      vulnerable: |
+        app.post("/internal/charge", (req, res) => process(req.body));
+      secure: |
+        app.post("/internal/charge", verifyServiceJwt,
+            (req, res) => process(req.body));
+    java:
+      vulnerable: |
+        @PostMapping("/internal/charge")
+        void charge(@RequestBody ChargeReq r) { process(r); }
+      secure: |
+        @PreAuthorize("hasAuthority('SCOPE_svc.billing')")
+        @PostMapping("/internal/charge")
+        void charge(@RequestBody ChargeReq r) { process(r); }
+    csharp:
+      vulnerable: |
+        [HttpPost("internal/charge")]
+        public IActionResult Charge(ChargeReq r) { Process(r); return Ok(); }
+      secure: |
+        [Authorize(Policy = "ServiceToService")]
+        [HttpPost("internal/charge")]
+        public IActionResult Charge(ChargeReq r) { Process(r); return Ok(); }
+
+# ---------------------------------------------------------------------------
+# CS-10.11 — Restricting HTTP methods on API endpoints
+# ---------------------------------------------------------------------------
+
+- id: CS-10.11
+  facet: API Security
+  section: HTTP Method Handling
+  security_rule: >-
+    Each API resource must accept only the HTTP methods it explicitly
+    implements and reject all others, so unexpected verbs cannot reach a
+    handler or expose unintended behaviour.
+  vulnerability_pattern: >-
+    A route handler is bound without restricting the verb, or a catch-all
+    accepts every method, so a request using an unintended verb such as PUT
+    or DELETE is silently processed.
+  secure_pattern: >-
+    The framework binds the handler to a specific verb, and any request
+    using an unsupported method receives a 405 response with an Allow
+    header listing the permitted verbs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        route("ANY", "/account", handler)            # all verbs hit handler
+      secure: |
+        route("GET", "/account", readHandler)
+        route("PUT", "/account", updateHandler)
+    python:
+      vulnerable: |
+        @app.route("/account", methods=["GET", "POST", "PUT", "DELETE"])
+        def account(): ...
+      secure: |
+        @app.route("/account", methods=["GET"])
+        def get_account(): ...
+    javascript:
+      vulnerable: |
+        app.all("/account", accountHandler);
+      secure: |
+        app.get("/account", readAccount);
+        app.put("/account", updateAccount);
+    java:
+      vulnerable: |
+        @RequestMapping("/account")
+        public Account account() { ... }
+      secure: |
+        @GetMapping("/account")
+        public Account getAccount() { ... }
+    csharp:
+      vulnerable: |
+        [Route("account")]
+        public IActionResult Account() { ... }
+      secure: |
+        [HttpGet("account")]
+        public IActionResult GetAccount() { ... }
+
+# ---------------------------------------------------------------------------
+# CS-10.12 — Avoiding sensitive data exposure in API responses and URLs
+# ---------------------------------------------------------------------------
+
+- id: CS-10.12
+  facet: API Security
+  section: Sensitive Data Exposure
+  security_rule: >-
+    API responses must return only the fields the caller needs, and secrets
+    or tokens must never be placed in a URL query string where they leak to
+    logs, history, and the Referer header.
+  vulnerability_pattern: >-
+    The API serializes a full database entity including password hashes or
+    internal flags, or accepts an API key as a query parameter, so secrets
+    end up in responses, server logs, and proxy logs.
+  secure_pattern: >-
+    Responses are projected through a response model that exposes only safe
+    fields, and credentials are carried in the Authorization header or
+    request body, never in the URL.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(serialize(userEntity))               # includes passwordHash
+        get("/data?api_key=" + key)                  # secret in URL
+      secure: |
+        respond({"id": user.id, "name": user.name})
+        get("/data", headers={"Authorization": "Bearer " + token})
+    python:
+      vulnerable: |
+        return jsonify(user.__dict__)
+      secure: |
+        return UserOut(id=user.id, name=user.name).model_dump()
+    javascript:
+      vulnerable: |
+        res.json(userRow);
+      secure: |
+        res.json({ id: userRow.id, name: userRow.name });
+    java:
+      vulnerable: |
+        return ResponseEntity.ok(userEntity);
+      secure: |
+        return ResponseEntity.ok(new UserResponse(user.getId(), user.getName()));
+    csharp:
+      vulnerable: |
+        return Ok(userEntity);
+      secure: |
+        return Ok(new UserResponse { Id = user.Id, Name = user.Name });

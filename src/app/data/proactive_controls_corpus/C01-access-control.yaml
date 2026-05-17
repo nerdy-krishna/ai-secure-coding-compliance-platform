@@ -1,0 +1,522 @@
+# OWASP Proactive Controls — C1: Implement Access Control
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+#
+# C1 covers authorization: deciding whether an already-authenticated
+# principal is permitted to perform a given action on a given resource.
+
+# ---------------------------------------------------------------------------
+# PC-C1.1 — Deny by default
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.1
+  facet: Access Control
+  section: Deny by default
+  security_rule: >-
+    Every access decision must default to denial, granting access only
+    when an explicit rule permits it, so any unmatched, unmapped, or new
+    route or action is rejected rather than allowed.
+  vulnerability_pattern: >-
+    The authorization logic permits access unless a rule explicitly
+    forbids it, so a request that matches no rule, or a route added after
+    the rules were written, is allowed through by accident.
+  secure_pattern: >-
+    The authorization logic starts from a denied state and flips to
+    allowed only when a matching grant is found, so anything not
+    explicitly permitted is refused.
+  code_patterns:
+    generic:
+      vulnerable: |
+        allowed = true
+        for rule in denyRules: if rule.matches(req): allowed = false
+      secure: |
+        allowed = false
+        for rule in grantRules: if rule.matches(req): allowed = true
+    python:
+      vulnerable: |
+        def can_access(user, action):
+            if action in EXPLICITLY_DENIED:
+                return False
+            return True
+      secure: |
+        def can_access(user, action):
+            return action in PERMISSIONS.get(user.role, set())
+    javascript:
+      vulnerable: |
+        function authorize(user, action) {
+          return !deniedActions.includes(action);
+        }
+      secure: |
+        function authorize(user, action) {
+          return (rolePermissions[user.role] || []).includes(action);
+        }
+    java:
+      vulnerable: |
+        boolean allowed = true;
+        if (DENIED.contains(action)) allowed = false;
+      secure: |
+        boolean allowed = permissions
+            .getOrDefault(user.getRole(), Set.of()).contains(action);
+    csharp:
+      vulnerable: |
+        var allowed = !Denied.Contains(action);
+      secure: |
+        var allowed = Permissions.TryGetValue(user.Role, out var p)
+            && p.Contains(action);
+
+# ---------------------------------------------------------------------------
+# PC-C1.2 — Enforce access control server-side
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.2
+  facet: Access Control
+  section: Enforce access control server-side
+  security_rule: >-
+    Access control decisions must be made and enforced by trusted
+    server-side code; client-side checks are only a usability aid and
+    must never be the gate that protects a resource.
+  vulnerability_pattern: >-
+    The server trusts a hidden form field, a request parameter, a cookie,
+    or the mere absence of a UI element to convey a user's privileges, so
+    a crafted request that the browser would never send bypasses the
+    check entirely.
+  secure_pattern: >-
+    The server re-derives the caller's identity and privileges from a
+    trusted session or token and performs the authorization check itself
+    on every request, ignoring any role or permission claimed by the
+    client.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if request.param("isAdmin") == "true": deleteAccount(id)
+      secure: |
+        if session.user.role == "admin": deleteAccount(id)
+    python:
+      vulnerable: |
+        if request.form.get("role") == "admin":
+            delete_user(target_id)
+      secure: |
+        if current_user.is_admin:
+            delete_user(target_id)
+    javascript:
+      vulnerable: |
+        if (req.body.role === "admin") deleteUser(req.body.targetId);
+      secure: |
+        if (req.user.role === "admin") deleteUser(req.body.targetId);
+    java:
+      vulnerable: |
+        if ("admin".equals(request.getParameter("role"))) deleteUser(id);
+      secure: |
+        if (authService.currentUser().hasRole("admin")) deleteUser(id);
+    csharp:
+      vulnerable: |
+        if (Request.Form["role"] == "admin") DeleteUser(id);
+      secure: |
+        if (User.IsInRole("admin")) DeleteUser(id);
+
+# ---------------------------------------------------------------------------
+# PC-C1.3 — Verify resource ownership on every request
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.3
+  facet: Access Control
+  section: Verify resource ownership
+  security_rule: >-
+    When a request names a specific record by an identifier, the server
+    must verify the authenticated caller owns or is otherwise entitled to
+    that record before acting, preventing insecure direct object
+    references.
+  vulnerability_pattern: >-
+    A record is looked up by an identifier taken straight from the
+    request and returned or modified without checking who owns it, so any
+    user can read or change another user's data by changing the id.
+  secure_pattern: >-
+    The lookup is constrained to records the caller is entitled to —
+    typically by adding the caller's user id to the query predicate — so
+    a request for someone else's record returns nothing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        record = db.find(Invoice, request.param("id"))
+      secure: |
+        record = db.find(Invoice, id=request.param("id"),
+                          owner_id=session.user.id)
+    python:
+      vulnerable: |
+        invoice = Invoice.query.get(request.args["id"])
+      secure: |
+        invoice = Invoice.query.filter_by(
+            id=request.args["id"], owner_id=current_user.id).first_or_404()
+    javascript:
+      vulnerable: |
+        const order = await Order.findById(req.params.id);
+      secure: |
+        const order = await Order.findOne({
+          _id: req.params.id, ownerId: req.user.id });
+    java:
+      vulnerable: |
+        Document doc = repo.findById(id).orElseThrow();
+      secure: |
+        Document doc = repo.findByIdAndOwnerId(id, currentUser.getId())
+            .orElseThrow(ForbiddenException::new);
+    csharp:
+      vulnerable: |
+        var file = _db.Files.Find(id);
+      secure: |
+        var file = _db.Files.FirstOrDefault(
+            f => f.Id == id && f.OwnerId == currentUser.Id);
+
+# ---------------------------------------------------------------------------
+# PC-C1.4 — Apply the principle of least privilege
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.4
+  facet: Access Control
+  section: Least privilege
+  security_rule: >-
+    Every user, service account, token, and process must be granted only
+    the minimum permissions needed for its task, and elevated rights must
+    be scoped narrowly and revoked when no longer required.
+  vulnerability_pattern: >-
+    A component runs with broad rights — a shared admin database account,
+    a wildcard cloud policy, or a token with full scope — so any flaw in
+    that component immediately exposes far more than it ever needed.
+  secure_pattern: >-
+    Each component is given a dedicated identity scoped to exactly the
+    actions and resources it uses, so a compromise is contained to that
+    narrow surface.
+  code_patterns:
+    generic:
+      vulnerable: |
+        connect(db, user="root", password=secret)   # full DBA rights
+      secure: |
+        connect(db, user="orders_svc", password=secret)  # SELECT/INSERT on orders
+    python:
+      vulnerable: |
+        engine = create_engine("postgresql://admin:pw@db/app")
+      secure: |
+        engine = create_engine("postgresql://orders_ro:pw@db/app")  # read-only role
+    javascript:
+      vulnerable: |
+        const token = jwt.sign({ sub: id, scope: "*" }, key);
+      secure: |
+        const token = jwt.sign({ sub: id, scope: "orders:read" }, key);
+    java:
+      vulnerable: |
+        var policy = AwsPolicy.allow("s3:*", "*");
+      secure: |
+        var policy = AwsPolicy.allow("s3:GetObject", "arn:aws:s3:::reports/*");
+    csharp:
+      vulnerable: |
+        var conn = new SqlConnection("Server=db;User Id=sa;Password=pw;");
+      secure: |
+        var conn = new SqlConnection("Server=db;User Id=reports_reader;Password=pw;");
+
+# ---------------------------------------------------------------------------
+# PC-C1.5 — Centralize authorization logic
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.5
+  facet: Access Control
+  section: Centralize authorization logic
+  security_rule: >-
+    Authorization decisions must flow through a single, well-tested
+    component or policy layer rather than being re-implemented inline at
+    each call site, so the rules stay consistent and auditable.
+  vulnerability_pattern: >-
+    Each endpoint hand-codes its own role and permission checks, so the
+    logic drifts between handlers, a new endpoint silently ships with no
+    check, and a rule change has to be found and applied in many places.
+  secure_pattern: >-
+    A shared authorization service, decorator, middleware, or policy
+    object evaluates every access decision against one rule set, so all
+    endpoints enforce the same logic and an added endpoint inherits it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def handler(req): if req.user.role == "editor" or req.user.role == "admin": ...
+      secure: |
+        @requires_permission("article:edit")
+        def handler(req): ...
+    python:
+      vulnerable: |
+        @app.put("/articles/{id}")
+        def update(id, user=Depends(current_user)):
+            if user.role not in ("editor", "admin"):
+                raise HTTPException(403)
+      secure: |
+        @app.put("/articles/{id}")
+        def update(id, _=Depends(require_permission("article:edit"))):
+            ...
+    javascript:
+      vulnerable: |
+        app.delete("/posts/:id", (req, res) => {
+          if (req.user.role !== "admin") return res.sendStatus(403);
+        });
+      secure: |
+        app.delete("/posts/:id", requirePermission("post:delete"), handler);
+    java:
+      vulnerable: |
+        public void delete(Long id) {
+          if (!user.getRole().equals("ADMIN")) throw new ForbiddenException();
+        }
+      secure: |
+        @PreAuthorize("hasAuthority('post:delete')")
+        public void delete(Long id) { ... }
+    csharp:
+      vulnerable: |
+        public IActionResult Delete(int id) {
+          if (!User.IsInRole("Admin")) return Forbid();
+        }
+      secure: |
+        [Authorize(Policy = "post:delete")]
+        public IActionResult Delete(int id) { ... }
+
+# ---------------------------------------------------------------------------
+# PC-C1.6 — Fail securely on authorization errors
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.6
+  facet: Access Control
+  section: Fail securely
+  security_rule: >-
+    When an authorization check throws an error, times out, or returns an
+    indeterminate result, the system must treat that outcome as a denial
+    rather than allowing the request to proceed.
+  vulnerability_pattern: >-
+    An exception in the permission check is swallowed, or a catch block
+    falls through, leaving execution to continue past the gate as though
+    access had been granted.
+  secure_pattern: >-
+    Any error or ambiguous result from the authorization path is caught
+    and converted into an explicit denial before the protected operation
+    is reached.
+  code_patterns:
+    generic:
+      vulnerable: |
+        try: allowed = check(user, res)
+        except: pass            # allowed stays whatever it was
+      secure: |
+        try: allowed = check(user, res)
+        except: allowed = false
+    python:
+      vulnerable: |
+        try:
+            authorized = policy.evaluate(user, resource)
+        except PolicyError:
+            authorized = True
+      secure: |
+        try:
+            authorized = policy.evaluate(user, resource)
+        except PolicyError:
+            authorized = False
+    javascript:
+      vulnerable: |
+        let allowed;
+        try { allowed = await checkAccess(user, res); }
+        catch (e) { allowed = true; }
+      secure: |
+        let allowed = false;
+        try { allowed = await checkAccess(user, res); }
+        catch (e) { allowed = false; }
+    java:
+      vulnerable: |
+        boolean allowed;
+        try { allowed = policy.check(user, res); }
+        catch (Exception e) { allowed = true; }
+      secure: |
+        boolean allowed = false;
+        try { allowed = policy.check(user, res); }
+        catch (Exception e) { allowed = false; }
+    csharp:
+      vulnerable: |
+        bool allowed;
+        try { allowed = _policy.Check(user, res); }
+        catch { allowed = true; }
+      secure: |
+        bool allowed = false;
+        try { allowed = _policy.Check(user, res); }
+        catch { allowed = false; }
+
+# ---------------------------------------------------------------------------
+# PC-C1.7 — Enforce access control on every layer and function
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.7
+  facet: Access Control
+  section: Protect every function and layer
+  security_rule: >-
+    Authorization must be enforced on every state-changing and
+    data-returning function — including APIs, background actions, and
+    administrative routes — not only on the functions reachable from the
+    navigation a normal user sees.
+  vulnerability_pattern: >-
+    A sensitive function is protected only because the UI hides its link,
+    while the underlying route, API endpoint, or method has no check, so
+    a user who guesses or forces the URL reaches it directly.
+  secure_pattern: >-
+    Each sensitive function carries its own server-side authorization
+    check independent of the UI, so reaching it by any path still
+    requires the appropriate permission.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # /admin/export has no check — only hidden from the menu
+        def admin_export(): return dump_all_users()
+      secure: |
+        @requires_role("admin")
+        def admin_export(): return dump_all_users()
+    python:
+      vulnerable: |
+        @app.get("/api/admin/users")
+        def list_users():
+            return User.query.all()
+      secure: |
+        @app.get("/api/admin/users")
+        def list_users(_=Depends(require_role("admin"))):
+            return User.query.all()
+    javascript:
+      vulnerable: |
+        router.get("/admin/metrics", (req, res) => res.json(getMetrics()));
+      secure: |
+        router.get("/admin/metrics", requireRole("admin"),
+                   (req, res) => res.json(getMetrics()));
+    java:
+      vulnerable: |
+        @GetMapping("/admin/report")
+        public Report report() { return reportService.build(); }
+      secure: |
+        @PreAuthorize("hasRole('ADMIN')")
+        @GetMapping("/admin/report")
+        public Report report() { return reportService.build(); }
+    csharp:
+      vulnerable: |
+        [HttpGet("admin/report")]
+        public Report Report() => _reports.Build();
+      secure: |
+        [Authorize(Roles = "Admin")]
+        [HttpGet("admin/report")]
+        public Report Report() => _reports.Build();
+
+# ---------------------------------------------------------------------------
+# PC-C1.8 — Use attribute or feature-based access control for fine-grained rules
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.8
+  facet: Access Control
+  section: Attribute and relationship based access control
+  security_rule: >-
+    When a decision depends on context — the resource's attributes, the
+    relationship between caller and resource, time, or location — use an
+    attribute or relationship based model rather than coarse static roles
+    that cannot express the rule.
+  vulnerability_pattern: >-
+    A coarse role check stands in for a contextual rule, so a user with
+    the right role can act on resources outside their team, region, or
+    relationship because the role alone cannot capture the constraint.
+  secure_pattern: >-
+    The decision evaluates the caller's attributes against the resource's
+    attributes — for example matching department, tenant, or assignment —
+    so permission depends on the actual relationship, not just the role.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if user.role == "manager": approve(expense)
+      secure: |
+        if user.role == "manager" and user.dept == expense.dept:
+            approve(expense)
+    python:
+      vulnerable: |
+        if current_user.role == "manager":
+            approve(expense)
+      secure: |
+        if current_user.role == "manager" \
+                and current_user.department_id == expense.department_id:
+            approve(expense)
+    javascript:
+      vulnerable: |
+        if (user.role === "manager") approveExpense(expense);
+      secure: |
+        if (user.role === "manager" && user.teamId === expense.teamId)
+          approveExpense(expense);
+    java:
+      vulnerable: |
+        if (user.hasRole("MANAGER")) approve(expense);
+      secure: |
+        if (user.hasRole("MANAGER")
+                && user.getDeptId().equals(expense.getDeptId()))
+            approve(expense);
+    csharp:
+      vulnerable: |
+        if (user.Role == "Manager") Approve(expense);
+      secure: |
+        if (user.Role == "Manager" && user.TenantId == expense.TenantId)
+            Approve(expense);
+
+# ---------------------------------------------------------------------------
+# PC-C1.9 — Log access control failures
+# ---------------------------------------------------------------------------
+
+- id: PC-C1.9
+  facet: Access Control
+  section: Log access control decisions
+  security_rule: >-
+    Failed authorization attempts must be logged with the caller
+    identity, the resource, and the action so that probing, privilege
+    escalation attempts, and broken-access-control abuse are detectable.
+  vulnerability_pattern: >-
+    A denied request is rejected silently with only an error response, so
+    a user systematically enumerating resources or roles leaves no trail
+    for monitoring or alerting to act on.
+  secure_pattern: >-
+    Every authorization denial emits a structured security log event
+    recording who was denied, what they tried to reach, and the action,
+    feeding detection and alerting.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if not allowed: return deny()
+      secure: |
+        if not allowed:
+            securityLog.warn("authz_denied", user=user.id, resource=res, action=act)
+            return deny()
+    python:
+      vulnerable: |
+        if not authorized:
+            raise HTTPException(403)
+      secure: |
+        if not authorized:
+            log.warning("authz_denied user=%s resource=%s action=%s",
+                        user.id, resource_id, action)
+            raise HTTPException(403)
+    javascript:
+      vulnerable: |
+        if (!allowed) return res.sendStatus(403);
+      secure: |
+        if (!allowed) {
+          logger.warn({ event: "authz_denied", user: user.id, resource, action });
+          return res.sendStatus(403);
+        }
+    java:
+      vulnerable: |
+        if (!allowed) throw new ForbiddenException();
+      secure: |
+        if (!allowed) {
+          securityLog.warn("authz_denied user={} resource={} action={}",
+              user.getId(), resourceId, action);
+          throw new ForbiddenException();
+        }
+    csharp:
+      vulnerable: |
+        if (!allowed) return Forbid();
+      secure: |
+        if (!allowed) {
+          _logger.LogWarning("authz_denied user={User} resource={Res} action={Act}",
+              user.Id, resourceId, action);
+          return Forbid();
+        }

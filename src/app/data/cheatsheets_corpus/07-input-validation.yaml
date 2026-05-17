@@ -1,0 +1,607 @@
+# OWASP Cheat Sheet Series — Domain 07: Input Validation
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Sources: Input Validation, Mass Assignment, Deserialization, and
+# XML External Entity Prevention cheat sheets.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-07.1 — Syntactic and Semantic Validation
+# ---------------------------------------------------------------------------
+
+- id: CS-07.1
+  facet: Input Validation
+  section: Syntactic and Semantic Validation
+  security_rule: >-
+    Every piece of untrusted input must be checked for both correct
+    syntax — the right type, format, and length — and correct semantics —
+    a value that makes sense for its business purpose — before use.
+  vulnerability_pattern: >-
+    Input is consumed directly from the request with no type, format, or
+    range check, so malformed or out-of-range values flow into business
+    logic and downstream sinks unchecked.
+  secure_pattern: >-
+    Input is parsed into a strongly typed value and checked against an
+    expected format and a meaningful range or business constraint at the
+    trust boundary, and rejected when it does not conform.
+  code_patterns:
+    generic:
+      vulnerable: |
+        age = request.get("age")
+        process(age)
+      secure: |
+        age = parseInteger(request.get("age"))
+        if age < 0 or age > 130: reject()
+        process(age)
+    python:
+      vulnerable: |
+        quantity = request.form["quantity"]
+      secure: |
+        quantity = int(request.form["quantity"])
+        if not 1 <= quantity <= 100:
+            abort(400)
+    javascript:
+      vulnerable: |
+        const qty = req.body.quantity;
+      secure: |
+        const qty = Number(req.body.quantity);
+        if (!Number.isInteger(qty) || qty < 1 || qty > 100) return res.sendStatus(400);
+    java:
+      vulnerable: |
+        int qty = Integer.parseInt(request.getParameter("quantity"));
+      secure: |
+        int qty = Integer.parseInt(request.getParameter("quantity"));
+        if (qty < 1 || qty > 100) throw new ValidationException("quantity");
+    csharp:
+      vulnerable: |
+        var qty = int.Parse(Request.Form["quantity"]);
+      secure: |
+        if (!int.TryParse(Request.Form["quantity"], out var qty) || qty < 1 || qty > 100)
+            return BadRequest();
+
+# ---------------------------------------------------------------------------
+# CS-07.2 — Allowlist Validation
+# ---------------------------------------------------------------------------
+
+- id: CS-07.2
+  facet: Input Validation
+  section: Allowlist Validation
+  security_rule: >-
+    Validation must be positive — accept only values that match a
+    well-defined allowlist of known-good patterns or members — rather
+    than trying to enumerate and block bad values.
+  vulnerability_pattern: >-
+    Input is screened with a denylist that strips or rejects known-bad
+    substrings, so any malicious payload not anticipated by the list
+    passes through unblocked.
+  secure_pattern: >-
+    Input is compared against an explicit allowlist of permitted values
+    or a tightly anchored pattern of permitted characters, and anything
+    outside the allowlist is rejected outright.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if "<script>" not in input: accept(input)
+      secure: |
+        if input in {"USD", "EUR", "GBP"}: accept(input)
+    python:
+      vulnerable: |
+        value = request.args["sort"].replace("--", "")
+      secure: |
+        if request.args["sort"] not in {"name", "date", "price"}:
+            abort(400)
+    javascript:
+      vulnerable: |
+        const sort = req.query.sort.replace(/[;'"]/g, "");
+      secure: |
+        const allowed = ["name", "date", "price"];
+        if (!allowed.includes(req.query.sort)) return res.sendStatus(400);
+    java:
+      vulnerable: |
+        String color = request.getParameter("color").replaceAll("[<>]", "");
+      secure: |
+        Set<String> allowed = Set.of("red", "green", "blue");
+        if (!allowed.contains(request.getParameter("color"))) throw new ValidationException();
+    csharp:
+      vulnerable: |
+        var role = Request.Query["role"].ToString().Replace("'", "");
+      secure: |
+        var allowed = new[] { "viewer", "editor", "owner" };
+        if (!allowed.Contains(Request.Query["role"].ToString())) return BadRequest();
+
+# ---------------------------------------------------------------------------
+# CS-07.3 — Server-Side Validation
+# ---------------------------------------------------------------------------
+
+- id: CS-07.3
+  facet: Input Validation
+  section: Server-Side Validation
+  security_rule: >-
+    All security-relevant validation must be enforced on the server;
+    client-side checks are a usability aid only and can never be trusted
+    because the client is fully under attacker control.
+  vulnerability_pattern: >-
+    The application relies on browser or mobile-client validation alone,
+    so a request crafted outside the official client skips every check
+    and reaches business logic with invalid data.
+  secure_pattern: >-
+    The server independently revalidates every field of every request
+    regardless of any client-side validation, treating each request as
+    if it could have been forged.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # client JS already checked the form, so server trusts it
+        saveOrder(request.body)
+      secure: |
+        validated = validateOrder(request.body)   # server revalidates
+        saveOrder(validated)
+    python:
+      vulnerable: |
+        @app.post("/transfer")
+        def transfer():
+            do_transfer(request.json["amount"])
+      secure: |
+        @app.post("/transfer")
+        def transfer():
+            data = TransferSchema().load(request.json)  # server-side schema
+            do_transfer(data["amount"])
+    javascript:
+      vulnerable: |
+        app.post("/transfer", (req, res) => doTransfer(req.body.amount));
+      secure: |
+        app.post("/transfer", (req, res) => {
+          const { value, error } = transferSchema.validate(req.body);
+          if (error) return res.sendStatus(400);
+          doTransfer(value.amount);
+        });
+    java:
+      vulnerable: |
+        @PostMapping("/transfer")
+        void transfer(@RequestBody TransferDto dto) { doTransfer(dto); }
+      secure: |
+        @PostMapping("/transfer")
+        void transfer(@Valid @RequestBody TransferDto dto) { doTransfer(dto); }
+    csharp:
+      vulnerable: |
+        [HttpPost] public IActionResult Transfer(TransferDto dto) => Do(dto);
+      secure: |
+        [HttpPost] public IActionResult Transfer(TransferDto dto) {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+            return Do(dto);
+        }
+
+# ---------------------------------------------------------------------------
+# CS-07.4 — Mass Assignment Prevention
+# ---------------------------------------------------------------------------
+
+- id: CS-07.4
+  facet: Input Validation
+  section: Mass Assignment Prevention
+  security_rule: >-
+    Request bodies must be bound only to an explicit allowlist of fields
+    a caller is permitted to set, so sensitive properties such as role,
+    balance, or isAdmin can never be assigned from client input.
+  vulnerability_pattern: >-
+    A whole request body is bound directly onto a domain or persistence
+    object, so a caller can add unexpected fields and overwrite
+    privileged properties that were never meant to be writable.
+  secure_pattern: >-
+    Input is bound to a narrow data transfer object exposing only the
+    fields the endpoint permits, and that object is mapped field by
+    field onto the domain entity.
+  code_patterns:
+    generic:
+      vulnerable: |
+        user.update(request.body)        # binds every field, including role
+      secure: |
+        user.name = request.body.name    # only allowlisted fields copied
+    python:
+      vulnerable: |
+        user = User(**request.json)
+      secure: |
+        user = User(name=request.json["name"], email=request.json["email"])
+    javascript:
+      vulnerable: |
+        Object.assign(user, req.body);
+      secure: |
+        const { name, email } = req.body;
+        Object.assign(user, { name, email });
+    java:
+      vulnerable: |
+        @PostMapping("/profile")
+        void update(@ModelAttribute User user) { repo.save(user); }
+      secure: |
+        @InitBinder
+        void bind(WebDataBinder b) { b.setAllowedFields("name", "email"); }
+    csharp:
+      vulnerable: |
+        [HttpPost] public IActionResult Update(User user) { _db.Update(user); return Ok(); }
+      secure: |
+        [HttpPost] public IActionResult Update([Bind("Name,Email")] User user) {
+            _db.Update(user); return Ok();
+        }
+
+# ---------------------------------------------------------------------------
+# CS-07.5 — Canonicalization Before Validation
+# ---------------------------------------------------------------------------
+
+- id: CS-07.5
+  facet: Input Validation
+  section: Canonicalization Before Validation
+  security_rule: >-
+    Untrusted input must be canonicalized to a single normal form —
+    consistent Unicode normalization and a single decoding pass — before
+    it is validated, so the validated value equals the value used.
+  vulnerability_pattern: >-
+    Input is validated in one representation but consumed in another,
+    so an encoded or alternately normalized payload slips past a check
+    that examined a different form of the same bytes.
+  secure_pattern: >-
+    Input is decoded and Unicode-normalized once at the trust boundary,
+    and validation runs against that canonical form, which is then the
+    only form passed downstream.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if isSafe(input): use(decode(input))
+      secure: |
+        canonical = normalize(decode(input))
+        if isSafe(canonical): use(canonical)
+    python:
+      vulnerable: |
+        path = request.args["file"]
+        if ".." not in path: open(path)
+      secure: |
+        import unicodedata, os
+        path = unicodedata.normalize("NFC", os.path.normpath(request.args["file"]))
+        if ".." not in path: open(path)
+    javascript:
+      vulnerable: |
+        const name = req.query.name;
+        if (allowed.has(name)) use(name);
+      secure: |
+        const name = decodeURIComponent(req.query.name).normalize("NFC");
+        if (allowed.has(name)) use(name);
+    java:
+      vulnerable: |
+        String f = request.getParameter("file");
+        if (!f.contains("..")) read(f);
+      secure: |
+        String f = Normalizer.normalize(
+            Paths.get(request.getParameter("file")).normalize().toString(),
+            Normalizer.Form.NFC);
+        if (!f.contains("..")) read(f);
+    csharp:
+      vulnerable: |
+        var f = Request.Query["file"].ToString();
+        if (!f.Contains("..")) Read(f);
+      secure: |
+        var f = Path.GetFullPath(Request.Query["file"]).Normalize(NormalizationForm.FormC);
+        if (f.StartsWith(BaseDir)) Read(f);
+
+# ---------------------------------------------------------------------------
+# CS-07.6 — Email Address Validation
+# ---------------------------------------------------------------------------
+
+- id: CS-07.6
+  facet: Input Validation
+  section: Email Address Validation
+  security_rule: >-
+    Email addresses must be validated with a simple, conservative check
+    and confirmed by sending a verification message, rather than rejected
+    by an overly strict regular expression.
+  vulnerability_pattern: >-
+    Email input is accepted with no structural check, or screened by a
+    fragile pattern that both rejects valid addresses and accepts strings
+    carrying header or injection characters.
+  secure_pattern: >-
+    The address is checked for one at-sign with non-empty local and
+    domain parts and a sane length, has control characters rejected, and
+    is then confirmed by a verification email before it is trusted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if "@" in email: store(email)
+      secure: |
+        if isValidEmailShape(email) and noControlChars(email):
+            sendVerification(email)
+    python:
+      vulnerable: |
+        email = request.form["email"]
+        store(email)
+      secure: |
+        from email_validator import validate_email
+        email = validate_email(request.form["email"]).normalized
+        send_verification(email)
+    javascript:
+      vulnerable: |
+        if (email.includes("@")) save(email);
+      secure: |
+        if (validator.isEmail(email) && !/[\r\n]/.test(email)) sendVerification(email);
+    java:
+      vulnerable: |
+        if (email.contains("@")) store(email);
+      secure: |
+        if (EmailValidator.getInstance().isValid(email)) sendVerification(email);
+    csharp:
+      vulnerable: |
+        if (email.Contains("@")) Store(email);
+      secure: |
+        if (new EmailAddressAttribute().IsValid(email)) SendVerification(email);
+
+# ---------------------------------------------------------------------------
+# CS-07.7 — File Upload Validation
+# ---------------------------------------------------------------------------
+
+- id: CS-07.7
+  facet: Input Validation
+  section: File Upload Validation
+  security_rule: >-
+    Uploaded files must be validated by extension allowlist and verified
+    content type, capped in size, stored under a generated name outside
+    the web root, and served without being executed.
+  vulnerability_pattern: >-
+    An uploaded file is saved under its client-supplied name and
+    extension inside an executable directory, so an attacker uploads a
+    script and then requests it to run code on the server.
+  secure_pattern: >-
+    The upload is checked against an allowlist of extensions and a
+    sniffed content type, size-limited, given a server-generated random
+    name, and stored in a non-executable location outside the web root.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(upload.filename, upload.bytes)      # client name, web root
+      secure: |
+        if ext(upload) in ALLOWED and contentType(upload) in ALLOWED:
+            save(randomName() + ext(upload), upload.bytes, dir=UPLOADS_OUTSIDE_WEBROOT)
+    python:
+      vulnerable: |
+        f = request.files["doc"]
+        f.save(os.path.join("static", f.filename))
+      secure: |
+        f = request.files["doc"]
+        if imghdr.what(f) not in {"png", "jpeg"}: abort(400)
+        f.save(os.path.join(UPLOAD_DIR, f"{uuid4()}.png"))
+    javascript:
+      vulnerable: |
+        fs.writeFileSync("public/" + file.originalname, file.buffer);
+      secure: |
+        if (!["image/png", "image/jpeg"].includes(file.mimetype)) return res.sendStatus(400);
+        fs.writeFileSync(path.join(UPLOAD_DIR, randomUUID() + ".png"), file.buffer);
+    java:
+      vulnerable: |
+        Files.write(Path.of("webapp", file.getOriginalFilename()), file.getBytes());
+      secure: |
+        if (!ALLOWED_TYPES.contains(file.getContentType())) throw new ValidationException();
+        Files.write(uploadDir.resolve(UUID.randomUUID() + ".png"), file.getBytes());
+    csharp:
+      vulnerable: |
+        await file.CopyToAsync(File.Create("wwwroot/" + file.FileName));
+      secure: |
+        if (!Allowed.Contains(file.ContentType)) return BadRequest();
+        await file.CopyToAsync(File.Create(Path.Combine(UploadDir, $"{Guid.NewGuid()}.png")));
+
+# ---------------------------------------------------------------------------
+# CS-07.8 — Safe Deserialization
+# ---------------------------------------------------------------------------
+
+- id: CS-07.8
+  facet: Input Validation
+  section: Safe Deserialization
+  security_rule: >-
+    Untrusted data must never be passed to a native object deserializer;
+    use a data-only format such as JSON into a known target type, or
+    restrict deserialization to an allowlist of expected classes.
+  vulnerability_pattern: >-
+    Serialized bytes from an untrusted source are handed to a native
+    deserializer that can instantiate arbitrary types, letting a crafted
+    payload assemble a gadget chain and run code while it is reconstructed.
+  secure_pattern: >-
+    Untrusted input is parsed with a data-only format into a fixed,
+    known data transfer type, and any unavoidable object deserialization
+    is constrained by a strict type allowlist filter.
+  code_patterns:
+    generic:
+      vulnerable: |
+        obj = nativeDeserialize(untrustedBytes)
+      secure: |
+        obj = jsonParse(untrustedBytes, intoType=KnownDto)
+    python:
+      vulnerable: |
+        obj = pickle.loads(request.data)
+      secure: |
+        obj = OrderDto(**json.loads(request.data))
+    javascript:
+      vulnerable: |
+        const obj = nodeSerialize.unserialize(req.body);
+      secure: |
+        const obj = JSON.parse(req.body);
+    java:
+      vulnerable: |
+        Object o = new ObjectInputStream(in).readObject();
+      secure: |
+        ObjectInputStream ois = new ObjectInputStream(in);
+        ois.setObjectInputFilter(ObjectInputFilter.Config.createFilter("com.app.dto.*;!*"));
+    csharp:
+      vulnerable: |
+        var o = new BinaryFormatter().Deserialize(stream);
+      secure: |
+        var o = JsonSerializer.Deserialize<KnownDto>(stream);
+
+# ---------------------------------------------------------------------------
+# CS-07.9 — XML External Entity Prevention
+# ---------------------------------------------------------------------------
+
+- id: CS-07.9
+  facet: Input Validation
+  section: XML External Entity Prevention
+  security_rule: >-
+    XML parsers handling untrusted documents must be configured to
+    disable document type definitions and external entity resolution, so
+    a malicious document cannot read files or trigger network requests.
+  vulnerability_pattern: >-
+    An XML parser runs with its default configuration, so a document
+    declaring an external or parameter entity makes the parser fetch
+    local files, internal URLs, or recursively expand and exhaust memory.
+  secure_pattern: >-
+    The parser is hardened before any untrusted input — document type
+    definitions disallowed, external general and parameter entities
+    disabled — or a library that is XXE-safe by default is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        doc = xmlParser.parse(untrustedXml)        # DTD and entities resolved
+      secure: |
+        xmlParser.disallowDoctypeDecl()
+        doc = xmlParser.parse(untrustedXml)
+    python:
+      vulnerable: |
+        tree = xml.etree.ElementTree.parse(untrusted_xml)
+      secure: |
+        import defusedxml.ElementTree as ET
+        tree = ET.parse(untrusted_xml)
+    javascript:
+      vulnerable: |
+        const doc = libxmljs.parseXml(untrustedXml, { noent: true });
+      secure: |
+        const doc = libxmljs.parseXml(untrustedXml, { noent: false, nonet: true });
+    java:
+      vulnerable: |
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+      secure: |
+        DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+        dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+    csharp:
+      vulnerable: |
+        var doc = new XmlDocument();
+        doc.LoadXml(untrustedXml);
+      secure: |
+        var doc = new XmlDocument { XmlResolver = null };
+        doc.LoadXml(untrustedXml);
+
+# ---------------------------------------------------------------------------
+# CS-07.10 — Numeric Range and Length Bounds
+# ---------------------------------------------------------------------------
+
+- id: CS-07.10
+  facet: Input Validation
+  section: Numeric Range and Length Bounds
+  security_rule: >-
+    Numeric and string input must be checked against minimum and maximum
+    bounds, so out-of-range numbers and oversized strings cannot drive
+    overflow, resource exhaustion, or unexpected logic.
+  vulnerability_pattern: >-
+    A number or string is accepted with no upper or lower bound, so an
+    extreme value triggers an overflow, allocates excessive memory, or
+    pushes business logic into an invalid state.
+  secure_pattern: >-
+    Each numeric field is validated against an explicit allowed range
+    and each string field against a maximum length before use, with
+    out-of-bounds values rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        allocate(request.get("count"))
+      secure: |
+        count = parseInteger(request.get("count"))
+        if 1 <= count <= 1000: allocate(count)
+    python:
+      vulnerable: |
+        page_size = int(request.args["size"])
+        rows = query(limit=page_size)
+      secure: |
+        page_size = int(request.args["size"])
+        page_size = max(1, min(page_size, 100))
+        rows = query(limit=page_size)
+    javascript:
+      vulnerable: |
+        const limit = Number(req.query.limit);
+        fetchRows(limit);
+      secure: |
+        let limit = Number(req.query.limit);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) limit = 20;
+        fetchRows(limit);
+    java:
+      vulnerable: |
+        String bio = request.getParameter("bio");
+        repo.save(bio);
+      secure: |
+        String bio = request.getParameter("bio");
+        if (bio.length() > 2000) throw new ValidationException("bio too long");
+        repo.save(bio);
+    csharp:
+      vulnerable: |
+        var limit = int.Parse(Request.Query["limit"]);
+        FetchRows(limit);
+      secure: |
+        if (!int.TryParse(Request.Query["limit"], out var limit) || limit is < 1 or > 100)
+            limit = 20;
+        FetchRows(limit);
+
+# ---------------------------------------------------------------------------
+# CS-07.11 — Fail Closed on Invalid Input
+# ---------------------------------------------------------------------------
+
+- id: CS-07.11
+  facet: Input Validation
+  section: Fail Closed on Invalid Input
+  security_rule: >-
+    When validation fails the request must be rejected outright; the
+    application must not silently coerce, truncate, or partially clean
+    bad input and then continue processing it.
+  vulnerability_pattern: >-
+    Invalid input is quietly repaired — stripped of offending characters
+    or coerced to a default — and processing continues, so an attacker
+    can shape input that survives the repair as a still-dangerous value.
+  secure_pattern: >-
+    A validation failure stops processing immediately with a clear
+    rejection and a generic error response, and the invalid request is
+    never used in any downstream operation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        clean = stripBadChars(input)     # repair, then keep going
+        process(clean)
+      secure: |
+        if not isValid(input): reject()
+        process(input)
+    python:
+      vulnerable: |
+        username = re.sub(r"[^a-z0-9]", "", request.form["username"])
+        create_user(username)
+      secure: |
+        username = request.form["username"]
+        if not re.fullmatch(r"[a-z0-9]{3,20}", username):
+            abort(400)
+        create_user(username)
+    javascript:
+      vulnerable: |
+        const code = req.body.code.replace(/\D/g, "");
+        redeem(code);
+      secure: |
+        const code = req.body.code;
+        if (!/^\d{6}$/.test(code)) return res.sendStatus(400);
+        redeem(code);
+    java:
+      vulnerable: |
+        String slug = request.getParameter("slug").replaceAll("[^a-z-]", "");
+        publish(slug);
+      secure: |
+        String slug = request.getParameter("slug");
+        if (!slug.matches("[a-z][a-z-]{2,49}")) throw new ValidationException("slug");
+        publish(slug);
+    csharp:
+      vulnerable: |
+        var sku = Regex.Replace(Request.Form["sku"], "[^A-Z0-9]", "");
+        AddItem(sku);
+      secure: |
+        var sku = Request.Form["sku"].ToString();
+        if (!Regex.IsMatch(sku, "^[A-Z0-9]{8}$")) return BadRequest();
+        AddItem(sku);

@@ -1,0 +1,446 @@
+# OWASP Proactive Controls — C10: Stop Server Side Request Forgery
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for web app security).
+#
+# C10 covers the practices that stop an attacker from coercing the server
+# into making requests it should not: URL allowlisting, scheme
+# restriction, blocking internal address ranges, disabling redirects,
+# protecting cloud metadata endpoints, and network segmentation.
+
+# ---------------------------------------------------------------------------
+# C10 — Stop Server Side Request Forgery
+# ---------------------------------------------------------------------------
+
+- id: PC-C10.1
+  facet: Server-Side Request Forgery Prevention
+  section: Validate destinations against an allowlist
+  security_rule: >-
+    When the server fetches a URL derived from user input, the target
+    host must be checked against an allowlist of known-good destinations
+    before any request is made, rather than relying on a denylist.
+  vulnerability_pattern: >-
+    A user-supplied URL is passed straight to an HTTP client, so an
+    attacker can point the server at internal services, link-local
+    addresses, or the cloud metadata endpoint.
+  secure_pattern: >-
+    The URL is parsed and its host is compared against a fixed allowlist
+    of permitted destinations, and any host not on the list is rejected
+    before the request is issued.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = httpGet(userUrl)
+      secure: |
+        if host(userUrl) in ALLOWED_HOSTS: response = httpGet(userUrl)
+        else: reject()
+    python:
+      vulnerable: |
+        data = requests.get(request.args["url"]).text
+      secure: |
+        host = urlparse(request.args["url"]).hostname
+        if host not in ALLOWED_HOSTS: abort(400)
+        data = requests.get(request.args["url"]).text
+    javascript:
+      vulnerable: |
+        const data = await fetch(req.query.url);
+      secure: |
+        const u = new URL(req.query.url);
+        if (!ALLOWED_HOSTS.has(u.hostname)) throw new Error("host not allowed");
+        const data = await fetch(u);
+    java:
+      vulnerable: |
+        var conn = new URL(userUrl).openConnection();
+      secure: |
+        URL u = new URL(userUrl);
+        if (!ALLOWED_HOSTS.contains(u.getHost())) throw new SecurityException();
+        var conn = u.openConnection();
+    csharp:
+      vulnerable: |
+        var data = await httpClient.GetStringAsync(userUrl);
+      secure: |
+        var u = new Uri(userUrl);
+        if (!AllowedHosts.Contains(u.Host)) throw new InvalidOperationException();
+        var data = await httpClient.GetStringAsync(u);
+
+- id: PC-C10.2
+  facet: Server-Side Request Forgery Prevention
+  section: Restrict the URL scheme
+  security_rule: >-
+    Only an allowlist of safe URL schemes such as https may be permitted
+    for server-side fetches, so that file, gopher, ftp, and other schemes
+    cannot be abused to read local resources or reach other protocols.
+  vulnerability_pattern: >-
+    A user-supplied URL is fetched without checking its scheme, so an
+    attacker can supply a file or gopher URL to read local files or speak
+    a non-HTTP protocol to an internal service.
+  secure_pattern: >-
+    The parsed scheme is compared against a small allowlist of HTTP-family
+    schemes, and any URL whose scheme is not on the list is rejected
+    before the request is made.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = fetch(userUrl)
+      secure: |
+        if scheme(userUrl) in {"https", "http"}: response = fetch(userUrl)
+        else: reject()
+    python:
+      vulnerable: |
+        body = requests.get(target).content
+      secure: |
+        if urlparse(target).scheme not in ("https", "http"): abort(400)
+        body = requests.get(target).content
+    javascript:
+      vulnerable: |
+        const res = await fetch(target);
+      secure: |
+        const u = new URL(target);
+        if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("scheme");
+        const res = await fetch(u);
+    java:
+      vulnerable: |
+        var stream = new URL(target).openStream();
+      secure: |
+        URL u = new URL(target);
+        if (!Set.of("https", "http").contains(u.getProtocol())) throw new SecurityException();
+        var stream = u.openStream();
+    csharp:
+      vulnerable: |
+        var res = await httpClient.GetAsync(target);
+      secure: |
+        var u = new Uri(target);
+        if (u.Scheme != Uri.UriSchemeHttps && u.Scheme != Uri.UriSchemeHttp) throw new InvalidOperationException();
+        var res = await httpClient.GetAsync(u);
+
+- id: PC-C10.3
+  facet: Server-Side Request Forgery Prevention
+  section: Block private and reserved address ranges
+  security_rule: >-
+    The resolved IP address of a fetch target must be checked and rejected
+    when it falls in a private, loopback, link-local, or otherwise
+    reserved range, so requests cannot reach the internal network.
+  vulnerability_pattern: >-
+    The application validates only the hostname and never inspects the
+    address it resolves to, so an attacker uses a name that resolves to a
+    loopback or private RFC 1918 address to reach internal hosts.
+  secure_pattern: >-
+    The target hostname is resolved and each returned IP address is
+    classified, and the request proceeds only when every address is a
+    public, routable, non-reserved address.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = httpGet(userUrl)
+      secure: |
+        ip = resolve(host(userUrl))
+        if isPublic(ip): response = httpGet(userUrl)
+        else: reject()
+    python:
+      vulnerable: |
+        data = requests.get(user_url).text
+      secure: |
+        ip = ipaddress.ip_address(socket.gethostbyname(urlparse(user_url).hostname))
+        if ip.is_private or ip.is_loopback or ip.is_link_local: abort(400)
+        data = requests.get(user_url).text
+    javascript:
+      vulnerable: |
+        const data = await fetch(userUrl);
+      secure: |
+        const { address } = await dns.promises.lookup(new URL(userUrl).hostname);
+        if (ipaddr.parse(address).range() !== "unicast") throw new Error("private ip");
+        const data = await fetch(userUrl);
+    java:
+      vulnerable: |
+        var conn = new URL(userUrl).openConnection();
+      secure: |
+        InetAddress addr = InetAddress.getByName(new URL(userUrl).getHost());
+        if (addr.isSiteLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress())
+            throw new SecurityException();
+        var conn = new URL(userUrl).openConnection();
+    csharp:
+      vulnerable: |
+        var data = await httpClient.GetStringAsync(userUrl);
+      secure: |
+        var ip = (await Dns.GetHostAddressesAsync(new Uri(userUrl).Host)).First();
+        if (IsPrivateOrLoopback(ip)) throw new InvalidOperationException();
+        var data = await httpClient.GetStringAsync(userUrl);
+
+- id: PC-C10.4
+  facet: Server-Side Request Forgery Prevention
+  section: Disable HTTP redirect following
+  security_rule: >-
+    Server-side HTTP clients used for user-supplied URLs must not follow
+    redirects automatically, so a public allowlisted endpoint cannot
+    bounce the request to an internal target.
+  vulnerability_pattern: >-
+    An HTTP client follows redirects by default, so an attacker has an
+    allowlisted host return a 302 to an internal address and the
+    revalidated check is bypassed on the redirected request.
+  secure_pattern: >-
+    Automatic redirect following is disabled, and any redirect response
+    is either rejected or its Location is re-validated against the same
+    allowlist and address-range checks before being followed manually.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = httpGet(userUrl, followRedirects=true)
+      secure: |
+        response = httpGet(userUrl, followRedirects=false)
+    python:
+      vulnerable: |
+        data = requests.get(user_url).text
+      secure: |
+        data = requests.get(user_url, allow_redirects=False).text
+    javascript:
+      vulnerable: |
+        const res = await fetch(userUrl);
+      secure: |
+        const res = await fetch(userUrl, { redirect: "error" });
+    java:
+      vulnerable: |
+        var client = HttpClient.newHttpClient();
+      secure: |
+        var client = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER).build();
+    csharp:
+      vulnerable: |
+        var client = new HttpClient();
+      secure: |
+        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+
+- id: PC-C10.5
+  facet: Server-Side Request Forgery Prevention
+  section: Protect the cloud metadata endpoint
+  security_rule: >-
+    Server-side fetches must explicitly block the cloud instance metadata
+    address so credentials and instance data exposed there cannot be
+    exfiltrated through an SSRF.
+  vulnerability_pattern: >-
+    A user-supplied URL is fetched with no special handling of the
+    link-local metadata address, so an attacker requests it and reads IAM
+    credentials or instance secrets from the metadata service.
+  secure_pattern: >-
+    The resolved target address is checked against the known metadata
+    address and rejected, and the instance is configured to require
+    authenticated metadata access where the provider supports it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = httpGet(userUrl)
+      secure: |
+        if resolve(host(userUrl)) == METADATA_IP: reject()
+        response = httpGet(userUrl)
+    python:
+      vulnerable: |
+        data = requests.get(user_url).text
+      secure: |
+        ip = socket.gethostbyname(urlparse(user_url).hostname)
+        if ip == "169.254.169.254": abort(403)
+        data = requests.get(user_url).text
+    javascript:
+      vulnerable: |
+        const data = await fetch(userUrl);
+      secure: |
+        const { address } = await dns.promises.lookup(new URL(userUrl).hostname);
+        if (address === "169.254.169.254") throw new Error("metadata blocked");
+        const data = await fetch(userUrl);
+    java:
+      vulnerable: |
+        var conn = new URL(userUrl).openConnection();
+      secure: |
+        InetAddress addr = InetAddress.getByName(new URL(userUrl).getHost());
+        if (addr.getHostAddress().equals("169.254.169.254")) throw new SecurityException();
+        var conn = new URL(userUrl).openConnection();
+    csharp:
+      vulnerable: |
+        var data = await httpClient.GetStringAsync(userUrl);
+      secure: |
+        var ip = (await Dns.GetHostAddressesAsync(new Uri(userUrl).Host)).First();
+        if (ip.ToString() == "169.254.169.254") throw new InvalidOperationException();
+        var data = await httpClient.GetStringAsync(userUrl);
+
+- id: PC-C10.6
+  facet: Server-Side Request Forgery Prevention
+  section: Resolve and validate the same address that is used
+  security_rule: >-
+    The address that is validated must be the exact address the request
+    connects to, so a name cannot resolve to a safe address during the
+    check and to an internal address when the request is made.
+  vulnerability_pattern: >-
+    The hostname is resolved once for validation and resolved again for
+    the connection, so a time-of-check to time-of-use DNS rebinding swaps
+    a public answer for an internal one between the two lookups.
+  secure_pattern: >-
+    The hostname is resolved a single time, the returned address is
+    validated, and that same pinned address is used to open the
+    connection so the check cannot be bypassed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if isPublic(resolve(host)): httpGet("https://" + host)
+      secure: |
+        ip = resolve(host)
+        if isPublic(ip): httpGetToAddress(ip, host)
+    python:
+      vulnerable: |
+        if is_public(socket.gethostbyname(host)):
+            requests.get("https://" + host)
+      secure: |
+        ip = socket.gethostbyname(host)
+        if not is_public(ip): abort(400)
+        requests.get(f"https://{ip}", headers={"Host": host}, verify=host)
+    javascript:
+      vulnerable: |
+        if (isPublic((await dns.promises.lookup(host)).address))
+            await fetch("https://" + host);
+      secure: |
+        const { address } = await dns.promises.lookup(host);
+        if (!isPublic(address)) throw new Error("private ip");
+        await fetch(`https://${address}`, { headers: { Host: host } });
+    java:
+      vulnerable: |
+        if (isPublic(InetAddress.getByName(host)))
+            new URL("https://" + host).openConnection();
+      secure: |
+        InetAddress addr = InetAddress.getByName(host);
+        if (!isPublic(addr)) throw new SecurityException();
+        var conn = new URL("https", addr.getHostAddress(), "/").openConnection();
+        conn.setRequestProperty("Host", host);
+    csharp:
+      vulnerable: |
+        if (IsPublic((await Dns.GetHostAddressesAsync(host))[0]))
+            await httpClient.GetAsync("https://" + host);
+      secure: |
+        var ip = (await Dns.GetHostAddressesAsync(host))[0];
+        if (!IsPublic(ip)) throw new InvalidOperationException();
+        var req = new HttpRequestMessage(HttpMethod.Get, $"https://{ip}/");
+        req.Headers.Host = host;
+        await httpClient.SendAsync(req);
+
+- id: PC-C10.7
+  facet: Server-Side Request Forgery Prevention
+  section: Do not reflect raw responses to the caller
+  security_rule: >-
+    Responses fetched from a user-supplied URL must not be returned to the
+    caller verbatim, so a blind SSRF cannot be turned into an information
+    disclosure channel.
+  vulnerability_pattern: >-
+    The body, headers, or status of the server-side fetch are streamed
+    straight back in the HTTP response, so an attacker reads internal
+    service contents through the proxying endpoint.
+  secure_pattern: >-
+    Only the specific fields the feature needs are extracted from the
+    fetched response, validated, and returned, while raw bodies, headers,
+    and error detail are withheld from the caller.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return httpGet(userUrl).body
+      secure: |
+        result = httpGet(userUrl)
+        return extractExpectedFields(result.body)
+    python:
+      vulnerable: |
+        return Response(requests.get(user_url).content)
+      secure: |
+        meta = requests.get(user_url).json()
+        return jsonify({"title": meta["title"], "length": meta["length"]})
+    javascript:
+      vulnerable: |
+        res.send(await (await fetch(userUrl)).text());
+      secure: |
+        const meta = await (await fetch(userUrl)).json();
+        res.json({ title: meta.title, length: meta.length });
+    java:
+      vulnerable: |
+        return new String(new URL(userUrl).openStream().readAllBytes());
+      secure: |
+        Preview meta = mapper.readValue(new URL(userUrl).openStream(), Preview.class);
+        return new PreviewDto(meta.title(), meta.length());
+    csharp:
+      vulnerable: |
+        return Content(await httpClient.GetStringAsync(userUrl));
+      secure: |
+        var meta = await httpClient.GetFromJsonAsync<Preview>(userUrl);
+        return Ok(new { meta.Title, meta.Length });
+
+- id: PC-C10.8
+  facet: Server-Side Request Forgery Prevention
+  section: Network segmentation and egress filtering
+  security_rule: >-
+    Services that make outbound requests should run behind network
+    segmentation and an egress firewall or proxy that allows only
+    required destinations, so SSRF is contained even if input checks fail.
+  vulnerability_pattern: >-
+    The fetching service has unrestricted outbound network access, so an
+    SSRF that slips past application validation can still reach internal
+    subnets and metadata services.
+  secure_pattern: >-
+    Outbound traffic is forced through an egress proxy or firewall with a
+    default-deny policy, and internal management networks are isolated so
+    the fetching service cannot route to them at all.
+  code_patterns:
+    generic:
+      vulnerable: |
+        egress_policy: allow all outbound
+      secure: |
+        egress_policy: deny all; allow only api.partner.example:443
+
+- id: PC-C10.9
+  facet: Server-Side Request Forgery Prevention
+  section: Validate after URL parsing and normalization
+  security_rule: >-
+    Untrusted URLs must be parsed and normalized with a robust URL parser
+    before validation, so credentials, encoded characters, and confusing
+    authority syntax cannot smuggle a different host past the check.
+  vulnerability_pattern: >-
+    A URL is validated with string matching on the raw input, so embedded
+    credentials, an at sign, encoded characters, or an unexpected port let
+    the real connect host differ from the host that was checked.
+  secure_pattern: >-
+    The URL is parsed by a standards-compliant parser, the normalized
+    host and port are extracted, and validation runs against those parsed
+    components rather than the raw string.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if userUrl.startsWith("https://api.example.com"): fetch(userUrl)
+      secure: |
+        u = parseUrl(userUrl)
+        if u.host == "api.example.com" and u.port in {443, none}: fetch(u)
+    python:
+      vulnerable: |
+        if user_url.startswith("https://api.example.com"):
+            requests.get(user_url)
+      secure: |
+        u = urlparse(user_url)
+        if u.hostname == "api.example.com" and u.port in (None, 443):
+            requests.get(user_url)
+    javascript:
+      vulnerable: |
+        if (userUrl.startsWith("https://api.example.com")) await fetch(userUrl);
+      secure: |
+        const u = new URL(userUrl);
+        if (u.hostname === "api.example.com" && (u.port === "" || u.port === "443"))
+            await fetch(u);
+    java:
+      vulnerable: |
+        if (userUrl.startsWith("https://api.example.com"))
+            new URL(userUrl).openConnection();
+      secure: |
+        URI u = URI.create(userUrl).normalize();
+        if ("api.example.com".equals(u.getHost()) && (u.getPort() == -1 || u.getPort() == 443))
+            u.toURL().openConnection();
+    csharp:
+      vulnerable: |
+        if (userUrl.StartsWith("https://api.example.com"))
+            await httpClient.GetAsync(userUrl);
+      secure: |
+        var u = new Uri(userUrl);
+        if (u.Host == "api.example.com" && u.Port == 443)
+            await httpClient.GetAsync(u);

@@ -1,0 +1,576 @@
+# OWASP Cheat Sheet Series — Domain 03: Session Management
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Source cheat sheets: Session Management, Cross-Site Request Forgery
+# Prevention, Transport Layer Security, plus the session-related guidance
+# in the Authentication and HTML5 cheat sheets.
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C#).
+
+# ---------------------------------------------------------------------------
+# CS-03.1 — Generate session identifiers with a CSPRNG
+# ---------------------------------------------------------------------------
+
+- id: CS-03.1
+  facet: Session Management
+  section: Session Identifier Generation
+  security_rule: >-
+    Session identifiers must be created by a framework-provided session
+    manager that draws at least 64 bits of entropy from a cryptographically
+    secure random source, never from a predictable value.
+  vulnerability_pattern: >-
+    The session identifier is derived from a guessable input such as a
+    counter, timestamp, username, or a non-cryptographic random generator,
+    so an attacker can predict or enumerate valid identifiers.
+  secure_pattern: >-
+    A vetted session manager mints the identifier from a cryptographically
+    secure pseudo-random generator with sufficient entropy, so identifiers
+    cannot be guessed or enumerated.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sessionId = md5(username + str(timestamp()))
+      secure: |
+        sessionId = csprngHex(32)        # 256 bits from a secure RNG
+    python:
+      vulnerable: |
+        session_id = str(random.randint(0, 999999))
+      secure: |
+        import secrets
+        session_id = secrets.token_urlsafe(32)
+    javascript:
+      vulnerable: |
+        const sid = Math.random().toString(36).slice(2);
+      secure: |
+        const sid = require("crypto").randomBytes(32).toString("hex");
+    java:
+      vulnerable: |
+        String sid = Long.toHexString(System.nanoTime());
+      secure: |
+        byte[] b = new byte[32];
+        SecureRandom.getInstanceStrong().nextBytes(b);
+    csharp:
+      vulnerable: |
+        var sid = new Random().Next().ToString();
+      secure: |
+        var sid = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
+# ---------------------------------------------------------------------------
+# CS-03.2 — Mark session cookies HttpOnly, Secure, and SameSite
+# ---------------------------------------------------------------------------
+
+- id: CS-03.2
+  facet: Session Management
+  section: Session Cookie Attributes
+  security_rule: >-
+    The cookie carrying the session identifier must be issued with the
+    HttpOnly, Secure, and SameSite attributes so it is unreadable from
+    script, sent only over HTTPS, and withheld from cross-site requests.
+  vulnerability_pattern: >-
+    The session cookie is set without HttpOnly, Secure, or SameSite, so
+    script can steal it through cross-site scripting, it can leak over
+    plain HTTP, and it rides along on cross-site requests.
+  secure_pattern: >-
+    The session cookie is written with HttpOnly to block script access,
+    Secure to confine it to HTTPS, and SameSite set to Lax or Strict to
+    keep it off cross-site requests.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("SESSIONID", sid)
+      secure: |
+        setCookie("SESSIONID", sid, httpOnly=true, secure=true, sameSite="Lax")
+    python:
+      vulnerable: |
+        response.set_cookie("session", sid)
+      secure: |
+        response.set_cookie("session", sid, httponly=True, secure=True,
+                             samesite="Lax")
+    javascript:
+      vulnerable: |
+        res.cookie("session", sid);
+      secure: |
+        res.cookie("session", sid, { httpOnly: true, secure: true,
+                                     sameSite: "lax" });
+    java:
+      vulnerable: |
+        response.addCookie(new Cookie("SESSIONID", sid));
+      secure: |
+        ResponseCookie c = ResponseCookie.from("SESSIONID", sid)
+            .httpOnly(true).secure(true).sameSite("Lax").build();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("SESSIONID", sid);
+      secure: |
+        Response.Cookies.Append("SESSIONID", sid, new CookieOptions {
+            HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
+
+# ---------------------------------------------------------------------------
+# CS-03.3 — Regenerate the session identifier on privilege change
+# ---------------------------------------------------------------------------
+
+- id: CS-03.3
+  facet: Session Management
+  section: Session Fixation Prevention
+  security_rule: >-
+    A fresh session identifier must be issued whenever the privilege level
+    changes — most importantly at login — and the pre-authentication
+    identifier must be discarded so it cannot be reused.
+  vulnerability_pattern: >-
+    The identifier a user holds before login is kept after authentication,
+    so an attacker who planted that identifier in the victim's browser is
+    logged into the victim's authenticated session.
+  secure_pattern: >-
+    On successful login the old session is invalidated and a brand-new
+    identifier is generated, breaking any session fixation attempt that
+    relied on the pre-login value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        session.userId = user.id          # same id kept after login
+      secure: |
+        regenerateSessionId()
+        session.userId = user.id
+    python:
+      vulnerable: |
+        session["user_id"] = user.id
+      secure: |
+        session.clear()
+        session.regenerate()              # new id, e.g. flask-login fresh login
+        session["user_id"] = user.id
+    javascript:
+      vulnerable: |
+        req.session.userId = user.id;
+      secure: |
+        req.session.regenerate(() => { req.session.userId = user.id; });
+    java:
+      vulnerable: |
+        request.getSession().setAttribute("user", user);
+      secure: |
+        request.changeSessionId();
+        request.getSession().setAttribute("user", user);
+    csharp:
+      vulnerable: |
+        HttpContext.Session.SetString("user", user.Id);
+      secure: |
+        await HttpContext.SignOutAsync();
+        HttpContext.Session.Clear();      // new session id on next SignIn
+        await HttpContext.SignInAsync(principal);
+
+# ---------------------------------------------------------------------------
+# CS-03.4 — Enforce idle and absolute session timeouts
+# ---------------------------------------------------------------------------
+
+- id: CS-03.4
+  facet: Session Management
+  section: Session Expiration
+  security_rule: >-
+    Every session must expire after a bounded idle period and after a
+    bounded absolute lifetime, regardless of activity, so an abandoned or
+    stolen session cannot be used indefinitely.
+  vulnerability_pattern: >-
+    Sessions are created with no idle timeout and no absolute lifetime, so
+    a session left open on a shared machine or captured by an attacker
+    stays valid forever.
+  secure_pattern: >-
+    The session manager records last-access and creation times and rejects
+    the session once the idle window or the absolute lifetime is exceeded,
+    forcing re-authentication.
+  code_patterns:
+    generic:
+      vulnerable: |
+        createSession(userId)             # never expires
+      secure: |
+        createSession(userId, idleTimeout=15*60, absoluteTimeout=8*3600)
+    python:
+      vulnerable: |
+        app.config["PERMANENT_SESSION_LIFETIME"] = None
+      secure: |
+        app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=15)
+        session.permanent = True
+    javascript:
+      vulnerable: |
+        app.use(session({ secret: s }));   # default: no rolling expiry
+      secure: |
+        app.use(session({ secret: s, rolling: true,
+                          cookie: { maxAge: 15 * 60 * 1000 } }));
+    java:
+      vulnerable: |
+        HttpSession s = request.getSession();
+      secure: |
+        HttpSession s = request.getSession();
+        s.setMaxInactiveInterval(15 * 60);
+    csharp:
+      vulnerable: |
+        services.AddSession();
+      secure: |
+        services.AddSession(o => o.IdleTimeout = TimeSpan.FromMinutes(15));
+
+# ---------------------------------------------------------------------------
+# CS-03.5 — Invalidate the session server-side on logout
+# ---------------------------------------------------------------------------
+
+- id: CS-03.5
+  facet: Session Management
+  section: Session Termination
+  security_rule: >-
+    Logout must destroy the session record on the server and clear the
+    client cookie, so the identifier becomes worthless even if it was
+    already copied by an attacker.
+  vulnerability_pattern: >-
+    Logout only clears the cookie in the browser or redirects, while the
+    server-side session record stays active, so a captured identifier
+    still authenticates after the user has logged out.
+  secure_pattern: >-
+    The logout handler explicitly invalidates the server-side session and
+    expires the cookie, so the identifier cannot be replayed afterwards.
+  code_patterns:
+    generic:
+      vulnerable: |
+        clearClientCookie("SESSIONID")    # server session still alive
+      secure: |
+        destroyServerSession(sessionId)
+        clearClientCookie("SESSIONID")
+    python:
+      vulnerable: |
+        resp.delete_cookie("session")
+      secure: |
+        session.clear()
+        logout_user()                     # server-side session destroyed
+    javascript:
+      vulnerable: |
+        res.clearCookie("session");
+      secure: |
+        req.session.destroy(() => res.clearCookie("session"));
+    java:
+      vulnerable: |
+        response.addCookie(expiredCookie("SESSIONID"));
+      secure: |
+        request.getSession(false).invalidate();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Delete("SESSIONID");
+      secure: |
+        HttpContext.Session.Clear();
+        await HttpContext.SignOutAsync();
+
+# ---------------------------------------------------------------------------
+# CS-03.6 — Keep the session identifier out of URLs
+# ---------------------------------------------------------------------------
+
+- id: CS-03.6
+  facet: Session Management
+  section: Session Identifier Exchange
+  security_rule: >-
+    The session identifier must travel only in a cookie or an
+    Authorization header, never in the URL query string or path, where it
+    would leak through history, logs, and Referer headers.
+  vulnerability_pattern: >-
+    The session identifier is appended to URLs, so it is captured in
+    browser history, server access logs, proxy logs, and the Referer
+    header sent to third-party sites.
+  secure_pattern: >-
+    The identifier is exchanged exclusively through a cookie or an
+    Authorization header, and URL-based session rewriting is disabled in
+    the framework.
+  code_patterns:
+    generic:
+      vulnerable: |
+        redirect("/dashboard?sid=" + sessionId)
+      secure: |
+        setCookie("SESSIONID", sessionId, httpOnly=true)
+        redirect("/dashboard")
+    python:
+      vulnerable: |
+        return redirect(f"/home?session={session_id}")
+      secure: |
+        resp = redirect("/home")
+        resp.set_cookie("session", session_id, httponly=True, secure=True)
+        return resp
+    javascript:
+      vulnerable: |
+        res.redirect("/home?sid=" + sid);
+      secure: |
+        res.cookie("session", sid, { httpOnly: true, secure: true });
+        res.redirect("/home");
+    java:
+      vulnerable: |
+        response.sendRedirect(response.encodeRedirectURL("/home"));
+      secure: |
+        # disable URL rewriting in web.xml:
+        # <tracking-mode>COOKIE</tracking-mode>
+        response.sendRedirect("/home");
+    csharp:
+      vulnerable: |
+        return Redirect("/home?sid=" + sid);
+      secure: |
+        Response.Cookies.Append("SESSIONID", sid,
+            new CookieOptions { HttpOnly = true, Secure = true });
+        return Redirect("/home");
+
+# ---------------------------------------------------------------------------
+# CS-03.7 — Use a host-bound cookie name prefix
+# ---------------------------------------------------------------------------
+
+- id: CS-03.7
+  facet: Session Management
+  section: Cookie Scope Hardening
+  security_rule: >-
+    The session cookie should use a __Host- name prefix so the browser
+    enforces that it is Secure, has no Domain attribute, and is scoped to
+    the issuing host, preventing cookie injection from subdomains.
+  vulnerability_pattern: >-
+    The session cookie is set with a broad Domain attribute or a plain
+    name, so a compromised or attacker-controlled sibling subdomain can
+    overwrite it and fix the victim's session.
+  secure_pattern: >-
+    The cookie name carries the __Host- prefix, which forces Secure, a
+    path of slash, and no Domain attribute, binding it to the exact host
+    and blocking subdomain cookie injection.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("SESSIONID", sid, domain=".example.com")
+      secure: |
+        setCookie("__Host-SESSIONID", sid, secure=true, path="/")
+    python:
+      vulnerable: |
+        response.set_cookie("session", sid, domain=".example.com")
+      secure: |
+        response.set_cookie("__Host-session", sid, secure=True, path="/")
+    javascript:
+      vulnerable: |
+        res.cookie("session", sid, { domain: ".example.com" });
+      secure: |
+        res.cookie("__Host-session", sid, { secure: true, path: "/" });
+    java:
+      vulnerable: |
+        ResponseCookie.from("SESSIONID", sid).domain(".example.com").build();
+      secure: |
+        ResponseCookie.from("__Host-SESSIONID", sid)
+            .secure(true).path("/").build();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("SESSIONID", sid,
+            new CookieOptions { Domain = ".example.com" });
+      secure: |
+        Response.Cookies.Append("__Host-SESSIONID", sid,
+            new CookieOptions { Secure = true, Path = "/" });
+
+# ---------------------------------------------------------------------------
+# CS-03.8 — Protect state-changing requests with anti-CSRF tokens
+# ---------------------------------------------------------------------------
+
+- id: CS-03.8
+  facet: Session Management
+  section: Cross-Site Request Forgery Prevention
+  security_rule: >-
+    Every state-changing request must carry an unpredictable anti-CSRF
+    token that the server validates against the session, so a forged
+    cross-site request without the token is rejected.
+  vulnerability_pattern: >-
+    A state-changing endpoint acts on the ambient session cookie alone
+    with no anti-CSRF token, so an attacker page can submit the request
+    on the victim's behalf.
+  secure_pattern: >-
+    A per-session synchronizer token is embedded in each form and checked
+    on the server, so a request that lacks the matching token is rejected
+    as forged.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if loggedIn(): performTransfer(amount)
+      secure: |
+        if loggedIn() and validToken(request.csrfToken, session.csrfToken):
+            performTransfer(amount)
+    python:
+      vulnerable: |
+        @app.route("/transfer", methods=["POST"])
+        def transfer(): do_transfer(request.form["amount"])
+      secure: |
+        from flask_wtf.csrf import CSRFProtect
+        CSRFProtect(app)                  # validates token on every POST
+    javascript:
+      vulnerable: |
+        app.post("/transfer", (req, res) => doTransfer(req.body.amount));
+      secure: |
+        const csrf = require("csurf")();
+        app.post("/transfer", csrf, (req, res) => doTransfer(req.body.amount));
+    java:
+      vulnerable: |
+        http.csrf(csrf -> csrf.disable());
+      secure: |
+        http.csrf(csrf -> csrf.csrfTokenRepository(
+            CookieCsrfTokenRepository.withHttpOnlyFalse()));
+    csharp:
+      vulnerable: |
+        public IActionResult Transfer(decimal amount) => DoTransfer(amount);
+      secure: |
+        [ValidateAntiForgeryToken]
+        public IActionResult Transfer(decimal amount) => DoTransfer(amount);
+
+# ---------------------------------------------------------------------------
+# CS-03.9 — Sign and encrypt client-side session state
+# ---------------------------------------------------------------------------
+
+- id: CS-03.9
+  facet: Session Management
+  section: Client-Side Session State Integrity
+  security_rule: >-
+    When session state is stored in the cookie itself rather than on the
+    server, it must be encrypted and authenticated with a server-held key
+    so the client cannot read or tamper with it.
+  vulnerability_pattern: >-
+    Session data such as a user id or role is placed in a cookie as plain
+    or merely encoded text, so a user can decode it and edit their own
+    privileges or identity.
+  secure_pattern: >-
+    The cookie payload is sealed with authenticated encryption using a
+    secret key the client never sees, so any tampering is detected and the
+    contents stay confidential.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("state", base64(jsonEncode({role: "user"})))
+      secure: |
+        setCookie("state", aeadSeal(serverKey, {role: "user"}))
+    python:
+      vulnerable: |
+        resp.set_cookie("role", "user")
+      secure: |
+        from itsdangerous import URLSafeTimedSerializer
+        s = URLSafeTimedSerializer(SECRET_KEY)
+        resp.set_cookie("state", s.dumps({"role": "user"}))
+    javascript:
+      vulnerable: |
+        res.cookie("state", JSON.stringify({ role: "user" }));
+      secure: |
+        res.cookie("state", jwt.sign({ role: "user" }, SECRET,
+                                     { algorithm: "HS256" }));
+    java:
+      vulnerable: |
+        cookie = new Cookie("role", "user");
+      secure: |
+        String token = Jwts.builder().claim("role", "user")
+            .signWith(SECRET_KEY).compact();
+    csharp:
+      vulnerable: |
+        Response.Cookies.Append("role", "user");
+      secure: |
+        var token = dataProtector.Protect(
+            JsonSerializer.Serialize(new { role = "user" }));
+        Response.Cookies.Append("state", token);
+
+# ---------------------------------------------------------------------------
+# CS-03.10 — Bind sessions to a single concurrency policy
+# ---------------------------------------------------------------------------
+
+- id: CS-03.10
+  facet: Session Management
+  section: Concurrent Session Control
+  security_rule: >-
+    The application should track active sessions per user and enforce a
+    concurrency policy so a user can see, and revoke, all sessions and so
+    new logins can invalidate stale ones.
+  vulnerability_pattern: >-
+    Sessions are created without any per-user registry, so a stolen
+    session keeps running unnoticed alongside the legitimate user and
+    cannot be enumerated or revoked.
+  secure_pattern: >-
+    Each login is recorded in a per-user session registry, allowing the
+    user to list and terminate other sessions and allowing the server to
+    enforce a maximum concurrent count.
+  code_patterns:
+    generic:
+      vulnerable: |
+        createSession(userId)             # no registry, no revocation path
+      secure: |
+        sessionRegistry.add(userId, sessionId)
+        enforceMaxConcurrent(userId, limit=3)
+    python:
+      vulnerable: |
+        session["user_id"] = user.id
+      secure: |
+        session["user_id"] = user.id
+        ActiveSession.objects.create(user=user, key=session.sid)
+    javascript:
+      vulnerable: |
+        req.session.userId = user.id;
+      secure: |
+        req.session.userId = user.id;
+        await sessionStore.register(user.id, req.sessionID);
+    java:
+      vulnerable: |
+        http.sessionManagement(s -> {});
+      secure: |
+        http.sessionManagement(s -> s.maximumSessions(3)
+            .maxSessionsPreventsLogin(false));
+    csharp:
+      vulnerable: |
+        await HttpContext.SignInAsync(principal);
+      secure: |
+        await HttpContext.SignInAsync(principal);
+        await _sessionRegistry.RegisterAsync(userId, sessionId);
+
+# ---------------------------------------------------------------------------
+# CS-03.11 — Verify the Origin and Referer on sensitive requests
+# ---------------------------------------------------------------------------
+
+- id: CS-03.11
+  facet: Session Management
+  section: Cross-Site Request Forgery Defense in Depth
+  security_rule: >-
+    As a defense-in-depth layer alongside anti-CSRF tokens, the server
+    should verify that the Origin or Referer header of a state-changing
+    request matches an allowlist of trusted origins.
+  vulnerability_pattern: >-
+    A state-changing endpoint ignores the Origin and Referer headers
+    entirely, so a cross-site request from any attacker domain is
+    processed as if it came from the application itself.
+  secure_pattern: >-
+    Before acting, the server reads the Origin header, falls back to
+    Referer when absent, and rejects the request when the source origin
+    is not in the trusted allowlist.
+  code_patterns:
+    generic:
+      vulnerable: |
+        handleStateChange(request)        # source origin never checked
+      secure: |
+        if originOf(request) in TRUSTED_ORIGINS: handleStateChange(request)
+    python:
+      vulnerable: |
+        def transfer(): do_transfer()
+      secure: |
+        def transfer():
+            if request.headers.get("Origin") not in TRUSTED_ORIGINS:
+                abort(403)
+            do_transfer()
+    javascript:
+      vulnerable: |
+        app.post("/transfer", (req, res) => doTransfer());
+      secure: |
+        app.post("/transfer", (req, res) => {
+            if (!TRUSTED.has(req.get("Origin"))) return res.sendStatus(403);
+            doTransfer();
+        });
+    java:
+      vulnerable: |
+        void transfer(HttpServletRequest req) { doTransfer(); }
+      secure: |
+        void transfer(HttpServletRequest req) {
+            if (!TRUSTED.contains(req.getHeader("Origin")))
+                throw new AccessDeniedException("origin");
+            doTransfer();
+        }
+    csharp:
+      vulnerable: |
+        public IActionResult Transfer() => DoTransfer();
+      secure: |
+        public IActionResult Transfer() {
+            if (!Trusted.Contains(Request.Headers["Origin"]))
+                return Forbid();
+            return DoTransfer();
+        }

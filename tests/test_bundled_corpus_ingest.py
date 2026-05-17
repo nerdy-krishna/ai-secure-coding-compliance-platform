@@ -103,8 +103,15 @@ def test_ingested_documents_carry_pattern_blocks():
 
 
 def test_only_if_empty_skips_already_populated_frameworks():
-    # cwe_essentials + asvs already populated; only isvs is empty.
-    store = _FakeStore(existing={"cwe_essentials": 14, "asvs": 345})
+    # Every bundled framework but isvs is already populated.
+    store = _FakeStore(
+        existing={
+            "cwe_essentials": 14,
+            "asvs": 345,
+            "proactive_controls": 95,
+            "cheatsheets": 112,
+        }
+    )
     result = ingest_all_bundled_corpora(store, only_if_empty=True)
 
     assert result["cwe_essentials"] == 14  # reported, not re-ingested

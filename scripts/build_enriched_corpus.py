@@ -57,6 +57,11 @@ _FRAMEWORKS: Dict[str, Dict[str, str]] = {
     "asvs": {"dir": "asvs_corpus", "facet": "control_family"},
     "cwe_essentials": {"dir": "cwe_essentials_corpus", "facet": "concern_area"},
     "isvs": {"dir": "isvs_corpus", "facet": "concern_area"},
+    "proactive_controls": {
+        "dir": "proactive_controls_corpus",
+        "facet": "concern_area",
+    },
+    "cheatsheets": {"dir": "cheatsheets_corpus", "facet": "concern_area"},
 }
 
 

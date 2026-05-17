@@ -1,0 +1,579 @@
+# OWASP Cheat Sheet Series — Domain 02: Authentication
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Sources: Authentication, Password Storage, Multifactor Authentication,
+# Forgot Password, Credential Stuffing Prevention, and Session-related
+# authentication cheat sheets.
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# where applicable).
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+- id: CS-02.1
+  facet: Authentication
+  section: Password Hashing at Rest
+  security_rule: >-
+    Passwords must be stored using a memory-hard, salted, adaptive
+    password-hashing function such as Argon2id, scrypt, or bcrypt — never
+    a plain or fast cryptographic hash.
+  vulnerability_pattern: >-
+    Passwords are stored in plaintext or hashed with a fast general
+    purpose digest such as MD5, SHA-1, or SHA-256, so a database leak
+    lets an attacker recover credentials with offline brute force.
+  secure_pattern: >-
+    Each password is run through a slow, salted, memory-hard hashing
+    function with sensible work parameters, so even leaked hashes are
+    expensive to crack one at a time.
+  code_patterns:
+    generic:
+      vulnerable: |
+        stored = sha256(password)
+      secure: |
+        stored = argon2id_hash(password)   # per-password salt, tuned cost
+    python:
+      vulnerable: |
+        digest = hashlib.sha256(password.encode()).hexdigest()
+      secure: |
+        from argon2 import PasswordHasher
+        digest = PasswordHasher().hash(password)
+    javascript:
+      vulnerable: |
+        const hash = crypto.createHash("sha256").update(password).digest("hex");
+      secure: |
+        const hash = await argon2.hash(password, { type: argon2.argon2id });
+    java:
+      vulnerable: |
+        String hash = DigestUtils.sha256Hex(password);
+      secure: |
+        String hash = new Argon2PasswordEncoder(16, 32, 1, 19456, 2).encode(password);
+    csharp:
+      vulnerable: |
+        var hash = Convert.ToHexString(SHA256.HashData(bytes));
+      secure: |
+        var hash = new PasswordHasher<User>().HashPassword(user, password);
+
+- id: CS-02.2
+  facet: Authentication
+  section: Password Verification
+  security_rule: >-
+    Password verification must compare a candidate against the stored
+    hash using the hashing library's own constant-time verify function,
+    never by re-hashing and comparing strings directly.
+  vulnerability_pattern: >-
+    The submitted password is re-hashed and the result is compared to the
+    stored value with an ordinary equality check that returns early,
+    leaking timing information about how many characters matched.
+  secure_pattern: >-
+    The password library's verify routine is used, which performs a
+    constant-time comparison and transparently handles the embedded salt
+    and work parameters.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if hash(input) == storedHash: login()
+      secure: |
+        if passwordHasher.verify(storedHash, input): login()
+    python:
+      vulnerable: |
+        if hashlib.sha256(input.encode()).hexdigest() == stored: login()
+      secure: |
+        from argon2 import PasswordHasher
+        if PasswordHasher().verify(stored, input): login()
+    javascript:
+      vulnerable: |
+        if (sha256(input) === storedHash) login();
+      secure: |
+        if (await argon2.verify(storedHash, input)) login();
+    java:
+      vulnerable: |
+        if (DigestUtils.sha256Hex(input).equals(stored)) login();
+      secure: |
+        if (passwordEncoder.matches(input, stored)) login();
+    csharp:
+      vulnerable: |
+        if (Sha256Hex(input) == stored) Login();
+      secure: |
+        var ok = new PasswordHasher<User>()
+            .VerifyHashedPassword(user, stored, input) != PasswordVerificationResult.Failed;
+
+- id: CS-02.3
+  facet: Authentication
+  section: Generic Authentication Error Messages
+  security_rule: >-
+    Failed login responses must be generic and identical whether the
+    username, the password, or both were wrong, so they cannot be used to
+    confirm which accounts exist.
+  vulnerability_pattern: >-
+    The login endpoint returns a distinct message such as no such user
+    versus wrong password, letting an attacker enumerate valid accounts
+    before attempting a password attack.
+  secure_pattern: >-
+    Every authentication failure returns one constant message and one
+    status code, and the code path takes a similar amount of time
+    regardless of whether the account exists.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if not user: return "No account with that email"
+        if not ok:   return "Incorrect password"
+      secure: |
+        if not user or not ok: return "Invalid email or password"
+    python:
+      vulnerable: |
+        if user is None:
+            return jsonify(error="Unknown username"), 404
+      secure: |
+        if user is None or not verify(user, pw):
+            return jsonify(error="Invalid username or password"), 401
+    javascript:
+      vulnerable: |
+        if (!user) return res.status(404).json({ error: "User not found" });
+      secure: |
+        if (!user || !ok) return res.status(401).json({ error: "Invalid credentials" });
+    java:
+      vulnerable: |
+        if (user == null) return error("Account does not exist");
+      secure: |
+        if (user == null || !ok) return error("Invalid username or password");
+    csharp:
+      vulnerable: |
+        if (user == null) return Unauthorized("No such user");
+      secure: |
+        if (user == null || !ok) return Unauthorized("Invalid username or password");
+
+- id: CS-02.4
+  facet: Authentication
+  section: Brute-Force and Rate Limiting
+  security_rule: >-
+    Authentication endpoints must throttle repeated failures with
+    progressive delays, account lockout, or rate limiting keyed on the
+    account and the source, to blunt brute-force and credential-stuffing.
+  vulnerability_pattern: >-
+    The login endpoint accepts unlimited password attempts at full speed,
+    so an attacker can run dictionary, brute-force, or credential-stuffing
+    attacks against accounts without resistance.
+  secure_pattern: >-
+    Failed attempts are counted per account and per source, and once a
+    threshold is crossed the endpoint imposes increasing delays, a
+    temporary lockout, or a CAPTCHA challenge.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if checkPassword(user, pw): login()
+      secure: |
+        if failCount(user) >= MAX: reject("temporarily locked")
+        if checkPassword(user, pw): login()
+    python:
+      vulnerable: |
+        @app.post("/login")
+        def login(): ...   # no attempt limit
+      secure: |
+        @app.post("/login")
+        @limiter.limit("5 per minute")
+        def login(): ...
+    javascript:
+      vulnerable: |
+        app.post("/login", loginHandler);
+      secure: |
+        const limiter = rateLimit({ windowMs: 60000, max: 5 });
+        app.post("/login", limiter, loginHandler);
+    java:
+      vulnerable: |
+        if (passwordEncoder.matches(pw, user.getHash())) login();
+      secure: |
+        if (loginAttemptService.isBlocked(username)) throw new LockedException("locked");
+        if (passwordEncoder.matches(pw, user.getHash())) login();
+    csharp:
+      vulnerable: |
+        var result = await _signInManager.PasswordSignInAsync(user, pw, false, false);
+      secure: |
+        var result = await _signInManager.PasswordSignInAsync(
+            user, pw, false, lockoutOnFailure: true);
+
+- id: CS-02.5
+  facet: Authentication
+  section: Password Strength and Length
+  security_rule: >-
+    Password policy must enforce a generous minimum length, allow long
+    passphrases and all characters including spaces and Unicode, and
+    check candidates against a list of known-breached passwords.
+  vulnerability_pattern: >-
+    The policy caps password length low, forbids spaces or symbols, or
+    relies on rigid composition rules while accepting weak or
+    previously breached passwords.
+  secure_pattern: >-
+    A minimum length of at least eight characters is enforced, very long
+    passphrases up to a sane upper bound are accepted, the full character
+    set is allowed, and the password is rejected if it appears in a
+    breach corpus.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if len(pw) < 8 or len(pw) > 16 or hasSymbol(pw): reject()
+      secure: |
+        if len(pw) < 8 or len(pw) > 128 or inBreachList(pw): reject()
+    python:
+      vulnerable: |
+        if not re.fullmatch(r"[A-Za-z0-9]{6,12}", pw): reject()
+      secure: |
+        if len(pw) < 8 or len(pw) > 128 or is_pwned(pw): reject()
+    javascript:
+      vulnerable: |
+        if (pw.length < 6 || pw.length > 16) reject();
+      secure: |
+        if (pw.length < 8 || pw.length > 128 || await isPwned(pw)) reject();
+    java:
+      vulnerable: |
+        if (pw.length() < 6 || pw.length() > 12) reject();
+      secure: |
+        if (pw.length() < 8 || pw.length() > 128 || breachList.contains(pw)) reject();
+    csharp:
+      vulnerable: |
+        if (pw.Length < 6 || pw.Length > 16) Reject();
+      secure: |
+        if (pw.Length < 8 || pw.Length > 128 || await IsPwnedAsync(pw)) Reject();
+
+- id: CS-02.6
+  facet: Authentication
+  section: Forgot-Password Reset Tokens
+  security_rule: >-
+    Password reset must use a cryptographically random, single-use token
+    with a short expiry that is invalidated once consumed, and must never
+    send the existing password or a permanent link.
+  vulnerability_pattern: >-
+    The reset link uses a guessable identifier such as a sequential id or
+    timestamp, never expires, can be reused, or the email simply contains
+    the current password in cleartext.
+  secure_pattern: >-
+    A high-entropy random token is generated, stored hashed with a short
+    time-to-live, checked in constant time, and deleted on first use so
+    the link cannot be guessed or replayed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = userId + "-" + timestamp
+      secure: |
+        token = randomBytes(32); store(hash(token), ttl=15min, singleUse=true)
+    python:
+      vulnerable: |
+        token = str(user.id) + datetime.now().isoformat()
+      secure: |
+        token = secrets.token_urlsafe(32)
+        save_reset(user.id, sha256(token), expires=now() + timedelta(minutes=15))
+    javascript:
+      vulnerable: |
+        const token = `${user.id}-${Date.now()}`;
+      secure: |
+        const token = crypto.randomBytes(32).toString("base64url");
+        await saveReset(user.id, sha256(token), { ttlMinutes: 15 });
+    java:
+      vulnerable: |
+        String token = user.getId() + "" + System.currentTimeMillis();
+      secure: |
+        byte[] b = new byte[32]; new SecureRandom().nextBytes(b);
+        String token = Base64.getUrlEncoder().encodeToString(b);
+    csharp:
+      vulnerable: |
+        var token = user.Id + DateTime.Now.Ticks.ToString();
+      secure: |
+        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+
+- id: CS-02.7
+  facet: Authentication
+  section: Forgot-Password Response Neutrality
+  security_rule: >-
+    The forgot-password endpoint must return the same response whether or
+    not the submitted address maps to an account, so it cannot be used to
+    enumerate registered users.
+  vulnerability_pattern: >-
+    The forgot-password flow replies differently for known and unknown
+    addresses, for example sent versus address not found, revealing which
+    emails have accounts.
+  secure_pattern: >-
+    The endpoint always returns a neutral confirmation message, and an
+    email is sent only when the account exists, so an observer learns
+    nothing from the HTTP response.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if not user: return "That email is not registered"
+        sendResetEmail(user)
+      secure: |
+        if user: sendResetEmail(user)
+        return "If that address has an account, a reset link was sent"
+    python:
+      vulnerable: |
+        if user is None:
+            return jsonify(error="No account for that email"), 404
+        send_reset(user)
+      secure: |
+        if user is not None:
+            send_reset(user)
+        return jsonify(message="If the address exists, a link was sent"), 200
+    javascript:
+      vulnerable: |
+        if (!user) return res.status(404).send("Email not found");
+        sendReset(user);
+      secure: |
+        if (user) sendReset(user);
+        res.status(200).send("If that account exists, a reset link was sent");
+    java:
+      vulnerable: |
+        if (user == null) return error("Email not registered");
+        sendReset(user);
+      secure: |
+        if (user != null) sendReset(user);
+        return ok("If the address has an account, a link was sent");
+    csharp:
+      vulnerable: |
+        if (user == null) return NotFound("Email not registered");
+        SendReset(user);
+      secure: |
+        if (user != null) SendReset(user);
+        return Ok("If that account exists, a reset link was sent");
+
+- id: CS-02.8
+  facet: Authentication
+  section: Multi-Factor Authentication
+  security_rule: >-
+    Sensitive applications must offer and, for privileged roles, require a
+    second authentication factor such as a TOTP authenticator app or a
+    hardware security key, not SMS where it can be avoided.
+  vulnerability_pattern: >-
+    Authentication relies on a single factor — a password alone — so any
+    leaked or phished credential gives full account access with nothing
+    else standing in the way.
+  secure_pattern: >-
+    After the password step a second factor is verified, with a
+    phishing-resistant option such as WebAuthn or a TOTP code preferred
+    over SMS one-time passwords.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if checkPassword(user, pw): grantSession(user)
+      secure: |
+        if checkPassword(user, pw): requireSecondFactor(user)
+    python:
+      vulnerable: |
+        if verify_password(user, pw):
+            login_user(user)
+      secure: |
+        if verify_password(user, pw):
+            session["pending_mfa"] = user.id   # session granted only after TOTP
+    javascript:
+      vulnerable: |
+        if (await checkPassword(user, pw)) issueSession(user);
+      secure: |
+        if (await checkPassword(user, pw)) req.session.pendingMfa = user.id;
+    java:
+      vulnerable: |
+        if (passwordEncoder.matches(pw, user.getHash())) authenticate(user);
+      secure: |
+        if (passwordEncoder.matches(pw, user.getHash()))
+            return mfaService.challenge(user);   // full auth only after factor
+    csharp:
+      vulnerable: |
+        await _signInManager.PasswordSignInAsync(user, pw, false, false);
+      secure: |
+        var r = await _signInManager.PasswordSignInAsync(user, pw, false, false);
+        if (r.RequiresTwoFactor) return RedirectToAction("VerifyTwoFactor");
+
+- id: CS-02.9
+  facet: Authentication
+  section: TOTP and One-Time-Code Handling
+  security_rule: >-
+    One-time codes and TOTP values must be compared in constant time,
+    accepted only once within a narrow time window, and subjected to the
+    same rate limiting as passwords.
+  vulnerability_pattern: >-
+    A one-time code is compared with an ordinary string equality that
+    short-circuits, can be submitted unlimited times, or stays valid long
+    after issue, so it can be brute-forced or replayed.
+  secure_pattern: >-
+    The code is verified with a constant-time comparison, marked used
+    immediately so it cannot be replayed, limited to a short validity
+    window, and rate limited per account.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if submittedCode == expectedCode: pass()
+      secure: |
+        if constantTimeEquals(submittedCode, expectedCode) and not used(code): pass()
+    python:
+      vulnerable: |
+        if otp == request.form["code"]: verify()
+      secure: |
+        import hmac
+        if hmac.compare_digest(otp, request.form["code"]): verify()
+    javascript:
+      vulnerable: |
+        if (code === req.body.code) verify();
+      secure: |
+        if (crypto.timingSafeEqual(Buffer.from(code), Buffer.from(req.body.code))) verify();
+    java:
+      vulnerable: |
+        if (expected.equals(submitted)) verify();
+      secure: |
+        if (MessageDigest.isEqual(expected.getBytes(UTF_8),
+                                  submitted.getBytes(UTF_8))) verify();
+    csharp:
+      vulnerable: |
+        if (expected == submitted) Verify();
+      secure: |
+        if (CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(expected),
+                Encoding.UTF8.GetBytes(submitted))) Verify();
+
+- id: CS-02.10
+  facet: Authentication
+  section: Session Renewal on Privilege Change
+  security_rule: >-
+    A fresh session identifier must be issued the moment a user
+    authenticates or changes privilege level, so any pre-login identifier
+    cannot be reused to ride the authenticated session.
+  vulnerability_pattern: >-
+    The session identifier assigned before login is kept unchanged after
+    successful authentication, allowing a fixed or attacker-planted
+    identifier to become an authenticated session.
+  secure_pattern: >-
+    On successful login the old session is invalidated and a new
+    identifier is generated, so the authenticated session can never share
+    an identifier with the anonymous one.
+  code_patterns:
+    generic:
+      vulnerable: |
+        session["user"] = user.id            # same session id as pre-login
+      secure: |
+        regenerateSessionId()
+        session["user"] = user.id
+    python:
+      vulnerable: |
+        session["user_id"] = user.id
+      secure: |
+        session.clear()
+        session["user_id"] = user.id
+        session.modified = True              # Flask issues a fresh session cookie
+    javascript:
+      vulnerable: |
+        req.session.userId = user.id;
+      secure: |
+        req.session.regenerate(() => { req.session.userId = user.id; });
+    java:
+      vulnerable: |
+        request.getSession().setAttribute("user", user);
+      secure: |
+        request.changeSessionId();
+        request.getSession().setAttribute("user", user);
+    csharp:
+      vulnerable: |
+        HttpContext.Session.SetString("user", user.Id);
+      secure: |
+        await HttpContext.SignOutAsync();
+        await HttpContext.SignInAsync(principal);   // new authentication ticket
+
+- id: CS-02.11
+  facet: Authentication
+  section: Credentials in Transit and Logs
+  security_rule: >-
+    Credentials must only be transmitted over TLS, sent in the request
+    body rather than the URL, and must never be written to logs, error
+    messages, or analytics.
+  vulnerability_pattern: >-
+    Passwords or tokens are passed as query-string parameters, sent over
+    plain HTTP, or logged as part of request dumps, so they end up in
+    server logs, proxy logs, and browser history.
+  secure_pattern: >-
+    Credentials travel only inside the body of a TLS-protected request,
+    and logging filters redact password and token fields so secrets never
+    reach any log sink.
+  code_patterns:
+    generic:
+      vulnerable: |
+        GET /login?user=alice&password=hunter2
+        log("request: " + fullRequest)
+      secure: |
+        POST /login   { body: credentials over TLS }
+        log("request: " + redact(fullRequest))
+    python:
+      vulnerable: |
+        logger.info("login attempt: %s", request.values.to_dict())
+      secure: |
+        safe = {k: v for k, v in request.values.items() if k != "password"}
+        logger.info("login attempt: %s", safe)
+    javascript:
+      vulnerable: |
+        console.log("login body", req.body);
+      secure: |
+        const { password, ...safe } = req.body;
+        console.log("login body", safe);
+    java:
+      vulnerable: |
+        log.info("login params: {}", request.getParameterMap());
+      secure: |
+        log.info("login attempt for user: {}", request.getParameter("username"));
+    csharp:
+      vulnerable: |
+        _logger.LogInformation("Login body: {Body}", JsonSerializer.Serialize(model));
+      secure: |
+        _logger.LogInformation("Login attempt for {User}", model.Username);
+
+- id: CS-02.12
+  facet: Authentication
+  section: Password-Hash Upgrade on Login
+  security_rule: >-
+    When a verified password hash uses outdated parameters or an older
+    algorithm, the application must rehash the password with current
+    parameters during the same successful login.
+  vulnerability_pattern: >-
+    Stored hashes are never re-evaluated after the work factor or
+    algorithm is upgraded, so accounts that predate the change keep weak
+    hashes indefinitely.
+  secure_pattern: >-
+    After verifying the password the application checks whether the
+    stored hash needs an upgrade and, if so, transparently rehashes the
+    plaintext with the current parameters and saves it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if verify(stored, pw): login()       # stale hash never refreshed
+      secure: |
+        if verify(stored, pw):
+            if needsRehash(stored): save(hash(pw))
+            login()
+    python:
+      vulnerable: |
+        if ph.verify(stored, pw):
+            login(user)
+      secure: |
+        if ph.verify(stored, pw):
+            if ph.check_needs_rehash(stored):
+                user.hash = ph.hash(pw); save(user)
+            login(user)
+    javascript:
+      vulnerable: |
+        if (await argon2.verify(stored, pw)) login(user);
+      secure: |
+        if (await argon2.verify(stored, pw)) {
+            if (argon2.needsRehash(stored)) user.hash = await argon2.hash(pw);
+            login(user);
+        }
+    java:
+      vulnerable: |
+        if (encoder.matches(pw, user.getHash())) login(user);
+      secure: |
+        if (encoder.matches(pw, user.getHash())) {
+            if (encoder.upgradeEncoding(user.getHash())) user.setHash(encoder.encode(pw));
+            login(user);
+        }
+    csharp:
+      vulnerable: |
+        if (Verify(user, stored, pw)) Login(user);
+      secure: |
+        var r = _hasher.VerifyHashedPassword(user, stored, pw);
+        if (r == PasswordVerificationResult.SuccessRehashNeeded)
+            user.Hash = _hasher.HashPassword(user, pw);

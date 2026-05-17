@@ -1,0 +1,466 @@
+# OWASP Proactive Controls — C5: Secure By Default Configurations
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/Java/C# for web app security).
+#
+# C5 is largely a configuration / hardening control: several entries are
+# generic-only because the practice has no language-specific code sink.
+
+# ---------------------------------------------------------------------------
+# PC-C5.1 — Harden Framework and Server Defaults
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.1
+  facet: Secure Configuration
+  section: Harden Framework and Server Defaults
+  security_rule: >-
+    Applications and servers must ship with the most restrictive setting
+    as the default, with debug, verbose tracebacks, auto-reload, and
+    development conveniences explicitly disabled in every non-development
+    environment.
+  vulnerability_pattern: >-
+    The application runs with the framework's development defaults in
+    production, so debug mode, an interactive debugger, or detailed
+    stack traces are exposed to anyone who triggers an error.
+  secure_pattern: >-
+    Debug and development features are turned off by default and only
+    enabled from an explicit, environment-scoped configuration value, so
+    a production deployment never serves an interactive debugger.
+  code_patterns:
+    generic:
+      vulnerable: |
+        app.run(debug=true)              # development debugger reachable
+      secure: |
+        app.run(debug=env("ENVIRONMENT") == "development")
+    python:
+      vulnerable: |
+        app.run(host="0.0.0.0", debug=True)
+      secure: |
+        app.run(host="0.0.0.0", debug=os.environ.get("FLASK_DEBUG") == "1")
+    javascript:
+      vulnerable: |
+        app.use(errorhandler());          // express dev error pages in prod
+      secure: |
+        if (process.env.NODE_ENV !== "production") app.use(errorhandler());
+    java:
+      vulnerable: |
+        server.error.include-stacktrace=always
+      secure: |
+        server.error.include-stacktrace=never
+    csharp:
+      vulnerable: |
+        app.UseDeveloperExceptionPage();
+      secure: |
+        if (app.Environment.IsDevelopment()) app.UseDeveloperExceptionPage();
+        else app.UseExceptionHandler("/error");
+
+# ---------------------------------------------------------------------------
+# PC-C5.2 — Remove Default Credentials and Sample Accounts
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.2
+  facet: Secure Configuration
+  section: Remove Default Credentials and Sample Accounts
+  security_rule: >-
+    Default, sample, and vendor-shipped accounts and passwords must be
+    removed or rotated before a system goes live, and no credential may
+    be hard-coded or embedded in source, images, or configuration.
+  vulnerability_pattern: >-
+    A system is deployed with a built-in administrator account, a
+    vendor default password, or a credential hard-coded in source, so
+    anyone who knows the well-known value gains access.
+  secure_pattern: >-
+    Initial credentials are generated uniquely per deployment or supplied
+    through a secrets manager, default accounts are disabled or deleted,
+    and the first login forces a password change.
+  code_patterns:
+    generic:
+      vulnerable: |
+        admin_password = "admin"          # shipped default, never rotated
+      secure: |
+        admin_password = secrets_manager.get("admin_initial_password")
+    python:
+      vulnerable: |
+        DB_PASSWORD = "postgres"
+      secure: |
+        DB_PASSWORD = os.environ["DB_PASSWORD"]   # injected per deployment
+    javascript:
+      vulnerable: |
+        const apiKey = "sk_test_default_key_123";
+      secure: |
+        const apiKey = process.env.API_KEY;
+    java:
+      vulnerable: |
+        String password = "changeit";
+      secure: |
+        String password = System.getenv("KEYSTORE_PASSWORD");
+    csharp:
+      vulnerable: |
+        var connStr = "Server=db;User Id=sa;Password=Password1;";
+      secure: |
+        var connStr = configuration.GetConnectionString("Default");
+
+# ---------------------------------------------------------------------------
+# PC-C5.3 — Disable Unused Features, Services, and Endpoints
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.3
+  facet: Secure Configuration
+  section: Disable Unused Features, Services, and Endpoints
+  security_rule: >-
+    Only the features, modules, ports, sample applications, and HTTP
+    methods the application actually needs may be enabled; everything
+    else must be removed or turned off to shrink the attack surface.
+  vulnerability_pattern: >-
+    Unused framework modules, sample apps, management consoles, or HTTP
+    methods are left enabled, so an attacker reaches functionality the
+    application never intended to expose.
+  secure_pattern: >-
+    The deployment enables an explicit allowlist of required features and
+    methods, and unused modules, demo content, and management endpoints
+    are uninstalled or disabled.
+  code_patterns:
+    generic:
+      vulnerable: |
+        enableAllModules()                # demo and admin modules included
+      secure: |
+        enableModules(["auth", "billing"])   # only what the app needs
+    python:
+      vulnerable: |
+        @app.route("/debug/console", methods=["GET", "POST", "PUT", "DELETE"])
+      secure: |
+        @app.route("/orders", methods=["GET", "POST"])   # no debug route in prod
+    javascript:
+      vulnerable: |
+        app.all("/admin/*", adminHandler);
+      secure: |
+        app.get("/admin/dashboard", requireAdmin, dashboardHandler);
+    java:
+      vulnerable: |
+        management.endpoints.web.exposure.include=*
+      secure: |
+        management.endpoints.web.exposure.include=health,info
+    csharp:
+      vulnerable: |
+        services.AddSwaggerGen();
+        app.UseSwagger(); app.UseSwaggerUI();
+      secure: |
+        if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
+
+# ---------------------------------------------------------------------------
+# PC-C5.4 — Set Security Response Headers
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.4
+  facet: Secure Configuration
+  section: Set Security Response Headers
+  security_rule: >-
+    HTTP responses must carry the standard hardening headers — a strict
+    Content-Security-Policy, HSTS, X-Content-Type-Options nosniff, and a
+    restrictive frame and referrer policy — set globally for every route.
+  vulnerability_pattern: >-
+    Responses are sent without security headers, so the browser applies
+    no Content-Security-Policy, allows MIME sniffing, and permits the
+    page to be framed, widening exposure to injection and clickjacking.
+  secure_pattern: >-
+    A middleware or filter adds a vetted set of security headers to every
+    response by default, including a content security policy, HSTS, and
+    nosniff, rather than relying on per-route opt-in.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(body)                     # no security headers attached
+      secure: |
+        respond(body, headers=SECURITY_HEADERS)   # CSP, HSTS, nosniff
+    python:
+      vulnerable: |
+        return Response(body)
+      secure: |
+        resp = Response(body)
+        resp.headers["Content-Security-Policy"] = "default-src 'self'"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+    javascript:
+      vulnerable: |
+        const app = express();
+      secure: |
+        const app = express();
+        app.use(helmet());                // CSP, HSTS, nosniff defaults
+    java:
+      vulnerable: |
+        http.headers(headers -> headers.disable());
+      secure: |
+        http.headers(h -> h
+            .contentSecurityPolicy(c -> c.policyDirectives("default-src 'self'"))
+            .httpStrictTransportSecurity(s -> s.includeSubDomains(true)));
+    csharp:
+      vulnerable: |
+        // responses sent with framework defaults, no headers added
+      secure: |
+        app.Use(async (ctx, next) => {
+            ctx.Response.Headers["Content-Security-Policy"] = "default-src 'self'";
+            ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            await next();
+        });
+
+# ---------------------------------------------------------------------------
+# PC-C5.5 — Secure Session Cookie Defaults
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.5
+  facet: Secure Configuration
+  section: Secure Session Cookie Defaults
+  security_rule: >-
+    Session and authentication cookies must be created with the Secure,
+    HttpOnly, and an appropriate SameSite attribute set by default, so a
+    cookie is never transmitted in clear text or read by client script.
+  vulnerability_pattern: >-
+    Cookies are issued without the Secure, HttpOnly, or SameSite flags,
+    so they travel over plain HTTP, are readable by injected JavaScript,
+    and are sent on cross-site requests.
+  secure_pattern: >-
+    The cookie or session framework is configured so every cookie is
+    Secure, HttpOnly, and SameSite by default, and the flags are not left
+    to per-cookie opt-in.
+  code_patterns:
+    generic:
+      vulnerable: |
+        setCookie("session", id)          # no Secure, HttpOnly, SameSite
+      secure: |
+        setCookie("session", id, secure=true, httpOnly=true, sameSite="Lax")
+    python:
+      vulnerable: |
+        resp.set_cookie("session", token)
+      secure: |
+        resp.set_cookie("session", token, secure=True, httponly=True,
+                        samesite="Lax")
+    javascript:
+      vulnerable: |
+        app.use(session({ secret: s, cookie: {} }));
+      secure: |
+        app.use(session({ secret: s,
+            cookie: { secure: true, httpOnly: true, sameSite: "lax" } }));
+    java:
+      vulnerable: |
+        server.servlet.session.cookie.secure=false
+      secure: |
+        server.servlet.session.cookie.secure=true
+        server.servlet.session.cookie.http-only=true
+        server.servlet.session.cookie.same-site=lax
+    csharp:
+      vulnerable: |
+        services.AddSession();
+      secure: |
+        services.AddSession(o => {
+            o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+            o.Cookie.HttpOnly = true;
+            o.Cookie.SameSite = SameSiteMode.Lax;
+        });
+
+# ---------------------------------------------------------------------------
+# PC-C5.6 — Run Services with Least Privilege
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.6
+  facet: Secure Configuration
+  section: Run Services with Least Privilege
+  security_rule: >-
+    Application processes, containers, and service accounts must run as a
+    dedicated non-root, non-administrator identity with only the file,
+    network, and database permissions the workload genuinely requires.
+  vulnerability_pattern: >-
+    The application process or container runs as root or an
+    administrator, so any code-execution flaw immediately yields full
+    control of the host or container.
+  secure_pattern: >-
+    The service runs under an unprivileged, purpose-built account, the
+    container drops to a non-root user, and database and filesystem
+    grants are scoped to exactly what the workload needs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        runProcessAs("root")
+      secure: |
+        runProcessAs("app-svc")           # dedicated unprivileged account
+    python:
+      vulnerable: |
+        FROM python:3.12
+        CMD ["python", "app.py"]          # container runs as root
+      secure: |
+        FROM python:3.12
+        RUN useradd --system appuser
+        USER appuser
+        CMD ["python", "app.py"]
+    java:
+      vulnerable: |
+        FROM eclipse-temurin:21
+        ENTRYPOINT ["java", "-jar", "app.jar"]   # runs as root
+      secure: |
+        FROM eclipse-temurin:21
+        RUN useradd --system appuser
+        USER appuser
+        ENTRYPOINT ["java", "-jar", "app.jar"]
+    csharp:
+      vulnerable: |
+        FROM mcr.microsoft.com/dotnet/aspnet:8.0
+        ENTRYPOINT ["dotnet", "App.dll"]
+      secure: |
+        FROM mcr.microsoft.com/dotnet/aspnet:8.0
+        USER app
+        ENTRYPOINT ["dotnet", "App.dll"]
+
+# ---------------------------------------------------------------------------
+# PC-C5.7 — Restrict Error Handling and Diagnostic Output
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.7
+  facet: Secure Configuration
+  section: Restrict Error Handling and Diagnostic Output
+  security_rule: >-
+    Unhandled errors must return a generic message to the client by
+    default while full diagnostic detail is written only to server-side
+    logs, so internal paths, queries, and versions are never leaked.
+  vulnerability_pattern: >-
+    An exception handler returns the exception message, stack trace, or
+    SQL fragment in the HTTP response, revealing internal structure that
+    helps an attacker target the system.
+  secure_pattern: >-
+    A global error handler logs the full exception with a correlation id
+    server-side and returns only a generic message and that id to the
+    client.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(500, str(exception))      # raw exception sent to client
+      secure: |
+        log.error(exception); respond(500, "An unexpected error occurred")
+    python:
+      vulnerable: |
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+      secure: |
+        except Exception as e:
+            app.logger.exception(e)
+            return jsonify({"error": "Internal server error"}), 500
+    javascript:
+      vulnerable: |
+        app.use((err, req, res, n) => res.status(500).send(err.stack));
+      secure: |
+        app.use((err, req, res, n) => {
+            logger.error(err);
+            res.status(500).json({ error: "Internal server error" });
+        });
+    java:
+      vulnerable: |
+        catch (Exception e) {
+            return ResponseEntity.status(500).body(e.toString());
+        }
+      secure: |
+        catch (Exception e) {
+            log.error("request failed", e);
+            return ResponseEntity.status(500).body("Internal server error");
+        }
+    csharp:
+      vulnerable: |
+        catch (Exception ex) { return StatusCode(500, ex.ToString()); }
+      secure: |
+        catch (Exception ex) {
+            _logger.LogError(ex, "request failed");
+            return StatusCode(500, "Internal server error");
+        }
+
+# ---------------------------------------------------------------------------
+# PC-C5.8 — Enforce Transport Security by Default
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.8
+  facet: Secure Configuration
+  section: Enforce Transport Security by Default
+  security_rule: >-
+    All connections must default to encrypted transport — plain HTTP is
+    redirected to HTTPS, TLS certificate validation is always on, and
+    weak protocol versions and ciphers are disabled.
+  vulnerability_pattern: >-
+    The application accepts plain HTTP, or a client disables certificate
+    verification, so traffic can be intercepted or modified by a
+    network attacker.
+  secure_pattern: >-
+    HTTP is redirected to HTTPS, HSTS is sent, certificate validation is
+    never disabled, and the TLS configuration permits only modern
+    protocol versions and strong ciphers.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client = httpClient(verifyTls=false)
+      secure: |
+        client = httpClient(verifyTls=true)
+    python:
+      vulnerable: |
+        requests.get(url, verify=False)
+      secure: |
+        requests.get(url, verify=True)
+    javascript:
+      vulnerable: |
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+      secure: |
+        https.get(url, { rejectUnauthorized: true }, handler);
+    java:
+      vulnerable: |
+        sslContext.init(null, trustAllCerts, new SecureRandom());
+      secure: |
+        SSLContext ctx = SSLContext.getDefault();   // platform trust store
+    csharp:
+      vulnerable: |
+        handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
+      secure: |
+        var handler = new HttpClientHandler();   // default certificate validation
+
+# ---------------------------------------------------------------------------
+# PC-C5.9 — Track and Patch Dependency and Component Configuration
+# ---------------------------------------------------------------------------
+
+- id: PC-C5.9
+  facet: Secure Configuration
+  section: Track and Patch Dependency and Component Configuration
+  security_rule: >-
+    Third-party components must be inventoried, pinned to specific vetted
+    versions, scanned for known vulnerabilities, and kept patched, so no
+    deployment depends on an unmaintained or vulnerable component.
+  vulnerability_pattern: >-
+    Dependencies are pulled with floating or wildcard version ranges and
+    are never scanned, so a build silently picks up a vulnerable or
+    compromised component.
+  secure_pattern: >-
+    Dependencies are pinned with a lockfile, an inventory or bill of
+    materials is maintained, and an automated scanner gates the build
+    against known vulnerabilities.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dependency: "logging-lib: latest"
+      secure: |
+        dependency: "logging-lib: 2.4.1"   # pinned, lockfile committed
+    python:
+      vulnerable: |
+        flask
+      secure: |
+        flask==3.0.3   # pinned in requirements.txt, scanned in CI
+    javascript:
+      vulnerable: |
+        "dependencies": { "lodash": "*" }
+      secure: |
+        "dependencies": { "lodash": "4.17.21" }
+    java:
+      vulnerable: |
+        implementation 'com.example:lib:+'
+      secure: |
+        implementation 'com.example:lib:1.8.2'
+    csharp:
+      vulnerable: |
+        <PackageReference Include="Newtonsoft.Json" Version="*" />
+      secure: |
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
