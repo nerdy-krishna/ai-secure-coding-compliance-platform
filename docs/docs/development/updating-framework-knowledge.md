@@ -64,7 +64,7 @@ Large Git repos (hundreds of files) can take a couple of minutes.
 
 ## Bundled corpora
 
-Five frameworks ship their enriched RAG corpus inside the repository
+Seven frameworks ship their enriched RAG corpus inside the repository
 rather than fetching it from an upstream Git repo:
 
 - **OWASP ASVS** — 345 verification requirements across 17 chapters.
@@ -74,9 +74,11 @@ rather than fetching it from an upstream Git repo:
   OWASP IoT Security Verification Standard.
 - **OWASP Proactive Controls** — 95 entries across the 10 controls.
 - **OWASP Cheatsheets** — 112 entries across 10 domains.
+- **OWASP LLM Top 10** — 88 entries across the 10 items (2025 edition).
+- **OWASP Agentic Top 10** — 95 entries across the 10 threats.
 
-For all five, the framework, its agents, and their prompt templates are
-created automatically by the seed (and by the data migration for
+For all seven, the framework, its agents, and their prompt templates
+are created automatically by the seed (and by the data migration for
 existing deployments).
 
 **The RAG corpus auto-ingests on app startup.** The corpora ship in the
@@ -115,7 +117,7 @@ docker compose exec app python scripts/ingest_bundled_corpora.py
 This is idempotent — it replaces a framework's documents rather than
 duplicating them.
 
-The corpus CSVs are **generated**, never hand-edited. All five are
+The corpus CSVs are **generated**, never hand-edited. All seven are
 rendered from hand-authored enriched YAML by the same harness,
 `scripts/build_enriched_corpus.py`:
 
@@ -130,6 +132,9 @@ rendered from hand-authored enriched YAML by the same harness,
   `src/app/data/proactive_controls_corpus/` (one file per C1-C10).
 - `cheatsheets_corpus.csv` — from per-domain YAML under
   `src/app/data/cheatsheets_corpus/`.
+- `llm_top10_corpus.csv` / `agentic_top10_corpus.csv` — from per-item
+  YAML under `src/app/data/llm_top10_corpus/` and
+  `src/app/data/agentic_top10_corpus/` (one file per Top-10 item).
 
 Each entry carries a security rule, vulnerability/secure pattern
 descriptions, and per-language code samples. Edit the YAML, then

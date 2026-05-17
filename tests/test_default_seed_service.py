@@ -148,19 +148,22 @@ async def test_each_framework_maps_only_to_its_own_agents(db_session):
     for framework, expected_agents in expected.items():
         assert agents_by_fw.get(framework) == expected_agents, framework
 
-    # Counts: 17 ASVS, 10 PC, 10 Cheatsheets, 1 each AI framework.
+    # Counts: 17 ASVS, 10 PC, 10 Cheatsheets, 10 LLM Top 10,
+    # 10 Agentic Top 10 — one agent per domain.
     assert len(agents_by_fw["asvs"]) == len(_ASVS_AGENT_SPECS)
     assert len(agents_by_fw["proactive_controls"]) == len(_PC_AGENT_SPECS)
     assert len(agents_by_fw["cheatsheets"]) == len(_CS_AGENT_SPECS)
+    assert len(agents_by_fw["llm_top10"]) == 10
+    assert len(agents_by_fw["agentic_top10"]) == 10
 
     # No cross-framework leakage between the three AppSec frameworks.
     assert agents_by_fw["asvs"].isdisjoint(agents_by_fw["proactive_controls"])
     assert agents_by_fw["asvs"].isdisjoint(agents_by_fw["cheatsheets"])
     assert agents_by_fw["proactive_controls"].isdisjoint(agents_by_fw["cheatsheets"])
 
-    # AI agents stay attached only to their AI frameworks.
-    assert agents_by_fw["llm_top10"] == {"LLMSecurityAgent"}
-    assert agents_by_fw["agentic_top10"] == {"AgenticSecurityAgent"}
+    # The LLM / Agentic rosters are disjoint from each other and from ASVS.
+    assert agents_by_fw["llm_top10"].isdisjoint(agents_by_fw["agentic_top10"])
+    assert agents_by_fw["llm_top10"].isdisjoint(agents_by_fw["asvs"])
 
 
 @pytest.mark.asyncio

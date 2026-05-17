@@ -1,0 +1,416 @@
+# OWASP LLM Top 10 (2025) — LLM08: Vector and Embedding Weaknesses
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the languages LLM-integrated apps are built in:
+# python / javascript / typescript).
+#
+# Scope: weaknesses in how vectors and embeddings are generated, stored,
+# retrieved, and trusted in retrieval-augmented generation (RAG) systems —
+# retrieval poisoning, embedding inversion, and cross-tenant leakage.
+
+# ---------------------------------------------------------------------------
+# LLM08.1 — Tenant Isolation in Vector Retrieval
+# ---------------------------------------------------------------------------
+
+- id: LLM08.1
+  facet: Vector and Embedding Weaknesses
+  section: Tenant Isolation in Vector Retrieval
+  security_rule: >-
+    Every similarity search against a shared vector store must be
+    constrained by a metadata filter that scopes results to the calling
+    tenant or user, so retrieval can never return another tenant's
+    embedded content.
+  vulnerability_pattern: >-
+    A RAG query runs nearest-neighbour search across a shared collection
+    with no tenant or owner filter, so the most similar chunks may belong
+    to a different tenant and that content is returned and fed to the
+    model as context.
+  secure_pattern: >-
+    The similarity search always carries a metadata filter bound to the
+    authenticated tenant or owner id taken from the server-side session,
+    so only that tenant's vectors are eligible to be returned.
+  code_patterns:
+    generic:
+      vulnerable: |
+        hits = vectorStore.search(queryEmbedding, topK=5)
+      secure: |
+        hits = vectorStore.search(queryEmbedding, topK=5,
+                                  filter={"tenant_id": session.tenant_id})
+    python:
+      vulnerable: |
+        hits = client.query_points("docs", query=embed(question), limit=5)
+      secure: |
+        flt = Filter(must=[FieldCondition(key="tenant_id",
+                                          match=MatchValue(value=user.tenant_id))])
+        hits = client.query_points("docs", query=embed(question),
+                                   limit=5, query_filter=flt)
+    javascript:
+      vulnerable: |
+        const hits = await index.query({ vector: qv, topK: 5 });
+      secure: |
+        const hits = await index.query({ vector: qv, topK: 5,
+          filter: { tenantId: { $eq: session.tenantId } } });
+    typescript:
+      vulnerable: |
+        const hits = await store.similaritySearch(question, 5);
+      secure: |
+        const hits = await store.similaritySearch(question, 5,
+          { tenantId: session.tenantId });
+
+# ---------------------------------------------------------------------------
+# LLM08.2 — Provenance and Trust of Ingested Content
+# ---------------------------------------------------------------------------
+
+- id: LLM08.2
+  facet: Vector and Embedding Weaknesses
+  section: Provenance and Trust of Ingested Content
+  security_rule: >-
+    Content must be authorized and its source recorded before it is
+    embedded into a knowledge base, so untrusted or attacker-supplied
+    documents cannot silently become retrievable RAG context.
+  vulnerability_pattern: >-
+    Any document a user can upload or any page a crawler reaches is
+    embedded straight into the shared index with no source label and no
+    authorization check, so an attacker plants content that later surfaces
+    as trusted context for other users.
+  secure_pattern: >-
+    Ingestion verifies the uploader's authorization, records a provenance
+    label such as source and trust level in the vector metadata, and only
+    admitted sources are embedded, so retrieval can later filter on trust.
+  code_patterns:
+    generic:
+      vulnerable: |
+        index.add(embed(uploadedDoc.text))
+      secure: |
+        if isAuthorizedSource(uploadedDoc):
+            index.add(embed(uploadedDoc.text),
+                      metadata={"source": uploadedDoc.origin, "trust": "verified"})
+    python:
+      vulnerable: |
+        store.add_texts([doc.text for doc in crawled_pages])
+      secure: |
+        approved = [d for d in crawled_pages if d.domain in ALLOWED_DOMAINS]
+        store.add_texts([d.text for d in approved],
+                        metadatas=[{"source": d.url, "trust": "crawled"} for d in approved])
+    javascript:
+      vulnerable: |
+        await index.upsert([{ id, values: await embed(upload.text) }]);
+      secure: |
+        if (!isAuthorized(upload.userId)) throw new Error("unauthorized source");
+        await index.upsert([{ id, values: await embed(upload.text),
+          metadata: { source: upload.origin, trust: "verified" } }]);
+    typescript:
+      vulnerable: |
+        await store.addDocuments([new Document({ pageContent: upload.text })]);
+      secure: |
+        if (!isAuthorized(upload.userId)) throw new Error("unauthorized source");
+        await store.addDocuments([new Document({ pageContent: upload.text,
+          metadata: { source: upload.origin, trust: "verified" } })]);
+
+# ---------------------------------------------------------------------------
+# LLM08.3 — Retrieved Context Is Untrusted Input
+# ---------------------------------------------------------------------------
+
+- id: LLM08.3
+  facet: Vector and Embedding Weaknesses
+  section: Retrieved Context Is Untrusted Input
+  security_rule: >-
+    Text retrieved from a vector store must be treated as untrusted data,
+    sanitized for embedded instructions, and clearly delimited from the
+    system prompt so poisoned chunks cannot hijack the model.
+  vulnerability_pattern: >-
+    Retrieved chunks are concatenated directly into the prompt with no
+    delimiter and no neutralization, so a chunk containing text like
+    ignore previous instructions is interpreted by the model as a
+    directive rather than as reference material.
+  secure_pattern: >-
+    Retrieved chunks are wrapped in an explicit data delimiter, screened
+    for instruction-like content, and the system prompt tells the model to
+    treat the delimited block strictly as reference data, never as
+    commands.
+  code_patterns:
+    generic:
+      vulnerable: |
+        prompt = systemPrompt + "\n" + join(retrievedChunks) + "\n" + question
+      secure: |
+        ctx = wrapAsData(sanitizeForInjection(retrievedChunks))
+        prompt = systemPrompt + "\n<context>" + ctx + "</context>\n" + question
+    python:
+      vulnerable: |
+        prompt = SYSTEM + "\n".join(c.text for c in chunks) + question
+      secure: |
+        ctx = "\n".join(neutralize_instructions(c.text) for c in chunks)
+        prompt = f"{SYSTEM}\n<context>\n{ctx}\n</context>\nQuestion: {question}"
+    javascript:
+      vulnerable: |
+        const prompt = system + chunks.map(c => c.text).join("\n") + question;
+      secure: |
+        const ctx = chunks.map(c => neutralizeInstructions(c.text)).join("\n");
+        const prompt = `${system}\n<context>\n${ctx}\n</context>\n${question}`;
+    typescript:
+      vulnerable: |
+        messages.push({ role: "user", content: chunks.join("\n") + question });
+      secure: |
+        const ctx = chunks.map(c => neutralizeInstructions(c)).join("\n");
+        messages.push({ role: "user",
+          content: `<context>${ctx}</context>\n${question}` });
+
+# ---------------------------------------------------------------------------
+# LLM08.4 — Access Control Carried Through to Retrieval
+# ---------------------------------------------------------------------------
+
+- id: LLM08.4
+  facet: Vector and Embedding Weaknesses
+  section: Access Control Carried Through to Retrieval
+  security_rule: >-
+    Per-document access control from the source system must be mirrored
+    onto vector metadata and enforced at query time, so RAG retrieval
+    never returns a chunk the requesting user could not read at the source.
+  vulnerability_pattern: >-
+    Documents with different permission levels are embedded into one
+    collection with no permission metadata, so a low-privilege user's
+    similarity search surfaces chunks from documents they were never
+    granted access to.
+  secure_pattern: >-
+    Each embedded chunk records the access groups or ACL of its source
+    document, and every query filters on the caller's effective
+    permissions, so retrieval mirrors source-system authorization.
+  code_patterns:
+    generic:
+      vulnerable: |
+        hits = store.search(queryEmbedding, topK=8)
+      secure: |
+        hits = store.search(queryEmbedding, topK=8,
+                            filter={"acl_group": anyOf(user.groups)})
+    python:
+      vulnerable: |
+        results = retriever.get_relevant_documents(question)
+      secure: |
+        flt = Filter(must=[FieldCondition(key="acl_group",
+                                          match=MatchAny(any=user.group_ids))])
+        results = retriever.get_relevant_documents(question, query_filter=flt)
+    javascript:
+      vulnerable: |
+        const docs = await retriever.invoke(question);
+      secure: |
+        const docs = await retriever.invoke(question,
+          { filter: { aclGroup: { $in: user.groupIds } } });
+    typescript:
+      vulnerable: |
+        const docs = await store.similaritySearch(question, 8);
+      secure: |
+        const docs = await store.similaritySearch(question, 8,
+          { aclGroup: { $in: user.groupIds } });
+
+# ---------------------------------------------------------------------------
+# LLM08.5 — Protecting Stored Embeddings from Inversion
+# ---------------------------------------------------------------------------
+
+- id: LLM08.5
+  facet: Vector and Embedding Weaknesses
+  section: Protecting Stored Embeddings from Inversion
+  security_rule: >-
+    Embedding vectors derived from sensitive text must be treated as
+    sensitive data themselves — access-controlled, encrypted at rest, and
+    never exposed through an API — because the source text can be partly
+    reconstructed by embedding inversion.
+  vulnerability_pattern: >-
+    Raw embedding vectors of confidential documents are stored without
+    encryption or returned in API responses on the assumption they are
+    opaque numbers, so an attacker who reads them runs an inversion model
+    to recover the underlying sensitive text.
+  secure_pattern: >-
+    Embeddings are stored in an access-controlled collection with
+    encryption at rest, API responses expose only document ids and
+    snippets rather than vectors, and especially sensitive content is
+    redacted before it is embedded at all.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return jsonResponse({"matches": hits.withVectors()})
+      secure: |
+        return jsonResponse({"matches": [{"id": h.id, "snippet": h.text}
+                                         for h in hits]})
+    python:
+      vulnerable: |
+        hits = client.query_points("docs", query=qv, with_vectors=True)
+        return [h.vector for h in hits.points]
+      secure: |
+        hits = client.query_points("docs", query=qv, with_vectors=False)
+        return [{"id": h.id, "score": h.score} for h in hits.points]
+    javascript:
+      vulnerable: |
+        const hits = await index.query({ vector: qv, topK: 5,
+          includeValues: true });
+        res.json(hits.matches);
+      secure: |
+        const hits = await index.query({ vector: qv, topK: 5,
+          includeValues: false });
+        res.json(hits.matches.map(m => ({ id: m.id, score: m.score })));
+    typescript:
+      vulnerable: |
+        const out = hits.map((h: Match) => ({ id: h.id, vector: h.values }));
+      secure: |
+        const out = hits.map((h: Match) => ({ id: h.id, score: h.score }));
+
+# ---------------------------------------------------------------------------
+# LLM08.6 — Validating External Knowledge Sources
+# ---------------------------------------------------------------------------
+
+- id: LLM08.6
+  facet: Vector and Embedding Weaknesses
+  section: Validating External Knowledge Sources
+  security_rule: >-
+    Content pulled from external or federated knowledge sources must be
+    validated and filtered before it is embedded or used as context, so a
+    compromised feed cannot inject malicious or conflicting knowledge.
+  vulnerability_pattern: >-
+    A RAG pipeline ingests a third-party feed, partner index, or scraped
+    site on a schedule and embeds whatever it receives, so when that
+    upstream source is poisoned the bad content flows straight into the
+    knowledge base and into model answers.
+  secure_pattern: >-
+    External content passes integrity and content validation — signature
+    or checksum checks, schema checks, and a content classifier — before
+    embedding, and each source is rate-limited and isolated so a single
+    poisoned feed cannot dominate retrieval.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for item in fetchFeed(externalUrl):
+            index.add(embed(item.text))
+      secure: |
+        for item in fetchFeed(externalUrl):
+            if verifySignature(item) and passesContentChecks(item):
+                index.add(embed(item.text), metadata={"source": externalUrl})
+    python:
+      vulnerable: |
+        docs = requests.get(PARTNER_FEED).json()
+        store.add_texts([d["text"] for d in docs])
+      secure: |
+        docs = requests.get(PARTNER_FEED).json()
+        valid = [d for d in docs if verify_checksum(d) and not is_malicious(d["text"])]
+        store.add_texts([d["text"] for d in valid])
+    javascript:
+      vulnerable: |
+        const feed = await (await fetch(externalUrl)).json();
+        for (const item of feed) await index.upsert([toVector(item)]);
+      secure: |
+        const feed = await (await fetch(externalUrl)).json();
+        for (const item of feed)
+          if (verifySignature(item) && await contentIsClean(item))
+            await index.upsert([toVector(item)]);
+    typescript:
+      vulnerable: |
+        const items: FeedItem[] = await fetchFeed(externalUrl);
+        await store.addDocuments(items.map(i => new Document({ pageContent: i.text })));
+      secure: |
+        const items: FeedItem[] = await fetchFeed(externalUrl);
+        const valid = items.filter(i => verifySignature(i) && contentIsClean(i));
+        await store.addDocuments(valid.map(i => new Document({ pageContent: i.text })));
+
+# ---------------------------------------------------------------------------
+# LLM08.7 — Per-Tenant Embedding Consistency
+# ---------------------------------------------------------------------------
+
+- id: LLM08.7
+  facet: Vector and Embedding Weaknesses
+  section: Per-Tenant Embedding Consistency
+  security_rule: >-
+    Query embeddings and stored embeddings that share a collection must be
+    produced by the same pinned embedding model and version, because a
+    mismatch silently degrades retrieval and can be steered by an attacker.
+  vulnerability_pattern: >-
+    The model used to embed ingested documents and the model used to embed
+    queries drift apart — different versions or providers — so vectors are
+    no longer comparable, retrieval returns near-random chunks, and a
+    safety filter that depends on relevance can be bypassed.
+  secure_pattern: >-
+    The embedding model identifier and version are pinned in one place,
+    recorded on the collection, and asserted to match at both ingest and
+    query time, so all vectors in a collection are produced consistently.
+  code_patterns:
+    generic:
+      vulnerable: |
+        queryVec = embedWith(currentDefaultModel, question)
+      secure: |
+        assert collection.embeddingModel == PINNED_MODEL
+        queryVec = embedWith(PINNED_MODEL, question)
+    python:
+      vulnerable: |
+        qv = OpenAIEmbeddings().embed_query(question)
+      secure: |
+        EMBED_MODEL = "text-embedding-3-small"
+        assert collection_meta["embed_model"] == EMBED_MODEL
+        qv = OpenAIEmbeddings(model=EMBED_MODEL).embed_query(question)
+    javascript:
+      vulnerable: |
+        const qv = await embedder.embed(question);
+      secure: |
+        if (collection.embedModel !== PINNED_EMBED_MODEL)
+          throw new Error("embedding model mismatch");
+        const qv = await embedder.embed(question, { model: PINNED_EMBED_MODEL });
+    typescript:
+      vulnerable: |
+        const qv: number[] = await new Embedder().embedQuery(question);
+      secure: |
+        const PINNED = "text-embedding-3-small";
+        if (collection.embedModel !== PINNED) throw new Error("model mismatch");
+        const qv: number[] = await new Embedder(PINNED).embedQuery(question);
+
+# ---------------------------------------------------------------------------
+# LLM08.8 — Auditing and Rollback of the Vector Index
+# ---------------------------------------------------------------------------
+
+- id: LLM08.8
+  facet: Vector and Embedding Weaknesses
+  section: Auditing and Rollback of the Vector Index
+  security_rule: >-
+    Every write to the vector store must be logged with the actor,
+    source, and timestamp, so poisoned content can be detected, traced to
+    its origin, and removed without rebuilding the whole index.
+  vulnerability_pattern: >-
+    Vectors are added and deleted with no audit trail and no per-entry
+    origin, so when retrieval starts returning poisoned answers there is
+    no way to find which ingestion introduced the bad chunks or to remove
+    only those.
+  secure_pattern: >-
+    Each ingestion is recorded with an actor, source, batch id, and
+    timestamp on both an append-only audit log and the vector metadata,
+    so a suspect batch can be queried, reviewed, and deleted on its own.
+  code_patterns:
+    generic:
+      vulnerable: |
+        index.add(vectors)
+      secure: |
+        batchId = newBatchId()
+        index.add(tagAll(vectors, {"batch": batchId, "actor": user.id}))
+        auditLog.write("ingest", batchId, user.id, source, now())
+    python:
+      vulnerable: |
+        store.add_documents(docs)
+      secure: |
+        batch_id = uuid4().hex
+        store.add_documents(docs, metadatas=[{"batch": batch_id,
+                                              "actor": user.id} for _ in docs])
+        audit_log.record(action="ingest", batch=batch_id, actor=user.id)
+    javascript:
+      vulnerable: |
+        await index.upsert(vectors);
+      secure: |
+        const batchId = randomUUID();
+        await index.upsert(vectors.map(v =>
+          ({ ...v, metadata: { ...v.metadata, batch: batchId, actor: user.id } })));
+        await auditLog.write({ action: "ingest", batchId, actor: user.id });
+    typescript:
+      vulnerable: |
+        await store.addDocuments(docs);
+      secure: |
+        const batchId: string = randomUUID();
+        await store.addDocuments(docs.map(d =>
+          ({ ...d, metadata: { ...d.metadata, batch: batchId, actor: user.id } })));
+        await auditLog.write({ action: "ingest", batchId, actor: user.id });

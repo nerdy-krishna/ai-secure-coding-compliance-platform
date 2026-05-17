@@ -170,6 +170,10 @@ _LEGACY_AGENT_NAMES = [
     "AsvsBuildDeploymentAgent",
     "AsvsClientSideAgent",
     "AsvsCloudContainerAgent",
+    # Single LLM / Agentic agents superseded by the per-Top-10-item
+    # rosters; cleared by "Restore defaults", orphaned by the migration.
+    "LLMSecurityAgent",
+    "AgenticSecurityAgent",
 ]
 
 
@@ -1274,60 +1278,337 @@ _ISVS_AGENT_SPECS: List[Dict[str, Any]] = [
 ]
 
 
-# The LLM / Agentic agents are framework-native already — they are not
-# part of the AppSec pool, keep their own names, and declare explicit
-# single-framework mappings.
-_AI_AGENT_DEFINITIONS: List[Dict[str, Any]] = [
+# The LLM Top 10 and Agentic Top 10 rosters — one agent per Top-10
+# item, each scoped to its own enriched-corpus slice via the
+# `concern_area` facet (`_framework_roster` injects it from the maps
+# below; every corpus entry is tagged with the matching value).
+_LLM_AGENT_SPECS: List[Dict[str, Any]] = [
     {
-        "name": "LLMSecurityAgent",
+        "name": "PromptInjectionAgent",
         "description": (
-            "Audits LLM-integrated apps against OWASP LLM Top 10 (2025): "
-            "prompt injection, sensitive-information disclosure, supply "
-            "chain (model/dataset provenance), data and model poisoning, "
-            "improper output handling, excessive agency, system-prompt "
-            "leakage, vector/embedding weaknesses, misinformation, and "
-            "unbounded consumption (token / cost / context-window DoS)."
+            "LLM01 — Prompt Injection. Reviews direct and indirect "
+            "prompt injection and jailbreak resistance."
         ),
         "domain_query": {
             "keywords": (
-                "prompt injection, jailbreak, system prompt leakage, "
-                "sensitive information disclosure, model poisoning, "
-                "training data leakage, output handling, excessive "
-                "agency, vector embedding weakness, RAG injection, "
-                "indirect prompt injection, LLM denial of service, "
-                "unbounded token consumption, hallucination misinformation"
+                "prompt injection, direct prompt injection, indirect "
+                "prompt injection, jailbreak, instruction override, "
+                "system prompt manipulation, untrusted prompt content"
             ),
-            "metadata_filter": {"control_family": ["LLM Security"]},
+            "metadata_filter": {"framework_name": ["llm_top10"]},
         },
-        "applicable_frameworks": ["llm_top10"],
     },
     {
-        "name": "AgenticSecurityAgent",
+        "name": "SensitiveDisclosureAgent",
         "description": (
-            "Audits autonomous / multi-agent / MCP apps against OWASP "
-            "Top 10 for Agentic AI (2026): memory poisoning, tool "
-            "misuse, privilege compromise, resource overload, cascading "
-            "hallucination, intent breaking and goal manipulation, "
-            "misaligned/deceptive behaviors, repudiation and "
-            "untraceability, identity spoofing/impersonation, and "
-            "human-in-the-loop overwhelm."
+            "LLM02 — Sensitive Information Disclosure. Reviews leakage "
+            "of secrets, PII, and confidential context through an LLM."
         ),
         "domain_query": {
             "keywords": (
-                "agent memory poisoning, tool misuse, privilege "
-                "compromise, agent resource overload, cascading "
-                "hallucination, intent breaking, goal manipulation, "
-                "deceptive agent behavior, repudiation, untraceable "
-                "agent action, identity spoofing, agent impersonation, "
-                "human in the loop overwhelm, MCP server, agent "
-                "permissions, agent identity, agent authorization, "
-                "tool authorization"
+                "sensitive information disclosure, PII leakage, "
+                "credential leakage, training data leakage, output "
+                "redaction, cross-tenant context leakage"
             ),
-            "metadata_filter": {"control_family": ["Agentic Security"]},
+            "metadata_filter": {"framework_name": ["llm_top10"]},
         },
-        "applicable_frameworks": ["agentic_top10"],
+    },
+    {
+        "name": "SupplyChainAgent",
+        "description": (
+            "LLM03 — Supply Chain. Reviews model, dataset, adapter, and "
+            "plugin provenance and integrity."
+        ),
+        "domain_query": {
+            "keywords": (
+                "LLM supply chain, model provenance, unsafe model "
+                "deserialization, dataset provenance, plugin vetting, "
+                "model integrity, pickle, safetensors"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
+    },
+    {
+        "name": "DataModelPoisoningAgent",
+        "description": (
+            "LLM04 — Data and Model Poisoning. Reviews tampering of "
+            "training, fine-tuning, RAG, and feedback data."
+        ),
+        "domain_query": {
+            "keywords": (
+                "data poisoning, model poisoning, training data "
+                "tampering, fine-tuning poisoning, backdoor, RAG "
+                "ingestion poisoning, feedback loop poisoning"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
+    },
+    {
+        "name": "OutputHandlingAgent",
+        "description": (
+            "LLM05 — Improper Output Handling. Reviews unsafe use of "
+            "LLM output in downstream interpreters and sinks."
+        ),
+        "domain_query": {
+            "keywords": (
+                "improper output handling, untrusted LLM output, "
+                "downstream injection, output validation, XSS from "
+                "model output, code execution from model output"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
+    },
+    {
+        "name": "ExcessiveAgencyAgent",
+        "description": (
+            "LLM06 — Excessive Agency. Reviews excessive permissions, "
+            "autonomy, and functionality granted to an LLM agent."
+        ),
+        "domain_query": {
+            "keywords": (
+                "excessive agency, excessive permissions, autonomous "
+                "action, tool permissions, function calling scope, "
+                "agent blast radius, least privilege tools"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
+    },
+    {
+        "name": "SystemPromptLeakageAgent",
+        "description": (
+            "LLM07 — System Prompt Leakage. Reviews exposure of system "
+            "prompt content and secrets or logic embedded in it."
+        ),
+        "domain_query": {
+            "keywords": (
+                "system prompt leakage, prompt extraction, instruction "
+                "disclosure, secrets in system prompt, prompt echo"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
+    },
+    {
+        "name": "VectorEmbeddingAgent",
+        "description": (
+            "LLM08 — Vector and Embedding Weaknesses. Reviews RAG "
+            "retrieval poisoning, embedding inversion, and tenant leakage."
+        ),
+        "domain_query": {
+            "keywords": (
+                "vector embedding weakness, RAG poisoning, embedding "
+                "inversion, retrieval access control, cross-tenant "
+                "vector leakage, retrieval scope filter"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
+    },
+    {
+        "name": "MisinformationAgent",
+        "description": (
+            "LLM09 — Misinformation. Reviews hallucination, overreliance, "
+            "and ungrounded or unverified model output."
+        ),
+        "domain_query": {
+            "keywords": (
+                "misinformation, hallucination, overreliance, "
+                "ungrounded output, fabricated citation, retrieval "
+                "grounding, package hallucination"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
+    },
+    {
+        "name": "UnboundedConsumptionAgent",
+        "description": (
+            "LLM10 — Unbounded Consumption. Reviews token, cost, and "
+            "context-window denial of service and wallet abuse."
+        ),
+        "domain_query": {
+            "keywords": (
+                "unbounded consumption, token denial of service, cost "
+                "abuse, context window exhaustion, denial of wallet, "
+                "rate limiting, token budget, agent loop bound"
+            ),
+            "metadata_filter": {"framework_name": ["llm_top10"]},
+        },
     },
 ]
+
+_AGENTIC_AGENT_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "MemoryPoisoningAgent",
+        "description": (
+            "Agentic — Memory Poisoning. Reviews corruption of an "
+            "agent's persistent or shared memory."
+        ),
+        "domain_query": {
+            "keywords": (
+                "agent memory poisoning, persistent memory tampering, "
+                "shared memory corruption, memory store integrity, "
+                "memory provenance"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "ToolMisuseAgent",
+        "description": (
+            "Agentic — Tool Misuse. Reviews unsafe or unintended tool "
+            "invocation by an agent."
+        ),
+        "domain_query": {
+            "keywords": (
+                "tool misuse, unsafe tool invocation, tool parameter "
+                "injection, tool authorization, MCP tool security, "
+                "tool schema constraints"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "PrivilegeCompromiseAgent",
+        "description": (
+            "Agentic — Privilege Compromise. Reviews an agent gaining "
+            "or exercising permissions beyond its intended scope."
+        ),
+        "domain_query": {
+            "keywords": (
+                "agent privilege compromise, privilege escalation, "
+                "scope violation, agent permissions, delegated identity"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "ResourceOverloadAgent",
+        "description": (
+            "Agentic — Resource Overload. Reviews exhaustion of compute, "
+            "token, or tool-call budgets through agent loops or fan-out."
+        ),
+        "domain_query": {
+            "keywords": (
+                "agent resource overload, agent loop, fan-out "
+                "exhaustion, step limit, recursion limit, agent budget, "
+                "concurrency bound"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "CascadingHallucinationAgent",
+        "description": (
+            "Agentic — Cascading Hallucination. Reviews incorrect output "
+            "propagating and amplifying through a multi-agent chain."
+        ),
+        "domain_query": {
+            "keywords": (
+                "cascading hallucination, error propagation, multi-agent "
+                "error amplification, inter-agent validation, grounding "
+                "between agents"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "IntentBreakingAgent",
+        "description": (
+            "Agentic — Intent Breaking and Goal Manipulation. Reviews "
+            "subversion of an agent's objective or planning."
+        ),
+        "domain_query": {
+            "keywords": (
+                "intent breaking, goal manipulation, objective "
+                "subversion, planning manipulation, reflection "
+                "manipulation"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "MisalignedBehaviorAgent",
+        "description": (
+            "Agentic — Misaligned and Deceptive Behaviors. Reviews "
+            "agents pursuing unintended or deceptive strategies."
+        ),
+        "domain_query": {
+            "keywords": (
+                "misaligned agent behavior, deceptive behavior, reward "
+                "hacking, unintended strategy, action allowlist, agent "
+                "monitoring"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "RepudiationAgent",
+        "description": (
+            "Agentic — Repudiation and Untraceability. Reviews agent "
+            "actions that cannot be attributed, audited, or reconstructed."
+        ),
+        "domain_query": {
+            "keywords": (
+                "agent repudiation, untraceable action, missing audit "
+                "trail, action attribution, agent logging, correlation id"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "IdentitySpoofingAgent",
+        "description": (
+            "Agentic — Identity Spoofing and Impersonation. Reviews an "
+            "agent or actor impersonating another agent, service, or user."
+        ),
+        "domain_query": {
+            "keywords": (
+                "agent identity spoofing, impersonation, agent "
+                "authentication, mutual agent auth, signed agent "
+                "messages, agent identity"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+    {
+        "name": "HitlOverwhelmAgent",
+        "description": (
+            "Agentic — Human-in-the-Loop Overwhelm. Reviews flooding "
+            "human reviewers so approvals become rubber-stamps."
+        ),
+        "domain_query": {
+            "keywords": (
+                "human in the loop overwhelm, approval fatigue, rubber "
+                "stamp approval, risk-based gating, approval batching"
+            ),
+            "metadata_filter": {"framework_name": ["agentic_top10"]},
+        },
+    },
+]
+
+# Bare spec name → `concern_area` facet (matches the corpus `facet` tag).
+_LLM_CONCERN_AREAS: Dict[str, str] = {
+    "PromptInjectionAgent": "Prompt Injection",
+    "SensitiveDisclosureAgent": "Sensitive Information Disclosure",
+    "SupplyChainAgent": "Supply Chain Vulnerabilities",
+    "DataModelPoisoningAgent": "Data and Model Poisoning",
+    "OutputHandlingAgent": "Improper Output Handling",
+    "ExcessiveAgencyAgent": "Excessive Agency",
+    "SystemPromptLeakageAgent": "System Prompt Leakage",
+    "VectorEmbeddingAgent": "Vector and Embedding Weaknesses",
+    "MisinformationAgent": "Misinformation",
+    "UnboundedConsumptionAgent": "Unbounded Consumption",
+}
+_AGENTIC_CONCERN_AREAS: Dict[str, str] = {
+    "MemoryPoisoningAgent": "Memory Poisoning",
+    "ToolMisuseAgent": "Tool Misuse",
+    "PrivilegeCompromiseAgent": "Privilege Compromise",
+    "ResourceOverloadAgent": "Resource Overload",
+    "CascadingHallucinationAgent": "Cascading Hallucination",
+    "IntentBreakingAgent": "Intent Breaking & Goal Manipulation",
+    "MisalignedBehaviorAgent": "Misaligned & Deceptive Behaviors",
+    "RepudiationAgent": "Repudiation & Untraceability",
+    "IdentitySpoofingAgent": "Identity Spoofing & Impersonation",
+    "HitlOverwhelmAgent": "Human-in-the-Loop Overwhelm",
+}
 
 
 # Proactive Controls / Cheatsheets agents key RAG retrieval on the
@@ -1398,8 +1679,8 @@ def _framework_roster(
 
 
 # The full default agent roster — 17 ASVS + 10 Proactive Controls + 10
-# Cheatsheets + 14 CWE Essentials + 7 ISVS dedicated agents, plus the
-# two framework-native AI agents.
+# Cheatsheets + 14 CWE Essentials + 7 ISVS + 10 LLM Top 10 + 10 Agentic
+# Top 10 dedicated agents, one per domain across all eight frameworks.
 AGENT_DEFINITIONS: List[Dict[str, Any]] = (
     _framework_roster(_ASVS_AGENT_SPECS, "asvs", "Asvs")
     + _framework_roster(
@@ -1410,7 +1691,10 @@ AGENT_DEFINITIONS: List[Dict[str, Any]] = (
     )
     + _framework_roster(_CWE_AGENT_SPECS, "cwe_essentials", "Cwe")
     + _framework_roster(_ISVS_AGENT_SPECS, "isvs", "Isvs")
-    + _AI_AGENT_DEFINITIONS
+    + _framework_roster(_LLM_AGENT_SPECS, "llm_top10", "Llm", _LLM_CONCERN_AREAS)
+    + _framework_roster(
+        _AGENTIC_AGENT_SPECS, "agentic_top10", "Agentic", _AGENTIC_CONCERN_AREAS
+    )
 )
 
 

@@ -31,6 +31,10 @@ _BUILD_SCRIPT = _REPO_ROOT / "scripts" / "build_enriched_corpus.py"
 _CORPORA = {
     "cwe_essentials": ("cwe_essentials_corpus.csv", 14),
     "isvs": ("isvs_corpus.csv", 7),
+    "proactive_controls": ("proactive_controls_corpus.csv", 10),
+    "cheatsheets": ("cheatsheets_corpus.csv", 10),
+    "llm_top10": ("llm_top10_corpus.csv", 10),
+    "agentic_top10": ("agentic_top10_corpus.csv", 10),
 }
 
 

@@ -1,0 +1,412 @@
+# OWASP LLM Top 10 (2025) — LLM06: Excessive Agency
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Excessive Agency is the vulnerability that arises when an LLM-based system
+# is granted more functionality, permissions, or autonomy than the task
+# requires. The damaging action is taken by downstream tools the agent can
+# invoke — so the mitigations live in how tools are defined, scoped,
+# authorized, and gated, not in the model itself.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript for LLM-integrated apps).
+
+# ---------------------------------------------------------------------------
+# LLM06.1 — Minimize tool surface
+# ---------------------------------------------------------------------------
+
+- id: LLM06.1
+  facet: Excessive Agency
+  section: Minimize Extension Functionality
+  security_rule: >-
+    An agent must be given only the tools strictly required for its task;
+    broad, general-purpose, or convenience tools that expose unneeded
+    capability must not be registered with the model.
+  vulnerability_pattern: >-
+    A general-purpose tool such as a shell, an arbitrary HTTP fetcher, or a
+    raw database handle is registered with the agent, so the model can take
+    any action that tool allows even though the task needs only a narrow
+    slice of it.
+  secure_pattern: >-
+    Each registered tool is purpose-built and narrow, exposing exactly one
+    intended operation, so the agent's reachable action set is bounded by
+    design rather than by the model choosing well.
+  code_patterns:
+    generic:
+      vulnerable: |
+        agent.register_tool(run_shell_command)   # whole OS reachable
+      secure: |
+        agent.register_tool(get_order_status)    # one task-specific action
+    python:
+      vulnerable: |
+        @tool
+        def execute(cmd: str) -> str:
+            return subprocess.run(cmd, shell=True, capture_output=True).stdout
+      secure: |
+        @tool
+        def get_order_status(order_id: str) -> str:
+            """Return the status of one order owned by the current user."""
+            return orders.status_for(order_id)
+    javascript:
+      vulnerable: |
+        tools.push({ name: "http", fn: (url) => fetch(url).then(r => r.text()) });
+      secure: |
+        tools.push({ name: "getWeather", fn: (city) => weatherApi.current(city) });
+    typescript:
+      vulnerable: |
+        const tools: Tool[] = [{ name: "sql", run: (q: string) => db.raw(q) }];
+      secure: |
+        const tools: Tool[] = [{ name: "findUser", run: (id: string) => db.users.byId(id) }];
+
+# ---------------------------------------------------------------------------
+# LLM06.2 — Constrain tool parameters
+# ---------------------------------------------------------------------------
+
+- id: LLM06.2
+  facet: Excessive Agency
+  section: Minimize Extension Permissions
+  security_rule: >-
+    Tool inputs supplied by the model must be constrained to the narrowest
+    type and value range the operation needs, so the model cannot widen the
+    blast radius through an open-ended parameter.
+  vulnerability_pattern: >-
+    A tool accepts a free-form string such as a raw path, a table name, or
+    a full URL, so the model can drive it to targets far outside the
+    intended scope by choosing a different parameter value.
+  secure_pattern: >-
+    Tool parameters are typed as enums, identifiers, or bounded values and
+    are validated against an allowlist on entry, so out-of-scope targets
+    are rejected before the action runs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def read_file(path): return open(path).read()   # any path on disk
+      secure: |
+        def read_doc(doc_id in ALLOWED_DOC_IDS): return docs.load(doc_id)
+    python:
+      vulnerable: |
+        @tool
+        def read_file(path: str) -> str:
+            return open(path).read()
+      secure: |
+        @tool
+        def read_report(name: Literal["sales", "ops", "finance"]) -> str:
+            return (REPORT_DIR / f"{name}.txt").read_text()
+    javascript:
+      vulnerable: |
+        const sendEmail = ({ to, body }) => mailer.send(to, body);
+      secure: |
+        const notifyOwner = ({ body }) => mailer.send(currentUser.email, body);
+    typescript:
+      vulnerable: |
+        function query(table: string, id: string) { return db.table(table).get(id); }
+      secure: |
+        type Table = "orders" | "tickets";
+        function query(table: Table, id: string) { return db.table(table).get(id); }
+
+# ---------------------------------------------------------------------------
+# LLM06.3 — Act with the user's identity, not the agent's
+# ---------------------------------------------------------------------------
+
+- id: LLM06.3
+  facet: Excessive Agency
+  section: Minimize Extension Permissions
+  security_rule: >-
+    Tools invoked on behalf of a user must execute with that user's own
+    identity and permissions, never with a broad shared or service account
+    that exceeds what the requesting user is entitled to.
+  vulnerability_pattern: >-
+    The agent calls downstream systems with a single high-privilege service
+    credential, so it can read or change data belonging to any user
+    regardless of who made the request.
+  secure_pattern: >-
+    Each downstream call carries the requesting user's scoped token or
+    identity context, so the action is confined to what that specific user
+    is already authorized to do.
+  code_patterns:
+    generic:
+      vulnerable: |
+        crm_client = CrmClient(token=SERVICE_ADMIN_TOKEN)   # full access
+      secure: |
+        crm_client = CrmClient(token=request.user.scoped_token)
+    python:
+      vulnerable: |
+        @tool
+        def fetch_records(query: str) -> list:
+            return crm.search(query, api_key=ADMIN_API_KEY)
+      secure: |
+        @tool
+        def fetch_records(query: str, *, ctx: UserContext) -> list:
+            return crm.search(query, token=ctx.user_token)
+    javascript:
+      vulnerable: |
+        const tool = (q) => db.query(q, { role: "admin" });
+      secure: |
+        const tool = (q, ctx) => db.query(q, { actingAs: ctx.userId });
+    typescript:
+      vulnerable: |
+        const getInvoices = () => api.invoices.list({ token: SERVICE_TOKEN });
+      secure: |
+        const getInvoices = (ctx: AgentContext) => api.invoices.list({ token: ctx.userToken });
+
+# ---------------------------------------------------------------------------
+# LLM06.4 — Human approval for high-impact actions
+# ---------------------------------------------------------------------------
+
+- id: LLM06.4
+  facet: Excessive Agency
+  section: Require Human Approval
+  security_rule: >-
+    High-impact or irreversible actions — such as sending money, deleting
+    data, or publishing externally — must require explicit human approval
+    before they execute, rather than running autonomously on the model's
+    decision.
+  vulnerability_pattern: >-
+    A consequential tool runs immediately whenever the model calls it, so a
+    hallucinated or manipulated tool call results in an irreversible action
+    with no human in the loop.
+  secure_pattern: >-
+    High-impact tools enqueue a pending action and return control to a
+    human, who reviews the concrete parameters and confirms before the
+    action is committed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def delete_account(user_id): accounts.delete(user_id)   # runs at once
+      secure: |
+        def delete_account(user_id): approvals.enqueue("delete", user_id)
+    python:
+      vulnerable: |
+        @tool
+        def wire_transfer(to: str, amount: float) -> str:
+            return bank.transfer(to, amount)
+      secure: |
+        @tool
+        def wire_transfer(to: str, amount: float) -> str:
+            pending = approvals.create("wire_transfer", to=to, amount=amount)
+            return f"Queued for human approval: {pending.id}"
+    javascript:
+      vulnerable: |
+        const publishPost = (post) => blog.publish(post);
+      secure: |
+        const publishPost = (post) => reviewQueue.add({ action: "publish", post });
+    typescript:
+      vulnerable: |
+        async function refund(orderId: string) { return payments.refund(orderId); }
+      secure: |
+        async function refund(orderId: string) {
+          return approvals.request<RefundAction>({ type: "refund", orderId });
+        }
+
+# ---------------------------------------------------------------------------
+# LLM06.5 — Limit agent autonomy with loop and budget caps
+# ---------------------------------------------------------------------------
+
+- id: LLM06.5
+  facet: Excessive Agency
+  section: Limit Autonomy
+  security_rule: >-
+    An autonomous agent loop must run under hard caps on iteration count,
+    elapsed time, tool-call count, and spend, so a runaway or manipulated
+    plan terminates instead of acting without bound.
+  vulnerability_pattern: >-
+    The agent reasoning loop continues until the model declares itself done,
+    with no ceiling on steps or cost, so a looping or hijacked plan keeps
+    invoking tools indefinitely.
+  secure_pattern: >-
+    The loop is bounded by an explicit maximum step count and resource
+    budget, and halts and escalates to a human when any limit is reached.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while not done:
+            done = agent.step()           # no ceiling
+      secure: |
+        for _ in range(MAX_STEPS):
+            if agent.step(): break
+        else: escalate("step budget exhausted")
+    python:
+      vulnerable: |
+        while True:
+            action = agent.next_action()
+            run(action)
+      secure: |
+        for step in range(25):
+            action = agent.next_action()
+            if action is None or budget.exceeded():
+                break
+            run(action)
+    javascript:
+      vulnerable: |
+        while (!agent.finished) await agent.tick();
+      secure: |
+        for (let i = 0; i < 25 && !agent.finished; i++) await agent.tick();
+        if (!agent.finished) escalate("max iterations reached");
+    typescript:
+      vulnerable: |
+        const run = async (a: Agent): Promise<void> => { while (!a.done) await a.step(); };
+      secure: |
+        const run = async (a: Agent, max = 25): Promise<void> => {
+          for (let i = 0; i < max && !a.done; i++) await a.step();
+        };
+
+# ---------------------------------------------------------------------------
+# LLM06.6 — Authorize the action downstream, never trust the model
+# ---------------------------------------------------------------------------
+
+- id: LLM06.6
+  facet: Excessive Agency
+  section: Enforce Authorization Downstream
+  security_rule: >-
+    Authorization for a tool action must be enforced by the downstream
+    system against the requesting user, treating every model-generated
+    tool call as untrusted input rather than as a pre-authorized request.
+  vulnerability_pattern: >-
+    The application assumes that because the model chose to call a tool the
+    action is permitted, so the tool runs with no independent permission
+    check on the real user.
+  secure_pattern: >-
+    Every tool invocation re-checks the requesting user's permissions for
+    the specific resource and operation at the point of execution, exactly
+    as a direct API call would be checked.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def tool_delete(doc_id): docs.delete(doc_id)   # trusts the model
+      secure: |
+        def tool_delete(doc_id, user):
+            require_permission(user, "delete", doc_id)
+            docs.delete(doc_id)
+    python:
+      vulnerable: |
+        @tool
+        def close_ticket(ticket_id: str) -> str:
+            return tickets.close(ticket_id)
+      secure: |
+        @tool
+        def close_ticket(ticket_id: str, *, ctx: UserContext) -> str:
+            if not policy.can(ctx.user, "close", ticket_id):
+                raise PermissionError("not authorized for this ticket")
+            return tickets.close(ticket_id)
+    javascript:
+      vulnerable: |
+        const archive = (id) => repo.archive(id);
+      secure: |
+        const archive = (id, ctx) => {
+          if (!can(ctx.user, "archive", id)) throw new ForbiddenError();
+          return repo.archive(id);
+        };
+    typescript:
+      vulnerable: |
+        function updateRecord(id: string, data: Patch) { return store.update(id, data); }
+      secure: |
+        function updateRecord(id: string, data: Patch, ctx: AgentContext) {
+          authorize(ctx.user, "update", id);
+          return store.update(id, data);
+        }
+
+# ---------------------------------------------------------------------------
+# LLM06.7 — Sanitize and constrain tool outputs fed back to the agent
+# ---------------------------------------------------------------------------
+
+- id: LLM06.7
+  facet: Excessive Agency
+  section: Contain Tool Output
+  security_rule: >-
+    Content returned by a tool — including retrieved documents, API
+    responses, and web pages — must be treated as untrusted data and must
+    not be allowed to silently issue new instructions or chain into further
+    privileged tool calls.
+  vulnerability_pattern: >-
+    A tool result is fed back into the agent as if it were a trusted
+    instruction, so an attacker who plants text in a fetched page or record
+    can steer the agent into invoking other tools.
+  secure_pattern: >-
+    Tool output is wrapped and clearly labelled as untrusted data, length
+    bounded, and prevented from automatically triggering high-impact tools
+    without a fresh authorization or approval step.
+  code_patterns:
+    generic:
+      vulnerable: |
+        agent.add_message(role="system", content=tool_result)
+      secure: |
+        agent.add_message(role="user", content=as_untrusted_data(tool_result))
+    python:
+      vulnerable: |
+        page = fetch_url(url)
+        messages.append({"role": "system", "content": page})
+      secure: |
+        page = fetch_url(url)[:8000]
+        messages.append({"role": "user",
+                         "content": f"<untrusted_tool_output>{page}</untrusted_tool_output>"})
+    javascript:
+      vulnerable: |
+        history.push({ role: "system", content: await readDoc(id) });
+      secure: |
+        const doc = (await readDoc(id)).slice(0, 8000);
+        history.push({ role: "user", content: `[untrusted data] ${doc}` });
+    typescript:
+      vulnerable: |
+        messages.push({ role: "system", content: toolResult } as Message);
+      secure: |
+        messages.push({ role: "tool", content: wrapUntrusted(toolResult) } as Message);
+
+# ---------------------------------------------------------------------------
+# LLM06.8 — Log and rate-limit agent actions for accountability
+# ---------------------------------------------------------------------------
+
+- id: LLM06.8
+  facet: Excessive Agency
+  section: Monitor and Rate-Limit Actions
+  security_rule: >-
+    Every tool invocation by an agent must be logged with its parameters
+    and acting identity, and consequential tools must be rate limited, so
+    abuse is detectable and a runaway agent is throttled.
+  vulnerability_pattern: >-
+    Agent tool calls run with no audit trail and no rate limit, so a
+    misbehaving or hijacked agent can take many damaging actions before
+    anyone notices and without a record of what occurred.
+  secure_pattern: >-
+    Each tool call is recorded in an audit log with actor, parameters, and
+    timestamp, and high-impact tools are guarded by a per-user or per-agent
+    rate limit that blocks bursts.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def call_tool(name, args): return TOOLS[name](args)
+      secure: |
+        def call_tool(name, args, user):
+            rate_limit.check(user, name)
+            audit.log(user, name, args)
+            return TOOLS[name](args)
+    python:
+      vulnerable: |
+        @tool
+        def send_invite(email: str) -> str:
+            return invites.send(email)
+      secure: |
+        @tool
+        def send_invite(email: str, *, ctx: UserContext) -> str:
+            limiter.hit(ctx.user.id, "send_invite", max_per_hour=10)
+            audit.record(ctx.user.id, "send_invite", {"email": email})
+            return invites.send(email)
+    javascript:
+      vulnerable: |
+        const invoke = (tool, args) => registry[tool](args);
+      secure: |
+        const invoke = (tool, args, ctx) => {
+          rateLimiter.consume(ctx.userId, tool);
+          auditLog.write({ user: ctx.userId, tool, args, at: Date.now() });
+          return registry[tool](args);
+        };
+    typescript:
+      vulnerable: |
+        async function runTool(t: string, a: Args): Promise<Result> { return tools[t](a); }
+      secure: |
+        async function runTool(t: string, a: Args, ctx: AgentContext): Promise<Result> {
+          await rateLimiter.check(ctx.userId, t);
+          auditLog.record({ user: ctx.userId, tool: t, args: a });
+          return tools[t](a);
+        }

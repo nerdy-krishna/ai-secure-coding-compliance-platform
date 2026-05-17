@@ -1,0 +1,497 @@
+# OWASP Top 10 for Agentic AI — T04: Resource Overload
+# Hand-authored enriched corpus (Agentic Threats enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: an autonomous agent exhausts compute, token, tool-call, or
+# wall-clock budgets — through unbounded reasoning loops, recursive
+# delegation, uncontrolled fan-out, or oversized context — degrading or
+# denying service and inflating cost.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript — the languages
+# agentic and multi-agent systems are built in).
+
+# ---------------------------------------------------------------------------
+# T4.1 — Agent Step / Iteration Cap
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.1
+  facet: Resource Overload
+  section: Agent Step and Iteration Cap
+  security_rule: >-
+    Every agent reasoning loop must enforce a hard maximum number of
+    steps or iterations, so a stuck or adversarially looping agent
+    terminates instead of consuming compute and tokens indefinitely.
+  vulnerability_pattern: >-
+    An agent executes a think-act loop with no iteration ceiling, so a
+    task that never reaches a stop condition runs forever, burning
+    compute and tokens until an external timeout or budget failure.
+  secure_pattern: >-
+    The loop is bounded by an explicit maximum step count, and reaching
+    that ceiling ends the run with a clear terminal status rather than
+    continuing to call the model.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while not done:
+            done = agent.step()        # no ceiling — may never terminate
+      secure: |
+        for step in range(MAX_STEPS):
+            if agent.step(): break
+        else: fail("step cap reached")
+    python:
+      vulnerable: |
+        agent = AgentExecutor(agent=a, tools=tools)   # max_iterations unset
+      secure: |
+        agent = AgentExecutor(agent=a, tools=tools, max_iterations=15,
+                              early_stopping_method="force")
+    javascript:
+      vulnerable: |
+        while (!result.final) result = await agent.next();
+      secure: |
+        for (let i = 0; i < MAX_STEPS && !result.final; i++)
+          result = await agent.next();
+    typescript:
+      vulnerable: |
+        const executor = new AgentExecutor({ agent, tools });
+      secure: |
+        const executor = new AgentExecutor({ agent, tools, maxIterations: 15 });
+
+# ---------------------------------------------------------------------------
+# T4.2 — Graph Recursion Limit
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.2
+  facet: Resource Overload
+  section: Graph Recursion Limit
+  security_rule: >-
+    Stateful agent graphs must run under an explicit recursion or
+    super-step limit, so a cyclic edge or a node that keeps routing back
+    on itself cannot expand the run without bound.
+  vulnerability_pattern: >-
+    An agent graph with conditional edges is invoked without a recursion
+    limit, so a routing cycle between nodes drives an unbounded number
+    of super-steps and exhausts compute.
+  secure_pattern: >-
+    The graph is invoked with a finite recursion limit sized to the
+    longest legitimate path, and exceeding it raises a caught error that
+    ends the run cleanly.
+  code_patterns:
+    generic:
+      vulnerable: |
+        graph.invoke(state)                  # no recursion bound on cyclic graph
+      secure: |
+        graph.invoke(state, recursion_limit=40)
+    python:
+      vulnerable: |
+        result = compiled_graph.invoke(initial_state)
+      secure: |
+        result = compiled_graph.invoke(initial_state,
+                                       config={"recursion_limit": 40})
+    javascript:
+      vulnerable: |
+        const out = await graph.invoke(state);
+      secure: |
+        const out = await graph.invoke(state, { recursionLimit: 40 });
+    typescript:
+      vulnerable: |
+        const out = await graph.invoke(state);
+      secure: |
+        const out = await graph.invoke(state,
+          { recursionLimit: 40 } as RunnableConfig);
+
+# ---------------------------------------------------------------------------
+# T4.3 — Token Budget Enforcement
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.3
+  facet: Resource Overload
+  section: Token Budget Enforcement
+  security_rule: >-
+    Each agent run must carry a cumulative token budget that is debited
+    after every model call and checked before the next, so total token
+    spend for a task is capped regardless of how many steps it takes.
+  vulnerability_pattern: >-
+    Token usage is never aggregated across the steps of a run, so a long
+    or looping task can consume an unbounded number of tokens and cost
+    even though each individual call looks small.
+  secure_pattern: >-
+    A running token total is accumulated from each call's usage metadata
+    and compared against a per-run ceiling, halting the agent with a
+    budget-exceeded result once the ceiling is reached.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = model.call(prompt)        # usage discarded, no running total
+      secure: |
+        spent += model.call(prompt).usage.total_tokens
+        if spent > TOKEN_BUDGET: stop("token budget exceeded")
+    python:
+      vulnerable: |
+        for task in subtasks:
+            results.append(llm.invoke(task))      # unbounded aggregate spend
+      secure: |
+        for task in subtasks:
+            r = llm.invoke(task)
+            spent += r.usage_metadata["total_tokens"]
+            if spent > TOKEN_BUDGET: raise BudgetExceeded(spent)
+            results.append(r)
+    javascript:
+      vulnerable: |
+        const res = await model.invoke(prompt);
+      secure: |
+        const res = await model.invoke(prompt);
+        spent += res.usage.totalTokens;
+        if (spent > TOKEN_BUDGET) throw new Error("token budget exceeded");
+    typescript:
+      vulnerable: |
+        const res = await model.invoke(prompt);
+      secure: |
+        spent += (await model.invoke(prompt)).usage.totalTokens;
+        if (spent > TOKEN_BUDGET) throw new BudgetExceededError(spent);
+
+# ---------------------------------------------------------------------------
+# T4.4 — Bounded Sub-Agent Fan-Out
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.4
+  facet: Resource Overload
+  section: Bounded Sub-Agent Fan-Out
+  security_rule: >-
+    An orchestrator that spawns sub-agents or parallel tasks must cap the
+    number it creates per request, so a large or attacker-influenced work
+    list cannot fan out into an overwhelming swarm of concurrent runs.
+  vulnerability_pattern: >-
+    An orchestrator spawns one sub-agent per item in a model-generated or
+    user-supplied list with no count limit, so an inflated list multiplies
+    into hundreds of concurrent agent runs.
+  secure_pattern: >-
+    The number of sub-agents spawned is capped at a fixed maximum, with
+    the work list truncated or rejected when it exceeds that maximum
+    before any sub-agent is started.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for item in plannedSubtasks: spawnAgent(item)   # count unbounded
+      secure: |
+        for item in plannedSubtasks[:MAX_SUBAGENTS]: spawnAgent(item)
+    python:
+      vulnerable: |
+        await asyncio.gather(*(run_sub_agent(t) for t in tasks))
+      secure: |
+        if len(tasks) > MAX_SUBAGENTS: raise FanOutTooLarge(len(tasks))
+        await asyncio.gather(*(run_sub_agent(t) for t in tasks))
+    javascript:
+      vulnerable: |
+        await Promise.all(tasks.map(t => runSubAgent(t)));
+      secure: |
+        if (tasks.length > MAX_SUBAGENTS) throw new Error("fan-out too large");
+        await Promise.all(tasks.map(t => runSubAgent(t)));
+    typescript:
+      vulnerable: |
+        await Promise.all(tasks.map((t: Task) => runSubAgent(t)));
+      secure: |
+        const bounded = tasks.slice(0, MAX_SUBAGENTS);
+        await Promise.all(bounded.map((t: Task) => runSubAgent(t)));
+
+# ---------------------------------------------------------------------------
+# T4.5 — Tool-Call Rate and Quota Limits
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.5
+  facet: Resource Overload
+  section: Tool-Call Rate and Quota Limits
+  security_rule: >-
+    Tool invocations made by an agent must be metered against a per-run
+    quota and a rate limit, so the agent cannot hammer an external API or
+    a billed service into exhaustion or throttling.
+  vulnerability_pattern: >-
+    An agent calls tools in a loop with no per-run call quota and no rate
+    limiting, so a repetitive plan floods a downstream API, triggers
+    provider throttling, or runs up usage charges.
+  secure_pattern: >-
+    Each tool call is counted against a per-run quota and paced by a rate
+    limiter, and exceeding either stops the agent rather than continuing
+    to call the tool.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = tool.run(args)              # no quota, no pacing
+      secure: |
+        rateLimiter.acquire()
+        if toolCalls.increment() > TOOL_QUOTA: stop("tool quota exceeded")
+        result = tool.run(args)
+    python:
+      vulnerable: |
+        def call_tool(name, args):
+            return TOOLS[name].invoke(args)
+      secure: |
+        def call_tool(name, args):
+            if tool_calls.inc() > TOOL_QUOTA: raise ToolQuotaExceeded()
+            limiter.wait()
+            return TOOLS[name].invoke(args)
+    javascript:
+      vulnerable: |
+        const out = await tool.invoke(args);
+      secure: |
+        await limiter.removeTokens(1);
+        if (++toolCalls > TOOL_QUOTA) throw new Error("tool quota exceeded");
+        const out = await tool.invoke(args);
+    typescript:
+      vulnerable: |
+        const out = await tool.invoke(args);
+      secure: |
+        await limiter.removeTokens(1);
+        if (++toolCalls > TOOL_QUOTA) throw new ToolQuotaError();
+        const out = await tool.invoke(args);
+
+# ---------------------------------------------------------------------------
+# T4.6 — Run Wall-Clock Timeout
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.6
+  facet: Resource Overload
+  section: Run Wall-Clock Timeout
+  security_rule: >-
+    Every agent run, and every blocking model or tool call inside it,
+    must execute under a wall-clock timeout, so a hung dependency or a
+    slow loop cannot tie up a worker indefinitely.
+  vulnerability_pattern: >-
+    An agent run or its model and tool calls are awaited with no deadline,
+    so a slow or unresponsive dependency blocks the worker and starves
+    other queued work.
+  secure_pattern: >-
+    The run executes inside a deadline, and individual model and tool
+    calls have their own shorter timeouts, so a stall is detected and
+    cancelled instead of blocking forever.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = agent.run(task)             # awaited with no deadline
+      secure: |
+        result = withTimeout(agent.run(task), seconds=120)
+    python:
+      vulnerable: |
+        result = await agent.ainvoke(task)
+      secure: |
+        result = await asyncio.wait_for(agent.ainvoke(task), timeout=120)
+    javascript:
+      vulnerable: |
+        const result = await agent.invoke(task);
+      secure: |
+        const result = await agent.invoke(task,
+          { signal: AbortSignal.timeout(120_000) });
+    typescript:
+      vulnerable: |
+        const result = await agent.invoke(task);
+      secure: |
+        const result = await agent.invoke(task,
+          { signal: AbortSignal.timeout(120_000) } as RunnableConfig);
+
+# ---------------------------------------------------------------------------
+# T4.7 — Context Window and History Bounding
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.7
+  facet: Resource Overload
+  section: Context Window and History Bounding
+  security_rule: >-
+    Conversation history and accumulated tool output appended to an
+    agent's context must be trimmed or summarized to a bounded size, so
+    context growth does not inflate per-call token cost and latency.
+  vulnerability_pattern: >-
+    Every step's messages and full tool outputs are appended to the
+    context with no trimming, so each successive model call carries a
+    larger prompt and cost grows quadratically over a long run.
+  secure_pattern: >-
+    History is capped to a recent window or compacted by a summarizer,
+    and large tool outputs are truncated before being added, keeping the
+    prompt size bounded across the whole run.
+  code_patterns:
+    generic:
+      vulnerable: |
+        messages.append(toolOutput)          # full history grows every step
+      secure: |
+        messages = trimToTokenBudget(messages + [truncate(toolOutput)])
+    python:
+      vulnerable: |
+        messages.append(ToolMessage(content=tool_output))
+      secure: |
+        messages.append(ToolMessage(content=tool_output[:MAX_TOOL_CHARS]))
+        messages = trim_messages(messages, max_tokens=8000, token_counter=llm)
+    javascript:
+      vulnerable: |
+        history.push({ role: "tool", content: toolOutput });
+      secure: |
+        history.push({ role: "tool", content: toolOutput.slice(0, MAX_CHARS) });
+        history = trimToTokenBudget(history, 8000);
+    typescript:
+      vulnerable: |
+        history.push({ role: "tool", content: toolOutput });
+      secure: |
+        history = trimMessages([...history,
+          { role: "tool", content: toolOutput.slice(0, MAX_CHARS) }], 8000);
+
+# ---------------------------------------------------------------------------
+# T4.8 — Recursive Delegation Depth Limit
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.8
+  facet: Resource Overload
+  section: Recursive Delegation Depth Limit
+  security_rule: >-
+    When an agent can delegate to another agent, the delegation chain
+    must carry a depth counter with a hard maximum, so agents calling
+    agents cannot recurse into an exponentially expanding tree of runs.
+  vulnerability_pattern: >-
+    A sub-agent can itself invoke further sub-agents with no depth
+    tracking, so a delegation cycle or an over-eager planner expands into
+    an unbounded tree that exhausts compute and budget.
+  secure_pattern: >-
+    Each delegation increments a depth value passed down the chain, and a
+    sub-agent invocation is refused once the depth reaches the configured
+    maximum.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def delegate(task): return subAgent.run(task)   # depth untracked
+      secure: |
+        def delegate(task, depth):
+            if depth >= MAX_DEPTH: raise DelegationTooDeep(depth)
+            return subAgent.run(task, depth + 1)
+    python:
+      vulnerable: |
+        async def handoff(task):
+            return await Agent(tools=tools).run(task)
+      secure: |
+        async def handoff(task, depth=0):
+            if depth >= MAX_DEPTH: raise DelegationTooDeep(depth)
+            return await Agent(tools=tools).run(task, depth=depth + 1)
+    javascript:
+      vulnerable: |
+        const handoff = task => subAgent.run(task);
+      secure: |
+        const handoff = (task, depth = 0) => {
+          if (depth >= MAX_DEPTH) throw new Error("delegation too deep");
+          return subAgent.run(task, depth + 1);
+        };
+    typescript:
+      vulnerable: |
+        const handoff = (task: Task) => subAgent.run(task);
+      secure: |
+        const handoff = (task: Task, depth = 0): Promise<Result> => {
+          if (depth >= MAX_DEPTH) throw new Error("delegation too deep");
+          return subAgent.run(task, depth + 1);
+        };
+
+# ---------------------------------------------------------------------------
+# T4.9 — Loop and Progress Detection
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.9
+  facet: Resource Overload
+  section: Loop and Progress Detection
+  security_rule: >-
+    An agent must detect when it is repeating the same action or making
+    no measurable progress, and abort the run, so a non-terminating loop
+    is stopped before it consumes the full step or token budget.
+  vulnerability_pattern: >-
+    An agent repeats an identical tool call or model action across many
+    steps with no repetition check, so it spins in place burning the
+    budget until a hard cap finally fires.
+  secure_pattern: >-
+    Recent actions are tracked and an identical action repeated beyond a
+    small threshold, or a stretch of steps with no progress, triggers an
+    immediate stop with a no-progress result.
+  code_patterns:
+    generic:
+      vulnerable: |
+        action = agent.next()
+        execute(action)                      # same action may repeat forever
+      secure: |
+        action = agent.next()
+        if recent.count(action) >= REPEAT_LIMIT: stop("no progress detected")
+        recent.append(action); execute(action)
+    python:
+      vulnerable: |
+        for _ in range(MAX_STEPS):
+            act = agent.decide(); run(act)
+      secure: |
+        for _ in range(MAX_STEPS):
+            act = agent.decide()
+            if seen[act] >= REPEAT_LIMIT: raise NoProgress(act)
+            seen[act] += 1; run(act)
+    javascript:
+      vulnerable: |
+        const act = agent.decide();
+        run(act);
+      secure: |
+        const act = agent.decide();
+        if ((seen[act] = (seen[act] ?? 0) + 1) > REPEAT_LIMIT)
+          throw new Error("no progress detected");
+        run(act);
+    typescript:
+      vulnerable: |
+        const act = agent.decide();
+        run(act);
+      secure: |
+        const act: string = agent.decide();
+        if ((seen.get(act) ?? 0) + 1 > REPEAT_LIMIT)
+          throw new Error("no progress detected");
+        seen.set(act, (seen.get(act) ?? 0) + 1); run(act);
+
+# ---------------------------------------------------------------------------
+# T4.10 — Per-Tenant Concurrency and Cost Caps
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T4.10
+  facet: Resource Overload
+  section: Per-Tenant Concurrency and Cost Caps
+  security_rule: >-
+    Concurrent agent runs and aggregate spend must be capped per tenant
+    or per user, so one principal cannot launch enough simultaneous runs
+    to starve shared workers or exhaust a shared cost budget.
+  vulnerability_pattern: >-
+    Agent runs are admitted with only a global limit and no per-tenant
+    accounting, so a single tenant can queue unbounded runs that
+    monopolize workers and the shared model budget.
+  secure_pattern: >-
+    Each tenant has a maximum number of in-flight runs and a spend
+    ceiling, both checked at admission, and a request is rejected or
+    queued once either cap is reached.
+  code_patterns:
+    generic:
+      vulnerable: |
+        startAgentRun(tenant, task)          # only a global worker pool limits it
+      secure: |
+        if activeRuns(tenant) >= TENANT_MAX or spend(tenant) >= TENANT_BUDGET:
+            reject("tenant capacity exceeded")
+        startAgentRun(tenant, task)
+    python:
+      vulnerable: |
+        async def submit(tenant_id, task):
+            return await run_agent(task)
+      secure: |
+        async def submit(tenant_id, task):
+            async with tenant_semaphores[tenant_id]:   # bounded per tenant
+                if tenant_spend[tenant_id] >= TENANT_BUDGET:
+                    raise TenantBudgetExceeded(tenant_id)
+                return await run_agent(task)
+    javascript:
+      vulnerable: |
+        async function submit(tenantId, task) { return runAgent(task); }
+      secure: |
+        async function submit(tenantId, task) {
+          if (activeRuns(tenantId) >= TENANT_MAX) throw new Error("tenant full");
+          return tenantLimiter(tenantId).schedule(() => runAgent(task));
+        }
+    typescript:
+      vulnerable: |
+        const submit = (tenantId: string, task: Task) => runAgent(task);
+      secure: |
+        const submit = (tenantId: string, task: Task): Promise<Result> => {
+          if (activeRuns(tenantId) >= TENANT_MAX) throw new Error("tenant full");
+          return tenantLimiter(tenantId).schedule(() => runAgent(task));
+        };

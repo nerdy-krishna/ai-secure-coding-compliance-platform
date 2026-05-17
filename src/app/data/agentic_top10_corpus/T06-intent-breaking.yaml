@@ -1,0 +1,436 @@
+# OWASP Top 10 for Agentic AI — T06: Intent Breaking & Goal Manipulation
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: an adversary subverts an agent's objective, plan, or reasoning so
+# the agent pursues an attacker-chosen goal while still appearing to operate
+# normally. Sub-risks span goal injection through untrusted content, plan
+# and reflection tampering, sub-goal drift, reward or success-criteria
+# hijacking, and loss of the original objective across long-running loops.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the languages agentic systems are built in).
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.1 — Immutable system goal separated from untrusted input
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.1
+  facet: Intent Breaking & Goal Manipulation
+  section: Goal Provenance and Trust Boundaries
+  security_rule: >-
+    The agent's objective must be fixed in a trusted system channel that
+    untrusted task content can never overwrite, and retrieved or tool-returned
+    text must be treated as data, never as new instructions.
+  vulnerability_pattern: >-
+    The agent goal and untrusted content are concatenated into one prompt or
+    message, so a document or tool result can append a sentence that redefines
+    what the agent is trying to achieve.
+  secure_pattern: >-
+    The objective lives in a separate trusted system message or signed task
+    record, and untrusted content is passed in a clearly delimited data role
+    that the agent is instructed to treat as inert reference material.
+  code_patterns:
+    generic:
+      vulnerable: |
+        prompt = goal + "\n" + retrieved_document
+        agent.run(prompt)
+      secure: |
+        agent.run(system=trusted_goal,
+                  messages=[as_data_block(retrieved_document)])
+    python:
+      vulnerable: |
+        msg = f"Your goal: {goal}\n\nContext:\n{untrusted_doc}"
+        llm.invoke(msg)
+      secure: |
+        llm.invoke([SystemMessage(trusted_goal),
+                    HumanMessage(f"<reference>{untrusted_doc}</reference>")])
+    javascript:
+      vulnerable: |
+        const prompt = `${goal}\n${untrustedDoc}`;
+        await agent.invoke(prompt);
+      secure: |
+        await agent.invoke({ system: trustedGoal,
+          messages: [{ role: "user", content: asDataBlock(untrustedDoc) }] });
+    typescript:
+      vulnerable: |
+        const input: string = `${goal}\n${untrustedDoc}`;
+        await agent.run(input);
+      secure: |
+        await agent.run({ system: trustedGoal,
+          context: { reference: untrustedDoc } as ReadonlyContext });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.2 — Goal integrity verification before each step
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.2
+  facet: Intent Breaking & Goal Manipulation
+  section: Goal Integrity Verification
+  security_rule: >-
+    The active objective must be checked for unauthorized change before each
+    planning or tool step, by comparing it against an integrity-protected copy
+    captured when the task was authorized.
+  vulnerability_pattern: >-
+    The goal is held in mutable agent state and read freshly each turn with no
+    check, so a single tampered turn silently replaces it and every later step
+    serves the attacker's objective.
+  secure_pattern: >-
+    The authorized goal is hashed or signed at task start, stored separately
+    from working memory, and re-verified before each step so any drift halts
+    the run for review.
+  code_patterns:
+    generic:
+      vulnerable: |
+        step(state.goal)                 # goal read raw from mutable state
+      secure: |
+        assert hash(state.goal) == authorized_goal_hash
+        step(state.goal)
+    python:
+      vulnerable: |
+        def plan(state): return planner(state["goal"])
+      secure: |
+        def plan(state):
+            if sha256(state["goal"]) != state["goal_hash"]:
+                raise GoalTamperError()
+            return planner(state["goal"])
+    javascript:
+      vulnerable: |
+        const next = planner(state.goal);
+      secure: |
+        if (sha256(state.goal) !== state.goalHash) throw new GoalTamperError();
+        const next = planner(state.goal);
+    typescript:
+      vulnerable: |
+        const next: Step = planner(state.goal);
+      secure: |
+        if (sha256(state.goal) !== state.goalHash) throw new GoalTamperError();
+        const next: Step = planner(state.goal);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.3 — Plans validated against the authorized objective
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.3
+  facet: Intent Breaking & Goal Manipulation
+  section: Plan Validation
+  security_rule: >-
+    A generated plan must be validated against the authorized objective and a
+    policy of allowed actions before any step executes, so an injected or
+    drifted plan cannot reach the tool layer.
+  vulnerability_pattern: >-
+    The planner output is executed step by step with no review, so a plan
+    poisoned by manipulated context can insert steps that pursue a different
+    goal while looking like ordinary progress.
+  secure_pattern: >-
+    Each plan is screened by a validator or critic that confirms every step is
+    in service of the authorized objective and within the action policy, and a
+    failing plan is rejected or escalated rather than run.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for step in planner(goal): execute(step)
+      secure: |
+        plan = planner(goal)
+        if validate_plan(plan, goal, policy): run(plan)
+    python:
+      vulnerable: |
+        for step in agent.plan(task):
+            tools.run(step)
+      secure: |
+        plan = agent.plan(task)
+        if critic.approves(plan, authorized_goal):
+            for step in plan: tools.run(step)
+    javascript:
+      vulnerable: |
+        for (const step of planner(goal)) await execute(step);
+      secure: |
+        const plan = planner(goal);
+        if (validatePlan(plan, goal, policy)) for (const s of plan) await execute(s);
+    typescript:
+      vulnerable: |
+        const plan: Step[] = await planner(goal);
+        for (const s of plan) await execute(s);
+      secure: |
+        const plan: Step[] = await planner(goal);
+        if (validatePlan(plan, goal, policy)) for (const s of plan) await execute(s);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.4 — Reflection and self-critique inputs are trusted
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.4
+  facet: Intent Breaking & Goal Manipulation
+  section: Reflection and Memory Integrity
+  security_rule: >-
+    Reflection, self-critique, and scratchpad notes that feed the next
+    reasoning step must come only from the agent's own trusted output, not
+    from untrusted tool results or retrieved memory.
+  vulnerability_pattern: >-
+    Tool output or retrieved memory is folded directly into the reflection or
+    scratchpad channel, so attacker text becomes the agent's own apparent
+    conclusion and steers the next decision.
+  secure_pattern: >-
+    The reflection channel is populated only by the model's own reasoning, and
+    external results enter as separately labelled observations that the critic
+    weighs but never mistakes for its own intent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        scratchpad += tool_result        # external text becomes self-talk
+      secure: |
+        observations.append(label("tool", tool_result))
+        scratchpad += own_reflection_only
+    python:
+      vulnerable: |
+        state["reflection"] += tool_output
+      secure: |
+        state["observations"].append({"src": "tool", "text": tool_output})
+        state["reflection"] += model_self_critique
+    javascript:
+      vulnerable: |
+        state.reflection += toolResult;
+      secure: |
+        state.observations.push({ src: "tool", text: toolResult });
+        state.reflection += modelSelfCritique;
+    typescript:
+      vulnerable: |
+        state.reflection += toolResult as string;
+      secure: |
+        state.observations.push({ src: "tool", text: toolResult });
+        state.reflection += modelSelfCritique;
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.5 — Success criteria are fixed and not model-defined
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.5
+  facet: Intent Breaking & Goal Manipulation
+  section: Success Criteria Integrity
+  security_rule: >-
+    Task completion and success criteria must be defined in trusted
+    configuration and evaluated by deterministic code, never inferred by the
+    agent from content it processed during the run.
+  vulnerability_pattern: >-
+    The agent decides for itself whether the task is done by reading the
+    conversation, so injected text claiming the goal is satisfied lets the
+    agent stop early or declare a manipulated outcome successful.
+  secure_pattern: >-
+    Completion is judged by a fixed checker function against predefined
+    acceptance criteria, and the agent only proposes that it is finished while
+    the trusted checker confirms.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if agent_thinks_done(history): finish()
+      secure: |
+        if acceptance_check(result, criteria): finish()
+    python:
+      vulnerable: |
+        if "task complete" in llm_output.lower(): return result
+      secure: |
+        if meets_criteria(result, ACCEPTANCE_SPEC): return result
+    javascript:
+      vulnerable: |
+        if (/done|complete/i.test(llmOutput)) return result;
+      secure: |
+        if (acceptanceCheck(result, ACCEPTANCE_SPEC)) return result;
+    typescript:
+      vulnerable: |
+        if (llmOutput.includes("complete")) return result;
+      secure: |
+        if (acceptanceCheck(result, ACCEPTANCE_SPEC)) return result;
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.6 — Delegated sub-goals stay within the parent objective
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.6
+  facet: Intent Breaking & Goal Manipulation
+  section: Sub-Goal Delegation Containment
+  security_rule: >-
+    Sub-goals handed to sub-agents must be derived from the parent objective
+    and constrained so a sub-agent cannot widen its mandate or return a goal
+    change to its parent.
+  vulnerability_pattern: >-
+    A parent agent forwards a sub-agent's free-text reply straight into its own
+    objective or next plan, so a compromised or manipulated sub-agent rewrites
+    the parent's intent.
+  secure_pattern: >-
+    Sub-goals are issued as scoped, schema-typed tasks, and sub-agent replies
+    are accepted only as structured results that update task state, never as
+    instructions that redefine the parent goal.
+  code_patterns:
+    generic:
+      vulnerable: |
+        parent.goal = subagent.run(subtask)      # child reply redefines parent
+      secure: |
+        result = subagent.run(scoped(subtask))
+        parent.record(validate_result(result))
+    python:
+      vulnerable: |
+        state["goal"] = research_agent.invoke(state)["output"]
+      secure: |
+        out = research_agent.invoke(scoped_task(state))
+        state["findings"].append(ResultModel.model_validate(out))
+    javascript:
+      vulnerable: |
+        parent.goal = await subAgent.run(subTask);
+      secure: |
+        const r = await subAgent.run(scope(subTask));
+        parent.findings.push(ResultSchema.parse(r));
+    typescript:
+      vulnerable: |
+        parent.goal = await subAgent.run(subTask);
+      secure: |
+        const r: SubResult = ResultSchema.parse(await subAgent.run(scope(subTask)));
+        parent.findings.push(r);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.7 — Bounded loops with periodic goal re-anchoring
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.7
+  facet: Intent Breaking & Goal Manipulation
+  section: Long-Horizon Goal Stability
+  security_rule: >-
+    Long-running agent loops must enforce a step budget and periodically
+    re-anchor on the original objective, so the goal cannot quietly drift away
+    over many iterations.
+  vulnerability_pattern: >-
+    An agent loops on its own evolving state with no step limit and no
+    reminder of the original task, so small per-step deviations accumulate
+    until the agent is pursuing an unrelated goal.
+  secure_pattern: >-
+    The loop has a hard iteration cap and re-injects the trusted original
+    objective on a fixed cadence, comparing current intent against it and
+    halting on divergence.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while not done: state = step(state)
+      secure: |
+        for i in range(MAX_STEPS):
+            if i % K == 0: state = reanchor(state, original_goal)
+            state = step(state)
+    python:
+      vulnerable: |
+        while not state["done"]:
+            state = agent.step(state)
+      secure: |
+        for i in range(MAX_STEPS):
+            if i % 5 == 0: state["goal"] = ORIGINAL_GOAL
+            state = agent.step(state)
+            if state["done"]: break
+    javascript:
+      vulnerable: |
+        while (!state.done) state = step(state);
+      secure: |
+        for (let i = 0; i < MAX_STEPS && !state.done; i++) {
+          if (i % 5 === 0) state.goal = ORIGINAL_GOAL;
+          state = step(state);
+        }
+    typescript:
+      vulnerable: |
+        while (!state.done) state = step(state);
+      secure: |
+        for (let i = 0; i < MAX_STEPS && !state.done; i++) {
+          if (i % 5 === 0) state.goal = ORIGINAL_GOAL;
+          state = step(state);
+        }
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.8 — Privileged intent changes require human authorization
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.8
+  facet: Intent Breaking & Goal Manipulation
+  section: Human Authorization of Goal Changes
+  security_rule: >-
+    Any change to the agent's objective, scope, or high-impact action set
+    after task start must require explicit human authorization rather than
+    being applied automatically from model reasoning.
+  vulnerability_pattern: >-
+    The agent updates its own goal or unlocks broader permissions purely from
+    its reasoning, so manipulated content can escalate the mandate with no
+    human in the loop.
+  secure_pattern: >-
+    Goal or scope changes are routed through an approval gate that pauses the
+    run and surfaces the proposed change to a human, who must confirm before
+    the new objective takes effect.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if model_wants_new_goal: state.goal = new_goal
+      secure: |
+        if model_wants_new_goal:
+            state.goal = await human_approve(new_goal, current_goal)
+    python:
+      vulnerable: |
+        state["goal"] = proposed_goal
+      secure: |
+        approval = await request_human_approval(proposed_goal)
+        state["goal"] = proposed_goal if approval.granted else state["goal"]
+    javascript:
+      vulnerable: |
+        state.goal = proposedGoal;
+      secure: |
+        const ok = await requestHumanApproval(proposedGoal);
+        if (ok) state.goal = proposedGoal;
+    typescript:
+      vulnerable: |
+        state.goal = proposedGoal;
+      secure: |
+        const ok: boolean = await requestHumanApproval(proposedGoal);
+        if (ok) state.goal = proposedGoal;
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T6.9 — Audit and alerting on objective and plan deviation
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T6.9
+  facet: Intent Breaking & Goal Manipulation
+  section: Goal Deviation Monitoring
+  security_rule: >-
+    The agent must log the authorized objective alongside each plan and action
+    and emit an alert when a step diverges from that objective, so goal
+    manipulation is detectable rather than silent.
+  vulnerability_pattern: >-
+    Actions are executed with no record tying them back to the authorized
+    objective, so an agent steered onto an attacker's goal leaves no trail and
+    the deviation is never noticed.
+  secure_pattern: >-
+    Every step is logged with the objective it claims to serve and scored for
+    alignment, and a low-alignment step raises an alert and can pause the run
+    for review.
+  code_patterns:
+    generic:
+      vulnerable: |
+        execute(step)
+      secure: |
+        log(goal=goal, step=step, align=score(step, goal))
+        if score(step, goal) < THRESHOLD: alert_and_pause()
+        execute(step)
+    python:
+      vulnerable: |
+        tools.run(step)
+      secure: |
+        logger.info("step", extra={"goal": goal, "step": step})
+        if alignment(step, goal) < 0.6: raise GoalDeviationAlert()
+        tools.run(step)
+    javascript:
+      vulnerable: |
+        await tools.run(step);
+      secure: |
+        logger.info({ goal, step, align: alignment(step, goal) });
+        if (alignment(step, goal) < 0.6) throw new GoalDeviationAlert();
+        await tools.run(step);
+    typescript:
+      vulnerable: |
+        await tools.run(step);
+      secure: |
+        logger.info({ goal, step, align: alignment(step, goal) });
+        if (alignment(step, goal) < 0.6) throw new GoalDeviationAlert();
+        await tools.run(step);

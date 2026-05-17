@@ -62,6 +62,8 @@ _FRAMEWORKS: Dict[str, Dict[str, str]] = {
         "facet": "concern_area",
     },
     "cheatsheets": {"dir": "cheatsheets_corpus", "facet": "concern_area"},
+    "llm_top10": {"dir": "llm_top10_corpus", "facet": "concern_area"},
+    "agentic_top10": {"dir": "agentic_top10_corpus", "facet": "concern_area"},
 }
 
 

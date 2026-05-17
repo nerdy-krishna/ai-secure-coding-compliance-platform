@@ -1,0 +1,390 @@
+# OWASP LLM Top 10 (2025) — LLM09: Misinformation
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript for LLM-integrated apps).
+#
+# LLM09 covers hallucination, overreliance on unverified model output,
+# fabricated facts and citations, insecure code suggestions, and the
+# absence of human review on consequential model-driven decisions.
+
+# ---------------------------------------------------------------------------
+# LLM09.1 — Grounding model output in retrieved sources
+# ---------------------------------------------------------------------------
+
+- id: LLM09.1
+  facet: Misinformation
+  section: Retrieval Grounding
+  security_rule: >-
+    Factual answers must be generated from retrieved, authoritative
+    source documents passed in the prompt, not from the model's
+    parametric memory, so responses can be traced back to evidence.
+  vulnerability_pattern: >-
+    A question is sent straight to the model with no retrieval step, so
+    the answer is produced from training-time memory and may state
+    confident but fabricated facts that no source supports.
+  secure_pattern: >-
+    Relevant documents are retrieved first and supplied as context, and
+    the prompt instructs the model to answer only from that context and
+    to say it does not know when the context is insufficient.
+  code_patterns:
+    generic:
+      vulnerable: |
+        answer = llm.ask("What is our refund policy?")
+      secure: |
+        docs = retriever.search("refund policy")
+        answer = llm.ask("Answer only from CONTEXT; say you don't know if absent.",
+                          context=docs)
+    python:
+      vulnerable: |
+        answer = llm.invoke(f"Question: {question}")
+      secure: |
+        docs = retriever.get_relevant_documents(question)
+        answer = llm.invoke(GROUNDED_PROMPT.format(context=docs, question=question))
+    javascript:
+      vulnerable: |
+        const answer = await llm.invoke(`Question: ${question}`);
+      secure: |
+        const docs = await retriever.getRelevantDocuments(question);
+        const answer = await llm.invoke(groundedPrompt(docs, question));
+    typescript:
+      vulnerable: |
+        const answer: string = await llm.invoke(`Question: ${question}`);
+      secure: |
+        const docs: Document[] = await retriever.getRelevantDocuments(question);
+        const answer: string = await llm.invoke(groundedPrompt(docs, question));
+
+# ---------------------------------------------------------------------------
+# LLM09.2 — Verifiable citations for factual claims
+# ---------------------------------------------------------------------------
+
+- id: LLM09.2
+  facet: Misinformation
+  section: Citation Verification
+  security_rule: >-
+    Factual claims surfaced to users must carry citations, and each
+    citation must be checked to point at a source that actually exists
+    and was part of the retrieved context.
+  vulnerability_pattern: >-
+    The model is asked to include citations and its output is shown as
+    is, so it can invent plausible-looking source titles, URLs, or case
+    numbers that lead nowhere and lend false authority to a wrong answer.
+  secure_pattern: >-
+    Every citation the model returns is resolved against the known set
+    of retrieved document identifiers, and any claim whose citation does
+    not resolve is dropped or flagged before the answer is shown.
+  code_patterns:
+    generic:
+      vulnerable: |
+        show(answer.text + " " + answer.citations)
+      secure: |
+        valid = [c for c in answer.citations if c.id in retrieved_ids]
+        show(answer.text, citations=valid)
+    python:
+      vulnerable: |
+        return {"answer": resp.text, "sources": resp.citations}
+      secure: |
+        verified = [c for c in resp.citations if c.doc_id in retrieved_ids]
+        if not verified:
+            raise UngroundedAnswerError("no citation resolves to a source")
+        return {"answer": resp.text, "sources": verified}
+    javascript:
+      vulnerable: |
+        res.json({ answer: resp.text, sources: resp.citations });
+      secure: |
+        const verified = resp.citations.filter(c => retrievedIds.has(c.docId));
+        if (verified.length === 0) throw new UngroundedAnswerError();
+        res.json({ answer: resp.text, sources: verified });
+    typescript:
+      vulnerable: |
+        res.json({ answer: resp.text, sources: resp.citations });
+      secure: |
+        const verified: Citation[] = resp.citations.filter(c => retrievedIds.has(c.docId));
+        if (verified.length === 0) throw new UngroundedAnswerError();
+        res.json({ answer: resp.text, sources: verified });
+
+# ---------------------------------------------------------------------------
+# LLM09.3 — Human review gate on consequential decisions
+# ---------------------------------------------------------------------------
+
+- id: LLM09.3
+  facet: Misinformation
+  section: Human Oversight
+  security_rule: >-
+    Model output that drives a consequential decision — medical, legal,
+    financial, safety, or hiring — must pass through a qualified human
+    reviewer before it is acted on or shown as authoritative.
+  vulnerability_pattern: >-
+    A model recommendation is applied automatically to a high-stakes
+    decision with no human in the loop, so a hallucinated or biased
+    output causes real-world harm without any chance to catch it.
+  secure_pattern: >-
+    Consequential model output is routed into a review queue, marked as
+    a draft pending human approval, and only released or executed after
+    a qualified reviewer signs off.
+  code_patterns:
+    generic:
+      vulnerable: |
+        applyDecision(llm.recommend(caseData))
+      secure: |
+        draft = llm.recommend(caseData)
+        reviewQueue.submit(draft)        # applied only after human approval
+    python:
+      vulnerable: |
+        loan.status = "approved" if llm.assess(application) else "denied"
+      secure: |
+        loan.recommendation = llm.assess(application)
+        loan.status = "pending_review"   # underwriter confirms before action
+    javascript:
+      vulnerable: |
+        await db.diagnoses.insert({ patientId, diagnosis: llmDiagnosis });
+      secure: |
+        await reviewQueue.enqueue({ patientId, draft: llmDiagnosis,
+                                    status: "awaiting_clinician" });
+    typescript:
+      vulnerable: |
+        await db.diagnoses.insert({ patientId, diagnosis: llmDiagnosis });
+      secure: |
+        const item: ReviewItem = { patientId, draft: llmDiagnosis,
+                                    status: "awaiting_clinician" };
+        await reviewQueue.enqueue(item);
+
+# ---------------------------------------------------------------------------
+# LLM09.4 — Validating LLM-generated code before use
+# ---------------------------------------------------------------------------
+
+- id: LLM09.4
+  facet: Misinformation
+  section: Insecure Code Suggestions
+  security_rule: >-
+    Code produced by a model must be reviewed, statically analysed, and
+    checked against a dependency registry before it is executed or
+    merged, because models suggest insecure code and non-existent packages.
+  vulnerability_pattern: >-
+    A model-generated snippet or import is run or installed directly, so
+    an insecure pattern ships unreviewed or a hallucinated package name
+    is registered by an attacker and pulled in as malware.
+  secure_pattern: >-
+    Generated code is treated as an untrusted proposal — it is linted,
+    scanned, and every dependency is confirmed to exist in the official
+    registry and to be the intended package before anything is run.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run(llm.generate("a script to back up the database"))
+      secure: |
+        code = llm.generate("a script to back up the database")
+        if lint(code) and scan(code) and depsExist(code): proposeForReview(code)
+    python:
+      vulnerable: |
+        exec(llm.generate("parse this CSV"))
+      secure: |
+        snippet = llm.generate("parse this CSV")
+        report = static_analyze(snippet)        # bandit / semgrep
+        if report.clean and packages_exist(snippet):
+            submit_for_human_review(snippet)
+    javascript:
+      vulnerable: |
+        eval(await llm.generate("sort this array"));
+      secure: |
+        const code = await llm.generate("sort this array");
+        if (await lint(code) && await depsResolvable(code)) openPullRequest(code);
+    typescript:
+      vulnerable: |
+        eval(await llm.generate("sort this array"));
+      secure: |
+        const code: string = await llm.generate("sort this array");
+        if (await lint(code) && await depsResolvable(code)) openPullRequest(code);
+
+# ---------------------------------------------------------------------------
+# LLM09.5 — Communicating uncertainty and limitations
+# ---------------------------------------------------------------------------
+
+- id: LLM09.5
+  facet: Misinformation
+  section: Uncertainty Disclosure
+  security_rule: >-
+    The interface must clearly tell users that responses are
+    AI-generated and may be wrong, and should surface confidence or
+    grounding signals so users calibrate their trust appropriately.
+  vulnerability_pattern: >-
+    Model answers are presented as authoritative fact with no AI
+    disclosure and no uncertainty signal, so users overrely on output
+    that could be confidently wrong.
+  secure_pattern: >-
+    Responses are labelled as AI-generated, low-confidence or ungrounded
+    answers carry a visible caution, and users are pointed to verify
+    against primary sources for important decisions.
+  code_patterns:
+    generic:
+      vulnerable: |
+        display(answer.text)
+      secure: |
+        display(answer.text, banner="AI-generated — verify before relying on it",
+                confidence=answer.confidence)
+    python:
+      vulnerable: |
+        return {"reply": answer.text}
+      secure: |
+        return {"reply": answer.text, "ai_generated": True,
+                "low_confidence": answer.confidence < 0.6}
+    javascript:
+      vulnerable: |
+        chat.append({ role: "assistant", text: answer.text });
+      secure: |
+        chat.append({ role: "assistant", text: answer.text,
+                      aiGenerated: true, lowConfidence: answer.confidence < 0.6 });
+    typescript:
+      vulnerable: |
+        chat.append({ role: "assistant", text: answer.text });
+      secure: |
+        const msg: AssistantMessage = { role: "assistant", text: answer.text,
+            aiGenerated: true, lowConfidence: answer.confidence < 0.6 };
+        chat.append(msg);
+
+# ---------------------------------------------------------------------------
+# LLM09.6 — Cross-checking factual output against authoritative data
+# ---------------------------------------------------------------------------
+
+- id: LLM09.6
+  facet: Misinformation
+  section: Automated Fact Checking
+  security_rule: >-
+    Where the model emits structured facts such as prices, dates,
+    inventory, or identifiers, those values must be verified against the
+    authoritative system of record before they are shown or acted on.
+  vulnerability_pattern: >-
+    A structured value generated by the model is trusted directly, so a
+    hallucinated price, stock level, or account number flows into the
+    UI or a transaction without ever being checked against real data.
+  secure_pattern: >-
+    Each factual field the model returns is looked up in the database or
+    upstream API of record, and a mismatch causes the value to be
+    corrected or the answer to be rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        quote(product, price=llm.extract("price"))
+      secure: |
+        price = catalog.lookup(product).price   # source of record wins
+        quote(product, price=price)
+    python:
+      vulnerable: |
+        return {"sku": resp.sku, "in_stock": resp.in_stock}
+      secure: |
+        record = inventory.get(resp.sku)
+        if record is None:
+            raise UnverifiedFactError(f"model returned unknown sku {resp.sku}")
+        return {"sku": record.sku, "in_stock": record.in_stock}
+    javascript:
+      vulnerable: |
+        sendQuote({ sku: resp.sku, price: resp.price });
+      secure: |
+        const record = await catalog.get(resp.sku);
+        if (!record) throw new UnverifiedFactError(resp.sku);
+        sendQuote({ sku: record.sku, price: record.price });
+    typescript:
+      vulnerable: |
+        sendQuote({ sku: resp.sku, price: resp.price });
+      secure: |
+        const record: Product | null = await catalog.get(resp.sku);
+        if (!record) throw new UnverifiedFactError(resp.sku);
+        sendQuote({ sku: record.sku, price: record.price });
+
+# ---------------------------------------------------------------------------
+# LLM09.7 — Constraining answers to the supplied context scope
+# ---------------------------------------------------------------------------
+
+- id: LLM09.7
+  facet: Misinformation
+  section: Scope Constraint
+  security_rule: >-
+    The system prompt must constrain the model to the application's
+    intended domain and instruct it to decline or defer questions that
+    fall outside the supplied knowledge, rather than improvising.
+  vulnerability_pattern: >-
+    An open-ended assistant answers any question with no domain
+    boundary, so off-topic or out-of-scope queries draw improvised,
+    unverifiable answers that users mistake for product guidance.
+  secure_pattern: >-
+    The system prompt scopes the assistant to its domain, and a
+    refusal or hand-off path is defined for out-of-scope questions so
+    the model declines instead of hallucinating.
+  code_patterns:
+    generic:
+      vulnerable: |
+        system = "You are a helpful assistant."
+      secure: |
+        system = "You are a billing-support assistant. For anything outside "
+                 "billing, reply that it is out of scope and offer a handoff."
+    python:
+      vulnerable: |
+        messages = [{"role": "user", "content": question}]
+      secure: |
+        messages = [{"role": "system", "content": SCOPED_DOMAIN_PROMPT},
+                    {"role": "user", "content": question}]
+    javascript:
+      vulnerable: |
+        const messages = [{ role: "user", content: question }];
+      secure: |
+        const messages = [{ role: "system", content: scopedDomainPrompt },
+                           { role: "user", content: question }];
+    typescript:
+      vulnerable: |
+        const messages: ChatMessage[] = [{ role: "user", content: question }];
+      secure: |
+        const messages: ChatMessage[] = [
+          { role: "system", content: scopedDomainPrompt },
+          { role: "user", content: question }];
+
+# ---------------------------------------------------------------------------
+# LLM09.8 — Logging and feedback for misinformation monitoring
+# ---------------------------------------------------------------------------
+
+- id: LLM09.8
+  facet: Misinformation
+  section: Monitoring and Feedback
+  security_rule: >-
+    Model responses must be logged with their grounding context and
+    given a user feedback channel, so hallucinations can be detected,
+    reported, and corrected over time.
+  vulnerability_pattern: >-
+    Responses are returned with no logging of the context they were
+    grounded in and no way for users to report a wrong answer, so
+    recurring misinformation goes unnoticed and uncorrected.
+  secure_pattern: >-
+    Each response is logged with its prompt, retrieved sources, and
+    model version, and the UI exposes a report-inaccuracy control that
+    feeds a review and correction workflow.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return answer
+      secure: |
+        log(answer=answer, context=docs, model=modelVersion)
+        return withFeedbackControl(answer)
+    python:
+      vulnerable: |
+        return JSONResponse({"answer": answer.text})
+      secure: |
+        audit_log.record(answer=answer.text, sources=[d.id for d in docs],
+                         model=MODEL_VERSION, trace_id=correlation_id_var.get())
+        return JSONResponse({"answer": answer.text, "response_id": rid,
+                             "report_url": f"/feedback/{rid}"})
+    javascript:
+      vulnerable: |
+        res.json({ answer: answer.text });
+      secure: |
+        await auditLog.record({ answer: answer.text,
+            sources: docs.map(d => d.id), model: MODEL_VERSION });
+        res.json({ answer: answer.text, responseId, reportUrl: `/feedback/${responseId}` });
+    typescript:
+      vulnerable: |
+        res.json({ answer: answer.text });
+      secure: |
+        await auditLog.record({ answer: answer.text,
+            sources: docs.map((d: Document) => d.id), model: MODEL_VERSION });
+        res.json({ answer: answer.text, responseId, reportUrl: `/feedback/${responseId}` });

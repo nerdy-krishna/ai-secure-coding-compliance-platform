@@ -1,0 +1,468 @@
+# OWASP LLM Top 10 (2025) — LLM05: Improper Output Handling
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# LLM05 covers the failure to treat model output as untrusted: passing
+# generated text straight into a downstream interpreter (browser, shell,
+# SQL engine, eval, file path, HTTP client, agent tool) without the same
+# encoding, validation, and parameterization an attacker-controlled value
+# would demand. The LLM is an untrusted producer; its output crossing a
+# trust boundary must be handled exactly like raw user input.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript for LLM-integrated apps).
+
+# ---------------------------------------------------------------------------
+# LLM05.1 — Treating model output as a trusted source
+# ---------------------------------------------------------------------------
+
+- id: LLM05.1
+  facet: Improper Output Handling
+  section: Output Trust Boundary
+  security_rule: >-
+    Treat every LLM completion as untrusted input. Output that crosses
+    into a downstream interpreter must pass the same encoding, validation,
+    and parameterization controls that raw user input would.
+  vulnerability_pattern: >-
+    Model output is assumed to be safe because it was produced by the
+    application's own LLM, so it is passed directly into a sink without
+    the encoding or validation applied to user input.
+  secure_pattern: >-
+    The completion is routed through the same trust boundary as any
+    external input — validated, encoded for its destination context, and
+    constrained — before it reaches a browser, query engine, or shell.
+  code_patterns:
+    generic:
+      vulnerable: |
+        answer = llm.complete(prompt)
+        sink(answer)                       # trusted blindly, no handling
+      secure: |
+        answer = llm.complete(prompt)
+        sink(encodeForContext(validate(answer)))
+    python:
+      vulnerable: |
+        result = llm.invoke(prompt).content
+        return HttpResponse(result)
+      secure: |
+        result = llm.invoke(prompt).content
+        return render(request, "answer.html", {"answer": result})  # autoescape
+    javascript:
+      vulnerable: |
+        const answer = await llm.complete(prompt);
+        res.send(answer);
+      secure: |
+        const answer = await llm.complete(prompt);
+        res.render("answer", { answer });   // template autoescapes
+    typescript:
+      vulnerable: |
+        const answer: string = (await llm.invoke(prompt)).content;
+        return answer;                      // handed straight to a sink
+      secure: |
+        const answer: string = (await llm.invoke(prompt)).content;
+        return sanitizeForSink(answer);
+
+# ---------------------------------------------------------------------------
+# LLM05.2 — Rendering model output as HTML (stored / reflected XSS)
+# ---------------------------------------------------------------------------
+
+- id: LLM05.2
+  facet: Improper Output Handling
+  section: Output Trust Boundary
+  security_rule: >-
+    Model output rendered in a browser must be HTML-encoded for its exact
+    sink context, or sanitized with a maintained HTML sanitizer, so a
+    completion containing markup cannot execute as script.
+  vulnerability_pattern: >-
+    An LLM completion is inserted into the page as raw HTML, so script
+    tags or event-handler attributes the model produced — often steered
+    by injected content — run in the viewer's browser.
+  secure_pattern: >-
+    The completion is written through a text node or an autoescaping
+    template, and any intentionally rendered markup is first passed
+    through an HTML sanitizer with a strict allowlist.
+  code_patterns:
+    generic:
+      vulnerable: |
+        page.innerHtml = llmResponse        # raw markup executes
+      secure: |
+        page.textContent = llmResponse
+      # for intentional rich text: page.innerHtml = htmlSanitizer.clean(llmResponse)
+    python:
+      vulnerable: |
+        return Markup(llm_answer)
+      secure: |
+        import nh3
+        return Markup(nh3.clean(llm_answer))
+    javascript:
+      vulnerable: |
+        chatBubble.innerHTML = message.content;
+      secure: |
+        chatBubble.textContent = message.content;
+    typescript:
+      vulnerable: |
+        return <div dangerouslySetInnerHTML={{ __html: answer }} />;
+      secure: |
+        return <div>{answer}</div>;   // React escapes by default
+
+# ---------------------------------------------------------------------------
+# LLM05.3 — Rendering LLM-generated Markdown without sanitization
+# ---------------------------------------------------------------------------
+
+- id: LLM05.3
+  facet: Improper Output Handling
+  section: Output Trust Boundary
+  security_rule: >-
+    LLM-generated Markdown must be rendered with raw-HTML passthrough
+    disabled and the resulting HTML sanitized, since chat UIs commonly
+    render completions as Markdown.
+  vulnerability_pattern: >-
+    A completion is rendered as Markdown with raw HTML allowed, so an
+    embedded script tag, javascript: link, or onerror image attribute in
+    the model output executes when the chat message is displayed.
+  secure_pattern: >-
+    The Markdown renderer runs with HTML passthrough disabled, the output
+    HTML is sanitized, and link and image URLs are checked against a safe
+    protocol allowlist before display.
+  code_patterns:
+    generic:
+      vulnerable: |
+        html = renderMarkdown(llmResponse)          # raw HTML passes through
+      secure: |
+        html = sanitize(renderMarkdown(llmResponse, allowRawHtml=false))
+    python:
+      vulnerable: |
+        html = markdown.markdown(llm_answer)
+      secure: |
+        import nh3
+        html = nh3.clean(markdown.markdown(llm_answer))
+    javascript:
+      vulnerable: |
+        bubble.innerHTML = marked.parse(message.content);
+      secure: |
+        bubble.innerHTML = DOMPurify.sanitize(marked.parse(message.content));
+    typescript:
+      vulnerable: |
+        <ReactMarkdown rehypePlugins={[rehypeRaw]}>{answer}</ReactMarkdown>
+      secure: |
+        <ReactMarkdown>{answer}</ReactMarkdown>   // no rehypeRaw; HTML inert
+
+# ---------------------------------------------------------------------------
+# LLM05.4 — Model output concatenated into a database query
+# ---------------------------------------------------------------------------
+
+- id: LLM05.4
+  facet: Improper Output Handling
+  section: Downstream Injection
+  security_rule: >-
+    When an LLM produces values for a database query, those values must
+    be supplied as bound parameters; the model must never be allowed to
+    emit the query text itself.
+  vulnerability_pattern: >-
+    A completion, or a text-to-SQL query the model generated, is executed
+    directly against the database, so prompt-injected content can read or
+    modify data outside the intended scope.
+  secure_pattern: >-
+    The query text is a fixed parameterized statement and the model
+    supplies only bound values, or a generated query is run under a
+    read-only, least-privilege connection with structural validation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        db.execute(llm.generateSql(question))
+      secure: |
+        params = llm.extractParams(question)        # values only
+        db.execute("SELECT * FROM orders WHERE id = ?", [params.id])
+    python:
+      vulnerable: |
+        cursor.execute(llm.invoke(text_to_sql_prompt).content)
+      secure: |
+        order_id = llm_extract_order_id(question)
+        cursor.execute("SELECT * FROM orders WHERE id = %s", (order_id,))
+    javascript:
+      vulnerable: |
+        const rows = await db.query(await llm.complete(sqlPrompt));
+      secure: |
+        const id = await llm.extractId(question);
+        const rows = await db.query("SELECT * FROM orders WHERE id = ?", [id]);
+    typescript:
+      vulnerable: |
+        const rows = await db.query<Order>(generatedSql);
+      secure: |
+        const id: number = await extractOrderId(question);
+        const rows = await db.query<Order>("SELECT * FROM orders WHERE id = $1", [id]);
+
+# ---------------------------------------------------------------------------
+# LLM05.5 — Model output passed to a code or expression evaluator
+# ---------------------------------------------------------------------------
+
+- id: LLM05.5
+  facet: Improper Output Handling
+  section: Downstream Injection
+  security_rule: >-
+    LLM output must never be passed to a dynamic code or expression
+    evaluator; any code the model emits must run only in an isolated,
+    resource-bounded sandbox with no host access.
+  vulnerability_pattern: >-
+    A completion is handed to eval, exec, or an expression engine in the
+    application process, so a model that was steered to produce hostile
+    code achieves remote code execution.
+  secure_pattern: >-
+    Generated code is either replaced with a constrained interpreter over
+    an allowlist of operations, or executed in a sandboxed runtime with
+    no filesystem, network, or host process access.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = eval(llm.generateCode(task))
+      secure: |
+        result = sandbox.run(llm.generateCode(task), noNetwork=true, noFs=true)
+    python:
+      vulnerable: |
+        exec(llm.invoke(prompt).content)
+      secure: |
+        op = ALLOWED_OPS.get(llm.invoke(prompt).content.strip())
+        result = op() if op else reject()
+    javascript:
+      vulnerable: |
+        const out = eval(await llm.complete(prompt));
+      secure: |
+        const out = await runInWorkerSandbox(await llm.complete(prompt));
+    typescript:
+      vulnerable: |
+        const fn = new Function(await llm.complete(prompt));
+        fn();
+      secure: |
+        const action = await llm.complete(prompt);
+        ALLOWED_ACTIONS[action]?.();   // dispatch table, no dynamic code
+
+# ---------------------------------------------------------------------------
+# LLM05.6 — Model output passed to a shell or OS command
+# ---------------------------------------------------------------------------
+
+- id: LLM05.6
+  facet: Improper Output Handling
+  section: Downstream Injection
+  security_rule: >-
+    LLM output used to invoke operating-system functionality must be
+    passed as discrete arguments to a directly invoked program, never
+    interpolated into a shell command string.
+  vulnerability_pattern: >-
+    A completion is concatenated into a command run through a shell, so
+    shell metacharacters the model emitted — under attacker steering —
+    let an attacker execute arbitrary commands on the host.
+  secure_pattern: >-
+    The program is invoked directly with model-derived values passed as
+    an argument vector, no shell is involved, and each value is validated
+    against an allowlist for its position.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run(llmResponse, shell=true)
+      secure: |
+        args = validateArgs(llm.extractArgs(task))
+        run(["convert", args.input, args.output])      # argument vector
+    python:
+      vulnerable: |
+        os.system(llm.invoke(prompt).content)
+      secure: |
+        fmt = llm_pick_format(prompt)
+        if fmt in {"png", "jpg"}:
+            subprocess.run(["convert", src, f"out.{fmt}"])
+    javascript:
+      vulnerable: |
+        child_process.exec(await llm.complete(prompt));
+      secure: |
+        const file = await llm.extractFilename(prompt);
+        child_process.execFile("gzip", [validatePath(file)]);
+    typescript:
+      vulnerable: |
+        exec(`ffmpeg -i ${llmArg}`);
+      secure: |
+        const input: string = validatePath(await llm.extractArg(prompt));
+        execFile("ffmpeg", ["-i", input]);
+
+# ---------------------------------------------------------------------------
+# LLM05.7 — Validating structured output against a strict schema
+# ---------------------------------------------------------------------------
+
+- id: LLM05.7
+  facet: Improper Output Handling
+  section: Output Validation
+  security_rule: >-
+    Structured output expected from an LLM must be parsed and validated
+    against a strict schema with type, range, and enum constraints before
+    any field is used; a parse or validation failure must be rejected.
+  vulnerability_pattern: >-
+    A completion expected to be JSON is parsed and its fields consumed
+    without schema validation, so missing, mistyped, oversized, or
+    out-of-range values flow into downstream logic.
+  secure_pattern: >-
+    The output is parsed into a declared schema with field types,
+    enumerated values, and bounds enforced, and any deviation triggers a
+    bounded retry or a safe rejection rather than silent acceptance.
+  code_patterns:
+    generic:
+      vulnerable: |
+        data = jsonParse(llmResponse)
+        applyAction(data.action)                # unvalidated field
+      secure: |
+        data = schema.validate(jsonParse(llmResponse))   # rejects bad output
+        applyAction(data.action)
+    python:
+      vulnerable: |
+        data = json.loads(llm.invoke(prompt).content)
+        grant_role(data["role"])
+      secure: |
+        class Decision(BaseModel):
+            role: Literal["viewer", "editor"]
+        grant_role(Decision.model_validate_json(llm_output).role)
+    javascript:
+      vulnerable: |
+        const data = JSON.parse(await llm.complete(prompt));
+        setAmount(data.amount);
+      secure: |
+        const data = decisionSchema.parse(JSON.parse(await llm.complete(prompt)));
+        setAmount(data.amount);
+    typescript:
+      vulnerable: |
+        const data = JSON.parse(raw) as Decision;   // cast, not checked
+      secure: |
+        const data: Decision = DecisionSchema.parse(JSON.parse(raw));  // zod
+
+# ---------------------------------------------------------------------------
+# LLM05.8 — Model output used as a file path or URL
+# ---------------------------------------------------------------------------
+
+- id: LLM05.8
+  facet: Improper Output Handling
+  section: Downstream Injection
+  security_rule: >-
+    LLM output used as a filesystem path or an outbound URL must be
+    canonicalized and confined — paths to an allowed base directory, URLs
+    to an allowlist of protocols and hosts — before the resource is used.
+  vulnerability_pattern: >-
+    A completion is used directly as a file path or fetch target, so a
+    traversal sequence or an internal address the model emitted enables
+    arbitrary file access or server-side request forgery.
+  secure_pattern: >-
+    The model-supplied path is resolved and verified to stay within an
+    allowed base directory, and a model-supplied URL has its scheme and
+    host checked against an allowlist with internal ranges rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        content = readFile(llmResponse)
+      secure: |
+        path = resolveWithin(BASE_DIR, llmResponse)   # traversal rejected
+        content = readFile(path)
+    python:
+      vulnerable: |
+        with open(llm.invoke(prompt).content) as f: data = f.read()
+      secure: |
+        target = (BASE_DIR / llm_path).resolve()
+        if not target.is_relative_to(BASE_DIR): reject()
+        data = target.read_text()
+    javascript:
+      vulnerable: |
+        const data = await fetch(await llm.complete(urlPrompt));
+      secure: |
+        const u = new URL(await llm.complete(urlPrompt));
+        if (ALLOWED_HOSTS.has(u.hostname) && u.protocol === "https:") await fetch(u);
+    typescript:
+      vulnerable: |
+        const buf = fs.readFileSync(modelPath);
+      secure: |
+        const full = path.resolve(BASE_DIR, modelPath);
+        if (!full.startsWith(BASE_DIR + path.sep)) throw new Error("traversal");
+        const buf = fs.readFileSync(full);
+
+# ---------------------------------------------------------------------------
+# LLM05.9 — Agent tool-call arguments emitted by the model
+# ---------------------------------------------------------------------------
+
+- id: LLM05.9
+  facet: Improper Output Handling
+  section: Agent Tool Invocation
+  security_rule: >-
+    Tool-call arguments an LLM agent emits must be validated against the
+    tool's schema and authorization policy before the tool runs; the
+    model selecting a tool is not authorization to execute it.
+  vulnerability_pattern: >-
+    An agent dispatches a tool with whatever arguments the model emitted,
+    so an injected instruction can drive a privileged or destructive tool
+    with attacker-chosen parameters.
+  secure_pattern: >-
+    Each tool call is checked against its argument schema and an explicit
+    per-tool authorization policy bound to the acting user, and sensitive
+    tools require independent confirmation before execution.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tools[call.name](call.args)            # model-chosen args, no checks
+      secure: |
+        if authorized(user, call.name) and schemaValid(call):
+            tools[call.name](call.args)
+    python:
+      vulnerable: |
+        TOOLS[tool_call["name"]](**tool_call["args"])
+      secure: |
+        spec = TOOL_REGISTRY[tool_call["name"]]
+        if spec.permits(current_user):
+            spec.run(**spec.schema.model_validate(tool_call["args"]).model_dump())
+    javascript:
+      vulnerable: |
+        await tools[call.function.name](JSON.parse(call.function.arguments));
+      secure: |
+        const t = registry.get(call.function.name);
+        const args = t.schema.parse(JSON.parse(call.function.arguments));
+        if (t.allows(user)) await t.run(args);
+    typescript:
+      vulnerable: |
+        await toolMap[name](args as ToolArgs);
+      secure: |
+        const tool = toolRegistry[name];
+        if (tool && tool.authorize(user)) await tool.run(tool.schema.parse(args));
+
+# ---------------------------------------------------------------------------
+# LLM05.10 — Model output in logs, error messages, and email headers
+# ---------------------------------------------------------------------------
+
+- id: LLM05.10
+  facet: Improper Output Handling
+  section: Output Trust Boundary
+  security_rule: >-
+    LLM output written into logs, email headers, or other line-oriented
+    sinks must have control characters such as carriage return and line
+    feed stripped or neutralized so it cannot forge structural records.
+  vulnerability_pattern: >-
+    A completion is written verbatim into a log line or an email header,
+    so newline characters in the output let it inject forged log entries
+    or additional headers.
+  secure_pattern: >-
+    Control characters are stripped or encoded from model output before
+    it enters a line-oriented sink, and structured logging records the
+    completion as a discrete, escaped field.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("llm said: " + llmResponse)
+      secure: |
+        log.info("llm output", field=stripCrlf(llmResponse))
+    python:
+      vulnerable: |
+        logger.info("answer: " + llm_answer)
+      secure: |
+        logger.info("llm answer", extra={"answer": llm_answer.replace("\n", " ")})
+    javascript:
+      vulnerable: |
+        console.log("model: " + answer);
+      secure: |
+        logger.info({ event: "model_output", answer: answer.replace(/[\r\n]/g, " ") });
+    typescript:
+      vulnerable: |
+        transport.sendMail({ subject: llmSubject, text: body });
+      secure: |
+        const safe = llmSubject.replace(/[\r\n]/g, "");
+        transport.sendMail({ subject: safe, text: body });

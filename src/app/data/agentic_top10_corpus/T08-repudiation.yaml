@@ -1,0 +1,466 @@
+# OWASP Top 10 for Agentic AI — T08: Repudiation & Untraceability
+# Hand-authored enriched corpus (Agentic Threats enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: agent actions that cannot be attributed, audited, or
+# reconstructed after the fact. Covers missing or incomplete audit
+# trails, untraceable tool calls, lost cross-agent correlation, mutable
+# or unsigned logs, missing actor identity on actions, and the inability
+# to replay or reconstruct an agent's decision path.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern
+# and secure_pattern (concept descriptions — no '*' or '[' — these feed
+# the agent's generic fallback), and short seed-sized code_patterns
+# (generic always, plus python / javascript / typescript — the
+# languages agentic and multi-agent systems are built in).
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.1 — Tool invocation audit trail
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.1
+  facet: Repudiation & Untraceability
+  section: Tool Invocation Audit Trail
+  security_rule: >-
+    Every tool or function call an agent makes must be recorded to a
+    durable audit log with the tool name, arguments, result status, and
+    the identity of the agent that invoked it, before the result is used.
+  vulnerability_pattern: >-
+    An agent invokes tools directly with no audit record, so after an
+    incident there is no way to know which tools ran, with what inputs,
+    or which agent triggered them.
+  secure_pattern: >-
+    Tool execution passes through a wrapper that emits a structured
+    audit event with the tool name, arguments, outcome, and invoking
+    agent identity for every call, success or failure.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = tool.run(args)            # no record of the call
+      secure: |
+        audit.log(event="tool_call", tool=tool.name, args=args, agent=agent.id)
+        result = tool.run(args)
+    python:
+      vulnerable: |
+        result = self.tools[name](**kwargs)
+      secure: |
+        audit_log.info("tool_call", tool=name, args=kwargs, agent_id=self.id)
+        result = self.tools[name](**kwargs)
+    javascript:
+      vulnerable: |
+        const result = await tool.invoke(args);
+      secure: |
+        auditLog.record({ event: "tool_call", tool: tool.name, args, agentId: agent.id });
+        const result = await tool.invoke(args);
+    typescript:
+      vulnerable: |
+        const result: ToolResult = await tool.invoke(args);
+      secure: |
+        auditLog.record({ event: "tool_call", tool: tool.name, args, agentId: agent.id });
+        const result: ToolResult = await tool.invoke(args);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.2 — Correlation identifiers across agents
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.2
+  facet: Repudiation & Untraceability
+  section: Correlation Identifiers Across Agents
+  security_rule: >-
+    A correlation or trace identifier must be created when a task enters
+    the system and propagated unchanged through every agent, sub-agent,
+    and tool call so the whole run can be reconstructed end to end.
+  vulnerability_pattern: >-
+    Each agent logs with its own local identifier and no shared trace
+    id, so a multi-agent run produces disconnected log fragments that
+    cannot be stitched back into one timeline.
+  secure_pattern: >-
+    A single trace id is generated at task intake and carried in the
+    context passed to every downstream agent and tool, and every log
+    line and audit event includes it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        subAgent.run(task)                 # child run has no link to the parent
+      secure: |
+        subAgent.run(task, context={"trace_id": ctx.trace_id})
+    python:
+      vulnerable: |
+        result = await planner_agent.ainvoke({"task": task})
+      secure: |
+        trace_id = correlation_id_var.get() or uuid4().hex
+        result = await planner_agent.ainvoke({"task": task, "trace_id": trace_id})
+    javascript:
+      vulnerable: |
+        const out = await childAgent.run({ task });
+      secure: |
+        const traceId = ctx.traceId ?? randomUUID();
+        const out = await childAgent.run({ task, traceId });
+    typescript:
+      vulnerable: |
+        const out = await childAgent.run({ task });
+      secure: |
+        const traceId: string = ctx.traceId ?? randomUUID();
+        const out = await childAgent.run({ task, traceId });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.3 — Actor identity on every action
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.3
+  facet: Repudiation & Untraceability
+  section: Actor Identity On Every Action
+  security_rule: >-
+    Every state-changing action an agent performs must record the
+    initiating principal — the human user and the specific agent acting
+    on their behalf — so the action can be attributed unambiguously.
+  vulnerability_pattern: >-
+    Actions are logged or persisted with no actor field, or with a
+    generic service account, so an action cannot be traced back to the
+    user or agent that caused it.
+  secure_pattern: >-
+    Each action carries both the on-behalf-of user identity and the
+    acting agent identity, written into the audit record and any
+    persisted row, so attribution is never ambiguous.
+  code_patterns:
+    generic:
+      vulnerable: |
+        db.update(record, changes)         # no actor recorded
+      secure: |
+        db.update(record, changes, actor={"user": user.id, "agent": agent.id})
+    python:
+      vulnerable: |
+        await repo.apply_change(change)
+      secure: |
+        await repo.apply_change(change, acting_user=user.id, acting_agent=agent.id)
+    javascript:
+      vulnerable: |
+        await store.commit(change);
+      secure: |
+        await store.commit(change, { onBehalfOf: user.id, agentId: agent.id });
+    typescript:
+      vulnerable: |
+        await store.commit(change);
+      secure: |
+        await store.commit(change, { onBehalfOf: user.id, agentId: agent.id });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.4 — Tamper-evident, append-only logs
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.4
+  facet: Repudiation & Untraceability
+  section: Tamper-Evident Append-Only Logs
+  security_rule: >-
+    Agent audit logs must be written to append-only, tamper-evident
+    storage so a compromised agent or operator cannot silently delete or
+    rewrite the record of what was done.
+  vulnerability_pattern: >-
+    Audit entries are written to a mutable file or table that the agent
+    process itself can overwrite or truncate, so the trail can be
+    altered after the fact to hide actions.
+  secure_pattern: >-
+    Audit events are appended to write-once storage or a hash-chained
+    log, where each entry references the digest of the previous one, so
+    any deletion or edit is detectable.
+  code_patterns:
+    generic:
+      vulnerable: |
+        logFile.write(entry)               # mutable, can be truncated
+      secure: |
+        entry.prev_hash = lastHash
+        appendOnlyLog.append(entry); lastHash = hash(entry)
+    python:
+      vulnerable: |
+        with open("audit.log", "w") as f: f.write(json.dumps(entry))
+      secure: |
+        entry["prev_hash"] = last_hash
+        entry["hash"] = sha256(canonical(entry)); audit_sink.append(entry)
+    javascript:
+      vulnerable: |
+        fs.writeFileSync("audit.log", JSON.stringify(entry));
+      secure: |
+        entry.prevHash = lastHash;
+        entry.hash = sha256(canonical(entry)); await auditSink.append(entry);
+    typescript:
+      vulnerable: |
+        fs.writeFileSync("audit.log", JSON.stringify(entry));
+      secure: |
+        entry.prevHash = lastHash;
+        entry.hash = sha256(canonical(entry)); await auditSink.append(entry);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.5 — Capturing the agent reasoning trace
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.5
+  facet: Repudiation & Untraceability
+  section: Capturing The Agent Reasoning Trace
+  security_rule: >-
+    The decision path behind an agent action — the prompt, the model
+    output, and the chosen tool or plan step — must be captured so the
+    reasoning that led to an outcome can be reviewed and explained.
+  vulnerability_pattern: >-
+    Only the final action is recorded while the intermediate plan, model
+    response, and tool selection are discarded, so a harmful action
+    cannot be explained or distinguished from a malfunction.
+  secure_pattern: >-
+    Each reasoning step records the prompt, the model completion, and
+    the selected next action under the run trace id, so the full
+    decision path is reconstructable.
+  code_patterns:
+    generic:
+      vulnerable: |
+        action = agent.decide(state); execute(action)
+      secure: |
+        step = agent.decide(state)
+        trace.record(prompt=step.prompt, completion=step.output, action=step.action)
+        execute(step.action)
+    python:
+      vulnerable: |
+        decision = llm.invoke(prompt)
+        run_tool(decision.tool)
+      secure: |
+        decision = llm.invoke(prompt)
+        trace.add_step(trace_id, prompt=prompt, completion=decision, tool=decision.tool)
+        run_tool(decision.tool)
+    javascript:
+      vulnerable: |
+        const decision = await llm.invoke(prompt);
+        await runTool(decision.tool);
+      secure: |
+        const decision = await llm.invoke(prompt);
+        trace.addStep(traceId, { prompt, completion: decision, tool: decision.tool });
+        await runTool(decision.tool);
+    typescript:
+      vulnerable: |
+        const decision = await llm.invoke(prompt);
+        await runTool(decision.tool);
+      secure: |
+        const decision: AgentStep = await llm.invoke(prompt);
+        trace.addStep(traceId, { prompt, completion: decision, tool: decision.tool });
+        await runTool(decision.tool);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.6 — Structured, queryable audit events
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.6
+  facet: Repudiation & Untraceability
+  section: Structured Queryable Audit Events
+  security_rule: >-
+    Audit events must be emitted as structured records with explicit
+    fields rather than free-form text, so an incident responder can
+    query and filter the agent's activity reliably.
+  vulnerability_pattern: >-
+    Agent activity is recorded as interpolated human-readable strings,
+    so the trail cannot be queried by tool, actor, or outcome and key
+    fields are easily lost in formatting.
+  secure_pattern: >-
+    Each event is a structured object with named fields for event type,
+    actor, tool, arguments, outcome, and timestamp, emitted to a sink
+    that preserves the structure for later querying.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("agent " + id + " ran " + tool + " ok")
+      secure: |
+        log.event(type="tool_call", agent=id, tool=tool, outcome="ok")
+    python:
+      vulnerable: |
+        logger.info(f"agent {agent_id} called {tool} -> {status}")
+      secure: |
+        logger.info("tool_call", agent_id=agent_id, tool=tool, outcome=status)
+    javascript:
+      vulnerable: |
+        console.log(`agent ${agentId} called ${tool}: ${status}`);
+      secure: |
+        logger.info({ event: "tool_call", agentId, tool, outcome: status });
+    typescript:
+      vulnerable: |
+        console.log(`agent ${agentId} called ${tool}: ${status}`);
+      secure: |
+        logger.info({ event: "tool_call", agentId, tool, outcome: status });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.7 — Logging human approval and override decisions
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.7
+  facet: Repudiation & Untraceability
+  section: Logging Human Approval And Override Decisions
+  security_rule: >-
+    Every human-in-the-loop approval, rejection, or override of an agent
+    action must be logged with the deciding user, the decision, the
+    action it applied to, and the time, so accountability is preserved.
+  vulnerability_pattern: >-
+    A human approves or overrides an agent's proposed action and the
+    decision is acted on with no record, so later no one can show who
+    authorized a sensitive operation.
+  secure_pattern: >-
+    The approval gate writes an audit event capturing the deciding
+    user, the verdict, the target action id, and the timestamp before
+    the agent is allowed to proceed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if userApproved: agent.proceed(action)
+      secure: |
+        audit.log(event="approval", user=user.id, verdict=verdict, action=action.id)
+        if verdict == "approved": agent.proceed(action)
+    python:
+      vulnerable: |
+        if approval.granted:
+            await agent.resume(action)
+      secure: |
+        audit_log.info("hitl_decision", user_id=approver.id,
+                       verdict=approval.verdict, action_id=action.id)
+        if approval.granted:
+            await agent.resume(action)
+    javascript:
+      vulnerable: |
+        if (approval.granted) await agent.resume(action);
+      secure: |
+        auditLog.record({ event: "hitl_decision", userId: approver.id,
+                          verdict: approval.verdict, actionId: action.id });
+        if (approval.granted) await agent.resume(action);
+    typescript:
+      vulnerable: |
+        if (approval.granted) await agent.resume(action);
+      secure: |
+        auditLog.record({ event: "hitl_decision", userId: approver.id,
+                          verdict: approval.verdict, actionId: action.id });
+        if (approval.granted) await agent.resume(action);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.8 — Trustworthy, synchronized timestamps
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.8
+  facet: Repudiation & Untraceability
+  section: Trustworthy Synchronized Timestamps
+  security_rule: >-
+    Audit events must carry a timezone-explicit timestamp from a
+    trusted, synchronized clock so the ordering of actions across agents
+    can be established without dispute.
+  vulnerability_pattern: >-
+    Events are stamped with a naive local time, or with a value the
+    agent itself supplies, so timelines across agents disagree and the
+    real order of actions cannot be proven.
+  secure_pattern: >-
+    The audit layer applies an authoritative UTC timestamp at write
+    time, independent of agent-supplied values, so all events share one
+    consistent and comparable time base.
+  code_patterns:
+    generic:
+      vulnerable: |
+        entry.time = localTimeString()     # naive, agent-controlled
+      secure: |
+        entry.time = trustedClock.utcNow().isoformat()
+    python:
+      vulnerable: |
+        entry["ts"] = datetime.now().isoformat()
+      secure: |
+        entry["ts"] = datetime.now(timezone.utc).isoformat()
+    javascript:
+      vulnerable: |
+        entry.ts = new Date().toString();
+      secure: |
+        entry.ts = new Date().toISOString();
+    typescript:
+      vulnerable: |
+        entry.ts = new Date().toString();
+      secure: |
+        entry.ts = new Date().toISOString();
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.9 — Audit logging that cannot be skipped on failure
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.9
+  facet: Repudiation & Untraceability
+  section: Audit Logging That Cannot Be Skipped On Failure
+  security_rule: >-
+    Audit logging of an agent action must not be bypassed when the
+    action throws, times out, or is cancelled — failed and partial
+    attempts must be recorded just like successful ones.
+  vulnerability_pattern: >-
+    The audit write is placed only on the success path, so an action
+    that fails midway leaves no trace and an attacker can cause errors
+    to suppress the record of an attempt.
+  secure_pattern: >-
+    The audit event is emitted in a finally block or equivalent guaranteed
+    path, recording the outcome including error and cancellation, so
+    every attempt is accounted for.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = tool.run(args); audit.log(result)   # skipped if run throws
+      secure: |
+        try: result = tool.run(args); finally: audit.log(outcome_of(result))
+    python:
+      vulnerable: |
+        result = await tool.run(args)
+        audit_log.info("tool_done", outcome="ok")
+      secure: |
+        try:
+            result = await tool.run(args); outcome = "ok"
+        finally:
+            audit_log.info("tool_done", outcome=outcome)
+    javascript:
+      vulnerable: |
+        const result = await tool.run(args);
+        auditLog.record({ event: "tool_done", outcome: "ok" });
+      secure: |
+        let outcome = "error";
+        try { const result = await tool.run(args); outcome = "ok"; }
+        finally { auditLog.record({ event: "tool_done", outcome }); }
+    typescript:
+      vulnerable: |
+        const result = await tool.run(args);
+        auditLog.record({ event: "tool_done", outcome: "ok" });
+      secure: |
+        let outcome = "error";
+        try { const result = await tool.run(args); outcome = "ok"; }
+        finally { auditLog.record({ event: "tool_done", outcome }); }
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T8.10 — Redaction without losing traceability
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T8.10
+  facet: Repudiation & Untraceability
+  section: Redaction Without Losing Traceability
+  security_rule: >-
+    Sensitive values in audit records must be redacted or hashed rather
+    than dropped, so logs stay safe to retain while still proving which
+    inputs an agent acted on.
+  vulnerability_pattern: >-
+    To avoid storing secrets, whole arguments or payloads are omitted
+    from the audit record, so the trail no longer shows what the agent
+    actually operated on and the action cannot be verified.
+  secure_pattern: >-
+    Sensitive fields are masked or replaced with a stable salted hash
+    while non-sensitive structure is retained, so the record stays both
+    privacy-safe and forensically meaningful.
+  code_patterns:
+    generic:
+      vulnerable: |
+        audit.log(tool=name)               # args dropped entirely
+      secure: |
+        audit.log(tool=name, args=redactSecrets(args))
+    python:
+      vulnerable: |
+        audit_log.info("tool_call", tool=name)
+      secure: |
+        audit_log.info("tool_call", tool=name, args=mask_sensitive(kwargs))
+    javascript:
+      vulnerable: |
+        auditLog.record({ event: "tool_call", tool: name });
+      secure: |
+        auditLog.record({ event: "tool_call", tool: name, args: redact(args) });
+    typescript:
+      vulnerable: |
+        auditLog.record({ event: "tool_call", tool: name });
+      secure: |
+        auditLog.record({ event: "tool_call", tool: name, args: redact(args) });

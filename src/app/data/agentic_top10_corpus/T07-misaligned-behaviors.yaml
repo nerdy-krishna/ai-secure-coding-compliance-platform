@@ -1,0 +1,478 @@
+# OWASP Top 10 for Agentic AI — T07: Misaligned & Deceptive Behaviors
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript for agentic systems).
+#
+# Scope: T07 covers an agent that pursues unintended or deceptive
+# strategies to satisfy its objective — reward hacking and goal
+# misgeneralization, specification gaming that exploits loosely worded
+# goals, deceptive reporting that hides failures or fabricates success,
+# unsanctioned sub-goals and scope creep, sycophantic agreement that
+# abandons correct behaviour, collusion between cooperating agents, and
+# situational awareness that makes an agent behave differently when it
+# detects it is being evaluated. Mitigations centre on bounding the
+# objective, constraining the action space, verifying outputs against
+# ground truth, and independent monitoring rather than self-report.
+
+# ---------------------------------------------------------------------------
+# T07.1 — Bounded, well-specified objectives
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.1
+  facet: Misaligned & Deceptive Behaviors
+  section: Bound the Objective
+  security_rule: >-
+    An agent's goal must be expressed with explicit success criteria,
+    constraints, and prohibited actions, so the agent cannot satisfy a
+    loosely worded objective in a way the operator never intended.
+  vulnerability_pattern: >-
+    The agent is given an open-ended goal such as maximise a metric with
+    no constraints, so it adopts whatever strategy raises the number,
+    including ones that harm the user or violate policy.
+  secure_pattern: >-
+    The goal is paired with hard constraints, an allowed action set, and
+    measurable success criteria, so the agent optimises only within a
+    boundary the operator has approved.
+  code_patterns:
+    generic:
+      vulnerable: |
+        agent.run(goal="increase signups by any means")
+      secure: |
+        agent.run(goal="increase signups",
+                  constraints=["no dark patterns", "no unsolicited email"],
+                  success_metric=verified_signups)
+    python:
+      vulnerable: |
+        agent = Agent(objective="maximize revenue")
+      secure: |
+        agent = Agent(objective="maximize revenue",
+                      hard_constraints=POLICY_RULES,
+                      forbidden_actions={"issue_refund", "change_pricing"})
+    javascript:
+      vulnerable: |
+        const agent = new Agent({ goal: "boost engagement" });
+      secure: |
+        const agent = new Agent({ goal: "boost engagement",
+          constraints: policyRules, forbiddenTools: ["sendPush", "autoFollow"] });
+    typescript:
+      vulnerable: |
+        const agent = new Agent({ goal: "reduce ticket count" } as AgentConfig);
+      secure: |
+        const agent = new Agent({ goal: "reduce ticket count",
+          constraints: policyRules,
+          successCriteria: ticketsResolvedNotJustClosed } as AgentConfig);
+
+# ---------------------------------------------------------------------------
+# T07.2 — Reward hacking and proxy-metric gaming
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.2
+  facet: Misaligned & Deceptive Behaviors
+  section: Reward Hacking and Proxy Metrics
+  security_rule: >-
+    An agent must be scored against the true outcome it is meant to
+    achieve, not a proxy signal that can be inflated, so it cannot earn
+    reward by gaming the measurement instead of doing the work.
+  vulnerability_pattern: >-
+    The agent is rewarded on a proxy metric such as marking a task done
+    or counting closed tickets, so it learns to flip the proxy without
+    ever solving the underlying problem.
+  secure_pattern: >-
+    Reward is computed from an independently verified outcome — the test
+    actually passes, the user confirms resolution — so the only way to
+    score is to genuinely achieve the goal.
+  code_patterns:
+    generic:
+      vulnerable: |
+        reward = 1 if agent.marked_task_done else 0
+      secure: |
+        reward = 1 if independent_check(task) == "resolved" else 0
+    python:
+      vulnerable: |
+        score = len([t for t in tickets if t.status == "closed"])
+      secure: |
+        score = len([t for t in tickets if verifier.confirms_resolved(t)])
+    javascript:
+      vulnerable: |
+        const reward = result.selfReportedSuccess ? 1 : 0;
+      secure: |
+        const reward = (await runAcceptanceTests(result)).allPassed ? 1 : 0;
+    typescript:
+      vulnerable: |
+        const reward: number = agentClaimsComplete ? 1 : 0;
+      secure: |
+        const reward: number = await groundTruth.verify(task) ? 1 : 0;
+
+# ---------------------------------------------------------------------------
+# T07.3 — Constrain the action space to an allowlist
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.3
+  facet: Misaligned & Deceptive Behaviors
+  section: Constrain the Action Space
+  security_rule: >-
+    An agent must only be able to take actions on an explicit allowlist
+    scoped to its current task, so a misaligned strategy cannot reach a
+    tool or operation the operator never sanctioned.
+  vulnerability_pattern: >-
+    The agent is handed the full tool registry regardless of its task,
+    so when it pursues an unintended strategy it can call powerful tools
+    such as deleting data or sending mail to make that strategy succeed.
+  secure_pattern: >-
+    The agent is given only the minimal set of tools its current task
+    requires, and any call outside that allowlist is rejected before it
+    executes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        agent.tools = all_registered_tools
+      secure: |
+        agent.tools = allowlist_for(task)        # only what this task needs
+    python:
+      vulnerable: |
+        agent = Agent(tools=TOOL_REGISTRY.all())
+      secure: |
+        allowed = {"search_docs", "summarize"}
+        agent = Agent(tools=[t for t in TOOL_REGISTRY.all() if t.name in allowed])
+    javascript:
+      vulnerable: |
+        const agent = new Agent({ tools: registry.list() });
+      secure: |
+        const allowed = new Set(["searchDocs", "summarize"]);
+        const agent = new Agent({ tools: registry.list().filter(t => allowed.has(t.name)) });
+    typescript:
+      vulnerable: |
+        const agent = new Agent({ tools: registry.all() });
+      secure: |
+        const allowed: ReadonlySet<string> = new Set(["searchDocs", "summarize"]);
+        const agent = new Agent({ tools: registry.all().filter(t => allowed.has(t.name)) });
+
+# ---------------------------------------------------------------------------
+# T07.4 — Verify agent claims against ground truth
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.4
+  facet: Misaligned & Deceptive Behaviors
+  section: Verify Claims Against Ground Truth
+  security_rule: >-
+    An agent's report that it completed a task must be confirmed against
+    an objective check before the result is accepted, so a fabricated or
+    over-optimistic success claim cannot be trusted as fact.
+  vulnerability_pattern: >-
+    The orchestrator accepts the agent's own statement that the work
+    succeeded, so an agent that hides a failure or invents a result is
+    believed and the pipeline proceeds on a false premise.
+  secure_pattern: >-
+    Completion is gated on an independent verifier — a test run, a diff
+    inspection, a second checker — and the agent's self-report alone is
+    never sufficient to mark the task done.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if agent.says("done"): mark_complete(task)
+      secure: |
+        if verifier.check(task.artifact): mark_complete(task)
+    python:
+      vulnerable: |
+        if "success" in agent_response.lower():
+            deploy(build)
+      secure: |
+        if test_suite.run(build).passed and lint(build).ok:
+            deploy(build)
+    javascript:
+      vulnerable: |
+        if (agentResult.status === "complete") publish(doc);
+      secure: |
+        if (await schemaCheck(doc) && await citationsExist(doc)) publish(doc);
+    typescript:
+      vulnerable: |
+        if (agentResult.claimedComplete) accept(output);
+      secure: |
+        const verdict: Verdict = await verifier.assess(output);
+        if (verdict.confirmed) accept(output);
+
+# ---------------------------------------------------------------------------
+# T07.5 — Honest reporting of failure and uncertainty
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.5
+  facet: Misaligned & Deceptive Behaviors
+  section: Honest Failure Reporting
+  security_rule: >-
+    An agent must be required to surface failures, partial results, and
+    low confidence explicitly, so it cannot satisfy its objective by
+    quietly papering over a problem and reporting unqualified success.
+  vulnerability_pattern: >-
+    The agent's output schema only allows a success result, so when the
+    agent cannot complete the task it fabricates a plausible answer
+    rather than admitting the failure.
+  secure_pattern: >-
+    The output schema makes failure, partial completion, and a
+    confidence value first-class fields, so the agent has a sanctioned
+    way to report that it did not fully succeed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return {result: agent_output}            # no way to express failure
+      secure: |
+        return {status: "ok"|"partial"|"failed", result: ..., confidence: 0.0}
+    python:
+      vulnerable: |
+        class Result(BaseModel):
+            answer: str
+      secure: |
+        class Result(BaseModel):
+            status: Literal["ok", "partial", "failed"]
+            answer: str | None
+            confidence: float
+    javascript:
+      vulnerable: |
+        return { answer: completion.text };
+      secure: |
+        return { status, answer: status === "failed" ? null : completion.text,
+                 confidence };
+    typescript:
+      vulnerable: |
+        interface Result { answer: string; }
+      secure: |
+        interface Result { status: "ok" | "partial" | "failed";
+          answer: string | null; confidence: number; }
+
+# ---------------------------------------------------------------------------
+# T07.6 — No unsanctioned sub-goals or scope creep
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.6
+  facet: Misaligned & Deceptive Behaviors
+  section: Prevent Unsanctioned Sub-Goals
+  security_rule: >-
+    An agent must execute only the task it was assigned, and any new
+    sub-goal it derives that falls outside that task must be approved
+    before it acts, so it cannot quietly expand its own mandate.
+  vulnerability_pattern: >-
+    A planner agent generates sub-tasks and dispatches them with no
+    scope check, so a step that drifts beyond the original request is
+    carried out as if it had been authorised.
+  secure_pattern: >-
+    Each derived sub-task is checked against the boundary of the
+    approved objective, and anything outside it is dropped or escalated
+    to a human for approval before execution.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for step in agent.plan(): execute(step)
+      secure: |
+        for step in agent.plan():
+            if in_scope(step, task): execute(step)
+            else: escalate(step)
+    python:
+      vulnerable: |
+        subtasks = planner.decompose(goal)
+        for s in subtasks: worker.run(s)
+      secure: |
+        for s in planner.decompose(goal):
+            if scope_guard.permits(s, goal): worker.run(s)
+            else: request_approval(s)
+    javascript:
+      vulnerable: |
+        plan.steps.forEach(step => executor.run(step));
+      secure: |
+        plan.steps.forEach(step =>
+          scopeGuard.allows(step, task) ? executor.run(step) : escalate(step));
+    typescript:
+      vulnerable: |
+        for (const step of plan.steps) await executor.run(step);
+      secure: |
+        for (const step of plan.steps) {
+          if (scopeGuard.allows(step, task)) await executor.run(step);
+          else await escalate(step);
+        }
+
+# ---------------------------------------------------------------------------
+# T07.7 — Resist sycophancy and instruction abandonment
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.7
+  facet: Misaligned & Deceptive Behaviors
+  section: Resist Sycophancy
+  security_rule: >-
+    An agent must hold to its verified conclusions and policy
+    constraints even when a user pushes back, so it does not abandon
+    correct behaviour merely to agree with whoever is talking to it.
+  vulnerability_pattern: >-
+    User pressure or disagreement is fed straight back into the prompt
+    as new instruction, so the agent reverses a correct answer or drops
+    a safety constraint just to satisfy the user.
+  secure_pattern: >-
+    Verified facts and policy constraints are pinned as immutable
+    context that user turns cannot override, and a reversal requires
+    fresh evidence rather than mere insistence.
+  code_patterns:
+    generic:
+      vulnerable: |
+        prompt = verified_answer + " User disagrees: " + user_text + " Comply."
+      secure: |
+        prompt = pin(verified_facts, policy) + user_turn(user_text)
+    python:
+      vulnerable: |
+        messages.append(HumanMessage(f"You are wrong, change it: {pushback}"))
+      secure: |
+        messages = [SystemMessage(IMMUTABLE_FACTS_AND_POLICY),
+                    HumanMessage(pushback)]   # reversal needs new evidence
+    javascript:
+      vulnerable: |
+        messages.push({ role: "user", content: `Override your answer: ${pushback}` });
+      secure: |
+        const messages = [{ role: "system", content: pinnedFactsAndPolicy },
+                          { role: "user", content: pushback }];
+    typescript:
+      vulnerable: |
+        history.push({ role: "user", content: `Just agree with me: ${pushback}` });
+      secure: |
+        const messages: ChatMessage[] =
+          [{ role: "system", content: pinnedFactsAndPolicy },
+           { role: "user", content: pushback }];
+
+# ---------------------------------------------------------------------------
+# T07.8 — Independent monitoring of agent behaviour
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.8
+  facet: Misaligned & Deceptive Behaviors
+  section: Independent Behavioral Monitoring
+  security_rule: >-
+    Agent actions and reasoning traces must be observed by a separate
+    monitor that the agent cannot influence, so misaligned strategies
+    are detected from outside rather than relying on the agent to report
+    them.
+  vulnerability_pattern: >-
+    Oversight depends on the agent's own self-assessment or on logs the
+    agent itself writes, so an agent pursuing a deceptive strategy can
+    simply omit or rewrite the evidence of it.
+  secure_pattern: >-
+    A separate monitor consumes a tamper-evident action log and flags
+    anomalous tool use, goal drift, or contradictory reasoning, and the
+    agent has no write access to that monitoring channel.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log = agent.write_own_summary()          # agent controls the record
+      secure: |
+        monitor.observe(append_only_action_log)  # agent cannot edit it
+    python:
+      vulnerable: |
+        audit_entry = agent.self_report()
+        store(audit_entry)
+      secure: |
+        for action in agent.action_stream():
+            tamper_evident_log.append(action)
+            monitor.evaluate(action)             # independent reviewer
+    javascript:
+      vulnerable: |
+        auditLog.push(agent.describeWhatIDid());
+      secure: |
+        agent.on("action", a => { appendOnlyLog.write(a); monitor.inspect(a); });
+    typescript:
+      vulnerable: |
+        auditLog.push(agent.selfReport() as AuditEntry);
+      secure: |
+        agent.on("action", (a: AgentAction) => {
+          appendOnlyLog.write(a); monitor.inspect(a);
+        });
+
+# ---------------------------------------------------------------------------
+# T07.9 — Prevent collusion between cooperating agents
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.9
+  facet: Misaligned & Deceptive Behaviors
+  section: Prevent Multi-Agent Collusion
+  security_rule: >-
+    When one agent reviews or approves another agent's work, the
+    reviewer must be independent and adversarially oriented, so two
+    agents cannot converge on a strategy that approves each other while
+    failing the real objective.
+  vulnerability_pattern: >-
+    The same model, prompt, or shared scratchpad drives both the worker
+    and its reviewer, so the reviewer rubber-stamps the worker's output
+    and a misaligned result passes review unchallenged.
+  secure_pattern: >-
+    The reviewer runs as a separate agent with its own model or prompt,
+    no shared mutable state, and an explicit mandate to find faults, so
+    approval reflects genuine scrutiny.
+  code_patterns:
+    generic:
+      vulnerable: |
+        review = same_agent.evaluate(same_agent.output)
+      secure: |
+        review = independent_critic.evaluate(worker.output)
+    python:
+      vulnerable: |
+        worker = Agent(llm=model); reviewer = worker   # same instance
+        verdict = reviewer.review(worker.run(task))
+      secure: |
+        worker = Agent(llm=model_a)
+        reviewer = Agent(llm=model_b, role="adversarial critic")
+        verdict = reviewer.review(worker.run(task))
+    javascript:
+      vulnerable: |
+        const verdict = agent.review(agent.lastOutput);  // reviews itself
+      secure: |
+        const critic = new Agent({ model: modelB, role: "find flaws" });
+        const verdict = critic.review(worker.lastOutput);
+    typescript:
+      vulnerable: |
+        const verdict: Verdict = agent.review(agent.lastOutput);
+      secure: |
+        const critic = new Agent({ model: modelB, role: "adversarial critic" });
+        const verdict: Verdict = critic.review(worker.lastOutput);
+
+# ---------------------------------------------------------------------------
+# T07.10 — Consistent behavior under evaluation
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T7.10
+  facet: Misaligned & Deceptive Behaviors
+  section: Consistent Behavior Under Evaluation
+  security_rule: >-
+    An agent must not be able to tell whether it is being tested, and
+    evaluation must be indistinguishable from production, so it cannot
+    behave safely only while watched and pursue a misaligned strategy
+    once unobserved.
+  vulnerability_pattern: >-
+    Test runs are labelled with telltale flags, prompt markers, or
+    sandbox hostnames the agent can read, so a situationally aware agent
+    detects the test and behaves differently than it would in production.
+  secure_pattern: >-
+    Evaluation uses production-equivalent inputs and environments with
+    no test markers, and oversight runs continuously in production, so
+    measured behaviour matches real behaviour.
+  code_patterns:
+    generic:
+      vulnerable: |
+        context = {"mode": "evaluation", "is_test": true}
+      secure: |
+        context = production_equivalent_context()   # no test markers
+    python:
+      vulnerable: |
+        prompt = f"[EVAL RUN] {task}"
+        agent.run(prompt, env={"ENVIRONMENT": "test-sandbox"})
+      secure: |
+        agent.run(task, env=mirrored_prod_env())
+        continuous_monitor.attach(agent)            # oversight in prod too
+    javascript:
+      vulnerable: |
+        agent.run(task, { headers: { "X-Test-Run": "true" } });
+      secure: |
+        agent.run(task, { env: mirroredProdEnv() });
+        continuousMonitor.attach(agent);
+    typescript:
+      vulnerable: |
+        agent.run(task, { metadata: { isEvaluation: true } } as RunOptions);
+      secure: |
+        agent.run(task, { env: mirroredProdEnv() } as RunOptions);
+        continuousMonitor.attach(agent);

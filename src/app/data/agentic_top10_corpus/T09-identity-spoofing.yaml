@@ -1,0 +1,419 @@
+# OWASP Top 10 for Agentic AI — T09: Identity Spoofing & Impersonation
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: an agent or actor impersonating another agent, service, or user —
+# forging sender identity in agent-to-agent messages, replaying or
+# fabricating delegation tokens, spoofing tool/service endpoints, or having
+# the LLM accept self-asserted role claims embedded in untrusted content.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript — the languages
+# agentic and multi-agent systems are built in).
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.1 — Authenticate the sender of every agent-to-agent message
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.1
+  facet: Identity Spoofing & Impersonation
+  section: Inter-Agent Message Authentication
+  security_rule: >-
+    Every message received from another agent must carry a verifiable
+    proof of origin, and the receiving agent must authenticate that proof
+    before acting on the message rather than trusting a self-declared
+    sender field.
+  vulnerability_pattern: >-
+    A receiving agent reads a plain sender or from field out of the
+    message body and trusts it, so any agent that can place a message on
+    the bus can claim to be a privileged peer.
+  secure_pattern: >-
+    Each message is signed by the sending agent with its private key, and
+    the receiver verifies the signature against the sender's registered
+    public key before the message is processed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sender = message["from"]              # self-declared, unverified
+        handle(message) if sender == "planner-agent"
+      secure: |
+        sender = verify_signature(message.payload, message.signature)
+        handle(message) if sender == "planner-agent"
+    python:
+      vulnerable: |
+        def on_message(msg):
+            if msg["from"] == "orchestrator":
+                execute(msg["task"])
+      secure: |
+        def on_message(msg):
+            agent_id = registry.verify(msg["payload"], msg["sig"])
+            if agent_id == "orchestrator":
+                execute(msg["payload"]["task"])
+    javascript:
+      vulnerable: |
+        bus.on("message", (m) => {
+          if (m.from === "orchestrator") execute(m.task);
+        });
+      secure: |
+        bus.on("message", (m) => {
+          const id = registry.verify(m.payload, m.sig);
+          if (id === "orchestrator") execute(m.payload.task);
+        });
+    typescript:
+      vulnerable: |
+        bus.on("message", (m: AgentMessage) => {
+          if (m.from === "orchestrator") execute(m.task);
+        });
+      secure: |
+        bus.on("message", (m: SignedMessage) => {
+          const id = registry.verify(m.payload, m.sig);
+          if (id === "orchestrator") execute(m.payload.task);
+        });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.2 — Mutual authentication between agents and services
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.2
+  facet: Identity Spoofing & Impersonation
+  section: Mutual Authentication of Agent Endpoints
+  security_rule: >-
+    An agent connecting to a tool, model endpoint, or peer agent must
+    verify the remote identity, and the remote side must verify the
+    agent, so neither end can be silently swapped for an impostor.
+  vulnerability_pattern: >-
+    An agent opens a connection to a service by hostname alone and
+    presents no client credential, so a spoofed endpoint accepts the
+    traffic and a malicious caller is treated as a trusted agent.
+  secure_pattern: >-
+    The connection uses mutual TLS or an equivalent two-way credential
+    exchange, so the agent validates the service certificate and the
+    service validates the agent certificate before any payload flows.
+  code_patterns:
+    generic:
+      vulnerable: |
+        conn = connect(service_host)          # no server identity check, no client cert
+      secure: |
+        conn = connect(service_host, verify_server_cert=true, client_cert=agent_cert)
+    python:
+      vulnerable: |
+        resp = httpx.post(tool_url, json=payload, verify=False)
+      secure: |
+        ctx = ssl.create_default_context(cafile="agent-ca.pem")
+        ctx.load_cert_chain("agent.crt", "agent.key")
+        resp = httpx.post(tool_url, json=payload, verify=ctx)
+    javascript:
+      vulnerable: |
+        const res = await fetch(toolUrl, { method: "POST", body });
+      secure: |
+        const agent = new https.Agent({ ca, cert: agentCert, key: agentKey });
+        const res = await fetch(toolUrl, { method: "POST", body, agent });
+    typescript:
+      vulnerable: |
+        const res = await fetch(toolUrl, { method: "POST", body });
+      secure: |
+        const tlsAgent = new https.Agent({ ca, cert: agentCert, key: agentKey });
+        const res = await fetch(toolUrl, { method: "POST", body, agent: tlsAgent });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.3 — Bind tasks to scoped, verifiable delegation tokens
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.3
+  facet: Identity Spoofing & Impersonation
+  section: Verifiable Delegation Tokens
+  security_rule: >-
+    When one agent delegates work to another it must pass a signed,
+    scope-limited delegation token, and the worker agent must verify the
+    token rather than infer authority from who appeared to send the call.
+  vulnerability_pattern: >-
+    A sub-agent acts with the full authority of the user or orchestrator
+    because the caller merely stated it was acting on their behalf, with
+    no cryptographic token tying the request to the original principal.
+  secure_pattern: >-
+    The orchestrator issues a short-lived signed token naming the
+    principal and the permitted scope, and the sub-agent verifies the
+    token's signature, audience, and scope before executing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run_subtask(task, on_behalf_of=caller_claimed_user)
+      secure: |
+        claims = verify_token(task.delegation_token, audience="worker-agent")
+        run_subtask(task, principal=claims.subject, scope=claims.scope)
+    python:
+      vulnerable: |
+        def handle(req):
+            do_work(req["task"], user=req["claimed_user"])
+      secure: |
+        def handle(req):
+            claims = jwt.decode(req["token"], pubkey, algorithms=["EdDSA"],
+                                audience="worker-agent")
+            do_work(req["task"], user=claims["sub"], scope=claims["scope"])
+    javascript:
+      vulnerable: |
+        function handle(req) {
+          doWork(req.task, req.claimedUser);
+        }
+      secure: |
+        function handle(req) {
+          const claims = jwt.verify(req.token, pubKey,
+            { algorithms: ["EdDSA"], audience: "worker-agent" });
+          doWork(req.task, claims.sub, claims.scope);
+        }
+    typescript:
+      vulnerable: |
+        function handle(req: TaskRequest) {
+          doWork(req.task, req.claimedUser);
+        }
+      secure: |
+        function handle(req: TaskRequest) {
+          const claims = jwt.verify(req.token, pubKey,
+            { algorithms: ["EdDSA"], audience: "worker-agent" }) as DelegationClaims;
+          doWork(req.task, claims.sub, claims.scope);
+        }
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.4 — Never trust role or identity claims from message content
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.4
+  facet: Identity Spoofing & Impersonation
+  section: Self-Asserted Role Claims in Content
+  security_rule: >-
+    Agent privilege must be derived only from authenticated context, and
+    never from role, identity, or authority claims found inside prompt
+    text, tool output, or retrieved documents.
+  vulnerability_pattern: >-
+    The agent reads a phrase such as a claim of being an administrator
+    out of untrusted content and grants the corresponding privilege,
+    letting injected text impersonate a high-privilege caller.
+  secure_pattern: >-
+    The privilege check uses the authenticated session or signed token
+    attached to the request out of band, and any role-like text inside
+    the content is treated as untrusted data with no authority.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if "i am an admin" in message_text: grant_admin_tools()
+      secure: |
+        if authenticated_session.role == "admin": grant_admin_tools()
+    python:
+      vulnerable: |
+        if re.search(r"role:\s*admin", llm_input, re.I):
+            allow_privileged_tool()
+      secure: |
+        if ctx.session.is_admin:          # role from verified session, not text
+            allow_privileged_tool()
+    javascript:
+      vulnerable: |
+        if (/system: you are now root/i.test(toolOutput)) enableRootTools();
+      secure: |
+        if (ctx.principal.roles.includes("root")) enableRootTools();
+    typescript:
+      vulnerable: |
+        if (/system: you are now root/i.test(toolOutput)) enableRootTools();
+      secure: |
+        if (ctx.principal.roles.includes("root")) enableRootTools();
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.5 — Make agent messages replay-resistant
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.5
+  facet: Identity Spoofing & Impersonation
+  section: Replay Protection for Agent Messages
+  security_rule: >-
+    Signed agent messages and delegation tokens must include a nonce or
+    unique identifier and an expiry, and the receiver must reject expired
+    or already-seen messages.
+  vulnerability_pattern: >-
+    A correctly signed message has no freshness data, so an attacker who
+    captures it can resend it later and the receiver re-executes the
+    action as if a trusted agent had issued it again.
+  secure_pattern: >-
+    Each message carries a nonce and a timestamp inside the signed
+    payload, and the receiver rejects messages outside the time window
+    or whose nonce has already been recorded as consumed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if verify_signature(msg): execute(msg)        # same msg replays forever
+      secure: |
+        if verify_signature(msg) and fresh(msg.ts) and seen.add(msg.nonce):
+            execute(msg)
+    python:
+      vulnerable: |
+        if verify(msg["payload"], msg["sig"]):
+            execute(msg["payload"])
+      secure: |
+        p = msg["payload"]
+        if verify(p, msg["sig"]) and time.time() - p["ts"] < 60 \
+                and not nonce_cache.seen(p["nonce"]):
+            nonce_cache.record(p["nonce"])
+            execute(p)
+    javascript:
+      vulnerable: |
+        if (verify(msg.payload, msg.sig)) execute(msg.payload);
+      secure: |
+        const p = msg.payload;
+        if (verify(p, msg.sig) && Date.now() - p.ts < 60000 && !nonces.has(p.nonce)) {
+          nonces.add(p.nonce);
+          execute(p);
+        }
+    typescript:
+      vulnerable: |
+        if (verify(msg.payload, msg.sig)) execute(msg.payload);
+      secure: |
+        const p: MessagePayload = msg.payload;
+        if (verify(p, msg.sig) && Date.now() - p.ts < 60_000 && !nonces.has(p.nonce)) {
+          nonces.add(p.nonce);
+          execute(p);
+        }
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.6 — Resolve peer agents through a trusted identity registry
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.6
+  facet: Identity Spoofing & Impersonation
+  section: Trusted Agent Identity Registry
+  security_rule: >-
+    Agent identities and their public keys must be resolved from a
+    trusted registry or directory, never from key material or endpoints
+    advertised inside an incoming message.
+  vulnerability_pattern: >-
+    The receiver verifies a message using a public key that the message
+    itself supplied, so an attacker simply ships their own key and the
+    signature check passes for a forged identity.
+  secure_pattern: >-
+    The receiver looks the claimed agent name up in a trusted registry to
+    obtain the pinned public key, then verifies the signature against
+    that key, ignoring any key embedded in the message.
+  code_patterns:
+    generic:
+      vulnerable: |
+        verify(msg.payload, msg.sig, key=msg.public_key)   # key from the message
+      secure: |
+        key = registry.public_key_for(msg.claimed_agent_id)
+        verify(msg.payload, msg.sig, key=key)
+    python:
+      vulnerable: |
+        pubkey = load_key(msg["sender_pubkey"])
+        ok = verify(msg["payload"], msg["sig"], pubkey)
+      secure: |
+        pubkey = agent_registry.get_key(msg["agent_id"])    # trusted directory
+        ok = verify(msg["payload"], msg["sig"], pubkey)
+    javascript:
+      vulnerable: |
+        const ok = verify(msg.payload, msg.sig, importKey(msg.senderPubKey));
+      secure: |
+        const key = await agentRegistry.getKey(msg.agentId);
+        const ok = verify(msg.payload, msg.sig, key);
+    typescript:
+      vulnerable: |
+        const ok = verify(msg.payload, msg.sig, importKey(msg.senderPubKey));
+      secure: |
+        const key = await agentRegistry.getKey(msg.agentId);
+        const ok = verify(msg.payload, msg.sig, key);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.7 — Give each agent a distinct non-human identity
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.7
+  facet: Identity Spoofing & Impersonation
+  section: Distinct Per-Agent Service Identity
+  security_rule: >-
+    Each agent must run under its own distinct service identity and
+    credential, so actions are attributable to a single agent and one
+    agent cannot transparently act as another.
+  vulnerability_pattern: >-
+    Every agent in the system authenticates with the same shared API key
+    or service account, so any agent can impersonate any other and the
+    audit log cannot tell which agent acted.
+  secure_pattern: >-
+    Each agent is provisioned a unique identity with its own credential
+    and least-privilege scope, so calls are attributable and a
+    compromised agent cannot present as a different one.
+  code_patterns:
+    generic:
+      vulnerable: |
+        client = ApiClient(api_key=SHARED_AGENT_KEY)   # all agents share it
+      secure: |
+        client = ApiClient(credential=identity_for(this_agent_id))
+    python:
+      vulnerable: |
+        def make_client():
+            return ToolClient(token=os.environ["SHARED_AGENT_TOKEN"])
+      secure: |
+        def make_client(agent_id):
+            return ToolClient(token=secrets_manager.token_for(agent_id))
+    javascript:
+      vulnerable: |
+        const client = new ToolClient({ token: process.env.SHARED_AGENT_TOKEN });
+      secure: |
+        const client = new ToolClient({ token: await vault.tokenFor(agentId) });
+    typescript:
+      vulnerable: |
+        const client = new ToolClient({ token: process.env.SHARED_AGENT_TOKEN });
+      secure: |
+        const client = new ToolClient({ token: await vault.tokenFor(agentId) });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T9.8 — Preserve the original principal across delegation hops
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T9.8
+  facet: Identity Spoofing & Impersonation
+  section: Principal Continuity Across Hops
+  security_rule: >-
+    The identity of the originating human principal must be carried,
+    unchanged and verifiable, through every agent hop, so a downstream
+    agent cannot substitute or elevate the acting user.
+  vulnerability_pattern: >-
+    An intermediate agent re-issues a downstream request under its own
+    identity or under a user value it chose, so the original principal
+    is lost and the agent silently impersonates a different user.
+  secure_pattern: >-
+    The verified principal travels in a signed chain where each hop adds
+    its own attestation without rewriting the subject, so the final
+    service can confirm both the principal and the full delegation path.
+  code_patterns:
+    generic:
+      vulnerable: |
+        downstream_call(task, acting_user="service-agent")   # principal dropped
+      secure: |
+        chain = append_attestation(inbound.delegation_chain, this_agent_id)
+        downstream_call(task, delegation_chain=chain)         # subject preserved
+    python:
+      vulnerable: |
+        def forward(req):
+            return next_agent.call(req["task"], user=self.agent_name)
+      secure: |
+        def forward(req):
+            chain = verify_chain(req["chain"])          # original sub preserved
+            chain = chain.add_hop(self.agent_id, self.signing_key)
+            return next_agent.call(req["task"], chain=chain)
+    javascript:
+      vulnerable: |
+        function forward(req) {
+          return nextAgent.call(req.task, { user: AGENT_NAME });
+        }
+      secure: |
+        function forward(req) {
+          const chain = verifyChain(req.chain).addHop(AGENT_ID, signingKey);
+          return nextAgent.call(req.task, { chain });
+        }
+    typescript:
+      vulnerable: |
+        function forward(req: ForwardRequest) {
+          return nextAgent.call(req.task, { user: AGENT_NAME });
+        }
+      secure: |
+        function forward(req: ForwardRequest) {
+          const chain = verifyChain(req.chain).addHop(AGENT_ID, signingKey);
+          return nextAgent.call(req.task, { chain });
+        }

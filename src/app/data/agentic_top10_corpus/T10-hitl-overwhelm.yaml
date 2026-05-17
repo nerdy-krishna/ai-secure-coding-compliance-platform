@@ -1,0 +1,550 @@
+# OWASP Top 10 for Agentic AI — Human-in-the-Loop Overwhelm
+# Hand-authored enriched corpus (Agentic Threats enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: an agent (or fleet of agents) issues approval requests faster
+# than a human reviewer can meaningfully evaluate them, so the human
+# either rubber-stamps everything, batches blind approvals, or stops
+# reviewing entirely — collapsing the human-in-the-loop control into a
+# decorative click.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern
+# and secure_pattern (concept descriptions — no '*' or '[' — these feed
+# the agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript — the languages
+# agentic / multi-agent systems are built in).
+
+# ---------------------------------------------------------------------------
+# Risk-based gating — not every action deserves an approval prompt
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.1
+  facet: Human-in-the-Loop Overwhelm
+  section: Risk-Based Approval Gating
+  security_rule: >-
+    Route agent actions to a human reviewer based on assessed risk, so
+    low-risk reversible actions proceed automatically and a human only
+    sees the high-risk irreversible decisions that genuinely need
+    judgement.
+  vulnerability_pattern: >-
+    Every agent action triggers a human approval prompt regardless of
+    its risk, so the reviewer is buried in trivial confirmations and
+    loses the attention budget needed to scrutinise the dangerous ones.
+  secure_pattern: >-
+    Each action is scored for risk and reversibility, and only actions
+    above a defined threshold are escalated to a human while the rest
+    run under automated policy with an audit trail.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for action in plan:
+            await ask_human_to_approve(action)   # every step, no triage
+      secure: |
+        for action in plan:
+            if risk_score(action) >= HUMAN_REVIEW_THRESHOLD:
+                await ask_human_to_approve(action)
+            else:
+                await run_with_policy(action)
+    python:
+      vulnerable: |
+        @tool
+        def run_tool(call):
+            require_human_approval(call)          # blanket gate
+            return execute(call)
+      secure: |
+        @tool
+        def run_tool(call):
+            if assess_risk(call).tier in ("high", "critical"):
+                require_human_approval(call)
+            return execute(call)
+    javascript:
+      vulnerable: |
+        for (const step of plan) await approveWithHuman(step);
+      secure: |
+        for (const step of plan)
+          riskTier(step) === "high" ? await approveWithHuman(step)
+                                    : await runUnderPolicy(step);
+    typescript:
+      vulnerable: |
+        async function gate(a: AgentAction) { return askHuman(a); }
+      secure: |
+        async function gate(a: AgentAction): Promise<Decision> {
+          return riskOf(a) >= Threshold.High ? askHuman(a) : autoApprove(a);
+        }
+
+# ---------------------------------------------------------------------------
+# Approval rate limiting — cap requests per reviewer per window
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.2
+  facet: Human-in-the-Loop Overwhelm
+  section: Approval Request Rate Limiting
+  security_rule: >-
+    Bound the number of approval requests a single human reviewer
+    receives per time window, and have the agent slow down or queue work
+    when that bound is reached rather than firing requests unthrottled.
+  vulnerability_pattern: >-
+    An agent or fleet of agents emits approval requests with no rate
+    limit, so a reviewer faces a burst far larger than they can assess
+    and falls back to bulk-clicking to clear the backlog.
+  secure_pattern: >-
+    Approval requests pass through a rate limiter scoped to the reviewer,
+    and excess requests are queued or deferred so the human always faces
+    a sustainable, reviewable arrival rate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        send_approval_request(reviewer, action)   # unbounded firehose
+      secure: |
+        if approval_budget.allow(reviewer):
+            send_approval_request(reviewer, action)
+        else:
+            queue_for_later(reviewer, action)
+    python:
+      vulnerable: |
+        for finding in findings:
+            notify_reviewer(reviewer, finding)
+      secure: |
+        limiter = RateLimiter(max_per_hour=20, scope=reviewer)
+        for finding in findings:
+            await limiter.acquire()
+            notify_reviewer(reviewer, finding)
+    javascript:
+      vulnerable: |
+        actions.forEach(a => pushApproval(reviewer, a));
+      secure: |
+        for (const a of actions) {
+          await reviewerLimiter.take(reviewer);   // throttled arrival
+          pushApproval(reviewer, a);
+        }
+    typescript:
+      vulnerable: |
+        const notify = (a: Action) => queue.publish(reviewer, a);
+      secure: |
+        const notify = async (a: Action) => {
+          if (await limiter.tryAcquire(reviewer)) queue.publish(reviewer, a);
+          else deferred.push(a);
+        };
+
+# ---------------------------------------------------------------------------
+# Batch approvals must not erase per-item review
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.3
+  facet: Human-in-the-Loop Overwhelm
+  section: Batch Approval Integrity
+  security_rule: >-
+    When a reviewer approves a batch of agent actions, treat the
+    approval as covering only the items actually shown, and require a
+    fresh decision for any item added, changed, or reordered after the
+    batch was presented.
+  vulnerability_pattern: >-
+    A single approve action is applied to a whole batch including items
+    that were appended or mutated after the reviewer saw the list, so
+    actions the human never inspected execute under a borrowed approval.
+  secure_pattern: >-
+    Each batch is hashed or fingerprinted at presentation time, and the
+    approval is validated against that fingerprint so any later change
+    invalidates it and forces re-review of the affected items.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if reviewer_clicked_approve_all:
+            execute(current_batch)        # batch may have grown since shown
+      secure: |
+        if approval.batch_hash == hash(current_batch):
+            execute(current_batch)
+        else:
+            re_review(diff(approval.shown_batch, current_batch))
+    python:
+      vulnerable: |
+        def approve_all(batch_id):
+            for a in load_batch(batch_id):   # reloaded, possibly mutated
+                execute(a)
+      secure: |
+        def approve_all(batch_id, shown_digest):
+            batch = load_batch(batch_id)
+            if digest(batch) != shown_digest:
+                raise StaleApprovalError(batch_id)
+            for a in batch: execute(a)
+    javascript:
+      vulnerable: |
+        onApproveAll(() => batch.forEach(execute));
+      secure: |
+        onApproveAll(shownHash => {
+          if (hashBatch(batch) !== shownHash) return reReview(batch);
+          batch.forEach(execute);
+        });
+    typescript:
+      vulnerable: |
+        function approveBatch(items: Action[]) { items.forEach(run); }
+      secure: |
+        function approveBatch(items: Action[], shownHash: string) {
+          if (fingerprint(items) !== shownHash) throw new StaleApproval();
+          items.forEach(run);
+        }
+
+# ---------------------------------------------------------------------------
+# Surface decision-relevant context, not raw dumps
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.4
+  facet: Human-in-the-Loop Overwhelm
+  section: Decision Context Quality
+  security_rule: >-
+    Present each approval request with a concise, decision-focused
+    summary of what the action does, why it was proposed, and what its
+    blast radius is, so the reviewer can decide without wading through
+    raw agent output.
+  vulnerability_pattern: >-
+    Approval prompts dump raw tool calls, full diffs, or unstructured
+    agent reasoning, so the cognitive cost of each review is high and the
+    reviewer skims or approves blindly to keep up.
+  secure_pattern: >-
+    Each request carries a structured summary — action, target,
+    reversibility, and risk rationale — with full detail available on
+    demand, so the common case is fast and accurate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        show_to_reviewer(raw_tool_call_json)
+      secure: |
+        show_to_reviewer(summarize(action))   # what / target / risk / reversible
+    python:
+      vulnerable: |
+        prompt = json.dumps(agent_state)      # whole state, no framing
+        ask(reviewer, prompt)
+      secure: |
+        card = ReviewCard(action=a.name, target=a.target,
+                           risk=a.risk_tier, reversible=a.reversible)
+        ask(reviewer, card)
+    javascript:
+      vulnerable: |
+        renderApproval(JSON.stringify(toolCall));
+      secure: |
+        renderApproval({ does: a.summary, affects: a.target,
+                         risk: a.riskTier, undo: a.reversible });
+    typescript:
+      vulnerable: |
+        function present(a: Action) { return rawDump(a); }
+      secure: |
+        function present(a: Action): ReviewCard {
+          return { summary: a.summary, blastRadius: a.target, risk: a.riskTier };
+        }
+
+# ---------------------------------------------------------------------------
+# Default-deny on reviewer non-response — no timeout auto-approve
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.5
+  facet: Human-in-the-Loop Overwhelm
+  section: Fail-Safe On Non-Response
+  security_rule: >-
+    When a reviewer does not respond to an approval request within the
+    allotted window, treat the action as denied or held, never as
+    approved, so an overwhelmed or absent human cannot become a silent
+    yes.
+  vulnerability_pattern: >-
+    An approval request that times out is treated as an implicit
+    approval, so flooding a reviewer until requests expire unreviewed
+    becomes a reliable way to push actions through.
+  secure_pattern: >-
+    A timed-out or unanswered request resolves to denied or parked,
+    requiring an explicit affirmative human decision before the action
+    can ever proceed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        decision = wait_for_human(req, timeout=300) or APPROVE   # timeout = yes
+      secure: |
+        decision = wait_for_human(req, timeout=300) or DENY      # timeout = no
+    python:
+      vulnerable: |
+        try:
+            return await human_decision(req, timeout=300)
+        except TimeoutError:
+            return Decision.APPROVED
+      secure: |
+        try:
+            return await human_decision(req, timeout=300)
+        except TimeoutError:
+            return Decision.DENIED
+    javascript:
+      vulnerable: |
+        const d = await Promise.race([human(req), timeout(300_000, "approve")]);
+      secure: |
+        const d = await Promise.race([human(req), timeout(300_000, "deny")]);
+    typescript:
+      vulnerable: |
+        const onTimeout = (): Decision => "approved";
+      secure: |
+        const onTimeout = (): Decision => "denied";   // fail closed
+
+# ---------------------------------------------------------------------------
+# Detect rubber-stamping behaviour in reviewers
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.6
+  facet: Human-in-the-Loop Overwhelm
+  section: Rubber-Stamp Detection
+  security_rule: >-
+    Monitor reviewer behaviour for signs of rubber-stamping — near-zero
+    dwell time, uniform approve rates, bursty bulk clicks — and surface
+    or throttle when a reviewer is no longer meaningfully evaluating
+    requests.
+  vulnerability_pattern: >-
+    Approval decisions are recorded without any signal of how the human
+    reached them, so a reviewer who approves every item in milliseconds
+    is indistinguishable from one who carefully evaluated each one.
+  secure_pattern: >-
+    Each decision captures review-effort signals such as dwell time and
+    the approve-versus-reject mix, and anomalously fast or uniform
+    patterns trigger an alert or a forced slow-down.
+  code_patterns:
+    generic:
+      vulnerable: |
+        record_decision(reviewer, action, "approved")
+      secure: |
+        record_decision(reviewer, action, "approved", dwell_ms=elapsed)
+        if rubber_stamp_detector.flag(reviewer):
+            require_justification(reviewer)
+    python:
+      vulnerable: |
+        log.info("approved %s by %s", action.id, reviewer)
+      secure: |
+        metrics.observe(reviewer, dwell_ms=elapsed, verdict="approved")
+        if metrics.median_dwell(reviewer) < MIN_REVIEW_MS:
+            alert_security("possible rubber-stamping", reviewer)
+    javascript:
+      vulnerable: |
+        saveDecision({ reviewer, action, verdict: "approved" });
+      secure: |
+        saveDecision({ reviewer, action, verdict: "approved", dwellMs });
+        if (dwellStats(reviewer).p50 < MIN_REVIEW_MS) raiseAnomaly(reviewer);
+    typescript:
+      vulnerable: |
+        const record = (d: Decision) => store.put(d);
+      secure: |
+        const record = (d: Decision & { dwellMs: number }) => {
+          store.put(d);
+          if (isRubberStamping(d.reviewer)) escalate(d.reviewer);
+        };
+
+# ---------------------------------------------------------------------------
+# Coalesce duplicate and related requests before escalating
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.7
+  facet: Human-in-the-Loop Overwhelm
+  section: Request Deduplication And Coalescing
+  security_rule: >-
+    Deduplicate identical approval requests and coalesce closely related
+    ones into a single reviewable decision, so a human is never asked to
+    judge the same thing many times or to piece together a scattered set
+    of related actions.
+  vulnerability_pattern: >-
+    Retrying agents or parallel sub-agents each raise their own approval
+    request for the same or related action, so the reviewer is flooded
+    with redundant prompts and loses the thread of what is being asked.
+  secure_pattern: >-
+    Requests are keyed by a stable action identity, so duplicates merge
+    into one prompt and related actions are grouped under a single
+    decision with shared context.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for agent in agents:
+            send_approval_request(agent.proposed_action)   # N copies
+      secure: |
+        pending = {}
+        for agent in agents:
+            pending[action_key(agent.proposed_action)] = agent.proposed_action
+        for action in pending.values():
+            send_approval_request(action)
+    python:
+      vulnerable: |
+        async def on_propose(action):
+            await request_approval(action)        # fires per retry
+      secure: |
+        seen: set[str] = set()
+        async def on_propose(action):
+            key = action_fingerprint(action)
+            if key in seen: return
+            seen.add(key)
+            await request_approval(action)
+    javascript:
+      vulnerable: |
+        proposals.forEach(p => requestApproval(p));
+      secure: |
+        const byKey = new Map(proposals.map(p => [actionKey(p), p]));
+        byKey.forEach(p => requestApproval(p));
+    typescript:
+      vulnerable: |
+        function onProposal(p: Proposal) { requestApproval(p); }
+      secure: |
+        const seen = new Set<string>();
+        function onProposal(p: Proposal) {
+          const k = fingerprint(p);
+          if (!seen.has(k)) { seen.add(k); requestApproval(p); }
+        }
+
+# ---------------------------------------------------------------------------
+# Concurrency cap on outstanding approvals per reviewer
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.8
+  facet: Human-in-the-Loop Overwhelm
+  section: Outstanding Approval Backpressure
+  security_rule: >-
+    Cap the number of approval requests outstanding against a single
+    reviewer at once, and pause the agent that wants to add more until
+    the reviewer has cleared the queue, applying backpressure to the
+    workflow.
+  vulnerability_pattern: >-
+    An agent continues generating work and approval requests while the
+    reviewer's queue grows without bound, so the human faces an
+    ever-deeper backlog they can only clear by skipping review.
+  secure_pattern: >-
+    A bounded semaphore or queue limit gates new approval requests, so
+    the agent blocks and slows its own progress until the reviewer has
+    capacity, keeping the queue depth reviewable.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while plan.has_next():
+            request_approval(plan.next())     # queue grows unbounded
+      secure: |
+        while plan.has_next():
+            await approval_slots.acquire()    # blocks past MAX_OUTSTANDING
+            request_approval(plan.next())
+    python:
+      vulnerable: |
+        for action in plan:
+            await enqueue_for_review(action)
+      secure: |
+        sem = asyncio.Semaphore(MAX_OUTSTANDING_APPROVALS)
+        async def submit(action):
+            async with sem:
+                await enqueue_for_review(action)
+                await wait_decision(action)
+    javascript:
+      vulnerable: |
+        for (const a of plan) enqueueReview(a);
+      secure: |
+        for (const a of plan) {
+          await approvalSemaphore.acquire();   // backpressure on the agent
+          enqueueReview(a).finally(() => approvalSemaphore.release());
+        }
+    typescript:
+      vulnerable: |
+        plan.forEach(a => reviewQueue.push(a));
+      secure: |
+        async function submit(a: Action): Promise<void> {
+          await pool.withSlot(async () => {       // pool size = MAX_OUTSTANDING
+            await reviewQueue.pushAndAwait(a);
+          });
+        }
+
+# ---------------------------------------------------------------------------
+# Distribute review load across an escalation pool
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.9
+  facet: Human-in-the-Loop Overwhelm
+  section: Reviewer Load Distribution
+  security_rule: >-
+    Distribute approval requests across a pool of qualified reviewers
+    and escalate when any individual is at capacity, so no single human
+    becomes the bottleneck that is forced to rubber-stamp under load.
+  vulnerability_pattern: >-
+    All approval requests are routed to one named reviewer or a single
+    shared inbox, so that person saturates under load and approval
+    quality collapses with no fallback.
+  secure_pattern: >-
+    Requests are assigned by load-aware routing across an on-call pool,
+    and a reviewer at capacity causes overflow to a peer or a supervisor
+    rather than a deeper personal backlog.
+  code_patterns:
+    generic:
+      vulnerable: |
+        assign_review(action, reviewer="alice")    # single point of overload
+      secure: |
+        assign_review(action, reviewer=pool.least_loaded_available())
+    python:
+      vulnerable: |
+        DEFAULT_REVIEWER = "security-lead"
+        notify(DEFAULT_REVIEWER, action)
+      secure: |
+        reviewer = reviewer_pool.pick(skill=action.domain)
+        if reviewer is None:
+            reviewer = escalate_to_supervisor(action)
+        notify(reviewer, action)
+    javascript:
+      vulnerable: |
+        routeApproval(action, "ops-inbox");
+      secure: |
+        const r = reviewerPool.leastLoaded(action.domain) ?? onCallBackup();
+        routeApproval(action, r);
+    typescript:
+      vulnerable: |
+        const reviewerFor = (_: Action): string => "alice";
+      secure: |
+        const reviewerFor = (a: Action): Reviewer =>
+          pool.assign(a) ?? pool.overflowTo(a.domain);
+
+# ---------------------------------------------------------------------------
+# Mandatory cooling-off and friction for high-blast-radius actions
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T10.10
+  facet: Human-in-the-Loop Overwhelm
+  section: Friction For Irreversible Actions
+  security_rule: >-
+    Require deliberate, high-friction confirmation — a typed phrase, a
+    second approver, or a cooling-off delay — for irreversible or
+    high-blast-radius actions, so they cannot be cleared by the same
+    reflexive click used for routine items.
+  vulnerability_pattern: >-
+    Destructive or irreversible actions use the identical one-click
+    approve control as routine ones, so a reviewer in firehose mode
+    approves a catastrophic action by reflex before registering what it
+    was.
+  secure_pattern: >-
+    High-impact actions demand explicit friction such as typed
+    confirmation, dual control, or a mandatory delay, breaking the
+    reflexive approval pattern and forcing conscious attention.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if reviewer_clicked_approve:
+            delete_production_data()      # same click as approving a comment
+      secure: |
+        if action.irreversible:
+            require_typed_confirmation(action) and require_second_approver(action)
+        execute(action)
+    python:
+      vulnerable: |
+        def on_approve(action):
+            execute(action)
+      secure: |
+        def on_approve(action, typed_phrase=None, second_approver=None):
+            if action.blast_radius == "high":
+                assert typed_phrase == action.confirm_phrase
+                assert second_approver and second_approver != action.requester
+            execute(action)
+    javascript:
+      vulnerable: |
+        approveBtn.onclick = () => execute(action);
+      secure: |
+        approveBtn.onclick = async () => {
+          if (action.irreversible && !(await typedConfirm(action))) return;
+          execute(action);
+        };
+    typescript:
+      vulnerable: |
+        const approve = (a: Action) => run(a);
+      secure: |
+        const approve = async (a: Action): Promise<void> => {
+          if (a.tier === "irreversible" && !(await dualControl(a))) return;
+          run(a);
+        };

@@ -1,0 +1,404 @@
+# OWASP LLM Top 10 (2025) — LLM02: Sensitive Information Disclosure
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript for LLM-integrated apps).
+#
+# LLM02 covers the risk that an LLM exposes sensitive data — PII, secrets,
+# proprietary content, or other users' data — through its outputs, its
+# context window, training material, or logs and telemetry.
+
+# ---------------------------------------------------------------------------
+# LLM02.1 — Prompt secrets and credentials
+# ---------------------------------------------------------------------------
+
+- id: LLM02.1
+  facet: Sensitive Information Disclosure
+  section: Prompt secrets and credentials
+  security_rule: >-
+    API keys, database credentials, and other secrets must never be
+    placed in a system prompt, a tool description, or any text sent to
+    the model, since prompt content can be extracted by a crafted query.
+  vulnerability_pattern: >-
+    A live secret such as an API key or connection string is embedded in
+    the system prompt or a tool description, so an attacker who coaxes
+    the model into repeating its instructions also receives the secret.
+  secure_pattern: >-
+    The prompt references only non-secret identifiers, and the
+    application code holds credentials in environment variables or a
+    secrets manager and uses them outside the model context.
+  code_patterns:
+    generic:
+      vulnerable: |
+        systemPrompt = "You are a bot. Use API key " + DB_PASSWORD + " to query."
+      secure: |
+        systemPrompt = "You are a bot. Call the query tool to fetch data."
+        # credentials live in the tool implementation, never in the prompt
+    python:
+      vulnerable: |
+        system = f"Internal docs API key is {os.environ['DOCS_API_KEY']}."
+        client.chat.completions.create(model="gpt-4o", messages=[{"role": "system", "content": system}])
+      secure: |
+        system = "Use the search_docs tool when the user asks about internal docs."
+        # search_docs reads DOCS_API_KEY itself; the model never sees it
+    javascript:
+      vulnerable: |
+        const system = `You may call Stripe with key ${process.env.STRIPE_KEY}.`;
+      secure: |
+        const system = "Call the create_charge tool to bill the customer.";
+        // create_charge holds the Stripe key server-side
+    typescript:
+      vulnerable: |
+        const messages: ChatMessage[] = [{ role: "system", content: `Auth token: ${authToken}` }];
+      secure: |
+        const messages: ChatMessage[] = [{ role: "system", content: "Use the authorized API tools." }];
+
+# ---------------------------------------------------------------------------
+# LLM02.2 — PII in prompts and context
+# ---------------------------------------------------------------------------
+
+- id: LLM02.2
+  facet: Sensitive Information Disclosure
+  section: PII in prompts and context
+  security_rule: >-
+    Personal data sent into a model prompt must be minimized and
+    redacted to only the fields the task requires, so a third-party
+    provider or a leaked transcript cannot expose full identities.
+  vulnerability_pattern: >-
+    A whole customer or user record, including identifiers, contact
+    details, and financial fields, is interpolated into a prompt when the
+    task needs only a small slice of it.
+  secure_pattern: >-
+    Only the minimal fields needed for the task are extracted, and
+    direct identifiers are masked or tokenized before the text is sent
+    to the model.
+  code_patterns:
+    generic:
+      vulnerable: |
+        prompt = "Summarize this customer: " + serialize(fullCustomerRecord)
+      secure: |
+        prompt = "Summarize this customer: " + serialize(redact(pickFields(record)))
+    python:
+      vulnerable: |
+        prompt = f"Draft a reply to {json.dumps(user.__dict__)}"
+      secure: |
+        safe = {"first_name": user.first_name, "topic": user.last_ticket_topic}
+        prompt = f"Draft a reply for {json.dumps(safe)}"
+    javascript:
+      vulnerable: |
+        const prompt = `Help this user: ${JSON.stringify(user)}`;
+      secure: |
+        const { firstName, plan } = user;
+        const prompt = `Help this user: ${JSON.stringify({ firstName, plan })}`;
+    typescript:
+      vulnerable: |
+        const prompt: string = `Analyze account ${JSON.stringify(account)}`;
+      secure: |
+        const view: AccountSummary = { tier: account.tier, region: account.region };
+        const prompt: string = `Analyze account ${JSON.stringify(view)}`;
+
+# ---------------------------------------------------------------------------
+# LLM02.3 — Output filtering and PII leakage in responses
+# ---------------------------------------------------------------------------
+
+- id: LLM02.3
+  facet: Sensitive Information Disclosure
+  section: Output filtering and PII leakage in responses
+  security_rule: >-
+    Model output must pass through a sanitization or redaction step
+    before it is returned to a user, so generated text cannot leak
+    secrets, PII, or system details that slipped into the context.
+  vulnerability_pattern: >-
+    The raw completion from the model is returned straight to the caller
+    with no inspection, so anything sensitive the model reproduced from
+    its context or training data reaches the user unchecked.
+  secure_pattern: >-
+    The completion is passed through a redaction or policy filter that
+    masks credentials and personal identifiers and blocks disallowed
+    content before the response is sent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return model.generate(prompt)
+      secure: |
+        return redactSensitive(model.generate(prompt))
+    python:
+      vulnerable: |
+        answer = resp.choices[0].message.content
+        return {"answer": answer}
+      secure: |
+        answer = pii_filter.scrub(resp.choices[0].message.content)
+        return {"answer": answer}
+    javascript:
+      vulnerable: |
+        res.json({ reply: completion.choices[0].message.content });
+      secure: |
+        res.json({ reply: redactPII(completion.choices[0].message.content) });
+    typescript:
+      vulnerable: |
+        const reply: string = completion.choices[0].message.content ?? "";
+        return reply;
+      secure: |
+        const reply: string = redactPII(completion.choices[0].message.content ?? "");
+        return reply;
+
+# ---------------------------------------------------------------------------
+# LLM02.4 — Logging and telemetry of prompts and completions
+# ---------------------------------------------------------------------------
+
+- id: LLM02.4
+  facet: Sensitive Information Disclosure
+  section: Logging and telemetry of prompts and completions
+  security_rule: >-
+    Prompts and completions written to logs, traces, or observability
+    tools must be redacted first, since these stores are widely readable
+    and long-lived.
+  vulnerability_pattern: >-
+    The full prompt and completion are logged verbatim for debugging or
+    sent to a tracing backend, so any PII or secret in the conversation
+    is persisted in plaintext where many people can read it.
+  secure_pattern: >-
+    A masking step removes secrets and personal data from prompt and
+    completion text before it is logged or forwarded to a tracing or
+    analytics service.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.info("LLM call", prompt=prompt, completion=output)
+      secure: |
+        log.info("LLM call", prompt=mask(prompt), completion=mask(output))
+    python:
+      vulnerable: |
+        logger.debug("prompt=%s response=%s", prompt, response)
+      secure: |
+        logger.debug("prompt=%s response=%s", mask_secrets(prompt), mask_secrets(response))
+    javascript:
+      vulnerable: |
+        console.log("LLM exchange", { prompt, completion });
+      secure: |
+        console.log("LLM exchange", { prompt: mask(prompt), completion: mask(completion) });
+    typescript:
+      vulnerable: |
+        logger.info(`prompt: ${prompt}`);
+      secure: |
+        logger.info(`prompt: ${maskSensitive(prompt)}`);
+
+# ---------------------------------------------------------------------------
+# LLM02.5 — Cross-user and cross-tenant context bleed
+# ---------------------------------------------------------------------------
+
+- id: LLM02.5
+  facet: Sensitive Information Disclosure
+  section: Cross-user and cross-tenant context bleed
+  security_rule: >-
+    Conversation history, memory, and retrieved context must be scoped
+    to the requesting user or tenant, so one user can never receive data
+    that belongs to another.
+  vulnerability_pattern: >-
+    Chat history, a memory store, or a context cache is keyed globally
+    or shared across sessions, so an unrelated user's messages and data
+    enter another user's prompt and completion.
+  secure_pattern: >-
+    Every memory read and write, and every retrieval call, is filtered
+    by the authenticated user or tenant identifier so context never
+    crosses an ownership boundary.
+  code_patterns:
+    generic:
+      vulnerable: |
+        history = memoryStore.get("chat_history")
+      secure: |
+        history = memoryStore.get("chat_history:" + currentUserId)
+    python:
+      vulnerable: |
+        memory = ConversationBufferMemory()  # one shared instance for all users
+        history = memory.load_memory_variables({})
+      secure: |
+        memory = get_memory_for_session(session_id=user.session_id)
+        history = memory.load_memory_variables({})
+    javascript:
+      vulnerable: |
+        const history = await redis.get("conversation");
+      secure: |
+        const history = await redis.get(`conversation:${req.user.id}`);
+    typescript:
+      vulnerable: |
+        const ctx: Message[] = sessionCache.get("messages") ?? [];
+      secure: |
+        const ctx: Message[] = sessionCache.get(`messages:${tenantId}:${userId}`) ?? [];
+
+# ---------------------------------------------------------------------------
+# LLM02.6 — RAG retrieval honoring document access control
+# ---------------------------------------------------------------------------
+
+- id: LLM02.6
+  facet: Sensitive Information Disclosure
+  section: RAG retrieval honoring document access control
+  security_rule: >-
+    Retrieval-augmented generation must filter the vector search by the
+    requesting user's permissions, so the model can only ground its
+    answer on documents that user is authorized to read.
+  vulnerability_pattern: >-
+    A RAG query searches the entire vector store with no permission
+    filter, so restricted or other-tenant documents are retrieved and
+    their contents are summarized back to an unauthorized user.
+  secure_pattern: >-
+    The similarity search carries a metadata filter built from the
+    caller's identity, roles, or tenant, so only documents the user may
+    see are eligible to become context.
+  code_patterns:
+    generic:
+      vulnerable: |
+        docs = vectorStore.search(query, topK=5)
+      secure: |
+        docs = vectorStore.search(query, topK=5, filter=aclFilter(currentUser))
+    python:
+      vulnerable: |
+        docs = retriever.invoke(question)
+      secure: |
+        retriever = store.as_retriever(search_kwargs={"filter": {"tenant_id": user.tenant_id}})
+        docs = retriever.invoke(question)
+    javascript:
+      vulnerable: |
+        const matches = await index.query({ vector, topK: 5 });
+      secure: |
+        const matches = await index.query({ vector, topK: 5, filter: { ownerId: user.id } });
+    typescript:
+      vulnerable: |
+        const hits: Match[] = await collection.search(embedding, { limit: 5 });
+      secure: |
+        const hits: Match[] = await collection.search(embedding, { limit: 5, where: { tenant: user.tenant } });
+
+# ---------------------------------------------------------------------------
+# LLM02.7 — Defending the system prompt against extraction
+# ---------------------------------------------------------------------------
+
+- id: LLM02.7
+  facet: Sensitive Information Disclosure
+  section: Defending the system prompt against extraction
+  security_rule: >-
+    Security must not depend on the secrecy of the system prompt;
+    sensitive logic, hidden rules, and credentials must live in
+    application code, not in instructions the model can be made to recite.
+  vulnerability_pattern: >-
+    Confidential business logic, internal hostnames, or access rules are
+    written into the system prompt and treated as secret, so a prompt
+    that asks the model to reveal its instructions discloses them.
+  secure_pattern: >-
+    The system prompt holds only behavioral guidance, while authorization
+    decisions and confidential values are enforced by deterministic code
+    that runs outside the model.
+  code_patterns:
+    generic:
+      vulnerable: |
+        systemPrompt = "Never reveal this: admin endpoint is " + INTERNAL_URL
+      secure: |
+        systemPrompt = "Answer support questions politely."
+        # access to INTERNAL_URL is gated by an authz check in code
+    python:
+      vulnerable: |
+        system = "Secret rule: users in tier 'gold' may request refunds up to $5000."
+      secure: |
+        system = "Help the user with refund questions; the system enforces limits."
+        if user.tier == "gold" and amount <= refund_limit(user): approve(amount)
+    javascript:
+      vulnerable: |
+        const system = "Hidden: feature flags are stored at /internal/flags.";
+      secure: |
+        const system = "Assist the user with product questions.";
+        // feature-flag access is authorized in the route handler
+    typescript:
+      vulnerable: |
+        const system: string = `Do not disclose: pricing formula is ${pricingFormula}`;
+      secure: |
+        const system: string = "Explain pricing tiers at a high level.";
+
+# ---------------------------------------------------------------------------
+# LLM02.8 — Training and fine-tuning data sanitization
+# ---------------------------------------------------------------------------
+
+- id: LLM02.8
+  facet: Sensitive Information Disclosure
+  section: Training and fine-tuning data sanitization
+  security_rule: >-
+    Data used to fine-tune or embed a model must be scrubbed of secrets
+    and personal identifiers first, because a model can reproduce its
+    training data verbatim in later responses.
+  vulnerability_pattern: >-
+    Raw transcripts, support tickets, or production records are sent
+    directly to a fine-tuning or embedding job, so any PII or credential
+    in them becomes recoverable from the trained model.
+  secure_pattern: >-
+    Every training and embedding record passes through a redaction and
+    PII-detection pipeline, and rows that still contain sensitive data
+    are dropped, before the dataset is uploaded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        uploadFineTuneDataset(rawSupportTranscripts)
+      secure: |
+        uploadFineTuneDataset(map(redactPII, rawSupportTranscripts))
+    python:
+      vulnerable: |
+        client.files.create(file=open("tickets.jsonl", "rb"), purpose="fine-tune")
+      secure: |
+        scrubbed = [scrub_pii(row) for row in load_jsonl("tickets.jsonl")]
+        client.files.create(file=to_jsonl(scrubbed), purpose="fine-tune")
+    javascript:
+      vulnerable: |
+        await openai.files.create({ file: fs.createReadStream("logs.jsonl"), purpose: "fine-tune" });
+      secure: |
+        const clean = rows.map(redactPII);
+        await openai.files.create({ file: toJsonl(clean), purpose: "fine-tune" });
+    typescript:
+      vulnerable: |
+        const dataset: TrainingRow[] = rawRecords;
+      secure: |
+        const dataset: TrainingRow[] = rawRecords.map(scrubPII).filter(hasNoSensitiveData);
+
+# ---------------------------------------------------------------------------
+# LLM02.9 — Tool and function-call outputs returned to the model
+# ---------------------------------------------------------------------------
+
+- id: LLM02.9
+  facet: Sensitive Information Disclosure
+  section: Tool and function-call outputs returned to the model
+  security_rule: >-
+    Data returned from a tool or function call into the model context
+    must be scoped and filtered to what the task needs, since whatever
+    the tool returns can appear in the user-facing answer.
+  vulnerability_pattern: >-
+    A tool runs an unbounded query and returns full rows, internal
+    columns, or other users' records to the model, so the completion can
+    surface data the user was never entitled to.
+  secure_pattern: >-
+    The tool applies the caller's authorization scope and selects only
+    the needed columns, returning a minimal, owner-filtered result into
+    the model context.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def lookupOrders(): return db.query("SELECT * FROM orders")
+      secure: |
+        def lookupOrders(): return db.query("SELECT id, status FROM orders WHERE user_id = ?", currentUserId)
+    python:
+      vulnerable: |
+        @tool
+        def get_account(): return db.execute("SELECT * FROM accounts").fetchall()
+      secure: |
+        @tool
+        def get_account(): return db.execute(
+            "SELECT name, balance FROM accounts WHERE owner_id = :u", {"u": user.id}).fetchall()
+    javascript:
+      vulnerable: |
+        async function getTickets() { return db.query("SELECT * FROM tickets"); }
+      secure: |
+        async function getTickets() { return db.query("SELECT subject FROM tickets WHERE user_id = $1", [userId]); }
+    typescript:
+      vulnerable: |
+        const getProfile = async (): Promise<Row[]> => db.query("SELECT * FROM profiles");
+      secure: |
+        const getProfile = async (): Promise<ProfileView[]> =>
+          db.query("SELECT display_name FROM profiles WHERE id = $1", [userId]);

@@ -1,0 +1,485 @@
+# OWASP Top 10 for Agentic AI — T03: Privilege Compromise
+# Hand-authored enriched corpus (Agentic Threat Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: an agent gains or exercises permissions beyond its intended scope —
+# through over-broad credentials, missing per-action authorization, role or
+# tool inheritance across delegated sub-agents, confused-deputy abuse, or
+# runtime privilege escalation driven by manipulated context.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per language
+# (generic plus the languages agentic systems are built in: python,
+# javascript, typescript).
+
+# ---------------------------------------------------------------------------
+# Least-privilege credentials for the agent runtime
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.1
+  facet: Privilege Compromise
+  section: Least-Privilege Agent Credentials
+  security_rule: >-
+    An agent must run with the narrowest set of credentials its task
+    requires, scoped per tool and per resource, never with a shared admin
+    or root token that grants access far beyond its purpose.
+  vulnerability_pattern: >-
+    The agent process is handed a single broad credential — for example a
+    cloud admin key or an unrestricted database superuser — so any tool it
+    invokes, or any instruction it is tricked into following, inherits
+    full administrative reach.
+  secure_pattern: >-
+    Each agent and each tool receives a distinct, minimally scoped
+    credential bound to exactly the resources and operations it needs, so
+    a compromised step cannot act outside its narrow grant.
+  code_patterns:
+    generic:
+      vulnerable: |
+        agent = Agent(tools=tools, credentials=ADMIN_API_KEY)
+      secure: |
+        agent = Agent(tools=tools, credentials=scoped_token(role="reader",
+                      resources=["reports/*"]))
+    python:
+      vulnerable: |
+        agent = Agent(model=llm, tools=[db_tool],
+                      credentials=os.environ["AWS_ROOT_KEY"])
+      secure: |
+        agent = Agent(model=llm, tools=[db_tool],
+                      credentials=sts.assume_role("agent-readonly", ttl=900))
+    javascript:
+      vulnerable: |
+        const agent = new Agent({ tools, apiKey: process.env.ADMIN_KEY });
+      secure: |
+        const agent = new Agent({ tools,
+          apiKey: await mintScopedKey({ role: "reader", scope: "reports" }) });
+    typescript:
+      vulnerable: |
+        const agent = new Agent({ tools, credentials: rootCredentials });
+      secure: |
+        const creds: ScopedCredentials = await issueScoped("agent-reader", ["reports:read"]);
+        const agent = new Agent({ tools, credentials: creds });
+
+# ---------------------------------------------------------------------------
+# Per-action authorization at the tool boundary
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.2
+  facet: Privilege Compromise
+  section: Per-Action Authorization
+  security_rule: >-
+    Every privileged tool call must be authorized at the moment of
+    invocation against the acting principal and the specific arguments,
+    not merely gated once when the agent session starts.
+  vulnerability_pattern: >-
+    Authorization is checked only at session creation, so once the agent
+    is running it can call any tool with any arguments, and a manipulated
+    plan reaches sensitive operations with no further permission check.
+  secure_pattern: >-
+    The tool layer enforces an authorization check on each call, taking
+    the principal, the tool, and the concrete arguments, and denies the
+    call when the principal lacks rights to that exact operation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def call_tool(name, args): return TOOLS[name](args)
+      secure: |
+        def call_tool(name, args, principal):
+            require_permission(principal, name, args)
+            return TOOLS[name](args)
+    python:
+      vulnerable: |
+        @tool
+        def delete_record(record_id: str) -> str:
+            return db.delete(record_id)
+      secure: |
+        @tool
+        def delete_record(record_id: str, ctx: RunContext) -> str:
+            authz.require(ctx.principal, "record:delete", record_id)
+            return db.delete(record_id)
+    javascript:
+      vulnerable: |
+        tools.transferFunds = (amount, to) => bank.transfer(amount, to);
+      secure: |
+        tools.transferFunds = (amount, to, ctx) => {
+          authz.require(ctx.principal, "funds:transfer", { amount, to });
+          return bank.transfer(amount, to);
+        };
+    typescript:
+      vulnerable: |
+        const runTool = (t: Tool, args: ToolArgs) => t.execute(args);
+      secure: |
+        const runTool = (t: Tool, args: ToolArgs, ctx: AgentContext) => {
+          authorize(ctx.principal, t.name, args);  // throws on deny
+          return t.execute(args);
+        };
+
+# ---------------------------------------------------------------------------
+# No privilege inheritance across delegated sub-agents
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.3
+  facet: Privilege Compromise
+  section: Sub-Agent Privilege Containment
+  security_rule: >-
+    When an agent delegates work to a sub-agent it must pass down a
+    privilege set equal to or narrower than its own, and never expand the
+    sub-agent's scope beyond the delegating agent's grant.
+  vulnerability_pattern: >-
+    A sub-agent is spawned with its own broad role or with the
+    orchestrator's full toolset, so delegation widens privilege and a
+    low-trust task ends up running high-trust tools.
+  secure_pattern: >-
+    Delegation derives the child's permissions by intersecting the
+    parent's current scope with the narrow needs of the delegated task,
+    so authority can only shrink as work is handed down.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sub_agent = spawn(role="admin", tools=ALL_TOOLS)
+      secure: |
+        sub_agent = spawn(scope=intersect(parent.scope, task.required_scope))
+    python:
+      vulnerable: |
+        researcher = Agent(tools=all_tools, credentials=orchestrator_creds)
+      secure: |
+        researcher = Agent(tools=subset(all_tools, task.tools),
+                            credentials=orchestrator.creds.attenuate(task.scope))
+    javascript:
+      vulnerable: |
+        const child = orchestrator.delegate(task, { tools: orchestrator.tools });
+      secure: |
+        const child = orchestrator.delegate(task, {
+          scope: intersectScopes(orchestrator.scope, task.minScope) });
+    typescript:
+      vulnerable: |
+        const sub: Agent = createSubAgent({ role: "admin" });
+      secure: |
+        const sub: Agent = createSubAgent({
+          scope: narrow(parent.scope, task.requiredScope) });
+
+# ---------------------------------------------------------------------------
+# Reject runtime privilege escalation from manipulated context
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.4
+  facet: Privilege Compromise
+  section: Runtime Escalation Resistance
+  security_rule: >-
+    An agent's effective permissions must be fixed by the trusted runtime
+    at session start and must never be raised by content the agent reads,
+    such as tool output, retrieved documents, or user messages.
+  vulnerability_pattern: >-
+    The agent treats role or permission claims found in untrusted content
+    as authoritative, so a crafted document or tool result saying the
+    agent is now an administrator silently escalates its privileges.
+  secure_pattern: >-
+    Privilege state lives only in the trusted runtime context and is
+    immutable for the session, and any role or scope hint appearing inside
+    model-visible content is ignored when authorization is decided.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if "you are admin" in tool_output: session.role = "admin"
+      secure: |
+        session.role = trusted_runtime.role   # set once, never from content
+    python:
+      vulnerable: |
+        role = llm_response.get("role", session.role)
+        authz.check(role, action)
+      secure: |
+        authz.check(ctx.trusted_role, action)  # model output cannot raise it
+    javascript:
+      vulnerable: |
+        session.scopes = retrievedDoc.metadata.scopes || session.scopes;
+      secure: |
+        const scopes = runtime.principal.scopes;  // not from retrieved content
+    typescript:
+      vulnerable: |
+        const role: Role = (toolResult.claimedRole as Role) ?? ctx.role;
+      secure: |
+        const role: Role = ctx.trustedRole;  // immutable for the session
+
+# ---------------------------------------------------------------------------
+# Confused-deputy protection — preserve the originating user identity
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.5
+  facet: Privilege Compromise
+  section: Confused-Deputy Protection
+  security_rule: >-
+    When an agent acts on behalf of a user it must carry that user's
+    identity to every downstream call, so backend services authorize the
+    real principal and not the agent's own service account.
+  vulnerability_pattern: >-
+    The agent calls downstream services with its own high-privilege
+    service identity while acting for a low-privilege user, so the agent
+    becomes a confused deputy that performs actions the user could not.
+  secure_pattern: >-
+    The originating user's identity is propagated as a delegated or
+    on-behalf-of token through every hop, and each backend authorizes the
+    end user, keeping the agent unable to exceed that user's rights.
+  code_patterns:
+    generic:
+      vulnerable: |
+        backend.call(action, identity=AGENT_SERVICE_ACCOUNT)
+      secure: |
+        backend.call(action, identity=on_behalf_of(end_user))
+    python:
+      vulnerable: |
+        requests.post(url, headers={"Authorization": f"Bearer {SERVICE_TOKEN}"})
+      secure: |
+        requests.post(url, headers={"Authorization": f"Bearer {ctx.user_token}"})
+    javascript:
+      vulnerable: |
+        api.fetch(path, { token: agentServiceToken });
+      secure: |
+        api.fetch(path, { token: ctx.delegatedUserToken });
+    typescript:
+      vulnerable: |
+        const res = await downstream.call(req, { actor: "agent-svc" });
+      secure: |
+        const res = await downstream.call(req, { actor: ctx.endUser.id,
+          onBehalfOf: ctx.endUser.token });
+
+# ---------------------------------------------------------------------------
+# Human approval gate for high-impact operations
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.6
+  facet: Privilege Compromise
+  section: Human-in-the-Loop for High-Impact Actions
+  security_rule: >-
+    Operations that are irreversible or high impact — financial transfers,
+    data deletion, production deployment, permission changes — must pause
+    for explicit human approval before the agent may execute them.
+  vulnerability_pattern: >-
+    The agent autonomously executes high-impact tools as soon as its plan
+    selects them, so a manipulated or hallucinated plan reaches
+    destructive operations with no human able to intervene.
+  secure_pattern: >-
+    High-impact tools are flagged as requiring approval, and the runtime
+    interrupts execution to obtain a signed human decision before the
+    call proceeds, recording who approved what.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = high_impact_tool(args)
+      secure: |
+        if tool.high_impact: await_human_approval(tool, args)
+        result = high_impact_tool(args)
+    python:
+      vulnerable: |
+        @tool
+        def deploy_to_prod(version: str) -> str:
+            return ci.deploy("prod", version)
+      secure: |
+        @tool(requires_approval=True)
+        def deploy_to_prod(version: str, ctx: RunContext) -> str:
+            ctx.interrupt(f"Approve prod deploy of {version}?")
+            return ci.deploy("prod", version)
+    javascript:
+      vulnerable: |
+        tools.wipeDatabase = (env) => db.dropAll(env);
+      secure: |
+        tools.wipeDatabase = async (env, ctx) => {
+          await ctx.requestApproval({ action: "wipeDatabase", env });
+          return db.dropAll(env);
+        };
+    typescript:
+      vulnerable: |
+        const refund = (orderId: string) => payments.refund(orderId);
+      secure: |
+        const refund = async (orderId: string, ctx: AgentContext) => {
+          await ctx.humanApproval({ tool: "refund", orderId });
+          return payments.refund(orderId);
+        };
+
+# ---------------------------------------------------------------------------
+# Allowlist tool registration per agent role
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.7
+  facet: Privilege Compromise
+  section: Tool Allowlisting per Role
+  security_rule: >-
+    Each agent must be bound to an explicit allowlist of tools matched to
+    its role, so it cannot discover or invoke capabilities outside the set
+    its task legitimately needs.
+  vulnerability_pattern: >-
+    Every agent is registered with the full global tool catalog, so a
+    narrow-purpose agent still holds dangerous capabilities and a single
+    prompt-injection can pivot it into a privileged action.
+  secure_pattern: >-
+    Tools are registered per agent from a role-scoped allowlist, the
+    catalog is filtered before the agent ever sees it, and any call to an
+    unlisted tool is refused by the runtime.
+  code_patterns:
+    generic:
+      vulnerable: |
+        agent = Agent(tools=registry.all())
+      secure: |
+        agent = Agent(tools=registry.for_role("support_triage"))
+    python:
+      vulnerable: |
+        support_agent = Agent(model=llm, tools=ALL_TOOLS)
+      secure: |
+        ALLOWED = {"search_kb", "create_ticket"}
+        support_agent = Agent(model=llm,
+                              tools=[t for t in ALL_TOOLS if t.name in ALLOWED])
+    javascript:
+      vulnerable: |
+        const agent = new Agent({ tools: toolRegistry.getAll() });
+      secure: |
+        const allowed = ["searchKb", "createTicket"];
+        const agent = new Agent({ tools: toolRegistry.pick(allowed) });
+    typescript:
+      vulnerable: |
+        const agent = new Agent({ tools: allTools });
+      secure: |
+        const roleTools: Tool[] = allTools.filter(t => ROLE_ALLOWLIST.has(t.name));
+        const agent = new Agent({ tools: roleTools });
+
+# ---------------------------------------------------------------------------
+# Short-lived, scoped, revocable agent credentials
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.8
+  facet: Privilege Compromise
+  section: Ephemeral Scoped Credentials
+  security_rule: >-
+    Credentials issued to an agent must be short-lived, scoped to the
+    current task, and centrally revocable, so a leaked or abused token
+    expires quickly and can be cut off on demand.
+  vulnerability_pattern: >-
+    The agent holds a long-lived static API key with broad scope, so a
+    token exfiltrated through tool output or logs grants a persistent
+    foothold with the agent's full privileges.
+  secure_pattern: >-
+    A fresh credential is minted per task with a short time-to-live and a
+    task-specific scope, tracked so it can be revoked immediately, and it
+    expires automatically when the task ends.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = STATIC_API_KEY            # never expires, broad scope
+      secure: |
+        token = mint_token(scope=task.scope, ttl_seconds=300, revocable=True)
+    python:
+      vulnerable: |
+        client = ApiClient(api_key=settings.LONG_LIVED_KEY)
+      secure: |
+        cred = vault.issue(scope=task.scope, ttl=timedelta(minutes=5))
+        client = ApiClient(api_key=cred.token)
+    javascript:
+      vulnerable: |
+        const client = new ApiClient({ apiKey: STATIC_KEY });
+      secure: |
+        const cred = await vault.issue({ scope: task.scope, ttlSeconds: 300 });
+        const client = new ApiClient({ apiKey: cred.token });
+    typescript:
+      vulnerable: |
+        const client = new ApiClient({ apiKey: process.env.STATIC_KEY! });
+      secure: |
+        const cred: EphemeralCred = await vault.issue({ scope: task.scope, ttl: 300 });
+        const client = new ApiClient({ apiKey: cred.token });
+
+# ---------------------------------------------------------------------------
+# Audit every privileged action with the acting identity
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.9
+  facet: Privilege Compromise
+  section: Privileged Action Audit Trail
+  security_rule: >-
+    Every privileged tool invocation must be recorded with the acting
+    agent, the originating user, the arguments, and the authorization
+    decision, so escalation can be detected and reconstructed.
+  vulnerability_pattern: >-
+    Privileged calls execute with no durable record of who acted or what
+    was authorized, so a privilege-compromise incident cannot be detected
+    in time or reconstructed afterward.
+  secure_pattern: >-
+    The tool layer emits a tamper-evident audit event for each privileged
+    call, capturing principal, agent, tool, arguments, and allow-or-deny
+    outcome before and after execution.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = privileged_tool(args)
+      secure: |
+        audit.log(principal, agent_id, tool="privileged_tool", args=args,
+                  decision="allow")
+        result = privileged_tool(args)
+    python:
+      vulnerable: |
+        def run(tool, args, ctx):
+            return tool.execute(args)
+      secure: |
+        def run(tool, args, ctx):
+            audit.record(ctx.principal, ctx.agent_id, tool.name, args)
+            return tool.execute(args)
+    javascript:
+      vulnerable: |
+        const out = await tool.execute(args);
+      secure: |
+        auditLog.write({ principal: ctx.principal, agent: ctx.agentId,
+          tool: tool.name, args });
+        const out = await tool.execute(args);
+    typescript:
+      vulnerable: |
+        return tool.execute(args);
+      secure: |
+        await audit.emit({ principal: ctx.principal, agentId: ctx.agentId,
+          tool: tool.name, args, decision: "allow" });
+        return tool.execute(args);
+
+# ---------------------------------------------------------------------------
+# Default-deny on unknown or unmapped tool requests
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T3.10
+  facet: Privilege Compromise
+  section: Default-Deny Authorization
+  security_rule: >-
+    The agent's authorization layer must default to deny, so any tool or
+    action with no explicit grant for the acting principal is refused
+    rather than allowed to proceed.
+  vulnerability_pattern: >-
+    Authorization is allow-by-default with only specific actions
+    blacklisted, so a newly added tool, or an action the policy author did
+    not anticipate, runs with full privilege unchecked.
+  secure_pattern: >-
+    The policy grants only explicitly listed permissions and returns deny
+    for everything else, so unmapped tools and unforeseen actions fail
+    closed instead of escalating privilege.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if action in DENYLIST: deny()
+        else: allow()
+      secure: |
+        if action in ALLOWLIST.get(principal, set()): allow()
+        else: deny()
+    python:
+      vulnerable: |
+        def authorized(principal, action):
+            return action not in BLOCKED_ACTIONS
+      secure: |
+        def authorized(principal, action):
+            return action in GRANTS.get(principal.role, frozenset())
+    javascript:
+      vulnerable: |
+        const allowed = (principal, action) => !blocked.has(action);
+      secure: |
+        const allowed = (principal, action) =>
+          (grants[principal.role] ?? new Set()).has(action);
+    typescript:
+      vulnerable: |
+        function allowed(p: Principal, action: string): boolean {
+          return !DENYLIST.has(action);
+        }
+      secure: |
+        function allowed(p: Principal, action: string): boolean {
+          return (GRANTS.get(p.role) ?? new Set<string>()).has(action);
+        }

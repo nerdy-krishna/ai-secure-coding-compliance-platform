@@ -1,0 +1,526 @@
+# OWASP LLM Top 10 (2025) — LLM10: Unbounded Consumption
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript for LLM-integrated apps).
+#
+# Unbounded Consumption covers token/cost/context-window denial of service
+# and wallet abuse: missing token caps, absent rate limiting, no per-user
+# cost budgets, missing request timeouts, unbounded retries and fan-out,
+# and oversized untrusted inputs that inflate context and spend.
+
+# ---------------------------------------------------------------------------
+# LLM10.1 — Output Token Caps
+# ---------------------------------------------------------------------------
+
+- id: LLM10.1
+  facet: Unbounded Consumption
+  section: Output Token Caps
+  security_rule: >-
+    Every model invocation must specify an explicit maximum output token
+    limit so a single request cannot generate an unbounded, expensive
+    completion.
+  vulnerability_pattern: >-
+    A completion request is made with no maximum output token limit, so
+    the model can emit a very long response that drives latency and cost
+    far beyond what the use case needs.
+  secure_pattern: >-
+    The request sets an explicit maximum output token limit sized to the
+    use case, so generation stops at a known, budgeted ceiling regardless
+    of what the model would otherwise produce.
+  code_patterns:
+    generic:
+      vulnerable: |
+        completion = llm.generate(prompt)          # no output ceiling
+      secure: |
+        completion = llm.generate(prompt, max_output_tokens=512)
+    python:
+      vulnerable: |
+        resp = client.chat.completions.create(model=MODEL, messages=msgs)
+      secure: |
+        resp = client.chat.completions.create(
+            model=MODEL, messages=msgs, max_tokens=512)
+    javascript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+      secure: |
+        const resp = await client.chat.completions.create({
+          model, messages, max_tokens: 512 });
+    typescript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+      secure: |
+        const resp = await client.chat.completions.create({
+          model, messages, max_tokens: 512 } satisfies ChatParams);
+
+# ---------------------------------------------------------------------------
+# LLM10.2 — Input Size and Context-Window Limits
+# ---------------------------------------------------------------------------
+
+- id: LLM10.2
+  facet: Unbounded Consumption
+  section: Input Size and Context-Window Limits
+  security_rule: >-
+    Untrusted input must be measured and bounded before it is placed into
+    a prompt, so an oversized payload cannot inflate the context window,
+    token spend, and latency.
+  vulnerability_pattern: >-
+    User-supplied text is concatenated straight into the prompt with no
+    length or token check, so a very large input fills the context window
+    and multiplies the cost of every call that includes it.
+  secure_pattern: >-
+    The input is token-counted and rejected or truncated against a fixed
+    maximum before being added to the prompt, so prompt size stays within
+    a known budget.
+  code_patterns:
+    generic:
+      vulnerable: |
+        prompt = system + userText             # userText size unchecked
+      secure: |
+        if tokenCount(userText) > MAX_INPUT: reject()
+        prompt = system + userText
+    python:
+      vulnerable: |
+        prompt = SYSTEM + request.json["text"]
+      secure: |
+        text = request.json["text"]
+        if litellm.token_counter(model=MODEL, text=text) > MAX_INPUT_TOKENS:
+            raise HTTPException(413, "input too large")
+        prompt = SYSTEM + text
+    javascript:
+      vulnerable: |
+        const prompt = system + req.body.text;
+      secure: |
+        if (encode(req.body.text).length > MAX_INPUT_TOKENS)
+          return res.status(413).json({ error: "input too large" });
+        const prompt = system + req.body.text;
+    typescript:
+      vulnerable: |
+        const prompt: string = system + req.body.text;
+      secure: |
+        const text: string = req.body.text;
+        if (encode(text).length > MAX_INPUT_TOKENS)
+          throw new PayloadTooLargeError("input too large");
+        const prompt: string = system + text;
+
+# ---------------------------------------------------------------------------
+# LLM10.3 — Per-User Rate Limiting
+# ---------------------------------------------------------------------------
+
+- id: LLM10.3
+  facet: Unbounded Consumption
+  section: Per-User Rate Limiting
+  security_rule: >-
+    LLM-backed endpoints must enforce a per-user or per-tenant request
+    rate limit so a single caller cannot flood the model with requests
+    and exhaust capacity or budget.
+  vulnerability_pattern: >-
+    An expensive model endpoint accepts unlimited requests per caller, so
+    a script or abusive user can issue calls as fast as the network
+    allows and drain both capacity and spend.
+  secure_pattern: >-
+    Each caller is subject to a rate limiter keyed on the authenticated
+    identity, so request volume per user stays within an enforced ceiling
+    over a rolling window.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def chat(user, msg): return llm.generate(msg)   # no rate limit
+      secure: |
+        def chat(user, msg):
+            if not rateLimiter.allow(user.id): raise TooManyRequests()
+            return llm.generate(msg)
+    python:
+      vulnerable: |
+        @router.post("/chat")
+        async def chat(body: ChatIn, user=Depends(current_user)):
+            return await llm.generate(body.message)
+      secure: |
+        @router.post("/chat", dependencies=[Depends(RateLimiter(times=20, seconds=60))])
+        async def chat(body: ChatIn, user=Depends(current_user)):
+            return await llm.generate(body.message)
+    javascript:
+      vulnerable: |
+        app.post("/chat", async (req, res) => res.json(await llm.generate(req.body.message)));
+      secure: |
+        const limiter = rateLimit({ windowMs: 60000, max: 20, keyGenerator: r => r.user.id });
+        app.post("/chat", limiter, async (req, res) =>
+          res.json(await llm.generate(req.body.message)));
+    typescript:
+      vulnerable: |
+        app.post("/chat", async (req: Request, res: Response) =>
+          res.json(await llm.generate(req.body.message)));
+      secure: |
+        const limiter = rateLimit({ windowMs: 60_000, max: 20, keyGenerator: (r: Request) => r.user.id });
+        app.post("/chat", limiter, async (req: Request, res: Response) =>
+          res.json(await llm.generate(req.body.message)));
+
+# ---------------------------------------------------------------------------
+# LLM10.4 — Per-User Cost and Token Budgets
+# ---------------------------------------------------------------------------
+
+- id: LLM10.4
+  facet: Unbounded Consumption
+  section: Per-User Cost and Token Budgets
+  security_rule: >-
+    Cumulative token spend must be metered against a per-user or
+    per-tenant budget, and requests must be refused once the budget for
+    the period is exhausted, to prevent denial-of-wallet abuse.
+  vulnerability_pattern: >-
+    Token usage is never accumulated or compared to a quota, so a caller
+    can keep spending the operator's API credit indefinitely without ever
+    being cut off.
+  secure_pattern: >-
+    Each call's token cost is added to a per-user running total for the
+    billing period, and further calls are rejected once the total reaches
+    the configured budget.
+  code_patterns:
+    generic:
+      vulnerable: |
+        answer = llm.generate(prompt)          # spend never metered
+      secure: |
+        if budget.spent(user) >= budget.limit(user): raise BudgetExceeded()
+        answer = llm.generate(prompt)
+        budget.add(user, answer.usage.total_tokens)
+    python:
+      vulnerable: |
+        resp = await client.chat.completions.create(model=MODEL, messages=msgs)
+      secure: |
+        if await usage_repo.tokens_this_month(user.id) >= MONTHLY_TOKEN_QUOTA:
+            raise HTTPException(402, "monthly token budget exhausted")
+        resp = await client.chat.completions.create(model=MODEL, messages=msgs)
+        await usage_repo.add(user.id, resp.usage.total_tokens)
+    javascript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+      secure: |
+        if (await usage.monthly(user.id) >= MONTHLY_TOKEN_QUOTA)
+          throw new PaymentRequiredError("token budget exhausted");
+        const resp = await client.chat.completions.create({ model, messages });
+        await usage.add(user.id, resp.usage.total_tokens);
+    typescript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+      secure: |
+        if ((await usage.monthly(user.id)) >= MONTHLY_TOKEN_QUOTA)
+          throw new PaymentRequiredError("token budget exhausted");
+        const resp = await client.chat.completions.create({ model, messages });
+        await usage.add(user.id, resp.usage?.total_tokens ?? 0);
+
+# ---------------------------------------------------------------------------
+# LLM10.5 — Request Timeouts
+# ---------------------------------------------------------------------------
+
+- id: LLM10.5
+  facet: Unbounded Consumption
+  section: Request Timeouts
+  security_rule: >-
+    Every call to a model or downstream inference service must run under
+    an explicit timeout, so a slow or stalled generation cannot hold a
+    worker and its resources open indefinitely.
+  vulnerability_pattern: >-
+    A model call is made with no timeout, so a hung or extremely slow
+    response pins a connection, thread, or worker until the operating
+    system or load balancer eventually kills it.
+  secure_pattern: >-
+    The call is wrapped in an explicit timeout that aborts the request
+    after a bounded interval, freeing the worker and surfacing a clean
+    error to the caller.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = llm.generate(prompt)              # no timeout
+      secure: |
+        result = withTimeout(llm.generate(prompt), seconds=30)
+    python:
+      vulnerable: |
+        resp = await client.chat.completions.create(model=MODEL, messages=msgs)
+      secure: |
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(model=MODEL, messages=msgs), timeout=30)
+    javascript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+      secure: |
+        const resp = await client.chat.completions.create(
+          { model, messages }, { signal: AbortSignal.timeout(30000) });
+    typescript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+      secure: |
+        const resp = await client.chat.completions.create(
+          { model, messages }, { signal: AbortSignal.timeout(30_000) });
+
+# ---------------------------------------------------------------------------
+# LLM10.6 — Bounded Retries and Backoff
+# ---------------------------------------------------------------------------
+
+- id: LLM10.6
+  facet: Unbounded Consumption
+  section: Bounded Retries and Backoff
+  security_rule: >-
+    Retries of failed or invalid model calls must be capped at a small
+    fixed number with backoff, so transient errors cannot trigger an
+    unbounded loop of paid inference calls.
+  vulnerability_pattern: >-
+    Failed or schema-invalid completions are retried in an open loop
+    until they succeed, so a persistently failing call multiplies token
+    spend without limit and can saturate the provider.
+  secure_pattern: >-
+    Retries are limited to a small fixed maximum with exponential
+    backoff, and the call gives up with an error once the attempt budget
+    is spent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while not valid(result): result = llm.generate(prompt)   # unbounded
+      secure: |
+        for attempt in range(MAX_RETRIES):
+            result = llm.generate(prompt)
+            if valid(result): break
+            sleep(backoff(attempt))
+    python:
+      vulnerable: |
+        while True:
+            out = await llm.generate(prompt)
+            if schema.validate(out): return out
+      secure: |
+        for attempt in range(3):
+            out = await llm.generate(prompt)
+            if schema.validate(out): return out
+            await asyncio.sleep(2 ** attempt)
+        raise RuntimeError("structured output failed after 3 attempts")
+    javascript:
+      vulnerable: |
+        let out; do { out = await llm.generate(prompt); } while (!valid(out));
+      secure: |
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const out = await llm.generate(prompt);
+          if (valid(out)) return out;
+          await sleep(2 ** attempt * 1000);
+        }
+        throw new Error("generation failed after 3 attempts");
+    typescript:
+      vulnerable: |
+        let out: Result; do { out = await llm.generate(prompt); } while (!valid(out));
+      secure: |
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const out: Result = await llm.generate(prompt);
+          if (valid(out)) return out;
+          await sleep(2 ** attempt * 1000);
+        }
+        throw new Error("generation failed after 3 attempts");
+
+# ---------------------------------------------------------------------------
+# LLM10.7 — Bounded Agent Loops and Tool Fan-Out
+# ---------------------------------------------------------------------------
+
+- id: LLM10.7
+  facet: Unbounded Consumption
+  section: Bounded Agent Loops and Tool Fan-Out
+  security_rule: >-
+    Autonomous agent reasoning loops must enforce a hard ceiling on the
+    number of steps or tool calls per task, so a model cannot recurse or
+    fan out into an unbounded chain of paid invocations.
+  vulnerability_pattern: >-
+    An agent loops, calling the model and tools until it decides it is
+    done, with no step ceiling, so a confused or adversarially steered
+    agent can run a very long or endless chain of expensive calls.
+  secure_pattern: >-
+    The agent loop carries a maximum step or recursion-depth counter and
+    terminates with a partial result or error once the ceiling is
+    reached, regardless of whether the task is complete.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while not agent.done(): agent.step()       # no step ceiling
+      secure: |
+        for _ in range(MAX_STEPS):
+            if agent.done(): break
+            agent.step()
+    python:
+      vulnerable: |
+        while not state.finished:
+            state = await run_tool_node(state)
+      secure: |
+        for step in range(MAX_AGENT_STEPS):
+            if state.finished: break
+            state = await run_tool_node(state)
+        else:
+            raise StepBudgetExceeded("agent exceeded step limit")
+    javascript:
+      vulnerable: |
+        while (!state.finished) state = await runToolNode(state);
+      secure: |
+        for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+          if (state.finished) break;
+          state = await runToolNode(state);
+        }
+        if (!state.finished) throw new Error("agent exceeded step limit");
+    typescript:
+      vulnerable: |
+        while (!state.finished) state = await runToolNode(state);
+      secure: |
+        for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+          if (state.finished) break;
+          state = await runToolNode(state);
+        }
+        if (!state.finished) throw new Error("agent exceeded step limit");
+
+# ---------------------------------------------------------------------------
+# LLM10.8 — Bounded Concurrency
+# ---------------------------------------------------------------------------
+
+- id: LLM10.8
+  facet: Unbounded Consumption
+  section: Bounded Concurrency
+  security_rule: >-
+    The number of in-flight model calls must be capped by a concurrency
+    limiter, so a large batch of work cannot launch unlimited parallel
+    inference requests and overwhelm the provider or the budget.
+  vulnerability_pattern: >-
+    Many model calls are dispatched in parallel with no concurrency
+    bound, so a large input set spawns an unlimited burst of simultaneous
+    paid requests that spikes cost and triggers provider throttling.
+  secure_pattern: >-
+    Parallel model calls run behind a semaphore or worker pool with a
+    fixed maximum, so only a bounded number execute at once and the rest
+    queue.
+  code_patterns:
+    generic:
+      vulnerable: |
+        results = parallelMap(items, llm.generate)        # unbounded fan-out
+      secure: |
+        results = parallelMap(items, llm.generate, maxConcurrency=5)
+    python:
+      vulnerable: |
+        results = await asyncio.gather(*(llm.generate(f) for f in files))
+      secure: |
+        sem = asyncio.Semaphore(5)
+        async def bounded(f):
+            async with sem: return await llm.generate(f)
+        results = await asyncio.gather(*(bounded(f) for f in files))
+    javascript:
+      vulnerable: |
+        const results = await Promise.all(files.map(f => llm.generate(f)));
+      secure: |
+        const limit = pLimit(5);
+        const results = await Promise.all(files.map(f => limit(() => llm.generate(f))));
+    typescript:
+      vulnerable: |
+        const results = await Promise.all(files.map((f: string) => llm.generate(f)));
+      secure: |
+        const limit = pLimit(5);
+        const results = await Promise.all(
+          files.map((f: string) => limit(() => llm.generate(f))));
+
+# ---------------------------------------------------------------------------
+# LLM10.9 — Consumption Monitoring and Alerting
+# ---------------------------------------------------------------------------
+
+- id: LLM10.9
+  facet: Unbounded Consumption
+  section: Consumption Monitoring and Alerting
+  security_rule: >-
+    Token usage and inference cost must be recorded per call and per user
+    and surfaced to monitoring with alert thresholds, so abnormal
+    consumption is detected and stopped quickly.
+  vulnerability_pattern: >-
+    Model calls are made with no record of tokens used or cost incurred,
+    so a denial-of-wallet attack runs invisibly and is only noticed when
+    the provider invoice arrives.
+  secure_pattern: >-
+    Every call emits a usage metric with token counts, cost, and the
+    caller identity, and alerts fire when consumption crosses a threshold
+    so operators can intervene before spend runs away.
+  code_patterns:
+    generic:
+      vulnerable: |
+        answer = llm.generate(prompt)              # usage never recorded
+      secure: |
+        answer = llm.generate(prompt)
+        metrics.record("llm.tokens", answer.usage.total_tokens, user=user.id)
+    python:
+      vulnerable: |
+        resp = await client.chat.completions.create(model=MODEL, messages=msgs)
+        return resp.choices[0].message.content
+      secure: |
+        resp = await client.chat.completions.create(model=MODEL, messages=msgs)
+        cost = litellm.completion_cost(completion_response=resp)
+        logger.info("llm_usage", extra={"user_id": user.id,
+            "tokens": resp.usage.total_tokens, "cost_usd": cost})
+        return resp.choices[0].message.content
+    javascript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+        return resp.choices[0].message.content;
+      secure: |
+        const resp = await client.chat.completions.create({ model, messages });
+        metrics.increment("llm.tokens", resp.usage.total_tokens, { userId: user.id });
+        return resp.choices[0].message.content;
+    typescript:
+      vulnerable: |
+        const resp = await client.chat.completions.create({ model, messages });
+        return resp.choices[0].message.content;
+      secure: |
+        const resp = await client.chat.completions.create({ model, messages });
+        metrics.increment("llm.tokens", resp.usage?.total_tokens ?? 0, { userId: user.id });
+        return resp.choices[0].message.content;
+
+# ---------------------------------------------------------------------------
+# LLM10.10 — Model Extraction and Scraping Throttles
+# ---------------------------------------------------------------------------
+
+- id: LLM10.10
+  facet: Unbounded Consumption
+  section: Model Extraction and Scraping Throttles
+  security_rule: >-
+    Programmatic access to the model must be authenticated and throttled
+    with per-key quotas and anomaly detection, so an attacker cannot
+    issue mass queries to clone behaviour or harvest training data.
+  vulnerability_pattern: >-
+    The model endpoint is reachable without authentication or per-key
+    quotas, so an attacker can run a high-volume scraping campaign that
+    extracts model behaviour and runs up cost.
+  secure_pattern: >-
+    Access requires an authenticated API key bound to an enforced quota,
+    and unusually high or systematic query patterns are flagged and
+    throttled or blocked.
+  code_patterns:
+    generic:
+      vulnerable: |
+        @public_endpoint
+        def query(prompt): return llm.generate(prompt)
+      secure: |
+        @requires_api_key
+        def query(key, prompt):
+            quota.consume(key)               # per-key quota enforced
+            return llm.generate(prompt)
+    python:
+      vulnerable: |
+        @router.post("/v1/query")
+        async def query(body: QueryIn):
+            return await llm.generate(body.prompt)
+      secure: |
+        @router.post("/v1/query")
+        async def query(body: QueryIn, key: ApiKey = Depends(verify_api_key)):
+            await quota.consume(key.id)
+            return await llm.generate(body.prompt)
+    javascript:
+      vulnerable: |
+        app.post("/v1/query", async (req, res) =>
+          res.json(await llm.generate(req.body.prompt)));
+      secure: |
+        app.post("/v1/query", verifyApiKey, enforceQuota, async (req, res) =>
+          res.json(await llm.generate(req.body.prompt)));
+    typescript:
+      vulnerable: |
+        app.post("/v1/query", async (req: Request, res: Response) =>
+          res.json(await llm.generate(req.body.prompt)));
+      secure: |
+        app.post("/v1/query", verifyApiKey, enforceQuota,
+          async (req: Request, res: Response) =>
+            res.json(await llm.generate(req.body.prompt)));

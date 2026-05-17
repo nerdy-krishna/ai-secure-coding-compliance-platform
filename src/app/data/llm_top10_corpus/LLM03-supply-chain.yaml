@@ -1,0 +1,441 @@
+# OWASP LLM Top 10 (2025) — LLM03: Supply Chain
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# LLM03 covers the provenance and integrity of everything an LLM
+# application pulls in from outside its own trust boundary: foundation
+# models and adapters from model hubs, training and fine-tuning datasets,
+# third-party plugins and tool integrations, and the package dependencies
+# that wire them together. A compromise anywhere in that chain — a
+# tampered model file, a poisoned dataset, a typo-squatted package, an
+# unverified adapter — can backdoor the application before a single
+# prompt is processed.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern
+# and secure_pattern (concept descriptions — no '*' or '[' — these feed
+# the agent's generic fallback), and short seed-sized code_patterns
+# (generic always; python / javascript / typescript where there is a
+# real code sink — the languages LLM-integrated apps are built in).
+
+# ---------------------------------------------------------------------------
+# LLM03.1 — Model artifact integrity
+# ---------------------------------------------------------------------------
+
+- id: LLM03.1
+  facet: Supply Chain Vulnerabilities
+  section: Model Artifact Integrity Verification
+  security_rule: >-
+    Model weights and adapters downloaded from a hub must be pinned to a
+    specific immutable revision and verified against a known good hash or
+    signature before they are loaded into the application.
+  vulnerability_pattern: >-
+    A model is loaded by mutable name or branch with no revision pin and
+    no integrity check, so a hub account takeover or a swapped artifact
+    silently substitutes backdoored weights on the next deployment.
+  secure_pattern: >-
+    The download is pinned to an exact commit revision and the resolved
+    artifact is checked against a recorded digest or signature, so any
+    tampering or substitution fails the load instead of running.
+  code_patterns:
+    generic:
+      vulnerable: |
+        model = hub.download("vendor/chat-model")   # mutable name, no pin
+      secure: |
+        model = hub.download("vendor/chat-model", revision=PINNED_COMMIT)
+        verifyDigest(model, EXPECTED_SHA256)
+    python:
+      vulnerable: |
+        from huggingface_hub import snapshot_download
+        path = snapshot_download("vendor/chat-model")
+      secure: |
+        path = snapshot_download("vendor/chat-model", revision=PINNED_SHA)
+        assert sha256_of_dir(path) == EXPECTED_DIGEST
+    javascript:
+      vulnerable: |
+        const model = await hub.getModel("vendor/chat-model");
+      secure: |
+        const model = await hub.getModel("vendor/chat-model", { revision: PINNED_SHA });
+        assertDigest(model.files, EXPECTED_DIGEST);
+    typescript:
+      vulnerable: |
+        const model: Model = await hub.getModel("vendor/chat-model");
+      secure: |
+        const model: Model = await hub.getModel("vendor/chat-model", { revision: PINNED_SHA });
+        assertDigest(model.files, EXPECTED_DIGEST);
+
+# ---------------------------------------------------------------------------
+# LLM03.2 — Unsafe model deserialization
+# ---------------------------------------------------------------------------
+
+- id: LLM03.2
+  facet: Supply Chain Vulnerabilities
+  section: Safe Model File Formats
+  security_rule: >-
+    Model checkpoints must be loaded from a non-executable serialization
+    format such as safetensors, and pickle-backed formats from untrusted
+    sources must never be deserialized into the process.
+  vulnerability_pattern: >-
+    A checkpoint in a pickle-backed format is loaded from an external
+    source, so the file's embedded object graph runs arbitrary code
+    inside the application the moment the weights are deserialized.
+  secure_pattern: >-
+    Weights are stored and loaded as safetensors or another data-only
+    format, and any legacy pickle load is forced into a weights-only or
+    sandboxed mode that cannot execute embedded code.
+  code_patterns:
+    generic:
+      vulnerable: |
+        weights = pickleLoad(open(modelFile))   # embedded code executes
+      secure: |
+        weights = safetensorsLoad(modelFile)    # data-only, no code path
+    python:
+      vulnerable: |
+        state = torch.load("downloaded_model.bin")
+      secure: |
+        from safetensors.torch import load_file
+        state = load_file("downloaded_model.safetensors")
+    javascript:
+      vulnerable: |
+        const w = deserializePickle(fs.readFileSync("model.pkl"));
+      secure: |
+        const w = loadSafetensors(fs.readFileSync("model.safetensors"));
+    typescript:
+      vulnerable: |
+        const w: Weights = deserializePickle(fs.readFileSync("model.pkl"));
+      secure: |
+        const w: Weights = loadSafetensors(fs.readFileSync("model.safetensors"));
+
+# ---------------------------------------------------------------------------
+# LLM03.3 — Dependency provenance
+# ---------------------------------------------------------------------------
+
+- id: LLM03.3
+  facet: Supply Chain Vulnerabilities
+  section: Dependency Pinning and Provenance
+  security_rule: >-
+    Every package the LLM application depends on must be installed from a
+    trusted registry, pinned to an exact version, and locked with a hash
+    so the resolved artifact cannot drift or be swapped.
+  vulnerability_pattern: >-
+    Dependencies are declared with loose version ranges and no lockfile
+    hashes, so a malicious release, a dependency-confusion package, or a
+    compromised maintainer account is pulled in on the next install.
+  secure_pattern: >-
+    Versions are pinned exactly and verified against a committed lockfile
+    with per-artifact hashes, and installs are restricted to a vetted
+    registry so an unexpected artifact fails the build.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dependency "langchain"        # any version, any source
+      secure: |
+        dependency "langchain==0.3.27" with hash sha256:KNOWN_GOOD
+    python:
+      vulnerable: |
+        # requirements.txt
+        langchain
+        openai>=1.0
+      secure: |
+        # requirements.txt (hash-locked, exact)
+        langchain==0.3.27 --hash=sha256:KNOWN_GOOD
+        openai==1.55.3 --hash=sha256:KNOWN_GOOD
+    javascript:
+      vulnerable: |
+        // package.json
+        "dependencies": { "langchain": "^0.3.0" }
+      secure: |
+        // package.json — exact pin, committed package-lock.json with integrity hashes
+        "dependencies": { "langchain": "0.3.27" }
+    typescript:
+      vulnerable: |
+        // package.json
+        "dependencies": { "@langchain/openai": "latest" }
+      secure: |
+        // package.json — exact pin, npm ci against committed lockfile
+        "dependencies": { "@langchain/openai": "0.3.17" }
+
+# ---------------------------------------------------------------------------
+# LLM03.4 — Plugin and tool vetting
+# ---------------------------------------------------------------------------
+
+- id: LLM03.4
+  facet: Supply Chain Vulnerabilities
+  section: Third-Party Plugin and Tool Vetting
+  security_rule: >-
+    Third-party plugins, tool integrations, and MCP servers exposed to an
+    agent must be loaded only from a vetted allowlist of trusted sources,
+    never from a name or URL supplied at runtime by the model or a user.
+  vulnerability_pattern: >-
+    The agent loads a plugin or connects to a tool server chosen from
+    untrusted input, so an attacker registers a hostile tool that the
+    model then invokes with the application's credentials and reach.
+  secure_pattern: >-
+    Available tools come from a fixed, reviewed registry; any plugin
+    identifier from the model or user is checked against that allowlist
+    before it is loaded, and unknown sources are rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tool = loadPlugin(requestedPluginUrl)   # source chosen at runtime
+      secure: |
+        if requestedPlugin in VETTED_TOOLS: tool = VETTED_TOOLS[requestedPlugin]
+    python:
+      vulnerable: |
+        tool = load_tools([request.json["tool_name"]], llm=llm)
+      secure: |
+        name = request.json["tool_name"]
+        if name not in ALLOWED_TOOLS: raise ValueError("unvetted tool")
+        tool = ALLOWED_TOOLS[name]
+    javascript:
+      vulnerable: |
+        const server = new MCPClient({ url: req.body.mcpUrl });
+      secure: |
+        if (!VETTED_MCP_SERVERS.has(req.body.mcpId)) throw new Error("unvetted server");
+        const server = new MCPClient({ url: VETTED_MCP_SERVERS.get(req.body.mcpId) });
+    typescript:
+      vulnerable: |
+        const server: MCPClient = new MCPClient({ url: req.body.mcpUrl });
+      secure: |
+        const url = VETTED_MCP_SERVERS.get(req.body.mcpId);
+        if (!url) throw new Error("unvetted server");
+        const server: MCPClient = new MCPClient({ url });
+
+# ---------------------------------------------------------------------------
+# LLM03.5 — Training and fine-tuning dataset provenance
+# ---------------------------------------------------------------------------
+
+- id: LLM03.5
+  facet: Supply Chain Vulnerabilities
+  section: Dataset Provenance and Poisoning Defense
+  security_rule: >-
+    Datasets used for training or fine-tuning must come from a known
+    provenance, be pinned to an immutable revision, and be integrity
+    checked before they are fed into a training run.
+  vulnerability_pattern: >-
+    A fine-tuning job pulls a dataset by mutable name from a public hub
+    with no provenance record or checksum, so a poisoned revision injects
+    a backdoor or hidden bias into the resulting model.
+  secure_pattern: >-
+    Datasets are pinned to a specific revision, verified against a
+    recorded checksum, and sourced from a documented and reviewed origin
+    so a swapped or poisoned version fails the integrity gate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        data = dataHub.load("community/instruct-tuning")   # mutable, unverified
+      secure: |
+        data = dataHub.load("community/instruct-tuning", revision=PINNED_SHA)
+        verifyChecksum(data, EXPECTED_CHECKSUM)
+    python:
+      vulnerable: |
+        from datasets import load_dataset
+        ds = load_dataset("community/instruct-tuning")
+      secure: |
+        ds = load_dataset("community/instruct-tuning", revision=PINNED_SHA)
+        assert dataset_checksum(ds) == EXPECTED_CHECKSUM
+    javascript:
+      vulnerable: |
+        const ds = await loadDataset("community/instruct-tuning");
+      secure: |
+        const ds = await loadDataset("community/instruct-tuning", { revision: PINNED_SHA });
+        assertChecksum(ds, EXPECTED_CHECKSUM);
+    typescript:
+      vulnerable: |
+        const ds: Dataset = await loadDataset("community/instruct-tuning");
+      secure: |
+        const ds: Dataset = await loadDataset("community/instruct-tuning", { revision: PINNED_SHA });
+        assertChecksum(ds, EXPECTED_CHECKSUM);
+
+# ---------------------------------------------------------------------------
+# LLM03.6 — Provenance and model bill of materials
+# ---------------------------------------------------------------------------
+
+- id: LLM03.6
+  facet: Supply Chain Vulnerabilities
+  section: Software and Model Bill of Materials
+  security_rule: >-
+    The application must maintain an up-to-date inventory of every model,
+    adapter, dataset, and package it depends on, recorded as a signed
+    bill of materials so its supply chain can be audited and monitored.
+  vulnerability_pattern: >-
+    There is no inventory of the models, adapters, and packages in use,
+    so a newly disclosed vulnerability or a compromised component cannot
+    be located, and tampering goes unnoticed.
+  secure_pattern: >-
+    A bill of materials enumerating each component with its version and
+    digest is generated on every build, signed, and continuously checked
+    against vulnerability feeds so affected components are found fast.
+  code_patterns:
+    generic:
+      vulnerable: |
+        deploy(application)             # no component inventory recorded
+      secure: |
+        bom = generateBom(application)
+        sign(bom); deploy(application, attach=bom)
+    python:
+      vulnerable: |
+        # no SBOM step in the build
+        build_image()
+      secure: |
+        subprocess.run(["cyclonedx-py", "environment", "-o", "sbom.json"])
+        sign_artifact("sbom.json")
+    javascript:
+      vulnerable: |
+        // build script — no SBOM produced
+        run("npm run build");
+      secure: |
+        run("npm sbom --sbom-format cyclonedx > sbom.json");
+        signArtifact("sbom.json");
+    typescript:
+      vulnerable: |
+        // build script — no SBOM produced
+        run("npm run build");
+      secure: |
+        run("npm sbom --sbom-format cyclonedx > sbom.json");
+        signArtifact("sbom.json");
+
+# ---------------------------------------------------------------------------
+# LLM03.7 — Vulnerability scanning of the AI supply chain
+# ---------------------------------------------------------------------------
+
+- id: LLM03.7
+  facet: Supply Chain Vulnerabilities
+  section: Continuous Vulnerability Scanning
+  security_rule: >-
+    Models, adapters, and package dependencies must be scanned for known
+    vulnerabilities and malware on every build and on a recurring
+    schedule, with the build failing on findings above an agreed floor.
+  vulnerability_pattern: >-
+    Dependencies and model artifacts are added once and never rescanned,
+    so a vulnerability or malicious package disclosed after adoption
+    keeps shipping to production undetected.
+  secure_pattern: >-
+    A scanner runs in the pipeline and on a schedule against the
+    dependency lockfile and model artifacts, failing the build when a
+    finding exceeds the configured severity floor.
+  code_patterns:
+    generic:
+      vulnerable: |
+        installDependencies()          # no vulnerability scan in the pipeline
+      secure: |
+        installDependencies()
+        scanForVulnerabilities() or failBuild()
+    python:
+      vulnerable: |
+        # CI step
+        pip install -r requirements.txt
+      secure: |
+        # CI step — fails the build on a known CVE
+        pip install -r requirements.txt
+        pip-audit --strict --requirement requirements.txt
+    javascript:
+      vulnerable: |
+        // CI step
+        run("npm ci");
+      secure: |
+        // CI step — non-zero exit fails the build
+        run("npm ci && npm audit --audit-level=high");
+    typescript:
+      vulnerable: |
+        // CI step
+        run("npm ci");
+      secure: |
+        // CI step — non-zero exit fails the build
+        run("npm ci && npm audit --audit-level=high");
+
+# ---------------------------------------------------------------------------
+# LLM03.8 — Pre-trained model trust and licensing
+# ---------------------------------------------------------------------------
+
+- id: LLM03.8
+  facet: Supply Chain Vulnerabilities
+  section: Pre-Trained Model Trust Evaluation
+  security_rule: >-
+    A pre-trained or community-fine-tuned model must be evaluated for its
+    publisher reputation, license terms, and known issues before
+    adoption, and treated as untrusted until that review is complete.
+  vulnerability_pattern: >-
+    A model is adopted purely because it ranks well on a leaderboard,
+    with no review of its publisher, license, or training data, so an
+    anonymous or poisoned model is wired straight into production.
+  secure_pattern: >-
+    Each candidate model passes a documented review of publisher
+    identity, license compatibility, training-data disclosure, and known
+    issues, and only reviewed models reach an approved registry.
+  code_patterns:
+    generic:
+      vulnerable: |
+        model = pickTopOfLeaderboard()   # no publisher or license review
+      secure: |
+        if model.id in APPROVED_MODELS: load(model)   # registry gated by review
+    python:
+      vulnerable: |
+        llm = ChatOpenAI(model=os.environ["ANY_MODEL_NAME"])
+      secure: |
+        name = os.environ["MODEL_NAME"]
+        if name not in APPROVED_MODELS: raise ValueError("model not vetted")
+        llm = ChatOpenAI(model=name)
+    javascript:
+      vulnerable: |
+        const llm = new ChatOpenAI({ model: process.env.MODEL_NAME });
+      secure: |
+        const name = process.env.MODEL_NAME;
+        if (!APPROVED_MODELS.has(name)) throw new Error("model not vetted");
+        const llm = new ChatOpenAI({ model: name });
+    typescript:
+      vulnerable: |
+        const llm: ChatOpenAI = new ChatOpenAI({ model: process.env.MODEL_NAME });
+      secure: |
+        const name = process.env.MODEL_NAME ?? "";
+        if (!APPROVED_MODELS.has(name)) throw new Error("model not vetted");
+        const llm: ChatOpenAI = new ChatOpenAI({ model: name });
+
+# ---------------------------------------------------------------------------
+# LLM03.9 — LoRA adapter and model merge integrity
+# ---------------------------------------------------------------------------
+
+- id: LLM03.9
+  facet: Supply Chain Vulnerabilities
+  section: Adapter and Model Merge Integrity
+  security_rule: >-
+    Fine-tuning adapters such as LoRA weights, and any merged or quantized
+    derivative model, must be sourced and verified with the same rigor as
+    a base model, since an adapter can reintroduce a backdoor on its own.
+  vulnerability_pattern: >-
+    A LoRA adapter or a community quantized model is downloaded and
+    merged onto a trusted base with no provenance check, so the adapter
+    layer carries a backdoor even though the base model is clean.
+  secure_pattern: >-
+    Adapters and derivative models are pinned to a known revision,
+    integrity checked, and sourced from a vetted publisher before they
+    are applied or merged onto the base model.
+  code_patterns:
+    generic:
+      vulnerable: |
+        model = applyAdapter(baseModel, hub.download("community/lora-tune"))
+      secure: |
+        adapter = hub.download("community/lora-tune", revision=PINNED_SHA)
+        verifyDigest(adapter, EXPECTED_DIGEST)
+        model = applyAdapter(baseModel, adapter)
+    python:
+      vulnerable: |
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(base, "community/lora-tune")
+      secure: |
+        path = snapshot_download("community/lora-tune", revision=PINNED_SHA)
+        assert sha256_of_dir(path) == EXPECTED_DIGEST
+        model = PeftModel.from_pretrained(base, path)
+    javascript:
+      vulnerable: |
+        const model = await applyAdapter(base, await hub.getModel("community/lora-tune"));
+      secure: |
+        const adapter = await hub.getModel("community/lora-tune", { revision: PINNED_SHA });
+        assertDigest(adapter.files, EXPECTED_DIGEST);
+        const model = await applyAdapter(base, adapter);
+    typescript:
+      vulnerable: |
+        const model: Model = await applyAdapter(base, await hub.getModel("community/lora-tune"));
+      secure: |
+        const adapter: Model = await hub.getModel("community/lora-tune", { revision: PINNED_SHA });
+        assertDigest(adapter.files, EXPECTED_DIGEST);
+        const model: Model = await applyAdapter(base, adapter);

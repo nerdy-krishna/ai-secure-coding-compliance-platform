@@ -1,0 +1,507 @@
+# OWASP Top 10 for Agentic AI — T05: Cascading Hallucination
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: one agent's incorrect, fabricated, or low-confidence output is
+# accepted as ground truth by a downstream agent and propagates — and
+# amplifies — through a multi-agent chain, so a single hallucination at
+# the source becomes a confident, system-wide false conclusion or a
+# harmful action.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the languages agentic systems are built in:
+# python / javascript / typescript).
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.1 — Inter-agent output validation
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.1
+  facet: Cascading Hallucination
+  section: Inter-agent output validation
+  security_rule: >-
+    The output of one agent must be validated against an expected schema
+    and acceptance criteria before it is consumed by a downstream agent,
+    so a malformed or fabricated result is rejected at the handoff rather
+    than propagated.
+  vulnerability_pattern: >-
+    A downstream agent consumes the raw text or object emitted by an
+    upstream agent with no schema check or acceptance test, so a
+    hallucinated field, a wrong type, or an invented entity flows
+    straight into the next stage of the chain.
+  secure_pattern: >-
+    Every agent-to-agent handoff passes through a validation gate that
+    enforces a typed schema and content acceptance rules, and a failing
+    output is rejected or routed back for correction before any
+    downstream agent sees it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        upstream_result = agent_a.run(task)
+        agent_b.run(upstream_result)          # consumed unchecked
+      secure: |
+        upstream_result = agent_a.run(task)
+        if validate_schema(upstream_result):  # gate at the handoff
+            agent_b.run(upstream_result)
+    python:
+      vulnerable: |
+        plan = planner_agent.invoke(goal)
+        executor_agent.invoke(plan["steps"])
+      secure: |
+        plan = Plan.model_validate(planner_agent.invoke(goal))
+        executor_agent.invoke(plan.steps)     # Pydantic-validated handoff
+    javascript:
+      vulnerable: |
+        const plan = await plannerAgent.run(goal);
+        await executorAgent.run(plan.steps);
+      secure: |
+        const plan = PlanSchema.parse(await plannerAgent.run(goal));
+        await executorAgent.run(plan.steps);
+    typescript:
+      vulnerable: |
+        const plan = await plannerAgent.run(goal);
+        await executorAgent.run(plan.steps);
+      secure: |
+        const plan: Plan = PlanSchema.parse(await plannerAgent.run(goal));
+        await executorAgent.run(plan.steps);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.2 — Grounding claims against authoritative sources
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.2
+  facet: Cascading Hallucination
+  section: Grounding claims against authoritative sources
+  security_rule: >-
+    Factual claims produced by an agent must be grounded against an
+    authoritative source — a retrieval store, a database, or a tool
+    result — before they are passed downstream or presented as fact.
+  vulnerability_pattern: >-
+    An agent generates facts, identifiers, or values from the model's
+    own parametric memory and the chain treats them as verified, so an
+    invented citation, record id, or figure is amplified by every
+    downstream agent that builds on it.
+  secure_pattern: >-
+    Claims that downstream agents will rely on are checked against a
+    retrieval or database lookup, and any claim that cannot be grounded
+    is dropped, flagged as unverified, or sent back for regeneration.
+  code_patterns:
+    generic:
+      vulnerable: |
+        answer = agent.generate(question)
+        report.append(answer)                 # ungrounded claim trusted
+      secure: |
+        answer = agent.generate(question)
+        if grounded_in(answer, knowledge_base):
+            report.append(answer)
+    python:
+      vulnerable: |
+        claim = research_agent.run(topic)
+        summary_agent.run(claim)
+      secure: |
+        claim = research_agent.run(topic)
+        evidence = retriever.search(claim.statement)
+        if supports(evidence, claim):
+            summary_agent.run(claim)
+    javascript:
+      vulnerable: |
+        const claim = await researchAgent.run(topic);
+        await summaryAgent.run(claim);
+      secure: |
+        const claim = await researchAgent.run(topic);
+        const evidence = await retriever.search(claim.statement);
+        if (supports(evidence, claim)) await summaryAgent.run(claim);
+    typescript:
+      vulnerable: |
+        const claim = await researchAgent.run(topic);
+        await summaryAgent.run(claim);
+      secure: |
+        const claim = await researchAgent.run(topic);
+        const evidence = await retriever.search(claim.statement);
+        if (isSupported(evidence, claim)) await summaryAgent.run(claim);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.3 — Propagating uncertainty and confidence
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.3
+  facet: Cascading Hallucination
+  section: Propagating uncertainty and confidence
+  security_rule: >-
+    An agent's confidence or uncertainty about its output must travel
+    with that output through the chain, so a downstream agent can weight,
+    re-verify, or reject a low-confidence result instead of treating
+    every input as equally certain.
+  vulnerability_pattern: >-
+    Agent outputs are passed downstream as bare values with no
+    confidence signal, so a tentative or low-probability guess is
+    consumed with the same authority as a verified fact and hardens into
+    a certain conclusion further down the chain.
+  secure_pattern: >-
+    Each agent emits its result together with a confidence score or
+    uncertainty flag, and downstream agents branch on that signal —
+    escalating to verification or human review when confidence is low.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = agent.run(task)
+        downstream.run(result.value)          # uncertainty discarded
+      secure: |
+        result = agent.run(task)
+        if result.confidence >= THRESHOLD:
+            downstream.run(result.value)
+        else:
+            escalate(result)
+    python:
+      vulnerable: |
+        finding = classifier_agent.run(doc)
+        next_agent.run(finding.label)
+      secure: |
+        finding = classifier_agent.run(doc)   # AgentResult(label, confidence)
+        if finding.confidence < 0.7:
+            finding = verifier_agent.run(doc, finding)
+        next_agent.run(finding.label)
+    javascript:
+      vulnerable: |
+        const finding = await classifierAgent.run(doc);
+        await nextAgent.run(finding.label);
+      secure: |
+        let finding = await classifierAgent.run(doc);
+        if (finding.confidence < 0.7) finding = await verifierAgent.run(doc, finding);
+        await nextAgent.run(finding.label);
+    typescript:
+      vulnerable: |
+        const finding = await classifierAgent.run(doc);
+        await nextAgent.run(finding.label);
+      secure: |
+        let finding: AgentResult = await classifierAgent.run(doc);
+        if (finding.confidence < 0.7) finding = await verifierAgent.run(doc, finding);
+        await nextAgent.run(finding.label);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.4 — Independent cross-verification before action
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.4
+  facet: Cascading Hallucination
+  section: Independent cross-verification before action
+  security_rule: >-
+    Before a chain takes a consequential or irreversible action, the
+    output that drives it must be confirmed by an independent verifier —
+    a separate agent, model, or tool — not by the same agent that
+    produced it.
+  vulnerability_pattern: >-
+    The agent that produced a conclusion is also the one trusted to
+    confirm it, so a hallucination is self-approved and the chain acts
+    on a fabricated result with no independent check.
+  secure_pattern: >-
+    A distinct verifier agent or tool, with a different prompt or model,
+    independently re-derives or checks the result, and the action
+    proceeds only when the independent check agrees.
+  code_patterns:
+    generic:
+      vulnerable: |
+        decision = agent.decide(case)
+        if agent.confirm(decision):           # self-confirmation
+            execute(decision)
+      secure: |
+        decision = agent.decide(case)
+        if verifier_agent.check(case, decision):  # independent verifier
+            execute(decision)
+    python:
+      vulnerable: |
+        amount = finance_agent.run(invoice)
+        pay(amount)
+      secure: |
+        amount = finance_agent.run(invoice)
+        cross = audit_agent.run(invoice)      # separate model + prompt
+        if abs(cross - amount) < TOLERANCE:
+            pay(amount)
+    javascript:
+      vulnerable: |
+        const amount = await financeAgent.run(invoice);
+        await pay(amount);
+      secure: |
+        const amount = await financeAgent.run(invoice);
+        const cross = await auditAgent.run(invoice);
+        if (Math.abs(cross - amount) < TOLERANCE) await pay(amount);
+    typescript:
+      vulnerable: |
+        const amount = await financeAgent.run(invoice);
+        await pay(amount);
+      secure: |
+        const amount = await financeAgent.run(invoice);
+        const cross = await auditAgent.run(invoice);
+        if (Math.abs(cross - amount) < TOLERANCE) await pay(amount);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.5 — Preserving provenance across the chain
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.5
+  facet: Cascading Hallucination
+  section: Preserving provenance across the chain
+  security_rule: >-
+    Each piece of information moving through a multi-agent chain must
+    carry provenance — which agent produced it and from what source — so
+    a downstream agent and an operator can trace any conclusion back to
+    its origin and tell verified data from generated data.
+  vulnerability_pattern: >-
+    Agent outputs are merged into a shared context as flat text with no
+    record of origin, so generated guesses and retrieved facts become
+    indistinguishable and a hallucination cannot be traced or isolated
+    once it has propagated.
+  secure_pattern: >-
+    Every value added to the shared context is tagged with its
+    originating agent and source, so downstream agents can prefer
+    grounded data and an operator can audit the lineage of any result.
+  code_patterns:
+    generic:
+      vulnerable: |
+        context += agent.run(task)            # origin lost
+      secure: |
+        context.add(value=agent.run(task), source=agent.name, kind="generated")
+    python:
+      vulnerable: |
+        shared_state["facts"] += research_agent.run(query)
+      secure: |
+        shared_state["facts"].append(
+            Provenance(value=research_agent.run(query),
+                       agent="research", source="kb", verified=True))
+    javascript:
+      vulnerable: |
+        sharedState.facts.push(await researchAgent.run(query));
+      secure: |
+        sharedState.facts.push({
+          value: await researchAgent.run(query), agent: "research", verified: true });
+    typescript:
+      vulnerable: |
+        sharedState.facts.push(await researchAgent.run(query));
+      secure: |
+        const fact: Provenance = {
+          value: await researchAgent.run(query), agent: "research", verified: true };
+        sharedState.facts.push(fact);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.6 — Bounding chain depth and error amplification
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.6
+  facet: Cascading Hallucination
+  section: Bounding chain depth and error amplification
+  security_rule: >-
+    Multi-agent and recursive workflows must enforce a maximum chain
+    depth or iteration count and detect divergence, so an error that
+    compounds across hops is halted rather than amplified indefinitely.
+  vulnerability_pattern: >-
+    An agent loop or hand-off chain runs without a depth or iteration
+    bound, so a small early error is re-summarised and re-elaborated at
+    each hop and amplifies into a confidently wrong, increasingly
+    detailed conclusion.
+  secure_pattern: >-
+    The workflow caps chain depth or iterations, and a monitor checks
+    that each hop stays consistent with prior state, terminating or
+    escalating the run when the bound is hit or divergence is detected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while not done:                       # unbounded refinement loop
+            state = agent.refine(state)
+      secure: |
+        for hop in range(MAX_DEPTH):
+            state = agent.refine(state)
+            if diverged(state): break
+    python:
+      vulnerable: |
+        def chain(state):
+            return chain(next_agent.run(state))   # unbounded recursion
+      secure: |
+        def chain(state, depth=0):
+            if depth >= MAX_DEPTH:
+                return state
+            return chain(next_agent.run(state), depth + 1)
+    javascript:
+      vulnerable: |
+        async function chain(state) {
+          return chain(await nextAgent.run(state));
+        }
+      secure: |
+        async function chain(state, depth = 0) {
+          if (depth >= MAX_DEPTH) return state;
+          return chain(await nextAgent.run(state), depth + 1);
+        }
+    typescript:
+      vulnerable: |
+        async function chain(state: State): Promise<State> {
+          return chain(await nextAgent.run(state));
+        }
+      secure: |
+        async function chain(state: State, depth = 0): Promise<State> {
+          if (depth >= MAX_DEPTH) return state;
+          return chain(await nextAgent.run(state), depth + 1);
+        }
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.7 — Validating tool-call arguments synthesised by an agent
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.7
+  facet: Cascading Hallucination
+  section: Validating tool-call arguments synthesised by an agent
+  security_rule: >-
+    Arguments that an agent synthesises for a tool, API, or another
+    agent must be validated for existence and correctness against the
+    real system before the call is made, so a hallucinated identifier or
+    parameter cannot trigger a wrong action.
+  vulnerability_pattern: >-
+    An agent fabricates a tool argument such as a record id, file path,
+    or account number and the chain invokes the tool with it directly,
+    so a hallucinated parameter drives a real and possibly harmful
+    operation.
+  secure_pattern: >-
+    Synthesised arguments are resolved or existence-checked against the
+    authoritative system before the tool runs, and a call referencing an
+    unknown entity is rejected instead of executed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tool.invoke(agent.pick_argument())    # argument may be invented
+      secure: |
+        arg = agent.pick_argument()
+        if system.exists(arg):
+            tool.invoke(arg)
+    python:
+      vulnerable: |
+        record_id = agent.run("which record?")
+        db.delete(record_id)
+      secure: |
+        record_id = agent.run("which record?")
+        if not db.get(record_id):
+            raise ValueError("hallucinated record id")
+        db.delete(record_id)
+    javascript:
+      vulnerable: |
+        const recordId = await agent.run("which record?");
+        await db.delete(recordId);
+      secure: |
+        const recordId = await agent.run("which record?");
+        if (!(await db.get(recordId))) throw new Error("hallucinated record id");
+        await db.delete(recordId);
+    typescript:
+      vulnerable: |
+        const recordId = await agent.run("which record?");
+        await db.delete(recordId);
+      secure: |
+        const recordId: string = await agent.run("which record?");
+        if (!(await db.get(recordId))) throw new Error("hallucinated record id");
+        await db.delete(recordId);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.8 — Human review gate on consequential conclusions
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.8
+  facet: Cascading Hallucination
+  section: Human review gate on consequential conclusions
+  security_rule: >-
+    A chain conclusion that drives a high-impact or irreversible outcome
+    must pass a human-in-the-loop review gate before it is acted on, so
+    a hallucination that survived automated checks still has a final
+    chance to be caught.
+  vulnerability_pattern: >-
+    A multi-agent chain executes a consequential action fully
+    autonomously, so a fabricated conclusion that propagated through
+    every hop is acted on with no human able to intercept it.
+  secure_pattern: >-
+    Consequential outcomes are routed to a human approval step that
+    presents the conclusion with its provenance and confidence, and the
+    action proceeds only after explicit human sign-off.
+  code_patterns:
+    generic:
+      vulnerable: |
+        execute(chain_result)                 # autonomous, no review
+      secure: |
+        if chain_result.high_impact:
+            await human_approval(chain_result)
+        execute(chain_result)
+    python:
+      vulnerable: |
+        result = workflow.run(case)
+        apply(result)
+      secure: |
+        result = workflow.run(case)
+        if result.impact == "high":
+            result = await request_human_review(result)
+        if result.approved:
+            apply(result)
+    javascript:
+      vulnerable: |
+        const result = await workflow.run(case);
+        await apply(result);
+      secure: |
+        const result = await workflow.run(case);
+        if (result.impact === "high") await requestHumanReview(result);
+        if (result.approved) await apply(result);
+    typescript:
+      vulnerable: |
+        const result = await workflow.run(case);
+        await apply(result);
+      secure: |
+        const result: ChainResult = await workflow.run(case);
+        if (result.impact === "high") await requestHumanReview(result);
+        if (result.approved) await apply(result);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T5.9 — Isolating shared memory writes between agents
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T5.9
+  facet: Cascading Hallucination
+  section: Isolating shared memory writes between agents
+  security_rule: >-
+    An agent must not write unverified conclusions into shared or
+    long-term memory that other agents read as established context, so a
+    hallucination cannot become persistent ground truth for the whole
+    system.
+  vulnerability_pattern: >-
+    An agent commits its raw output directly into shared scratchpad or
+    persistent memory, so every later agent and later run reads a
+    fabricated value as authoritative context and the error compounds
+    across the system.
+  secure_pattern: >-
+    Writes to shared or long-term memory pass through a verification
+    step, and unverified outputs are kept in a private, clearly marked
+    scratch area that is not promoted to shared memory until confirmed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        shared_memory.write(agent.run(task))  # unverified, globally visible
+      secure: |
+        draft = agent.run(task)
+        if verified(draft):
+            shared_memory.write(draft)
+    python:
+      vulnerable: |
+        memory.save(key, analysis_agent.run(input))
+      secure: |
+        draft = analysis_agent.run(input)
+        if review_agent.approve(draft):
+            memory.save(key, draft)           # only verified data promoted
+        else:
+            scratch.save(key, draft)
+    javascript:
+      vulnerable: |
+        await memory.save(key, await analysisAgent.run(input));
+      secure: |
+        const draft = await analysisAgent.run(input);
+        if (await reviewAgent.approve(draft)) await memory.save(key, draft);
+        else await scratch.save(key, draft);
+    typescript:
+      vulnerable: |
+        await memory.save(key, await analysisAgent.run(input));
+      secure: |
+        const draft = await analysisAgent.run(input);
+        if (await reviewAgent.approve(draft)) await memory.save(key, draft);
+        else await scratch.save(key, draft);

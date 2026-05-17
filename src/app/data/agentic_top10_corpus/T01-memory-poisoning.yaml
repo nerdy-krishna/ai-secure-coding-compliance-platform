@@ -1,0 +1,451 @@
+# OWASP Top 10 for Agentic AI — T01: Memory Poisoning
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Memory Poisoning: an attacker corrupts an agent's persistent or shared
+# memory — conversation history, vector-store knowledge, scratchpad state,
+# or cross-agent blackboards — so that later turns or other agents act on
+# attacker-controlled content as if it were trusted.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript — the languages
+# agentic and multi-agent systems are built in).
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.1 — Untrusted content written to long-term memory
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.1
+  facet: Memory Poisoning
+  section: Untrusted Content Written to Long-Term Memory
+  security_rule: >-
+    Content derived from tool output, retrieved documents, or other
+    agents must be validated and provenance-tagged before it is written
+    into an agent's persistent memory store.
+  vulnerability_pattern: >-
+    Whatever a tool or sub-agent returns is appended verbatim into the
+    long-term memory store, so an attacker who controls one tool result
+    can plant instructions that steer every later turn.
+  secure_pattern: >-
+    Before a value is persisted it is validated against an expected
+    schema, length-bounded, and stamped with a provenance label such as
+    untrusted-tool-output so later reads can treat it accordingly.
+  code_patterns:
+    generic:
+      vulnerable: |
+        memory.append(toolResult)              # raw tool output persisted
+      secure: |
+        record = validate(toolResult, schema=ToolResultSchema)
+        memory.append(record.tagged(provenance="untrusted-tool"))
+    python:
+      vulnerable: |
+        store.add(MemoryItem(text=tool_output))
+      secure: |
+        item = MemoryItem(text=clean(tool_output)[:MAX_LEN],
+                          provenance="untrusted_tool", trusted=False)
+        store.add(item)
+    javascript:
+      vulnerable: |
+        await memory.put({ text: toolResult });
+      secure: |
+        const safe = schema.parse({ text: toolResult.slice(0, MAX_LEN) });
+        await memory.put({ ...safe, provenance: "untrusted_tool" });
+    typescript:
+      vulnerable: |
+        await memory.put({ text: toolResult } as MemoryItem);
+      secure: |
+        const item: MemoryItem = MemoryItemSchema.parse({
+          text: toolResult.slice(0, MAX_LEN), provenance: "untrusted_tool" });
+        await memory.put(item);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.2 — Memory entries treated as trusted instructions
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.2
+  facet: Memory Poisoning
+  section: Stored Memory Treated as Trusted Instructions
+  security_rule: >-
+    Recalled memory must be placed into the prompt as quoted, clearly
+    delimited reference data, never as system or developer instructions
+    that the agent is bound to obey.
+  vulnerability_pattern: >-
+    Retrieved memory is concatenated straight into the system prompt or
+    instruction block, so a poisoned note such as ignore prior rules is
+    obeyed with the same authority as the developer's own directives.
+  secure_pattern: >-
+    Memory is injected only inside a fenced data section with an explicit
+    note that its content is reference material and must not be followed
+    as commands, keeping trusted instructions in a separate channel.
+  code_patterns:
+    generic:
+      vulnerable: |
+        systemPrompt = baseInstructions + "\n" + recalledMemory
+      secure: |
+        systemPrompt = baseInstructions
+        userTurn = fencedDataBlock("MEMORY (reference only)", recalledMemory)
+    python:
+      vulnerable: |
+        messages = [{"role": "system", "content": base + recalled_memory}]
+      secure: |
+        messages = [
+            {"role": "system", "content": base},
+            {"role": "user", "content": f"<memory note='data only'>{recalled_memory}</memory>"},
+        ]
+    javascript:
+      vulnerable: |
+        const system = `${base}\n${recalledMemory}`;
+      secure: |
+        const messages = [{ role: "system", content: base },
+          { role: "user", content: `<memory note="data only">${recalledMemory}</memory>` }];
+    typescript:
+      vulnerable: |
+        const system: string = `${base}\n${recalledMemory}`;
+      secure: |
+        const messages: ChatMessage[] = [{ role: "system", content: base },
+          { role: "user", content: `<memory note="data only">${recalledMemory}</memory>` }];
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.3 — Unscoped shared memory across users or sessions
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.3
+  facet: Memory Poisoning
+  section: Cross-Session and Cross-Tenant Memory Isolation
+  security_rule: >-
+    Every memory read and write must be scoped to the originating user,
+    tenant, and session so one principal cannot plant or read entries
+    belonging to another.
+  vulnerability_pattern: >-
+    Memory is keyed on a single global namespace or a guessable thread
+    id, so one user's poisoned note is recalled in another user's
+    session and acted on as their own context.
+  secure_pattern: >-
+    The memory key is composed from the authenticated tenant and user
+    identifiers plus the session id, and every query filters on that
+    same scope so recall can never cross a trust boundary.
+  code_patterns:
+    generic:
+      vulnerable: |
+        memory.query(namespace="global", text=q)
+      secure: |
+        memory.query(namespace=(tenantId, userId, sessionId), text=q)
+    python:
+      vulnerable: |
+        config = {"configurable": {"thread_id": "shared"}}
+      secure: |
+        config = {"configurable": {"thread_id": f"{tenant_id}:{user_id}:{session_id}"}}
+    javascript:
+      vulnerable: |
+        const ns = ["memories"];
+      secure: |
+        const ns = ["memories", ctx.tenantId, ctx.userId];
+        await store.search(ns, { query });
+    typescript:
+      vulnerable: |
+        const ns: string[] = ["memories"];
+      secure: |
+        const ns: string[] = ["memories", ctx.tenantId, ctx.userId];
+        await store.search(ns, { query });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.4 — Poisoned RAG / vector-store knowledge base
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.4
+  facet: Memory Poisoning
+  section: Vector-Store and RAG Index Integrity
+  security_rule: >-
+    Documents ingested into a retrieval index must come from an
+    authenticated, authorized source and be content-screened, so the
+    knowledge an agent retrieves cannot be silently corrupted.
+  vulnerability_pattern: >-
+    Any document submitted through an open ingestion path is embedded
+    and indexed without source checks, so an attacker uploads a record
+    crafted to surface for common queries and carry hidden instructions.
+  secure_pattern: >-
+    Ingestion requires an authorized writer, screens content for
+    embedded instructions and anomalies, and records the source so
+    poisoned documents can be traced and purged.
+  code_patterns:
+    generic:
+      vulnerable: |
+        vectorStore.add(embed(uploadedDoc))
+      secure: |
+        if writerAuthorized(principal) and screen(uploadedDoc):
+            vectorStore.add(embed(uploadedDoc), metadata={"source": principal})
+    python:
+      vulnerable: |
+        qdrant.upsert(collection, [PointStruct(vector=embed(doc), payload={"text": doc})])
+      secure: |
+        if not is_authorized(principal) or not passes_content_screen(doc):
+            raise PermissionError("ingestion rejected")
+        qdrant.upsert(collection, [PointStruct(vector=embed(doc),
+            payload={"text": doc, "source": principal.id})])
+    javascript:
+      vulnerable: |
+        await index.upsert([{ values: embed(doc), metadata: { text: doc } }]);
+      secure: |
+        if (!isAuthorized(principal) || !screenContent(doc)) throw new Error("rejected");
+        await index.upsert([{ values: embed(doc),
+          metadata: { text: doc, source: principal.id } }]);
+    typescript:
+      vulnerable: |
+        await index.upsert([{ values: embed(doc), metadata: { text: doc } }]);
+      secure: |
+        if (!isAuthorized(principal) || !screenContent(doc)) throw new Error("rejected");
+        const point: VectorPoint = { values: embed(doc),
+          metadata: { text: doc, source: principal.id } };
+        await index.upsert([point]);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.5 — Cross-agent blackboard / shared scratchpad poisoning
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.5
+  facet: Memory Poisoning
+  section: Cross-Agent Shared State Trust
+  security_rule: >-
+    When agents communicate through a shared blackboard or scratchpad,
+    each consumer must treat entries from peer agents as untrusted input
+    and re-validate them against its own task contract.
+  vulnerability_pattern: >-
+    A downstream agent reads a shared-state field written by a peer and
+    acts on it directly, so one compromised or manipulated agent can
+    pivot the whole workflow by writing a poisoned field.
+  secure_pattern: >-
+    Shared-state writes are namespaced and signed by the producing
+    agent, and each consumer validates the entry's author, schema, and
+    plausibility before using it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        plan = blackboard.get("plan")
+        execute(plan)
+      secure: |
+        entry = blackboard.get("plan")
+        if verifyAuthor(entry, expected="planner") and validate(entry.value):
+            execute(entry.value)
+    python:
+      vulnerable: |
+        def executor_node(state: GraphState):
+            return run_steps(state["plan"])
+      secure: |
+        def executor_node(state: GraphState):
+            plan = state["plan"]
+            if plan.author != "planner" or not plan_schema.validate(plan.value):
+                raise ValueError("untrusted plan entry rejected")
+            return run_steps(plan.value)
+    javascript:
+      vulnerable: |
+        const plan = sharedState.plan;
+        await execute(plan);
+      secure: |
+        const entry = sharedState.plan;
+        if (entry.author !== "planner" || !planSchema.safeParse(entry.value).success)
+          throw new Error("untrusted plan rejected");
+        await execute(entry.value);
+    typescript:
+      vulnerable: |
+        const plan: Plan = sharedState.plan;
+        await execute(plan);
+      secure: |
+        const entry: SignedEntry<Plan> = sharedState.plan;
+        if (entry.author !== "planner" || !planSchema.safeParse(entry.value).success)
+          throw new Error("untrusted plan rejected");
+        await execute(entry.value);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.6 — No integrity verification on memory recall
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.6
+  facet: Memory Poisoning
+  section: Memory Integrity Verification on Recall
+  security_rule: >-
+    Stored memory must carry an integrity signal such as a keyed hash or
+    signature, and that signal must be verified on every read so silent
+    tampering of the backing store is detected.
+  vulnerability_pattern: >-
+    Memory records are stored as plain text with no integrity check, so
+    an attacker who reaches the database or cache can rewrite a record
+    and the agent recalls the altered content as authentic.
+  secure_pattern: >-
+    Each record is stored with a server-side HMAC over its content and
+    scope, and recall recomputes and compares the HMAC, discarding any
+    record whose signal does not match.
+  code_patterns:
+    generic:
+      vulnerable: |
+        record = store.read(key)
+        use(record.text)
+      secure: |
+        record = store.read(key)
+        if hmac(record.text, secretKey) == record.mac: use(record.text)
+    python:
+      vulnerable: |
+        item = db.get_memory(key)
+        return item["text"]
+      secure: |
+        item = db.get_memory(key)
+        expected = hmac.new(SECRET, item["text"].encode(), "sha256").hexdigest()
+        if not hmac.compare_digest(expected, item["mac"]):
+            raise IntegrityError("memory tampering detected")
+        return item["text"]
+    javascript:
+      vulnerable: |
+        const item = await db.getMemory(key);
+        return item.text;
+      secure: |
+        const item = await db.getMemory(key);
+        const mac = createHmac("sha256", SECRET).update(item.text).digest("hex");
+        if (!timingSafeEqualHex(mac, item.mac)) throw new Error("memory tampered");
+        return item.text;
+    typescript:
+      vulnerable: |
+        const item: MemoryRow = await db.getMemory(key);
+        return item.text;
+      secure: |
+        const item: MemoryRow = await db.getMemory(key);
+        const mac = createHmac("sha256", SECRET).update(item.text).digest("hex");
+        if (!timingSafeEqualHex(mac, item.mac)) throw new Error("memory tampered");
+        return item.text;
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.7 — Unbounded memory growth and recency abuse
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.7
+  facet: Memory Poisoning
+  section: Memory Write Rate and Capacity Limits
+  security_rule: >-
+    Memory writes must be rate-limited and capacity-bounded per scope so
+    an attacker cannot flood the store to evict trusted history or
+    dominate retrieval through repetition.
+  vulnerability_pattern: >-
+    Any turn can append unlimited entries to memory, so an attacker
+    repeats a poisoned note until it crowds out genuine context or
+    becomes the most frequent and highest-ranked recall result.
+  secure_pattern: >-
+    Each scope has a write quota and a bounded retention window, and
+    near-duplicate entries are de-duplicated, so no single source can
+    saturate or skew the store.
+  code_patterns:
+    generic:
+      vulnerable: |
+        memory.append(entry)                  # no quota, no dedupe
+      secure: |
+        if writeQuota.allow(scope) and not memory.hasSimilar(entry):
+            memory.appendBounded(entry, maxItems=CAP)
+    python:
+      vulnerable: |
+        store.add(scope, entry)
+      secure: |
+        if not rate_limiter.allow(scope):
+            raise RateLimitError("memory write quota exceeded")
+        if not store.has_near_duplicate(scope, entry):
+            store.add_bounded(scope, entry, max_items=CAP)
+    javascript:
+      vulnerable: |
+        await store.add(scope, entry);
+      secure: |
+        if (!rateLimiter.allow(scope)) throw new Error("memory write quota exceeded");
+        if (!(await store.hasNearDuplicate(scope, entry)))
+          await store.addBounded(scope, entry, { maxItems: CAP });
+    typescript:
+      vulnerable: |
+        await store.add(scope, entry);
+      secure: |
+        if (!rateLimiter.allow(scope)) throw new Error("memory write quota exceeded");
+        if (!(await store.hasNearDuplicate(scope, entry)))
+          await store.addBounded(scope, entry, { maxItems: CAP });
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.8 — No provenance, audit trail, or rollback for memory
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.8
+  facet: Memory Poisoning
+  section: Memory Provenance and Rollback
+  security_rule: >-
+    Every memory write must be logged with its author, source, and
+    timestamp, and the store must support reverting to a known-good
+    state so a poisoning incident can be contained.
+  vulnerability_pattern: >-
+    Memory is mutated in place with no history, so once a poisoned entry
+    is written there is no way to learn how it got there or to roll the
+    store back to before the incident.
+  secure_pattern: >-
+    Writes are recorded as append-only, attributed versioned events, so
+    operators can audit who wrote what and restore the store to a
+    snapshot taken before the poisoning.
+  code_patterns:
+    generic:
+      vulnerable: |
+        memory[key] = value                   # in-place, no history
+      secure: |
+        memoryLog.append(WriteEvent(key, value, author, source, now()))
+        memory.applyVersioned(key, value)
+    python:
+      vulnerable: |
+        store.update(key, value)
+      secure: |
+        audit.record(MemoryWrite(key=key, value=value, author=agent_id,
+                                 source=source, ts=utcnow()))
+        store.update(key, value, version=audit.last_version)
+    javascript:
+      vulnerable: |
+        memory[key] = value;
+      secure: |
+        await auditLog.append({ key, value, author: agentId, source, ts: Date.now() });
+        await memory.putVersioned(key, value);
+    typescript:
+      vulnerable: |
+        memory[key] = value;
+      secure: |
+        await auditLog.append({ key, value, author: agentId, source, ts: Date.now() });
+        await memory.putVersioned(key, value);
+
+# ---------------------------------------------------------------------------
+# AGENTIC-T1.9 — Sensitive data persisted into recallable memory
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T1.9
+  facet: Memory Poisoning
+  section: Sensitive Data Hygiene in Memory
+  security_rule: >-
+    Secrets, credentials, and personal data must be redacted before any
+    content is committed to memory, so a later poisoning or scope leak
+    cannot turn the store into an exfiltration channel.
+  vulnerability_pattern: >-
+    Raw conversation and tool output, including API keys and personal
+    data, is written verbatim into long-lived memory, so a poisoned
+    recall prompt can later surface those secrets to an attacker.
+  secure_pattern: >-
+    A redaction pass strips secrets and high-entropy strings before the
+    write, and sensitive fields are stored only as references that the
+    agent cannot dereference into plaintext.
+  code_patterns:
+    generic:
+      vulnerable: |
+        memory.append(conversationTurn)
+      secure: |
+        memory.append(redactSecrets(conversationTurn))
+    python:
+      vulnerable: |
+        store.add(MemoryItem(text=turn_text))
+      secure: |
+        store.add(MemoryItem(text=redact_secrets(turn_text)))
+    javascript:
+      vulnerable: |
+        await memory.put({ text: turnText });
+      secure: |
+        await memory.put({ text: redactSecrets(turnText) });
+    typescript:
+      vulnerable: |
+        await memory.put({ text: turnText } as MemoryItem);
+      secure: |
+        const item: MemoryItem = { text: redactSecrets(turnText) };
+        await memory.put(item);

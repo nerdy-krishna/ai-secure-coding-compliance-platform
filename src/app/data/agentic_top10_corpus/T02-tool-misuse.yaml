@@ -1,0 +1,495 @@
+# OWASP Top 10 for Agentic AI — T02: Tool Misuse
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Threat: an autonomous agent invokes its tools in unintended or unsafe
+# ways — passing attacker-influenced arguments to a tool, calling a tool
+# outside its intended scope, chaining tools to escalate impact, or being
+# steered into dangerous tool calls by injected instructions.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + Python/JavaScript/TypeScript — the languages
+# agentic / multi-agent systems are built in).
+
+# ---------------------------------------------------------------------------
+# T2.1 — Tool argument validation at the boundary
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.1
+  facet: Tool Misuse
+  section: Tool Argument Validation
+  security_rule: >-
+    Every argument an agent passes to a tool must be validated against a
+    strict schema inside the tool itself, since the model can emit any
+    value it is steered to produce and the schema description is only a
+    hint, not an enforced contract.
+  vulnerability_pattern: >-
+    A tool trusts the arguments the model supplies and uses them directly
+    in a sensitive operation, so a model that is confused or steered by
+    injected text can drive the tool with values its author never
+    intended.
+  secure_pattern: >-
+    The tool revalidates every argument against an explicit typed schema
+    with bounds, allowed values, and length limits before acting, and
+    rejects anything that does not conform rather than coercing it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def tool(args): return delete_records(args.table, args.where)
+      secure: |
+        def tool(args):
+            v = Schema.validate(args)          # types, enums, bounds enforced
+            return delete_records(v.table, v.where)
+    python:
+      vulnerable: |
+        @tool
+        def transfer(amount: float, to: str):
+            return bank.send(amount, to)        # amount unbounded, to unchecked
+      secure: |
+        class TransferArgs(BaseModel):
+            amount: confloat(gt=0, le=10_000)
+            to: constr(pattern=r"^acct-[0-9]{8}$")
+        @tool(args_schema=TransferArgs)
+        def transfer(amount, to): return bank.send(amount, to)
+    javascript:
+      vulnerable: |
+        const tool = { run: ({ path }) => fs.readFileSync(path) };
+      secure: |
+        const Args = z.object({ path: z.enum(ALLOWED_FILES) });
+        const tool = { run: (raw) => fs.readFileSync(Args.parse(raw).path) };
+    typescript:
+      vulnerable: |
+        async function runTool(args: any) { return db.query(args.sql); }
+      secure: |
+        const Args = z.object({ table: z.enum(TABLES), limit: z.number().int().max(100) });
+        async function runTool(raw: unknown) {
+          const a = Args.parse(raw); return db.select(a.table, a.limit);
+        }
+
+# ---------------------------------------------------------------------------
+# T2.2 — Least-privilege tool exposure per agent
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.2
+  facet: Tool Misuse
+  section: Least-Privilege Tool Exposure
+  security_rule: >-
+    An agent must be bound only to the tools its current task requires,
+    so that a compromised or misled agent cannot reach high-impact tools
+    that are irrelevant to its role.
+  vulnerability_pattern: >-
+    Every agent in the system is registered with the full tool catalog,
+    so a low-trust agent handling untrusted input can still invoke
+    destructive or privileged tools far outside its mandate.
+  secure_pattern: >-
+    Each agent receives a narrow, role-scoped tool list, and high-impact
+    tools are bound only to the specific agents whose task genuinely
+    needs them.
+  code_patterns:
+    generic:
+      vulnerable: |
+        agent = Agent(tools=ALL_TOOLS)        # summarizer can also delete data
+      secure: |
+        agent = Agent(tools=tools_for_role("summarizer"))   # read-only subset
+    python:
+      vulnerable: |
+        graph = create_react_agent(model, tools=registry.all())
+      secure: |
+        READER_TOOLS = [search_docs, read_file]
+        graph = create_react_agent(model, tools=READER_TOOLS)
+    javascript:
+      vulnerable: |
+        const agent = new Agent({ tools: toolRegistry.getAll() });
+      secure: |
+        const agent = new Agent({ tools: toolRegistry.forRole("reader") });
+    typescript:
+      vulnerable: |
+        const agent = createAgent({ llm, tools: allTools });
+      secure: |
+        const scoped: Tool[] = allTools.filter(t => ROLE_TOOLS.reader.has(t.name));
+        const agent = createAgent({ llm, tools: scoped });
+
+# ---------------------------------------------------------------------------
+# T2.3 — Human approval gate for high-impact tool calls
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.3
+  facet: Tool Misuse
+  section: Human-in-the-Loop Approval
+  security_rule: >-
+    Irreversible or high-impact tool calls — deleting data, moving money,
+    sending external messages, or changing infrastructure — must pause
+    for explicit human approval before they execute.
+  vulnerability_pattern: >-
+    The agent executes destructive or externally visible tool calls
+    autonomously the moment the model proposes them, so a single bad
+    decision or injected instruction takes immediate real-world effect.
+  secure_pattern: >-
+    High-impact tools are gated behind an interrupt that surfaces the
+    proposed call and its arguments to a human, and the call runs only
+    after an explicit approval is recorded.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = tool.invoke(call.args)       # destructive call runs at once
+      secure: |
+        if tool.high_impact: await_human_approval(call)
+        result = tool.invoke(call.args)
+    python:
+      vulnerable: |
+        def call_node(state):
+            return {"out": delete_bucket.invoke(state["args"])}
+      secure: |
+        def call_node(state):
+            decision = interrupt({"tool": "delete_bucket", "args": state["args"]})
+            if not decision["approved"]: return {"out": "cancelled"}
+            return {"out": delete_bucket.invoke(state["args"])}
+    javascript:
+      vulnerable: |
+        await sendEmailTool.run(args);
+      secure: |
+        const ok = await requestApproval({ tool: "sendEmail", args });
+        if (ok) await sendEmailTool.run(args);
+    typescript:
+      vulnerable: |
+        const out = await tools.deployStack.run(args);
+      secure: |
+        if (HIGH_IMPACT.has(toolName)) await interrupt({ toolName, args });
+        const out = await tools.deployStack.run(args);
+
+# ---------------------------------------------------------------------------
+# T2.4 — Prompt-injection-resistant tool routing
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.4
+  facet: Tool Misuse
+  section: Injection-Resistant Tool Routing
+  security_rule: >-
+    Content returned by a tool or fetched from an external source must be
+    treated as data, not as instructions, so that text inside it cannot
+    redirect the agent into making unintended tool calls.
+  vulnerability_pattern: >-
+    Tool output, retrieved documents, or web content are concatenated
+    into the agent prompt with the same authority as the system policy,
+    so injected directives in that content trigger attacker-chosen tool
+    calls.
+  secure_pattern: >-
+    Untrusted tool and retrieval output is wrapped in a clearly delimited
+    data role, the system policy reasserts that such content is never an
+    instruction, and tool selection is constrained to the current task.
+  code_patterns:
+    generic:
+      vulnerable: |
+        prompt = system + "\n" + fetched_web_page    # page text steers tools
+      secure: |
+        prompt = system + "\n<untrusted_data>" + fetched_web_page + "</untrusted_data>"
+    python:
+      vulnerable: |
+        messages.append(HumanMessage(content=tool_result))
+      secure: |
+        messages.append(ToolMessage(content=tool_result, tool_call_id=cid))
+        # tool role is data; system message states tool output is never a command
+    javascript:
+      vulnerable: |
+        prompt += `\nSearch results:\n${searchOutput}`;
+      secure: |
+        prompt += `\n<data trust="untrusted">${searchOutput}</data>`;
+    typescript:
+      vulnerable: |
+        messages.push({ role: "user", content: retrievedDoc });
+      secure: |
+        messages.push({ role: "tool", name: "retriever",
+                        content: `<untrusted>${retrievedDoc}</untrusted>` });
+
+# ---------------------------------------------------------------------------
+# T2.5 — Tool call rate and budget limiting
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.5
+  facet: Tool Misuse
+  section: Tool Call Rate and Budget Limits
+  security_rule: >-
+    The number and cost of tool invocations within a single agent run
+    must be capped, so a looping or manipulated agent cannot exhaust
+    resources, spend a budget, or hammer an external API.
+  vulnerability_pattern: >-
+    The agent loop calls tools without any counter or budget, so a
+    reasoning loop or an injected goal can drive thousands of calls,
+    causing runaway cost or a denial of service against a dependency.
+  secure_pattern: >-
+    A per-run counter and spend budget bound tool invocations, and the
+    run halts cleanly with an error once the call ceiling or cost ceiling
+    is reached.
+  code_patterns:
+    generic:
+      vulnerable: |
+        while not done: result = next_tool.invoke(args)   # unbounded loop
+      secure: |
+        while not done and calls < MAX_CALLS:
+            result = next_tool.invoke(args); calls += 1
+    python:
+      vulnerable: |
+        graph = create_react_agent(model, tools)
+        graph.invoke(state)                       # no recursion ceiling
+      secure: |
+        graph = create_react_agent(model, tools)
+        graph.invoke(state, config={"recursion_limit": 25})
+    javascript:
+      vulnerable: |
+        for (;;) { const r = await callTool(plan.next()); }
+      secure: |
+        for (let i = 0; i < MAX_STEPS; i++) { const r = await callTool(plan.next()); }
+    typescript:
+      vulnerable: |
+        async function loop() { while (true) await invokeTool(pick()); }
+      secure: |
+        async function loop(budget: Budget) {
+          while (budget.callsLeft() > 0 && budget.costLeft() > 0) {
+            budget.charge(await invokeTool(pick()));
+          }
+        }
+
+# ---------------------------------------------------------------------------
+# T2.6 — Tool execution sandboxing
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.6
+  facet: Tool Misuse
+  section: Tool Execution Sandboxing
+  security_rule: >-
+    Tools that run code, shell commands, or file operations on behalf of
+    an agent must execute in an isolated sandbox with no ambient
+    credentials, restricted filesystem, and constrained network access.
+  vulnerability_pattern: >-
+    A code-execution or shell tool runs in the agent's own process or
+    host with full privileges, so any model-generated command reaches
+    the real filesystem, secrets, and internal network.
+  secure_pattern: >-
+    Code and shell tools run inside a locked-down container or sandbox
+    with a read-only or scratch filesystem, dropped capabilities, and an
+    egress allowlist, so a misused call cannot escape its blast radius.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def run_code(src): exec(src)               # runs in the agent process
+      secure: |
+        def run_code(src): return sandbox.run(src, network="none", fs="scratch")
+    python:
+      vulnerable: |
+        @tool
+        def shell(cmd: str): return subprocess.run(cmd, shell=True, capture_output=True)
+      secure: |
+        @tool
+        def shell(cmd: list[str]):
+            return sandbox_exec(cmd, image="tools:pinned", net=False, ro_root=True)
+    javascript:
+      vulnerable: |
+        const runCode = { run: ({ code }) => eval(code) };
+      secure: |
+        const runCode = { run: ({ code }) =>
+          ivm.runInIsolate(code, { timeoutMs: 2000, memoryMb: 64 }) };
+    typescript:
+      vulnerable: |
+        const tool = { run: ({ script }: { script: string }) => exec(script) };
+      secure: |
+        const tool = { run: ({ script }: { script: string }) =>
+          runInContainer(script, { image: "sandbox:pinned", network: "none" }) };
+
+# ---------------------------------------------------------------------------
+# T2.7 — Per-tool authorization on the user context
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.7
+  facet: Tool Misuse
+  section: Per-Tool Authorization
+  security_rule: >-
+    Before a tool acts, it must verify that the user the agent is acting
+    for is authorized for that specific action and resource, rather than
+    relying on a single broad service credential.
+  vulnerability_pattern: >-
+    Tools execute under one shared high-privilege service account and
+    skip any per-user authorization check, so the agent can be steered
+    into reading or changing data belonging to other users or tenants.
+  secure_pattern: >-
+    Each tool receives the acting user's identity and enforces an
+    authorization check scoped to that user before touching a resource,
+    so the agent can never exceed the caller's own permissions.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def get_record(rec_id): return db.fetch(rec_id)   # no owner check
+      secure: |
+        def get_record(rec_id, ctx):
+            require_access(ctx.user, rec_id); return db.fetch(rec_id)
+    python:
+      vulnerable: |
+        @tool
+        def read_invoice(invoice_id: str):
+            return repo.get(invoice_id)            # any invoice, any tenant
+      secure: |
+        @tool
+        def read_invoice(invoice_id: str, *, config: RunnableConfig):
+            user = config["configurable"]["user"]
+            return repo.get_for_user(invoice_id, user.id)
+    javascript:
+      vulnerable: |
+        const getFile = { run: ({ id }) => store.get(id) };
+      secure: |
+        const getFile = { run: ({ id }, ctx) => {
+          assertOwner(ctx.userId, id); return store.get(id);
+        } };
+    typescript:
+      vulnerable: |
+        async function deleteDoc(args: { id: string }) { return docs.remove(args.id); }
+      secure: |
+        async function deleteDoc(args: { id: string }, ctx: AgentContext) {
+          if (!(await can(ctx.user, "delete", args.id))) throw new ForbiddenError();
+          return docs.remove(args.id);
+        }
+
+# ---------------------------------------------------------------------------
+# T2.8 — Authenticated and integrity-checked tool registration
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.8
+  facet: Tool Misuse
+  section: Trusted Tool Registration
+  security_rule: >-
+    Tools and MCP servers an agent loads must come from a trusted,
+    integrity-verified source, since a malicious tool definition can
+    misdescribe itself to lure the agent into harmful calls.
+  vulnerability_pattern: >-
+    The agent dynamically loads tools or connects to MCP servers chosen
+    by a discovery feed or a URL, so an attacker can register a tool
+    whose description steers the model into invoking it.
+  secure_pattern: >-
+    Tool sources are pinned to a vetted allowlist, their definitions are
+    integrity-checked against a known hash or signature, and new tools
+    enter the catalog only through a reviewed change.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tools = load_tools_from(url)            # untrusted, unverified source
+      secure: |
+        tools = load_tools_from(PINNED_SOURCE)
+        verify_signature(tools, TRUSTED_KEY)
+    python:
+      vulnerable: |
+        client = MCPClient(server_url=request.args["mcp_server"])
+        tools = client.list_tools()
+      secure: |
+        assert server_url in ALLOWED_MCP_SERVERS
+        client = MCPClient(server_url=server_url)
+        tools = verify_manifest(client.list_tools(), expected_hashes=PINNED_HASHES)
+    javascript:
+      vulnerable: |
+        const tools = await fetch(discoveryUrl).then(r => r.json());
+      secure: |
+        if (!ALLOWED_REGISTRIES.has(origin(discoveryUrl))) throw new Error("untrusted");
+        const tools = verifyManifest(await fetchPinned(discoveryUrl));
+    typescript:
+      vulnerable: |
+        const server = new McpServerConnection(userProvidedEndpoint);
+      secure: |
+        if (!ALLOWED_ENDPOINTS.includes(endpoint)) throw new Error("untrusted endpoint");
+        const server = new McpServerConnection(endpoint, { pinnedCert: TRUSTED_CERT });
+
+# ---------------------------------------------------------------------------
+# T2.9 — Tool invocation audit logging
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.9
+  facet: Tool Misuse
+  section: Tool Invocation Auditing
+  security_rule: >-
+    Every tool invocation must be logged with the agent identity, the
+    acting user, the tool name, the arguments, and the outcome, so misuse
+    is detectable, attributable, and reviewable after the fact.
+  vulnerability_pattern: >-
+    Tool calls execute with no durable record of which agent invoked
+    what with which arguments, so misuse cannot be detected, attributed,
+    or investigated.
+  secure_pattern: >-
+    A structured audit event is emitted for every tool call capturing
+    agent id, user id, tool name, sanitized arguments, result status, and
+    a correlation id, and the log is retained for review.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = tool.invoke(args)              # no record of the call
+      secure: |
+        result = tool.invoke(args)
+        audit.log(agent_id, user_id, tool.name, redact(args), status(result))
+    python:
+      vulnerable: |
+        def call_tool(tool, args): return tool.invoke(args)
+      secure: |
+        def call_tool(tool, args, ctx):
+            out = tool.invoke(args)
+            logger.info("tool_call", extra={"tool": tool.name, "user": ctx.user_id,
+                        "args": redact(args), "ok": out.ok, "corr": ctx.correlation_id})
+            return out
+    javascript:
+      vulnerable: |
+        const out = await tool.run(args);
+      secure: |
+        const out = await tool.run(args);
+        auditLog.emit({ tool: tool.name, user: ctx.userId,
+                        args: redact(args), status: out.status });
+    typescript:
+      vulnerable: |
+        async function invoke(t: Tool, a: ToolArgs) { return t.run(a); }
+      secure: |
+        async function invoke(t: Tool, a: ToolArgs, ctx: AgentContext) {
+          const out = await t.run(a);
+          audit.record({ tool: t.name, user: ctx.user, args: redact(a),
+                          ok: out.ok, correlationId: ctx.correlationId });
+          return out;
+        }
+
+# ---------------------------------------------------------------------------
+# T2.10 — Constrained tool output handling
+# ---------------------------------------------------------------------------
+
+- id: AGENTIC-T2.10
+  facet: Tool Misuse
+  section: Constrained Tool Output Handling
+  security_rule: >-
+    The output a tool returns to the agent must be size-bounded, type-
+    checked, and schema-conformed before it re-enters the model context,
+    so a tool cannot flood, confuse, or poison the agent's next decision.
+  vulnerability_pattern: >-
+    Whatever a tool returns is fed straight back into the model context
+    with no size or shape limit, so an oversized or malformed result
+    exhausts the context window or smuggles in misleading content.
+  secure_pattern: >-
+    Tool results are validated against an expected schema, truncated to a
+    safe length, and stripped of control content before they are placed
+    back into the agent's messages.
+  code_patterns:
+    generic:
+      vulnerable: |
+        messages.append(tool_output)            # arbitrary size and shape
+      secure: |
+        messages.append(truncate(validate(tool_output), MAX_LEN))
+    python:
+      vulnerable: |
+        state["messages"].append(ToolMessage(content=raw_result, tool_call_id=cid))
+      secure: |
+        safe = ResultSchema.model_validate(raw_result)
+        text = str(safe)[:8000]
+        state["messages"].append(ToolMessage(content=text, tool_call_id=cid))
+    javascript:
+      vulnerable: |
+        messages.push({ role: "tool", content: result });
+      secure: |
+        const text = String(ResultSchema.parse(result)).slice(0, 8000);
+        messages.push({ role: "tool", content: text });
+    typescript:
+      vulnerable: |
+        return { role: "tool", content: toolResult as string };
+      secure: |
+        const parsed = ResultSchema.parse(toolResult);
+        return { role: "tool", content: stringify(parsed).slice(0, MAX_TOOL_OUTPUT) };
