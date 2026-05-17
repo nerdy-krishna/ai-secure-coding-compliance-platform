@@ -11,18 +11,12 @@ from app.infrastructure.database.repositories.chat_repo import ChatRepository
 from app.infrastructure.database import models as db_models
 from app.infrastructure.agents.chat_agent import ChatAgent
 from app.infrastructure.observability.mask import mask as mask_secrets
+from app.shared.lib.framework_validation import validate_framework_selection
 from app.shared.lib.scan_status import COMPLETED_SCAN_STATUSES
 
 # Input validation constants
 _MAX_TITLE_CHARS = 200
 _MAX_QUESTION_CHARS = 8000
-_VALID_FRAMEWORKS = {
-    "asvs",
-    "proactive_controls",
-    "cheatsheets",
-    "llm_top10",
-    "agentic_top10",
-}
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +44,10 @@ class ChatService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"title must be 1..{_MAX_TITLE_CHARS} chars",
             )
-        unknown_frameworks = set(frameworks) - _VALID_FRAMEWORKS
-        if unknown_frameworks:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"unknown frameworks: {sorted(unknown_frameworks)}",
-            )
+        # A chat session may be created with no frameworks (general Q&A).
+        await validate_framework_selection(
+            self.chat_repo.db, frameworks, require_non_empty=False
+        )
         # V16.4.1 — structured bound-field logging; avoids log-injection via title
         logger.info(
             "chat: new session creating",

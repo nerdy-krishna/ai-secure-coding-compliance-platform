@@ -47,6 +47,7 @@ from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.messaging.publisher import publish_message
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
 from app.shared.lib.files import get_language_from_filename
+from app.shared.lib.framework_validation import validate_framework_selection
 from app.shared.lib.git import clone_repo_and_get_files
 
 logger = logging.getLogger(__name__)
@@ -63,9 +64,8 @@ MAX_PATH_LEN: int = 1_024
 # Input-validation allow-lists (V02.2.1)
 # ---------------------------------------------------------------------------
 _VALID_SCAN_TYPES: frozenset[str] = frozenset({"AUDIT", "SUGGEST", "REMEDIATE"})
-_VALID_FRAMEWORKS: frozenset[str] = frozenset(
-    {"asvs", "proactive_controls", "cheatsheets", "llm_top10", "agentic_top10"}
-)
+# Framework names are validated against the live `frameworks` table —
+# see `validate_framework_selection`.
 
 # repo_url must be https:// on a known public code-hosting domain (V05.3.2)
 _REPO_URL_RE = re.compile(
@@ -142,13 +142,7 @@ class ScanSubmissionService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid scan_type '{scan_type}'. Must be one of {sorted(_VALID_SCAN_TYPES)}.",
             )
-        if not frameworks or (set(frameworks) - _VALID_FRAMEWORKS):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Invalid or empty frameworks list. Allowed values: {sorted(_VALID_FRAMEWORKS)}."
-                ),
-            )
+        await validate_framework_selection(self.repo.db, frameworks)
         if not project_name or len(project_name) > 200:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
