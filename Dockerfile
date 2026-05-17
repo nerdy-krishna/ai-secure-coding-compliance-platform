@@ -148,7 +148,7 @@ COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
 # deployments don't reach out to HuggingFace on first scan. Cache lives
 # under FASTEMBED_CACHE_PATH (set in base stage). Threat-model G7 +
 # mitigation 7.
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])"
+RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -242,7 +242,7 @@ COPY --chown=appuser:appuser ./src /app/src
 # Pre-warm the fastembed model cache (same as the api stage). Worker
 # performs the bulk of the embedder work during scans; baking the
 # cache here keeps first-scan latency consistent.
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])"
+RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
 
 # Pre-warm the OSV-Scanner vulnerability DB so first-scan latency is
 # consistent and air-gapped deployments don't reach api.osv.dev at

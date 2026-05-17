@@ -88,6 +88,23 @@ untouched. Documents are tagged `scan_ready=True` and carry the metadata
 facet the framework's agents filter retrieval on — `concern_area` for
 CWE Essentials and ISVS, `control_family` for ASVS.
 
+## Hybrid retrieval (dense + sparse)
+
+Retrieval fuses a dense semantic vector (MiniLM-L6-v2) with a sparse
+BM25 term-match vector via Reciprocal Rank Fusion, so exact security
+terms (SSRF, XXE, ReDoS) that dense embeddings blur are still surfaced.
+Each Qdrant collection therefore carries a named dense vector plus a
+BM25 sparse vector.
+
+**Upgrading from a pre-hybrid deployment:** the first boot on this
+version detects the legacy single-vector collections and recreates them
+with the hybrid layout — existing points are dropped. The bundled
+corpora (ASVS, CWE Essentials, ISVS) re-ingest automatically on that
+same startup. Any **admin-uploaded** content (Git-URL or CSV
+frameworks) must be re-ingested manually afterwards from
+**Admin → Frameworks → Ingest docs**, or it will be missing until
+re-ingested.
+
 To re-ingest manually (after editing a corpus, or to force a refresh):
 
 ```

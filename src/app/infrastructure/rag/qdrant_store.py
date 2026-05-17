@@ -35,7 +35,7 @@ from app.infrastructure.rag.base import (
     SECURITY_GUIDELINES_COLLECTION,
     RAGQueryResult,
 )
-from app.infrastructure.rag.embedder import embed
+from app.infrastructure.rag.embedder import embed, sparse_embed
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,13 @@ logger = logging.getLogger(__name__)
 # equivalent output to the prior chromadb-bundled ONNX path).
 VECTOR_SIZE = 384
 DISTANCE = qmodels.Distance.COSINE
+
+# RAG lever 2 — hybrid retrieval. Each collection carries a named dense
+# vector plus a BM25 sparse vector; `query_points` fuses the two legs
+# with Reciprocal Rank Fusion so exact security terms (SSRF, XXE, ReDoS)
+# that dense embeddings blur are still surfaced.
+DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "bm25"
 
 # V02.2.1 — positive-validation bounds for query entry points.
 MAX_N_RESULTS = 50
@@ -230,14 +237,47 @@ class QdrantStore:
             raise
 
     def _ensure_collection(self, name: str) -> None:
+        """Create the collection with the hybrid (dense + sparse) layout,
+        or recreate it if it predates RAG lever 2.
+
+        A pre-lever-2 collection has a single unnamed dense vector and no
+        sparse config — incompatible with the named-vector hybrid layout.
+        Such a collection is dropped and recreated; the bundled corpora
+        re-ingest on the next startup, and operators must re-ingest any
+        admin-uploaded content (see updating-framework-knowledge.md).
+        """
         existing = {c.name for c in self._client.get_collections().collections}
         if name in existing:
-            return
+            if self._is_hybrid_collection(name):
+                return
+            logger.warning(
+                "Recreating Qdrant collection %s for hybrid retrieval — "
+                "existing documents are dropped; bundled corpora re-ingest "
+                "on startup, re-ingest admin content manually.",
+                name,
+            )
+            self._client.delete_collection(name)
         self._client.create_collection(
             collection_name=name,
-            vectors_config=qmodels.VectorParams(size=VECTOR_SIZE, distance=DISTANCE),
+            vectors_config={
+                DENSE_VECTOR_NAME: qmodels.VectorParams(
+                    size=VECTOR_SIZE, distance=DISTANCE
+                )
+            },
+            sparse_vectors_config={SPARSE_VECTOR_NAME: qmodels.SparseVectorParams()},
         )
-        logger.info("Created Qdrant collection %s", name)
+        logger.info("Created Qdrant collection %s (hybrid)", name)
+
+    def _is_hybrid_collection(self, name: str) -> bool:
+        """True when `name` already has the named dense + sparse layout."""
+        try:
+            params = self._client.get_collection(name).config.params
+        except Exception:
+            return False
+        vectors = params.vectors
+        has_dense = isinstance(vectors, dict) and DENSE_VECTOR_NAME in vectors
+        sparse = params.sparse_vectors or {}
+        return has_dense and SPARSE_VECTOR_NAME in sparse
 
     # ------------------------------------------------------------------
     # VectorStore protocol
@@ -256,14 +296,24 @@ class QdrantStore:
         texts_to_embed = embed_texts if embed_texts is not None else documents
         if len(texts_to_embed) != len(documents):
             raise ValueError("embed_texts must be the same length as documents")
+        # RAG lever 2 — every point carries both a dense vector and a
+        # BM25 sparse vector so retrieval can fuse semantic + term match.
         embeddings = embed(texts_to_embed)
+        sparse_vectors = sparse_embed(texts_to_embed)
         points = [
             qmodels.PointStruct(
                 id=_qdrant_id(doc_id),
-                vector=vec,
+                vector={
+                    DENSE_VECTOR_NAME: vec,
+                    SPARSE_VECTOR_NAME: qmodels.SparseVector(
+                        indices=sparse[0], values=sparse[1]
+                    ),
+                },
                 payload={**meta, "_chroma_id": doc_id, "document": doc},
             )
-            for doc_id, doc, meta, vec in zip(ids, documents, metadatas, embeddings)
+            for doc_id, doc, meta, vec, sparse in zip(
+                ids, documents, metadatas, embeddings, sparse_vectors
+            )
         ]
         # V02.4.1 — cap concurrent Qdrant calls.
         with _RAG_CALL_SEM:
@@ -275,6 +325,54 @@ class QdrantStore:
                 # V16.5.2 — log and re-raise as domain error so callers can branch.
                 logger.warning("qdrant_store: upsert failed: %s", e)
                 raise RAGUnavailableError(str(e)) from e
+
+    def _hybrid_points(
+        self,
+        collection: str,
+        query_text: str,
+        n_results: int,
+        flt: Optional[qmodels.Filter],
+    ) -> List[Any]:
+        """RAG lever 2 — hybrid dense + sparse retrieval for one query.
+
+        Runs a dense (semantic) and a BM25 (term-match) prefetch and
+        fuses them with Reciprocal Rank Fusion. If the sparse leg is
+        unavailable the search degrades to dense-only rather than
+        failing, so a sparse-embedder hiccup costs recall, not the scan.
+        """
+        dense_vec = embed([query_text])[0]
+        try:
+            indices, values = sparse_embed([query_text], is_query=True)[0]
+            return self._client.query_points(
+                collection_name=collection,
+                prefetch=[
+                    qmodels.Prefetch(
+                        query=dense_vec,
+                        using=DENSE_VECTOR_NAME,
+                        filter=flt,
+                        limit=n_results * 4,
+                    ),
+                    qmodels.Prefetch(
+                        query=qmodels.SparseVector(indices=indices, values=values),
+                        using=SPARSE_VECTOR_NAME,
+                        filter=flt,
+                        limit=n_results * 4,
+                    ),
+                ],
+                query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
+                limit=n_results,
+                with_payload=True,
+            ).points
+        except Exception as e:
+            logger.warning("qdrant_store: hybrid search degraded to dense-only: %s", e)
+            return self._client.query_points(
+                collection_name=collection,
+                query=dense_vec,
+                using=DENSE_VECTOR_NAME,
+                query_filter=flt,
+                limit=n_results,
+                with_payload=True,
+            ).points
 
     def query_guidelines(
         self,
@@ -290,7 +388,6 @@ class QdrantStore:
         if n_results <= 0 or n_results > MAX_N_RESULTS:
             raise ValueError(f"n_results must be between 1 and {MAX_N_RESULTS}")
 
-        query_embeddings = embed(query_texts)
         flt = _translate_filter(where)
         ids_out: List[List[str]] = []
         docs_out: List[List[str]] = []
@@ -298,17 +395,11 @@ class QdrantStore:
         dists_out: List[List[float]] = []
         # V02.4.1 — cap concurrent Qdrant calls.
         with _RAG_CALL_SEM:
-            for vec in query_embeddings:
+            for query_text in query_texts:
                 try:
-                    # `query_points` replaced the removed `search` API in
-                    # qdrant-client 1.12+; `.points` carries the hit list.
-                    hits = self._client.query_points(
-                        collection_name=SECURITY_GUIDELINES_COLLECTION,
-                        query=vec,
-                        query_filter=flt,
-                        limit=n_results,
-                        with_payload=True,
-                    ).points
+                    hits = self._hybrid_points(
+                        SECURITY_GUIDELINES_COLLECTION, query_text, n_results, flt
+                    )
                 except Exception as e:
                     # V16.5.2 — log and return empty result for graceful degradation.
                     logger.warning("qdrant_store: search (guidelines) failed: %s", e)
@@ -351,23 +442,17 @@ class QdrantStore:
         if n_results <= 0 or n_results > MAX_N_RESULTS:
             raise ValueError(f"n_results must be between 1 and {MAX_N_RESULTS}")
 
-        query_embeddings = embed(query_texts)
         ids_out: List[List[str]] = []
         docs_out: List[List[str]] = []
         metas_out: List[List[Dict[str, Any]]] = []
         dists_out: List[List[float]] = []
         # V02.4.1 — cap concurrent Qdrant calls.
         with _RAG_CALL_SEM:
-            for vec in query_embeddings:
+            for query_text in query_texts:
                 try:
-                    # `query_points` replaced the removed `search` API in
-                    # qdrant-client 1.12+; `.points` carries the hit list.
-                    hits = self._client.query_points(
-                        collection_name=CWE_COLLECTION_NAME,
-                        query=vec,
-                        limit=n_results,
-                        with_payload=True,
-                    ).points
+                    hits = self._hybrid_points(
+                        CWE_COLLECTION_NAME, query_text, n_results, None
+                    )
                 except Exception as e:
                     # V16.5.2 — log and return empty result for graceful degradation.
                     logger.warning("qdrant_store: search (cwe) failed: %s", e)
