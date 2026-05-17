@@ -20,6 +20,7 @@ from app.core.services.default_seed_service import (
     _ASVS_AGENT_SPECS,
     _CS_AGENT_SPECS,
     _CWE_AGENT_SPECS,
+    _ISVS_AGENT_SPECS,
     _PC_AGENT_SPECS,
     seed_defaults,
     seed_if_empty,
@@ -107,6 +108,24 @@ async def test_cwe_essentials_roster_is_gated_and_concern_scoped():
     # 3 systems-gated (spatial/temporal memory, concurrency), 1 web-gated
     # (web injection), 10 ungated — matches the issue's concern-area table.
     assert gating_counts == {"systems": 3, "web": 1, "all": 10}
+
+
+@pytest.mark.asyncio
+async def test_isvs_roster_is_concern_scoped_and_ungated():
+    """OWASP ISVS ships 7 framework-prefixed concern-area agents; each
+    scopes RAG retrieval to its concern-area and carries no gating
+    value (ISVS agents always run — the operator opts in explicitly)."""
+    isvs_agents = [
+        a for a in AGENT_DEFINITIONS if a["applicable_frameworks"] == ["isvs"]
+    ]
+    assert len(isvs_agents) == len(_ISVS_AGENT_SPECS) == 7
+    for agent in isvs_agents:
+        assert agent["name"].startswith("Isvs"), agent["name"]
+        dq = agent["domain_query"]
+        # Ungated — ISVS agents run on every file.
+        assert "gating" not in dq, agent["name"]
+        assert "concern_area" in dq["metadata_filter"], agent["name"]
+        assert dq["metadata_filter"]["framework_name"] == ["isvs"]
 
 
 @pytest.mark.asyncio

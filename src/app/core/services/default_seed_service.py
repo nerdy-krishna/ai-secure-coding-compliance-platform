@@ -85,6 +85,20 @@ FRAMEWORKS_DATA: List[Dict[str, str]] = [
         ),
     },
     {
+        "name": "isvs",
+        "description": (
+            "OWASP IoT Security Verification Standard (ISVS) — covers "
+            "firmware, hardware, and device-communication concerns that "
+            "neither the web-centric ASVS nor CWE Essentials address. "
+            "Seven concern-areas span secure development & provisioning, "
+            "the user-space device application, firmware integrity & "
+            "secure boot, software-platform hardening, communication "
+            "transport & cryptography, pairing & network exposure, and "
+            "the hardware platform. Opt-in at scan time. Select this "
+            "for IoT / embedded / connected-device codebases."
+        ),
+    },
+    {
         "name": "llm_top10",
         "description": (
             "OWASP Top 10 for Large Language Model Applications (2025). "
@@ -1091,6 +1105,164 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
 ]
 
 
+# OWASP ISVS — IoT Security Verification Standard. Seven concern-area
+# agents (breakdown signed off under Framework Expansion #61): ISVS
+# chapters V1/V2/V5 map 1:1, V3 Software Platform splits into firmware
+# integrity vs platform hardening, and V4 Communication splits into
+# transport/crypto vs pairing/network exposure. RAG retrieval is scoped
+# by the framework-agnostic `concern_area` facet. ISVS agents are
+# ungated — the operator opts into ISVS explicitly, and device code
+# spans too many file types for a language filter to help.
+_ISVS_AGENT_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "SecureDevelopmentAgent",
+        "description": (
+            "ISVS V1 — IoT ecosystem and secure development. Reviews "
+            "secure SDLC practices, threat modeling, device identity, "
+            "provisioning and onboarding, and supply-chain integrity."
+        ),
+        "domain_query": {
+            "keywords": (
+                "IoT secure development lifecycle, threat modeling, "
+                "device identity, secure provisioning, onboarding, "
+                "device enrollment, supply chain security, "
+                "bill of materials, secure defaults, decommissioning"
+            ),
+            "metadata_filter": {
+                "framework_name": ["isvs"],
+                "concern_area": ["Secure Development & Provisioning"],
+            },
+        },
+    },
+    {
+        "name": "DeviceApplicationAgent",
+        "description": (
+            "ISVS V2 — user-space device application. Reviews on-device "
+            "credential and sensitive-data storage, local IPC, and "
+            "application-level access control on the device."
+        ),
+        "domain_query": {
+            "keywords": (
+                "user space application, on-device data storage, "
+                "sensitive data at rest, credential storage on device, "
+                "local inter-process communication, device application "
+                "access control, local logging, application sandboxing"
+            ),
+            "metadata_filter": {
+                "framework_name": ["isvs"],
+                "concern_area": ["Device Application & Data Protection"],
+            },
+        },
+    },
+    {
+        "name": "FirmwareIntegrityAgent",
+        "description": (
+            "ISVS V3 — firmware integrity and secure boot. Reviews the "
+            "verified boot chain, bootloader, firmware image signing, "
+            "anti-rollback, and over-the-air update authenticity."
+        ),
+        "domain_query": {
+            "keywords": (
+                "secure boot, verified boot chain, bootloader security, "
+                "firmware image signing, firmware integrity, "
+                "anti-rollback protection, over-the-air update, OTA "
+                "update authenticity, firmware downgrade protection, "
+                "root of trust"
+            ),
+            "metadata_filter": {
+                "framework_name": ["isvs"],
+                "concern_area": ["Firmware Integrity & Secure Boot"],
+            },
+        },
+    },
+    {
+        "name": "PlatformHardeningAgent",
+        "description": (
+            "ISVS V3 — software platform hardening. Reviews OS / RTOS "
+            "hardening, removal of unnecessary services, on-device "
+            "cryptography and key storage, memory protections, and "
+            "process isolation."
+        ),
+        "domain_query": {
+            "keywords": (
+                "operating system hardening, RTOS hardening, "
+                "unnecessary services, on-device cryptography, key "
+                "storage, secure key management, memory protection, "
+                "process isolation, debug build disabled, least "
+                "functionality"
+            ),
+            "metadata_filter": {
+                "framework_name": ["isvs"],
+                "concern_area": ["Software Platform Hardening"],
+            },
+        },
+    },
+    {
+        "name": "TransportSecurityAgent",
+        "description": (
+            "ISVS V4 — communication transport and cryptography. "
+            "Reviews transport encryption, mutual authentication, "
+            "certificate validation, and the cryptography protecting "
+            "device communications."
+        ),
+        "domain_query": {
+            "keywords": (
+                "transport encryption, TLS, DTLS, mutual "
+                "authentication, certificate validation, certificate "
+                "pinning, weak cipher suites, communication "
+                "cryptography, key exchange, message integrity"
+            ),
+            "metadata_filter": {
+                "framework_name": ["isvs"],
+                "concern_area": ["Communication Transport & Cryptography"],
+            },
+        },
+    },
+    {
+        "name": "NetworkExposureAgent",
+        "description": (
+            "ISVS V4 — pairing and network exposure. Reviews device "
+            "pairing and bonding, exposed protocols and services, and "
+            "the network-facing attack surface."
+        ),
+        "domain_query": {
+            "keywords": (
+                "device pairing, bonding, Bluetooth pairing, exposed "
+                "network services, open ports, protocol exposure, "
+                "network attack surface, default network services, "
+                "unauthenticated endpoints, debug network interface"
+            ),
+            "metadata_filter": {
+                "framework_name": ["isvs"],
+                "concern_area": ["Pairing & Network Exposure"],
+            },
+        },
+    },
+    {
+        "name": "HardwarePlatformAgent",
+        "description": (
+            "ISVS V5 — hardware platform. Reviews debug and test "
+            "interfaces, tamper resistance, secure elements / TPM / "
+            "TEE usage, and side-channel and fault-injection "
+            "resistance."
+        ),
+        "domain_query": {
+            "keywords": (
+                "JTAG, SWD, UART debug interface, test interface "
+                "disabled, tamper resistance, tamper detection, secure "
+                "element, trusted platform module, TPM, trusted "
+                "execution environment, TEE, side-channel resistance, "
+                "fault injection resistance"
+            ),
+            "metadata_filter": {
+                "framework_name": ["isvs"],
+                "concern_area": ["Hardware Platform Security"],
+            },
+        },
+    },
+]
+
+
 # The LLM / Agentic agents are framework-native already — they are not
 # part of the AppSec pool, keep their own names, and declare explicit
 # single-framework mappings.
@@ -1170,13 +1342,14 @@ def _framework_roster(
 
 
 # The full default agent roster — 17 ASVS + 10 Proactive Controls + 10
-# Cheatsheets + 14 CWE Essentials dedicated agents, plus the two
-# framework-native AI agents.
+# Cheatsheets + 14 CWE Essentials + 7 ISVS dedicated agents, plus the
+# two framework-native AI agents.
 AGENT_DEFINITIONS: List[Dict[str, Any]] = (
     _framework_roster(_ASVS_AGENT_SPECS, "asvs", "Asvs")
     + _framework_roster(_PC_AGENT_SPECS, "proactive_controls", "ProactiveControls")
     + _framework_roster(_CS_AGENT_SPECS, "cheatsheets", "Cheatsheets")
     + _framework_roster(_CWE_AGENT_SPECS, "cwe_essentials", "Cwe")
+    + _framework_roster(_ISVS_AGENT_SPECS, "isvs", "Isvs")
     + _AI_AGENT_DEFINITIONS
 )
 
@@ -1208,6 +1381,10 @@ _FRAMEWORK_TEMPLATES: Dict[str, Dict[str, str]] = {
     "cwe_essentials": {
         "audit": _load_prompt("audit_cwe.md"),
         "remediation": _load_prompt("remediation_cwe.md"),
+    },
+    "isvs": {
+        "audit": _load_prompt("audit_isvs.md"),
+        "remediation": _load_prompt("remediation_isvs.md"),
     },
 }
 _GENERIC_TEMPLATES: Dict[str, str] = {
