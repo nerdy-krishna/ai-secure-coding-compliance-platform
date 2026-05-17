@@ -1,0 +1,453 @@
+# OWASP MASVS v2 — Control Group: MASVS-STORAGE
+# Secure storage of sensitive data on a mobile device.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the mobile languages swift / kotlin / java / dart).
+
+# ---------------------------------------------------------------------------
+# MASVS-STORAGE — Secure Data Storage
+# ---------------------------------------------------------------------------
+
+- id: MASVS-STORAGE.1
+  facet: Data Storage
+  section: Sensitive Data in System Credential Stores
+  security_rule: >-
+    Sensitive data such as credentials, tokens, and keys must be stored
+    in the platform credential store — the iOS Keychain or the Android
+    Keystore-backed store — and never in plain application files or
+    preferences.
+  vulnerability_pattern: >-
+    A secret such as an auth token or password is written to a plain
+    preferences file, plist, or local file, where it is readable by
+    anyone with filesystem or backup access to the device.
+  secure_pattern: >-
+    Secrets are written to the operating system credential store, which
+    is hardware-backed where available, so the value is encrypted at
+    rest and scoped to the application.
+  code_patterns:
+    generic:
+      vulnerable: |
+        preferences.write("auth_token", token)   # plain on-disk file
+      secure: |
+        keychainStore.set("auth_token", token)   # OS credential store
+    swift:
+      vulnerable: |
+        UserDefaults.standard.set(token, forKey: "authToken")
+      secure: |
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: "authToken",
+            kSecValueData as String: Data(token.utf8)]
+        SecItemAdd(q as CFDictionary, nil)
+    kotlin:
+      vulnerable: |
+        getSharedPreferences("p", MODE_PRIVATE).edit().putString("token", token).apply()
+      secure: |
+        val prefs = EncryptedSharedPreferences.create(context, "secure_p", masterKey,
+            AES256_SIV, AES256_GCM)
+        prefs.edit().putString("token", token).apply()
+    java:
+      vulnerable: |
+        getSharedPreferences("p", MODE_PRIVATE).edit().putString("token", token).apply();
+      secure: |
+        SharedPreferences prefs = EncryptedSharedPreferences.create(context,
+            "secure_p", masterKey, AES256_SIV, AES256_GCM);
+        prefs.edit().putString("token", token).apply();
+    dart:
+      vulnerable: |
+        await SharedPreferences.getInstance()
+          ..then((p) => p.setString("token", token));
+      secure: |
+        await const FlutterSecureStorage().write(key: "token", value: token);
+
+- id: MASVS-STORAGE.2
+  facet: Data Storage
+  section: No Sensitive Data in Application Storage
+  security_rule: >-
+    The application must not store sensitive data in locations that are
+    world-readable, externally accessible, or unencrypted, such as
+    external storage, the SD card, or a local database without
+    encryption.
+  vulnerability_pattern: >-
+    Sensitive data is written to external or shared storage or to an
+    unencrypted local database, so any other app or any user with device
+    access can read it.
+  secure_pattern: >-
+    Sensitive data is confined to the app-private sandbox and held in an
+    encrypted database or store, so it is not reachable by other apps and
+    is unreadable without the app's key.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeFile(externalStorageDir + "/profile.db", sensitiveData)
+      secure: |
+        encryptedDb.openInPrivateSandbox(key).write(sensitiveData)
+    swift:
+      vulnerable: |
+        try data.write(to: sharedContainerURL.appendingPathComponent("notes.txt"))
+      secure: |
+        try data.write(to: appSupportURL.appendingPathComponent("notes.txt"),
+            options: .completeFileProtection)
+    kotlin:
+      vulnerable: |
+        File(getExternalFilesDir(null), "cards.db").writeBytes(sensitiveBytes)
+      secure: |
+        val db = SQLiteDatabase.openOrCreateDatabase(
+            File(filesDir, "cards.db"), passphrase, null)
+    java:
+      vulnerable: |
+        new FileOutputStream(new File(Environment.getExternalStorageDirectory(),
+            "cards.db")).write(sensitiveBytes);
+      secure: |
+        SQLiteDatabase db = SQLiteDatabase.openOrCreateDatabase(
+            new File(getFilesDir(), "cards.db"), passphrase, null);
+    dart:
+      vulnerable: |
+        File("${(await getExternalStorageDirectory())!.path}/data.json")
+          .writeAsStringSync(sensitiveJson);
+      secure: |
+        final db = await openDatabase("${(await getApplicationSupportDirectory())
+          .path}/data.db", password: passphrase);
+
+- id: MASVS-STORAGE.3
+  facet: Data Storage
+  section: Sensitive Data Excluded from Backups
+  security_rule: >-
+    Sensitive data must be excluded from cloud and local device backups
+    so it cannot be extracted from an unencrypted backup of the device.
+  vulnerability_pattern: >-
+    A file or preference holding a secret is left eligible for iCloud,
+    iTunes, or Android auto-backup, so the secret is copied off-device
+    into a backup an attacker may obtain.
+  secure_pattern: >-
+    Secrets are stored in the credential store, which is not backed up by
+    default, or files holding them are explicitly flagged as excluded
+    from backup and from the auto-backup ruleset.
+  code_patterns:
+    generic:
+      vulnerable: |
+        saveSecretFile(path)                  # included in device backup
+      secure: |
+        saveSecretFile(path); markExcludedFromBackup(path)
+    swift:
+      vulnerable: |
+        try data.write(to: secretURL)         # backed up to iCloud by default
+      secure: |
+        var url = secretURL
+        var rv = URLResourceValues(); rv.isExcludedFromBackup = true
+        try url.setResourceValues(rv)
+    kotlin:
+      vulnerable: |
+        <application android:allowBackup="true" android:fullBackupContent="true">
+      secure: |
+        <application android:allowBackup="false"
+            android:dataExtractionRules="@xml/data_extraction_rules">
+    java:
+      vulnerable: |
+        // AndroidManifest.xml
+        <application android:allowBackup="true">
+      secure: |
+        // AndroidManifest.xml — exclude secrets dir from auto-backup
+        <application android:allowBackup="false">
+    dart:
+      vulnerable: |
+        await File(secretPath).writeAsString(secret);   // auto-backup eligible
+      secure: |
+        await const FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true))
+          .write(key: "secret", value: secret);
+
+- id: MASVS-STORAGE.4
+  facet: Data Storage
+  section: No Sensitive Data in Application Logs
+  security_rule: >-
+    Sensitive data must not be written to application logs, including the
+    system log, crash logs, and console output, where other apps or
+    support tooling could read it.
+  vulnerability_pattern: >-
+    Credentials, tokens, or personal data are passed to a logging call,
+    so the secret is persisted to a log buffer that is readable by
+    diagnostics tools or shipped to a crash service.
+  secure_pattern: >-
+    Log statements emit only non-sensitive identifiers, and any secret is
+    redacted or omitted, with verbose and debug logging disabled in
+    release builds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log.debug("login ok, token=" + token)
+      secure: |
+        log.debug("login ok for userId=" + userId)   # no secret in log
+    swift:
+      vulnerable: |
+        print("session token: \(token)")
+      secure: |
+        os_log("session established", log: .default, type: .info)
+    kotlin:
+      vulnerable: |
+        Log.d("Auth", "password=$password")
+      secure: |
+        Log.d("Auth", "auth succeeded for user $userId")
+    java:
+      vulnerable: |
+        Log.d("Auth", "token=" + token);
+      secure: |
+        Log.d("Auth", "auth succeeded for user " + userId);
+    dart:
+      vulnerable: |
+        debugPrint("api key: $apiKey");
+      secure: |
+        debugPrint("request completed: status=$statusCode");
+
+- id: MASVS-STORAGE.5
+  facet: Data Storage
+  section: Sensitive Data Not Shared via IPC
+  security_rule: >-
+    The application must not expose sensitive data through unprotected
+    inter-process communication channels such as exported content
+    providers, broadcasts, clipboard, or shared activities.
+  vulnerability_pattern: >-
+    Sensitive data is placed on a channel reachable by other apps — an
+    exported content provider, an implicit broadcast, or the global
+    clipboard — so any installed app can read it.
+  secure_pattern: >-
+    IPC components are not exported, are guarded by a signature-level
+    permission, and sensitive values are kept off the shared clipboard
+    or flagged as sensitive when they must be copied.
+  code_patterns:
+    generic:
+      vulnerable: |
+        broadcast(intentWith(secret))          # any app can receive it
+      secure: |
+        sendToSelfOnly(intentWith(secret), signaturePermission)
+    swift:
+      vulnerable: |
+        UIPasteboard.general.string = creditCardNumber
+      secure: |
+        let pb = UIPasteboard.general
+        pb.setItems([["cc": creditCardNumber]],
+            options: [.expirationDate: Date().addingTimeInterval(60)])
+    kotlin:
+      vulnerable: |
+        <provider android:name=".SecretProvider" android:exported="true"/>
+      secure: |
+        <provider android:name=".SecretProvider" android:exported="false"
+            android:permission="com.app.permission.SIGNATURE"/>
+    java:
+      vulnerable: |
+        ClipData clip = ClipData.newPlainText("token", token);
+        clipboard.setPrimaryClip(clip);
+      secure: |
+        PersistableBundle extras = new PersistableBundle();
+        extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+        clip.getDescription().setExtras(extras);
+    dart:
+      vulnerable: |
+        await Clipboard.setData(ClipboardData(text: sessionToken));
+      secure: |
+        // keep secrets off the shared clipboard; pass in-process instead
+        sessionService.useTokenInMemory(sessionToken);
+
+- id: MASVS-STORAGE.6
+  facet: Data Storage
+  section: Keyboard Cache and Autofill of Sensitive Fields
+  security_rule: >-
+    Input fields that accept sensitive data must disable third-party
+    keyboard caching, predictive text, and autofill so secrets are not
+    retained by the keyboard or system autofill store.
+  vulnerability_pattern: >-
+    A password or other sensitive field allows predictive text or
+    autofill, so the value is cached by the keyboard dictionary or the
+    autofill service and can leak into another context.
+  secure_pattern: >-
+    Sensitive fields are marked as secure or password entry and opt out
+    of autofill, so the keyboard does not learn the value and the system
+    does not store it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        textField(sensitive=true)              # predictive text still on
+      secure: |
+        textField(sensitive=true, autocorrect=false, autofill=false)
+    swift:
+      vulnerable: |
+        passwordField.autocorrectionType = .yes
+      secure: |
+        passwordField.isSecureTextEntry = true
+        passwordField.autocorrectionType = .no
+    kotlin:
+      vulnerable: |
+        <EditText android:inputType="text"/>
+      secure: |
+        <EditText android:inputType="textPassword"
+            android:importantForAutofill="no"/>
+    java:
+      vulnerable: |
+        editText.setInputType(InputType.TYPE_CLASS_TEXT);
+      secure: |
+        editText.setInputType(InputType.TYPE_CLASS_TEXT
+            | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        editText.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+    dart:
+      vulnerable: |
+        TextField(controller: pwController);
+      secure: |
+        TextField(controller: pwController, obscureText: true,
+            enableSuggestions: false, autocorrect: false);
+
+- id: MASVS-STORAGE.7
+  facet: Data Storage
+  section: No Sensitive Data Exposed via the App Switcher
+  security_rule: >-
+    The application must prevent sensitive data on screen from being
+    captured in the task-switcher snapshot the operating system takes
+    when the app moves to the background.
+  vulnerability_pattern: >-
+    A screen showing sensitive data is left visible when the app is
+    backgrounded, so the OS stores a snapshot of it that is shown in the
+    app switcher and saved to disk.
+  secure_pattern: >-
+    On entering the background the sensitive view is hidden behind an
+    overlay or blurred, or the window is flagged secure, so the captured
+    snapshot reveals nothing sensitive.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onBackground():  pass                  # sensitive screen snapshotted
+      secure: |
+        onBackground():  showPrivacyOverlay()
+    swift:
+      vulnerable: |
+        func sceneWillResignActive(_ scene: UIScene) { }
+      secure: |
+        func sceneWillResignActive(_ scene: UIScene) {
+            window?.addSubview(privacyBlurOverlay)
+        }
+    kotlin:
+      vulnerable: |
+        // no FLAG_SECURE — balance screen captured to task snapshot
+        setContentView(R.layout.account)
+      secure: |
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE)
+    java:
+      vulnerable: |
+        setContentView(R.layout.account);
+      secure: |
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE);
+    dart:
+      vulnerable: |
+        Widget build(BuildContext c) => AccountBalanceView();
+      secure: |
+        // flutter_windowmanager — block snapshot of sensitive screen
+        await FlutterWindowManager.addFlags(FlutterWindowManager.FLAG_SECURE);
+
+- id: MASVS-STORAGE.8
+  facet: Data Storage
+  section: Hardware-Backed Keys and Access Control
+  security_rule: >-
+    Encryption keys protecting stored sensitive data must be generated
+    and held in hardware-backed storage and gated on user authentication,
+    so the keys cannot be extracted or used outside the device.
+  vulnerability_pattern: >-
+    An encryption key is created in software and stored as a string or
+    file alongside the data it protects, so an attacker who reads the
+    storage also obtains the key.
+  secure_pattern: >-
+    Keys are generated inside the Secure Enclave or hardware Keystore as
+    non-exportable, with access bound to device unlock or biometric
+    authentication, so the key never exists in plain application memory.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = randomBytes(32); saveFile("data.key", key)
+      secure: |
+        key = hardwareKeystore.generateNonExportableKey(requireUserAuth=true)
+    swift:
+      vulnerable: |
+        let key = SymmetricKey(size: .bits256)   # lives in app memory
+      secure: |
+        let access = SecAccessControlCreateWithFlags(nil,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            .privateKeyUsage, nil)
+    kotlin:
+      vulnerable: |
+        val key = KeyGenerator.getInstance("AES").generateKey()  // not in Keystore
+      secure: |
+        val spec = KeyGenParameterSpec.Builder("k", PURPOSE_ENCRYPT or PURPOSE_DECRYPT)
+            .setUserAuthenticationRequired(true)
+            .setIsStrongBoxBacked(true).build()
+    java:
+      vulnerable: |
+        SecretKey key = KeyGenerator.getInstance("AES").generateKey();
+      secure: |
+        KeyGenerator kg = KeyGenerator.getInstance("AES", "AndroidKeyStore");
+        kg.init(new KeyGenParameterSpec.Builder("k", PURPOSE_ENCRYPT | PURPOSE_DECRYPT)
+            .setUserAuthenticationRequired(true).build());
+    dart:
+      vulnerable: |
+        final key = base64Encode(randomBytes(32));   // stored next to data
+      secure: |
+        await const FlutterSecureStorage(
+          iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device))
+          .write(key: "dek", value: dek);
+
+- id: MASVS-STORAGE.9
+  facet: Data Storage
+  section: Purging Sensitive Data on Logout and Uninstall
+  security_rule: >-
+    Sensitive data must be removed from storage and memory when it is no
+    longer needed — on logout, on session end, or when the user revokes
+    access — so it does not linger on the device.
+  vulnerability_pattern: >-
+    On logout the application clears the in-memory session but leaves
+    cached tokens, credentials, or personal data on disk, so the next
+    person with the device can recover the previous user's data.
+  secure_pattern: >-
+    Logout and account removal explicitly delete every credential-store
+    entry, cached file, and database row holding sensitive data, and
+    overwrite or release the corresponding in-memory buffers.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onLogout():  session = null            # disk cache untouched
+      secure: |
+        onLogout():  session = null; credentialStore.deleteAll(); cache.purge()
+    swift:
+      vulnerable: |
+        func logout() { self.session = nil }
+      secure: |
+        func logout() {
+            self.session = nil
+            SecItemDelete([kSecClass as String: kSecClassGenericPassword] as CFDictionary)
+        }
+    kotlin:
+      vulnerable: |
+        fun logout() { sessionHolder.clear() }
+      secure: |
+        fun logout() {
+            sessionHolder.clear()
+            encryptedPrefs.edit().clear().apply()
+            context.deleteDatabase("cards.db")
+        }
+    java:
+      vulnerable: |
+        void logout() { sessionHolder.clear(); }
+      secure: |
+        void logout() {
+            sessionHolder.clear();
+            encryptedPrefs.edit().clear().apply();
+            context.deleteDatabase("cards.db");
+        }
+    dart:
+      vulnerable: |
+        void logout() => session = null;
+      secure: |
+        Future<void> logout() async {
+          session = null;
+          await const FlutterSecureStorage().deleteAll();
+        }

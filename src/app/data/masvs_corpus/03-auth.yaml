@@ -1,0 +1,471 @@
+# OWASP MASVS v2 — Control Group: MASVS-AUTH (Authentication and Authorization)
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + swift/kotlin/java/dart for mobile apps).
+#
+# MASVS-AUTH covers authentication and authorization for mobile apps:
+# the app enforces server-side identity decisions, uses the platform's
+# secure credential and biometric APIs correctly, and protects session
+# material at rest and in transit.
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.1 — Server-side authentication and authorization enforcement
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.1
+  facet: Authentication and Authorization
+  section: Server-side Enforcement of Authentication and Authorization
+  security_rule: >-
+    Authentication and authorization decisions must be made and enforced
+    on a trusted backend. The mobile app may reflect identity state in its
+    UI but must never be the sole authority for granting access to data or
+    actions.
+  vulnerability_pattern: >-
+    The app decides locally whether a user is authenticated or entitled to
+    a feature and then calls a backend endpoint that trusts the request
+    without re-checking, so anyone who tampers with the client can reach
+    privileged data.
+  secure_pattern: >-
+    Every privileged request carries a server-issued credential, and the
+    backend independently verifies identity and entitlement on each call.
+    The client-side check is treated only as a usability hint.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if localFlags.isAdmin: callApi("/admin/users")   # backend trusts caller
+      secure: |
+        callApi("/admin/users", token=session.accessToken)  # backend re-checks role
+    swift:
+      vulnerable: |
+        if UserDefaults.standard.bool(forKey: "isAdmin") {
+            api.get("/admin/users")
+        }
+      secure: |
+        api.get("/admin/users", bearer: try keychain.accessToken())
+        // server validates the token's role claim before responding
+    kotlin:
+      vulnerable: |
+        if (prefs.getBoolean("is_admin", false)) {
+            api.getAdminUsers()
+        }
+      secure: |
+        api.getAdminUsers("Bearer ${tokenStore.accessToken()}")
+        // server authorizes the request from the verified token
+    dart:
+      vulnerable: |
+        if (localUser.role == 'admin') {
+          await http.get(Uri.parse('$base/admin/users'));
+        }
+      secure: |
+        await http.get(Uri.parse('$base/admin/users'),
+            headers: {'Authorization': 'Bearer ${await store.accessToken()}'});
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.2 — Secure storage of credentials and session tokens
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.2
+  facet: Authentication and Authorization
+  section: Secure Storage of Authentication Material
+  security_rule: >-
+    Session tokens, refresh tokens, and any cached credentials must be
+    stored in the platform's hardware-backed secure storage and never in
+    world-readable or unencrypted locations.
+  vulnerability_pattern: >-
+    Tokens or passwords are written to shared preferences, plist files,
+    local databases, or log output, so any process with file access or a
+    rooted or jailbroken device can read the user's session material.
+  secure_pattern: >-
+    Authentication material is held in the iOS Keychain or Android
+    Keystore-backed EncryptedSharedPreferences, scoped to this app, and is
+    never persisted to plain preferences or logs.
+  code_patterns:
+    generic:
+      vulnerable: |
+        plainPrefs.put("auth_token", token)
+      secure: |
+        secureStore.put("auth_token", token)   # hardware-backed keystore
+    swift:
+      vulnerable: |
+        UserDefaults.standard.set(token, forKey: "authToken")
+      secure: |
+        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: "authToken",
+            kSecValueData as String: Data(token.utf8)]
+        SecItemAdd(q as CFDictionary, nil)
+    kotlin:
+      vulnerable: |
+        getSharedPreferences("auth", MODE_PRIVATE)
+            .edit().putString("token", token).apply()
+      secure: |
+        EncryptedSharedPreferences.create("auth", masterKey, context,
+            PrefKeyEncryptionScheme.AES256_SIV, PrefValueEncryptionScheme.AES256_GCM)
+            .edit().putString("token", token).apply()
+    dart:
+      vulnerable: |
+        await SharedPreferences.getInstance()
+          ..setString('token', token);
+      secure: |
+        await const FlutterSecureStorage().write(key: 'token', value: token);
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.3 — Correct use of biometric authentication
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.3
+  facet: Authentication and Authorization
+  section: Biometric Authentication
+  security_rule: >-
+    Biometric authentication must gate access to a secret or key held in
+    secure hardware, so that a successful biometric result unlocks real
+    cryptographic material rather than merely returning a boolean.
+  vulnerability_pattern: >-
+    The app calls a biometric prompt and, on a success callback, simply
+    sets a local boolean or proceeds, so an attacker who hooks the callback
+    or patches the binary bypasses the check without any biometric.
+  secure_pattern: >-
+    The biometric prompt is bound to a Keystore or Keychain key created
+    with a biometric access control, and the protected operation can only
+    complete by using the key the successful authentication unlocks.
+  code_patterns:
+    generic:
+      vulnerable: |
+        biometricPrompt(onSuccess: { unlocked = true })
+      secure: |
+        biometricPrompt(cryptoObject: keyRequiringBiometric,
+                        onSuccess: { useUnlockedKey() })
+    swift:
+      vulnerable: |
+        context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+            localizedReason: "Unlock") { ok, _ in if ok { self.unlocked = true } }
+      secure: |
+        let acl = SecAccessControlCreateWithFlags(nil,
+            kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .biometryCurrentSet, nil)
+        // key stored with this ACL; reading it forces a fresh biometric
+    kotlin:
+      vulnerable: |
+        BiometricPrompt(this, executor, object : AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(r: AuthenticationResult) {
+                unlocked = true } }).authenticate(promptInfo)
+      secure: |
+        val key = keyGen.also { it.init(KeyGenParameterSpec.Builder("k",
+            PURPOSE_DECRYPT).setUserAuthenticationRequired(true).build()) }.generateKey()
+        prompt.authenticate(promptInfo, CryptoObject(Cipher.getInstance("AES/GCM/NoPadding")))
+    dart:
+      vulnerable: |
+        final ok = await LocalAuthentication().authenticate(
+            localizedReason: 'Unlock');
+        if (ok) unlocked = true;
+      secure: |
+        // gate a secure-storage read on biometrics, do not trust the bool alone
+        await LocalAuthentication().authenticate(localizedReason: 'Unlock',
+            options: const AuthenticationOptions(biometricOnly: true));
+        final secret = await const FlutterSecureStorage(
+            iOptions: IOSOptions(accessibility: KeychainAccessibility.passcode))
+          .read(key: 'signing_key');
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.4 — Tokens transmitted and used securely
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.4
+  facet: Authentication and Authorization
+  section: Secure Transmission of Credentials
+  security_rule: >-
+    Credentials and session tokens must only ever be sent over a
+    validated TLS connection, placed in the Authorization header rather
+    than in URLs, and never embedded in query strings or logs.
+  vulnerability_pattern: >-
+    A token or password is appended to a request URL as a query parameter
+    or sent over plain HTTP, so it leaks into server logs, proxy caches,
+    analytics, and the device URL history.
+  secure_pattern: >-
+    The credential travels in the Authorization header of an HTTPS request
+    to a host whose certificate has been validated, and is never written
+    into a URL or referrer-visible location.
+  code_patterns:
+    generic:
+      vulnerable: |
+        httpGet("http://api.example.com/data?token=" + token)
+      secure: |
+        httpsGet("https://api.example.com/data", header={"Authorization": bearer(token)})
+    swift:
+      vulnerable: |
+        let url = URL(string: "http://api.example.com/data?token=\(token)")!
+        URLSession.shared.dataTask(with: url).resume()
+      secure: |
+        var req = URLRequest(url: URL(string: "https://api.example.com/data")!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: req).resume()
+    kotlin:
+      vulnerable: |
+        val req = Request.Builder()
+            .url("http://api.example.com/data?token=$token").build()
+      secure: |
+        val req = Request.Builder()
+            .url("https://api.example.com/data")
+            .header("Authorization", "Bearer $token").build()
+    dart:
+      vulnerable: |
+        await http.get(Uri.parse('http://api.example.com/data?token=$token'));
+      secure: |
+        await http.get(Uri.parse('https://api.example.com/data'),
+            headers: {'Authorization': 'Bearer $token'});
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.5 — Session invalidation on logout and token expiry
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.5
+  facet: Authentication and Authorization
+  section: Session Lifecycle and Logout
+  security_rule: >-
+    On logout the app must call the backend to revoke the session and
+    must erase every local copy of session and refresh tokens, so a stale
+    token left on the device cannot be replayed.
+  vulnerability_pattern: >-
+    Logout only clears an in-memory flag or navigates to the login screen
+    while the persisted token remains in storage and is still accepted by
+    the server, so the session survives the logout.
+  secure_pattern: >-
+    Logout calls a server revocation endpoint and then deletes the access
+    and refresh tokens from secure storage, ensuring the credential is
+    invalid both on the device and on the backend.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def logout(): navigateTo(loginScreen)   # token still on disk and valid
+      secure: |
+        def logout():
+            api.post("/auth/revoke", token=session.refreshToken)
+            secureStore.deleteAll(); navigateTo(loginScreen)
+    swift:
+      vulnerable: |
+        func logout() { self.currentUser = nil; showLogin() }
+      secure: |
+        func logout() async {
+            try? await api.revoke(refresh: keychain.refreshToken())
+            keychain.deleteAll(); showLogin()
+        }
+    kotlin:
+      vulnerable: |
+        fun logout() { isLoggedIn = false; goToLogin() }
+      secure: |
+        suspend fun logout() {
+            api.revoke(tokenStore.refreshToken())
+            tokenStore.clear(); goToLogin()
+        }
+    dart:
+      vulnerable: |
+        void logout() { user = null; context.go('/login'); }
+      secure: |
+        Future<void> logout() async {
+          await api.revoke(await storage.read(key: 'refresh'));
+          await const FlutterSecureStorage().deleteAll();
+          if (mounted) context.go('/login');
+        }
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.6 — No hardcoded credentials or static secrets
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.6
+  facet: Authentication and Authorization
+  section: Static Credentials and Embedded Secrets
+  security_rule: >-
+    The app must not ship hardcoded passwords, API keys, shared secrets,
+    or backdoor accounts in its source, resources, or compiled binary,
+    since anyone can extract them by decompiling the package.
+  vulnerability_pattern: >-
+    A password, signing secret, or privileged API key is written as a
+    literal in code or a resource file, so it is recoverable from the
+    distributed app by any user and cannot be rotated per install.
+  secure_pattern: >-
+    Authentication is performed against per-user credentials exchanged at
+    runtime for short-lived tokens, and any required secret is provisioned
+    server-side and never embedded in the client.
+  code_patterns:
+    generic:
+      vulnerable: |
+        API_KEY = "sk_live_9f3a2b7c"   # extractable from the binary
+      secure: |
+        token = authService.exchange(userCredential)   # short-lived, per user
+    swift:
+      vulnerable: |
+        let apiSecret = "p@ssw0rd-shared-2026"
+      secure: |
+        let token = try await authService.signIn(username: u, password: p)
+        // server returns a short-lived access token
+    kotlin:
+      vulnerable: |
+        const val ADMIN_PASSWORD = "Sup3rS3cret!"
+      secure: |
+        val token = authService.signIn(username, password).accessToken
+    dart:
+      vulnerable: |
+        const apiKey = 'AIzaSyD-hardcoded-key-value';
+      secure: |
+        final token = await authService.signIn(username, password);
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.7 — Step-up authentication for sensitive actions
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.7
+  facet: Authentication and Authorization
+  section: Step-up Authentication for Sensitive Operations
+  security_rule: >-
+    High-risk operations such as changing a password, transferring funds,
+    or altering security settings must require a fresh authentication
+    challenge rather than relying on the existing session alone.
+  vulnerability_pattern: >-
+    A sensitive action is permitted on the strength of an active session,
+    so anyone who gains brief access to an unlocked device or a hijacked
+    session can perform irreversible changes without re-proving identity.
+  secure_pattern: >-
+    Before a sensitive action the app forces a recent re-authentication —
+    a password re-entry or a device biometric or passcode prompt — and the
+    backend verifies that proof is fresh before applying the change.
+  code_patterns:
+    generic:
+      vulnerable: |
+        def transferFunds(amount): api.post("/transfer", amount)
+      secure: |
+        def transferFunds(amount):
+            proof = reauthenticate()
+            api.post("/transfer", amount, stepUpProof=proof)
+    swift:
+      vulnerable: |
+        func deleteAccount() { api.delete("/account") }
+      secure: |
+        func deleteAccount() async throws {
+            try await LAContext().evaluatePolicy(
+                .deviceOwnerAuthentication, localizedReason: "Confirm deletion")
+            api.delete("/account")
+        }
+    kotlin:
+      vulnerable: |
+        fun changePassword(new: String) { api.setPassword(new) }
+      secure: |
+        fun changePassword(new: String) {
+            biometricPrompt.authenticate(reauthInfo)   // fresh proof required
+            // proceed to api.setPassword(new) only inside onAuthenticationSucceeded
+        }
+    dart:
+      vulnerable: |
+        Future<void> transfer(double amt) => api.transfer(amt);
+      secure: |
+        Future<void> transfer(double amt) async {
+          final ok = await LocalAuthentication().authenticate(
+              localizedReason: 'Confirm transfer');
+          if (ok) await api.transfer(amt);
+        }
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.8 — Local authentication is not the only access control
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.8
+  facet: Authentication and Authorization
+  section: Local Authentication Boundaries
+  security_rule: >-
+    A device PIN, pattern, or biometric used to unlock the app must gate
+    access to local data only, and must never substitute for proving
+    identity to the backend before remote resources are accessed.
+  vulnerability_pattern: >-
+    Passing the local app-unlock check is treated as a full login, so the
+    app reuses a long-lived stored token for backend calls without ever
+    confirming the session is still valid for this user.
+  secure_pattern: >-
+    Local unlock only releases an encrypted refresh token, which is then
+    exchanged with the backend for a fresh access token, so backend access
+    always depends on a server-validated credential.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if localUnlock(): useApp(longLivedToken)
+      secure: |
+        if localUnlock():
+            access = authService.refresh(decrypt(storedRefreshToken))
+            useApp(access)
+    swift:
+      vulnerable: |
+        if try context.evaluatePolicy(.deviceOwnerAuthentication, ...) {
+            api.use(staticToken)
+        }
+      secure: |
+        if try await context.evaluatePolicy(.deviceOwnerAuthentication, ...) {
+            let access = try await authService.refresh(keychain.refreshToken())
+            api.use(access)
+        }
+    kotlin:
+      vulnerable: |
+        prompt.authenticate(info)   // onSuccess -> api.use(savedToken)
+      secure: |
+        // onAuthenticationSucceeded:
+        val access = authService.refresh(tokenStore.refreshToken())
+        api.use(access)
+    dart:
+      vulnerable: |
+        if (await LocalAuthentication().authenticate(localizedReason: 'Unlock')) {
+          api.use(savedToken);
+        }
+      secure: |
+        if (await LocalAuthentication().authenticate(localizedReason: 'Unlock')) {
+          final access = await authService.refresh(
+              await storage.read(key: 'refresh'));
+          api.use(access);
+        }
+
+# ---------------------------------------------------------------------------
+# MASVS-AUTH.9 — Account lockout and brute-force resistance
+# ---------------------------------------------------------------------------
+
+- id: MASVS-AUTH.9
+  facet: Authentication and Authorization
+  section: Brute-force and Rate-limiting Protection
+  security_rule: >-
+    Authentication attempts, including local PIN or password entry, must
+    be rate-limited or locked out after repeated failures, with the
+    authoritative counter kept server-side where remote credentials apply.
+  vulnerability_pattern: >-
+    Failed login attempts are counted only in client memory or local
+    storage, so uninstalling and reinstalling the app, clearing data, or
+    tampering with the counter resets it and enables unlimited guessing.
+  secure_pattern: >-
+    The backend tracks failed attempts per account and enforces lockout or
+    backoff, while local PIN entry uses a tamper-resistant counter and
+    increasing delays so guessing is bounded on and off device.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if checkPin(entered): unlock()    # unlimited attempts, no counter
+      secure: |
+        if attempts >= MAX: lockUntil(backoff(attempts))
+        elif checkPin(entered): unlock(); attempts = 0
+        else: attempts += 1
+    swift:
+      vulnerable: |
+        if entered == storedPin { unlock() }
+      secure: |
+        guard failedAttempts < maxAttempts else { lockOut(); return }
+        if entered == storedPin { unlock(); failedAttempts = 0 }
+        else { failedAttempts += 1 }
+    kotlin:
+      vulnerable: |
+        if (entered == savedPin) unlock()
+      secure: |
+        if (failedAttempts >= MAX_ATTEMPTS) { lockOut(); return }
+        if (entered == savedPin) { unlock(); failedAttempts = 0 }
+        else failedAttempts++
+    dart:
+      vulnerable: |
+        if (entered == savedPin) unlock();
+      secure: |
+        if (failedAttempts >= maxAttempts) { lockOut(); return; }
+        if (entered == savedPin) { unlock(); failedAttempts = 0; }
+        else { failedAttempts++; }

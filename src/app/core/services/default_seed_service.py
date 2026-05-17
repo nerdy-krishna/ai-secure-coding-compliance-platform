@@ -124,6 +124,18 @@ FRAMEWORKS_DATA: List[Dict[str, str]] = [
             "apps."
         ),
     },
+    {
+        "name": "masvs",
+        "description": (
+            "OWASP Mobile Application Security Verification Standard "
+            "(MASVS v2). Eight control groups span data storage, "
+            "cryptography, authentication and authorization, network "
+            "communication, platform interaction, code quality and "
+            "exploit mitigation, resilience against reverse engineering, "
+            "and privacy. Select this for iOS, Android, and "
+            "cross-platform mobile codebases (Swift, Kotlin, Java, Dart)."
+        ),
+    },
 ]
 
 
@@ -1611,6 +1623,142 @@ _AGENTIC_CONCERN_AREAS: Dict[str, str] = {
 }
 
 
+# OWASP MASVS v2 — one agent per control group, `concern_area`-scoped to
+# its slice of the bundled mobile corpus (iOS / Android / Flutter).
+_MASVS_AGENT_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "StorageAgent",
+        "description": (
+            "MASVS-STORAGE — Data Storage. Reviews secure storage of "
+            "sensitive data on a mobile device."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile data storage, keychain, keystore, encrypted "
+                "shared preferences, secure storage, sensitive data at "
+                "rest, backup exclusion, data leakage"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+    {
+        "name": "CryptoAgent",
+        "description": (
+            "MASVS-CRYPTO — Cryptography. Reviews cryptographic "
+            "algorithms, key management, and randomness in mobile apps."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile cryptography, key management, hardware-backed "
+                "keystore, strong algorithms, secure random, key "
+                "attestation, weak cipher"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+    {
+        "name": "AuthAgent",
+        "description": (
+            "MASVS-AUTH — Authentication and Authorization. Reviews "
+            "login, biometrics, and token handling in mobile apps."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile authentication, biometric authentication, local "
+                "authentication, session token storage, authorization, "
+                "step-up authentication"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+    {
+        "name": "NetworkAgent",
+        "description": (
+            "MASVS-NETWORK — Network Communication. Reviews transport "
+            "security and certificate handling in mobile apps."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile network security, TLS, certificate pinning, App "
+                "Transport Security, network security config, cleartext "
+                "traffic, hostname verification"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+    {
+        "name": "PlatformAgent",
+        "description": (
+            "MASVS-PLATFORM — Platform Interaction. Reviews IPC, "
+            "WebViews, deep links, and UI exposure on mobile platforms."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile platform interaction, inter-process "
+                "communication, exported component, WebView, deep link, "
+                "intent, pasteboard, screenshot, app permissions"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+    {
+        "name": "CodeQualityAgent",
+        "description": (
+            "MASVS-CODE — Code Quality and Exploit Mitigation. Reviews "
+            "input handling, dependencies, and build hardening on mobile."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile code quality, exploit mitigation, input "
+                "validation, outdated dependency, memory corruption, "
+                "build hardening flags, injection"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+    {
+        "name": "ResilienceAgent",
+        "description": (
+            "MASVS-RESILIENCE — Resilience Against Reverse Engineering. "
+            "Reviews tampering, root or jailbreak, and obfuscation defenses."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile resilience, reverse engineering, anti-tampering, "
+                "root detection, jailbreak detection, anti-debugging, "
+                "obfuscation, integrity check, emulator detection"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+    {
+        "name": "PrivacyAgent",
+        "description": (
+            "MASVS-PRIVACY — Privacy. Reviews data minimization, "
+            "consent, and tracking transparency in mobile apps."
+        ),
+        "domain_query": {
+            "keywords": (
+                "mobile privacy, data minimization, permission scoping, "
+                "user consent, tracking transparency, personal data, "
+                "advertising identifier"
+            ),
+            "metadata_filter": {"framework_name": ["masvs"]},
+        },
+    },
+]
+_MASVS_CONCERN_AREAS: Dict[str, str] = {
+    "StorageAgent": "Data Storage",
+    "CryptoAgent": "Cryptography",
+    "AuthAgent": "Authentication and Authorization",
+    "NetworkAgent": "Network Communication",
+    "PlatformAgent": "Platform Interaction",
+    "CodeQualityAgent": "Code Quality and Exploit Mitigation",
+    "ResilienceAgent": "Resilience Against Reverse Engineering",
+    "PrivacyAgent": "Privacy",
+}
+
+
 # Proactive Controls / Cheatsheets agents key RAG retrieval on the
 # `concern_area` facet (one per control / domain), so each agent
 # retrieves only its own slice of the enriched bundled corpus. The
@@ -1680,7 +1828,8 @@ def _framework_roster(
 
 # The full default agent roster — 17 ASVS + 10 Proactive Controls + 10
 # Cheatsheets + 14 CWE Essentials + 7 ISVS + 10 LLM Top 10 + 10 Agentic
-# Top 10 dedicated agents, one per domain across all eight frameworks.
+# Top 10 + 8 MASVS dedicated agents, one per domain across all eight
+# frameworks.
 AGENT_DEFINITIONS: List[Dict[str, Any]] = (
     _framework_roster(_ASVS_AGENT_SPECS, "asvs", "Asvs")
     + _framework_roster(
@@ -1695,6 +1844,7 @@ AGENT_DEFINITIONS: List[Dict[str, Any]] = (
     + _framework_roster(
         _AGENTIC_AGENT_SPECS, "agentic_top10", "Agentic", _AGENTIC_CONCERN_AREAS
     )
+    + _framework_roster(_MASVS_AGENT_SPECS, "masvs", "Masvs", _MASVS_CONCERN_AREAS)
 )
 
 

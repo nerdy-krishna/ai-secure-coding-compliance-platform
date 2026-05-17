@@ -270,6 +270,7 @@ _LANGUAGE_MAP = {
     ".sh": "BASH",
     ".sql": "SQL",
     ".tf": "TERRAFORM",
+    ".dart": "DART",
 }
 
 

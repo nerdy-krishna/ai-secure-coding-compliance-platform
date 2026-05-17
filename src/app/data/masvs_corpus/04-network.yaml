@@ -1,0 +1,388 @@
+# OWASP MASVS v2 — Control Group: MASVS-NETWORK (Network Communication)
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the mobile languages swift/kotlin/java/dart).
+#
+# Scope: secure network communication for mobile apps — encrypted
+# transport, server identity verification, certificate pinning, and
+# resilience against on-path interception.
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-1 — Secure encrypted channels for network traffic
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.1
+  facet: Network Communication
+  section: Encrypted Transport for All Traffic
+  security_rule: >-
+    All network traffic, including calls to APIs, third-party services,
+    and analytics endpoints, must travel over TLS so data is encrypted
+    in transit and cannot be read or modified on the network path.
+  vulnerability_pattern: >-
+    The app reaches an endpoint over plain HTTP, or accepts both HTTP and
+    HTTPS, so traffic crosses the network unencrypted and any on-path
+    attacker can read or tamper with it.
+  secure_pattern: >-
+    Every endpoint is reached over HTTPS only, and the platform transport
+    security policy blocks cleartext connections so an accidental HTTP
+    URL fails closed rather than leaking data.
+  code_patterns:
+    generic:
+      vulnerable: |
+        request("http://api.example.com/login", body)
+      secure: |
+        request("https://api.example.com/login", body)
+    swift:
+      vulnerable: |
+        let url = URL(string: "http://api.example.com/profile")!
+      secure: |
+        let url = URL(string: "https://api.example.com/profile")!
+    kotlin:
+      vulnerable: |
+        val request = Request.Builder().url("http://api.example.com/profile").build()
+      secure: |
+        val request = Request.Builder().url("https://api.example.com/profile").build()
+    java:
+      vulnerable: |
+        URL url = new URL("http://api.example.com/profile");
+      secure: |
+        URL url = new URL("https://api.example.com/profile");
+    dart:
+      vulnerable: |
+        final res = await http.get(Uri.parse("http://api.example.com/profile"));
+      secure: |
+        final res = await http.get(Uri.parse("https://api.example.com/profile"));
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-1 — Disable platform cleartext-traffic exceptions
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.2
+  facet: Network Communication
+  section: Disable Cleartext Traffic Exceptions
+  security_rule: >-
+    The platform transport security configuration must not relax its
+    defaults — App Transport Security on iOS and the Android Network
+    Security Configuration must keep cleartext traffic disabled with no
+    arbitrary-loads or permit-cleartext exceptions.
+  vulnerability_pattern: >-
+    A global flag in the app manifest or Info.plist re-enables cleartext
+    or arbitrary insecure loads, silently downgrading every connection
+    and removing the platform's transport protections.
+  secure_pattern: >-
+    The manifest and Info.plist keep cleartext traffic off, and any
+    unavoidable exception is scoped to a single named domain rather than
+    applied app-wide.
+  code_patterns:
+    generic:
+      vulnerable: |
+        transportSecurity: { allowArbitraryInsecureLoads: true }
+      secure: |
+        transportSecurity: { allowArbitraryInsecureLoads: false }
+    swift:
+      vulnerable: |
+        <key>NSAllowsArbitraryLoads</key><true/>
+      secure: |
+        <key>NSAllowsArbitraryLoads</key><false/>
+    kotlin:
+      vulnerable: |
+        <application android:usesCleartextTraffic="true">
+      secure: |
+        <application android:usesCleartextTraffic="false">
+    java:
+      vulnerable: |
+        <base-config cleartextTrafficPermitted="true"/>
+      secure: |
+        <base-config cleartextTrafficPermitted="false"/>
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-1 — Enforce modern TLS versions and strong cipher suites
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.3
+  facet: Network Communication
+  section: Modern TLS Versions and Cipher Suites
+  security_rule: >-
+    Connections must negotiate a current TLS version, at minimum TLS 1.2,
+    with strong cipher suites, and deprecated protocols such as SSLv3,
+    TLS 1.0, and TLS 1.1 must be refused.
+  vulnerability_pattern: >-
+    The app permits an obsolete TLS or SSL protocol version or weak
+    cipher suites, so a downgrade or weak-crypto attack lets traffic be
+    decrypted on the network path.
+  secure_pattern: >-
+    The TLS client is pinned to a minimum protocol version of TLS 1.2,
+    and the cipher list is restricted to strong, forward-secret suites
+    so weak negotiation is impossible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tlsConfig.minVersion = "SSLv3"
+      secure: |
+        tlsConfig.minVersion = "TLS1.2"
+    swift:
+      vulnerable: |
+        <key>NSExceptionMinimumTLSVersion</key><string>TLSv1.0</string>
+      secure: |
+        <key>NSExceptionMinimumTLSVersion</key><string>TLSv1.2</string>
+    kotlin:
+      vulnerable: |
+        val spec = ConnectionSpec.COMPATIBLE_TLS
+      secure: |
+        val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+            .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2).build()
+    java:
+      vulnerable: |
+        SSLContext ctx = SSLContext.getInstance("SSL");
+      secure: |
+        SSLContext ctx = SSLContext.getInstance("TLSv1.2");
+    dart:
+      vulnerable: |
+        final ctx = SecurityContext()..allowLegacyUnsafeRenegotiation = true;
+      secure: |
+        final client = HttpClient(context: SecurityContext.defaultContext);
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-2 — Verify the server's TLS certificate
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.4
+  facet: Network Communication
+  section: Server Certificate Verification
+  security_rule: >-
+    The app must verify the server's X.509 certificate against the
+    trusted certificate authority store and reject any chain that fails
+    validation, has expired, or is self-signed.
+  vulnerability_pattern: >-
+    A custom TrustManager, SSLSocketFactory, or trust callback accepts
+    every certificate without checking the chain, so any server can
+    impersonate the real one and intercept traffic.
+  secure_pattern: >-
+    Certificate validation is left to the platform default trust
+    evaluation, or the custom evaluator performs full chain and validity
+    checks before trusting the connection.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onServerCertificate = (cert) => true   # accept anything
+      secure: |
+        onServerCertificate = (cert) => platformTrustStore.validate(cert)
+    swift:
+      vulnerable: |
+        completionHandler(.useCredential, URLCredential(trust: challenge.protectionSpace.serverTrust!))
+      secure: |
+        completionHandler(.performDefaultHandling, nil)
+    kotlin:
+      vulnerable: |
+        val tm = object : X509TrustManager {
+            override fun checkServerTrusted(c: Array<X509Certificate>, t: String) {}
+        }
+      secure: |
+        val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        tmf.init(null as KeyStore?)
+    java:
+      vulnerable: |
+        TrustManager[] tm = { new X509TrustManager() {
+            public void checkServerTrusted(X509Certificate[] c, String s) {} } };
+      secure: |
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(
+            TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init((KeyStore) null);
+    dart:
+      vulnerable: |
+        client.badCertificateCallback = (cert, host, port) => true;
+      secure: |
+        final client = HttpClient();   // default trust evaluation, no override
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-2 — Verify the server hostname against the certificate
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.5
+  facet: Network Communication
+  section: Hostname Verification
+  security_rule: >-
+    The app must confirm that the hostname it connected to matches a
+    subject or subject-alternative-name entry in the server certificate,
+    so a valid certificate for one domain cannot be used to impersonate
+    another.
+  vulnerability_pattern: >-
+    Hostname verification is disabled or replaced with a stub that always
+    returns true, so any certificate trusted by the device, even one for
+    an unrelated domain, is accepted for the connection.
+  secure_pattern: >-
+    The default hostname verifier is left in place, so the connection is
+    only trusted when the certificate identity matches the host that was
+    requested.
+  code_patterns:
+    generic:
+      vulnerable: |
+        hostnameVerifier = (host, session) => true
+      secure: |
+        hostnameVerifier = defaultHostnameVerifier
+    kotlin:
+      vulnerable: |
+        builder.hostnameVerifier { _, _ -> true }
+      secure: |
+        builder.hostnameVerifier(OkHostnameVerifier)
+    java:
+      vulnerable: |
+        conn.setHostnameVerifier((hostname, session) -> true);
+      secure: |
+        conn.setHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier());
+    dart:
+      vulnerable: |
+        client.badCertificateCallback = (cert, host, port) => true;
+      secure: |
+        final res = await http.get(Uri.parse("https://api.example.com/data"));
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-2 — Pin the server certificate or public key
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.6
+  facet: Network Communication
+  section: Certificate and Public-Key Pinning
+  security_rule: >-
+    Apps handling sensitive data should pin the expected server
+    certificate or public key so that a connection is rejected when the
+    presented identity is not the one the app was built to trust, even
+    if a rogue certificate authority issued it.
+  vulnerability_pattern: >-
+    The app relies only on the device trust store with no pinning, so a
+    compromised or attacker-installed certificate authority can issue a
+    valid-looking certificate and intercept traffic undetected.
+  secure_pattern: >-
+    The app pins the public-key hash of the expected server, or its
+    issuing intermediate, and aborts the connection on any mismatch,
+    with a backup pin provisioned for key rotation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        connect(host)                       # device trust store only
+      secure: |
+        connect(host, pinnedKeyHashes=["sha256/AAAA...", "sha256/BBBB..."])
+    swift:
+      vulnerable: |
+        let session = URLSession(configuration: .default)
+      secure: |
+        let pinned = ServerTrustManager(evaluators:
+            ["api.example.com": PublicKeysTrustEvaluator()])
+    kotlin:
+      vulnerable: |
+        val client = OkHttpClient.Builder().build()
+      secure: |
+        val pinner = CertificatePinner.Builder()
+            .add("api.example.com", "sha256/AAAA...").build()
+        val client = OkHttpClient.Builder().certificatePinner(pinner).build()
+    java:
+      vulnerable: |
+        OkHttpClient client = new OkHttpClient.Builder().build();
+      secure: |
+        CertificatePinner cp = new CertificatePinner.Builder()
+            .add("api.example.com", "sha256/AAAA...").build();
+        OkHttpClient client = new OkHttpClient.Builder().certificatePinner(cp).build();
+    dart:
+      vulnerable: |
+        final res = await http.get(Uri.parse("https://api.example.com/data"));
+      secure: |
+        await HttpCertificatePinning.check(serverURL: "https://api.example.com",
+            sha: SHA.SHA256, allowedSHAFingerprints: pinnedHashes, timeout: 30);
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-3 — Do not rely on a single insecure channel for security
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.7
+  facet: Network Communication
+  section: Defense in Depth Beyond the Transport Channel
+  security_rule: >-
+    The app must not depend on transport encryption alone to protect
+    sensitive data — secrets must still be protected at the application
+    layer so a broken or downgraded channel does not expose them in clear.
+  vulnerability_pattern: >-
+    Sensitive payloads are placed in URL query parameters or sent with no
+    application-layer protection, trusting TLS entirely, so a logged URL
+    or a stripped TLS session leaks the data.
+  secure_pattern: >-
+    Sensitive values are carried in the request body, additionally
+    encrypted or signed at the application layer, so the data stays
+    protected even if the transport channel is compromised.
+  code_patterns:
+    generic:
+      vulnerable: |
+        get("https://api.example.com/pay?card=" + cardNumber)
+      secure: |
+        post("https://api.example.com/pay", body=encryptPayload({card: cardNumber}))
+    swift:
+      vulnerable: |
+        URL(string: "https://api.example.com/auth?token=\(token)")
+      secure: |
+        var req = URLRequest(url: authURL); req.httpMethod = "POST"
+        req.httpBody = try JSONEncoder().encode(["token": token])
+    kotlin:
+      vulnerable: |
+        val req = Request.Builder().url("https://api.example.com/auth?token=$token").build()
+      secure: |
+        val body = json.toRequestBody(mediaType)
+        val req = Request.Builder().url(authURL).post(body).build()
+    java:
+      vulnerable: |
+        new URL("https://api.example.com/auth?token=" + token);
+      secure: |
+        HttpURLConnection c = (HttpURLConnection) authUrl.openConnection();
+        c.setRequestMethod("POST");
+        c.getOutputStream().write(jsonBody.getBytes(StandardCharsets.UTF_8));
+    dart:
+      vulnerable: |
+        await http.get(Uri.parse("https://api.example.com/auth?token=$token"));
+      secure: |
+        await http.post(authUri, body: jsonEncode({"token": token}),
+            headers: {"Content-Type": "application/json"});
+
+# ---------------------------------------------------------------------------
+# MASVS-NETWORK-1 — Keep developer-only TLS bypasses out of release builds
+# ---------------------------------------------------------------------------
+
+- id: MASVS-NETWORK.8
+  facet: Network Communication
+  section: No TLS Bypasses in Release Builds
+  security_rule: >-
+    Debugging aids that weaken transport security — trust-all managers,
+    proxy-friendly user certificate trust, or cleartext debug overrides —
+    must be confined to debug builds and never shipped in a release.
+  vulnerability_pattern: >-
+    A TLS bypass added for local testing, or an Android network security
+    config that trusts user-installed certificate authorities, is left
+    enabled in the production build and lets traffic be intercepted.
+  secure_pattern: >-
+    Insecure overrides are guarded by a debug-build flag or a debug-only
+    resource, and the release configuration trusts only the system
+    certificate store.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if true: httpClient.trustAllCertificates()
+      secure: |
+        if isDebugBuild: httpClient.trustAllCertificates()
+    swift:
+      vulnerable: |
+        session.serverTrustPolicy = .disableEvaluation
+      secure: |
+        #if DEBUG
+        session.serverTrustPolicy = .disableEvaluation
+        #endif
+    kotlin:
+      vulnerable: |
+        if (true) builder.sslSocketFactory(trustAllFactory, trustAllManager)
+      secure: |
+        if (BuildConfig.DEBUG) builder.sslSocketFactory(trustAllFactory, trustAllManager)
+    java:
+      vulnerable: |
+        <debug-overrides><trust-anchors><certificates src="user"/></trust-anchors></debug-overrides>
+      secure: |
+        <base-config><trust-anchors><certificates src="system"/></trust-anchors></base-config>

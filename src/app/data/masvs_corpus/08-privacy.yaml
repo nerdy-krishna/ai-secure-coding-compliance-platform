@@ -1,0 +1,478 @@
+# OWASP MASVS v2 — Control Group: MASVS-PRIVACY
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the mobile languages: Swift, Kotlin, Java, Dart).
+#
+# MASVS-PRIVACY covers minimisation of personal data, prevention of
+# leakage to third parties, transparency of data handling, and giving
+# users control over their data on iOS, Android, and cross-platform apps.
+
+# ---------------------------------------------------------------------------
+# Data Minimization
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.1
+  facet: Privacy
+  section: Data Minimization
+  security_rule: >-
+    The app must collect and process only the personal data that is
+    strictly necessary for the feature in use, avoiding precise or
+    bulk collection when a coarser or narrower value would suffice.
+  vulnerability_pattern: >-
+    The app requests precise location, the full contact list, or other
+    high-sensitivity data when the feature only needs a coarse or
+    partial value, gathering far more personal data than it uses.
+  secure_pattern: >-
+    The app requests the least precise and least extensive data that
+    satisfies the feature, for example a coarse location or a single
+    picked contact instead of the entire address book.
+  code_patterns:
+    generic:
+      vulnerable: |
+        request(PRECISE_LOCATION)        # feature only needs the city
+      secure: |
+        request(COARSE_LOCATION)         # least precise value that works
+    swift:
+      vulnerable: |
+        locationManager.requestWhenInUseAuthorization()
+        let exact = locationManager.location?.coordinate   # full precision
+      secure: |
+        locationManager.desiredAccuracy = kCLLocationAccuracyReduced
+        locationManager.requestWhenInUseAuthorization()
+    kotlin:
+      vulnerable: |
+        requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), RC)
+      secure: |
+        requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), RC)
+    java:
+      vulnerable: |
+        Cursor c = resolver.query(ContactsContract.Contacts.CONTENT_URI,
+                                  null, null, null, null);   // whole address book
+      secure: |
+        Intent pick = new Intent(Intent.ACTION_PICK,
+                                 ContactsContract.Contacts.CONTENT_URI);
+        startActivityForResult(pick, RC_ONE_CONTACT);        // user picks one
+    dart:
+      vulnerable: |
+        final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.best);
+      secure: |
+        final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.low);
+
+# ---------------------------------------------------------------------------
+# Permission Scoping
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.2
+  facet: Privacy
+  section: Permission Scoping
+  security_rule: >-
+    The app must declare and request only the runtime permissions its
+    features actually use, requesting each one in context at the moment
+    it is needed rather than all of them up front.
+  vulnerability_pattern: >-
+    The app declares broad or unused sensitive permissions in its
+    manifest, or prompts for every permission at first launch before the
+    related feature is ever opened.
+  secure_pattern: >-
+    Only permissions tied to a shipped feature are declared, and each is
+    requested just in time when the user invokes the feature that needs
+    it, so the grant is tied to a clear purpose.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onLaunch: requestAll(CAMERA, MIC, LOCATION, CONTACTS)
+      secure: |
+        onUserTapsScanButton: request(CAMERA)   # just-in-time, per feature
+    swift:
+      vulnerable: |
+        AVCaptureDevice.requestAccess(for: .video) { _ in }   # at app start
+      secure: |
+        @IBAction func scanTapped() {
+            AVCaptureDevice.requestAccess(for: .video) { granted in }
+        }
+    kotlin:
+      vulnerable: |
+        // AndroidManifest.xml declares RECORD_AUDIO but no feature records audio
+        <uses-permission android:name="android.permission.RECORD_AUDIO" />
+      secure: |
+        // declare only what ships; request in the camera screen
+        cameraPermission.launch(Manifest.permission.CAMERA)
+    java:
+      vulnerable: |
+        ActivityCompat.requestPermissions(this, ALL_PERMS, RC);  // on first run
+      secure: |
+        if (needsCamera) ActivityCompat.requestPermissions(this,
+            new String[]{Manifest.permission.CAMERA}, RC_CAMERA);
+    dart:
+      vulnerable: |
+        await [Permission.camera, Permission.microphone,
+               Permission.location, Permission.contacts].request();
+      secure: |
+        if (await Permission.camera.request().isGranted) openScanner();
+
+# ---------------------------------------------------------------------------
+# Sensitive Data in Logs
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.3
+  facet: Privacy
+  section: Sensitive Data in Logs
+  security_rule: >-
+    Personal and sensitive data must never be written to application
+    logs, console output, or crash reports where other apps, support
+    staff, or analytics back ends could read it.
+  vulnerability_pattern: >-
+    The app prints personal data such as email addresses, tokens,
+    location, or health values to the system log or attaches them to a
+    crash report, exposing them beyond the app sandbox.
+  secure_pattern: >-
+    Logging of personal data is removed or guarded behind debug-only
+    builds, and any unavoidable identifier in a log is masked or replaced
+    with a non-reversible reference.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("user=" + email + " token=" + authToken)
+      secure: |
+        log("user=" + maskEmail(email))     # no token, identifier masked
+    swift:
+      vulnerable: |
+        print("Logged in as \(user.email), token \(authToken)")
+      secure: |
+        os_log("Login succeeded for user %{private}@", log: .auth, user.id)
+    kotlin:
+      vulnerable: |
+        Log.d("Auth", "email=${user.email} session=${session.token}")
+      secure: |
+        Log.d("Auth", "login ok for user ${user.id.hashCode()}")
+    java:
+      vulnerable: |
+        Log.i("Profile", "Address: " + user.getHomeAddress());
+      secure: |
+        if (BuildConfig.DEBUG) Log.i("Profile", "profile loaded");
+    dart:
+      vulnerable: |
+        debugPrint('Card: ${card.number} CVV: ${card.cvv}');
+      secure: |
+        debugPrint('Payment method added');
+
+# ---------------------------------------------------------------------------
+# Third-Party Data Sharing
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.4
+  facet: Privacy
+  section: Third-Party Data Sharing
+  security_rule: >-
+    The app must not send personal data to analytics, advertising, or
+    other third-party SDKs without a clear purpose and a lawful basis,
+    and must not transmit it before the user has had a chance to consent.
+  vulnerability_pattern: >-
+    A third-party analytics or ad SDK is initialised at startup and
+    receives identifiers, contacts, or precise location automatically,
+    sending personal data off device before any consent is gathered.
+  secure_pattern: >-
+    Third-party SDKs are initialised only after consent is granted, and
+    personal data is either withheld from them entirely or sent only as
+    aggregated, de-identified values for the agreed purpose.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onStart: analyticsSdk.init(); analyticsSdk.send(deviceId, contacts)
+      secure: |
+        if consentGranted: analyticsSdk.init()   # de-identified events only
+    swift:
+      vulnerable: |
+        Analytics.logEvent("open", parameters: ["email": user.email])
+      secure: |
+        if consent.analyticsAllowed {
+            Analytics.logEvent("open", parameters: ["plan": user.tier])
+        }
+    kotlin:
+      vulnerable: |
+        FirebaseAnalytics.getInstance(this)
+            .setUserProperty("phone", user.phoneNumber)
+      secure: |
+        if (consent.analytics)
+            FirebaseAnalytics.getInstance(this).logEvent("screen_view", null)
+    java:
+      vulnerable: |
+        tracker.setUserId(user.getEmail());
+        tracker.send(new HitBuilders.ScreenViewBuilder().build());
+      secure: |
+        if (consentStore.isAnalyticsAllowed())
+            tracker.send(new HitBuilders.ScreenViewBuilder().build());
+    dart:
+      vulnerable: |
+        FirebaseAnalytics.instance.setUserId(id: user.email);
+      secure: |
+        if (consent.analytics)
+          FirebaseAnalytics.instance.logEvent(name: 'screen_view');
+
+# ---------------------------------------------------------------------------
+# User Consent
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.5
+  facet: Privacy
+  section: User Consent
+  security_rule: >-
+    Processing of personal data that requires consent must begin only
+    after the user has given a free, specific, and informed opt-in, and
+    the recorded consent state must be honoured on every code path.
+  vulnerability_pattern: >-
+    Personal data is collected or shared with consent assumed to default
+    on, or the consent flag is written but never checked before the
+    data-processing call runs.
+  secure_pattern: >-
+    Consent defaults to off, is captured through an explicit opt-in, and
+    every personal-data operation is gated on the stored consent value
+    before it executes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        consent = true                # assumed; never asked
+        collect(personalData)
+      secure: |
+        if consentStore.get(PURPOSE) == GRANTED: collect(personalData)
+    swift:
+      vulnerable: |
+        var trackingConsent = true
+        sendUsageData()
+      secure: |
+        guard ConsentStore.shared.isGranted(.usage) else { return }
+        sendUsageData()
+    kotlin:
+      vulnerable: |
+        var marketingOptIn = true        // pre-checked default
+        mailer.subscribe(user.email)
+      secure: |
+        if (consentRepo.isGranted(Purpose.MARKETING)) mailer.subscribe(user.email)
+    java:
+      vulnerable: |
+        prefs.edit().putBoolean("analytics", true).apply();  // default on
+      secure: |
+        if (prefs.getBoolean("analytics_consent", false)) analytics.enable();
+    dart:
+      vulnerable: |
+        bool consent = true;
+        await uploadCrashLogs();
+      secure: |
+        if (await consentStore.isGranted(Purpose.crashReports))
+          await uploadCrashLogs();
+
+# ---------------------------------------------------------------------------
+# App Tracking Transparency
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.6
+  facet: Privacy
+  section: Tracking Transparency
+  security_rule: >-
+    Before accessing a cross-app tracking identifier or correlating user
+    activity across other apps and websites, the app must request and
+    receive the platform tracking-transparency authorization.
+  vulnerability_pattern: >-
+    The app reads the advertising identifier or builds a cross-app
+    profile without first obtaining tracking-transparency authorization,
+    tracking the user against platform policy.
+  secure_pattern: >-
+    The app calls the tracking-transparency request, waits for the
+    authorized result, and only then reads the advertising identifier or
+    performs cross-app correlation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        adId = getAdvertisingId()        # no tracking authorization checked
+      secure: |
+        if requestTrackingAuthorization() == AUTHORIZED: adId = getAdvertisingId()
+    swift:
+      vulnerable: |
+        let idfa = ASIdentifierManager.shared().advertisingIdentifier
+      secure: |
+        ATTrackingManager.requestTrackingAuthorization { status in
+            guard status == .authorized else { return }
+            let idfa = ASIdentifierManager.shared().advertisingIdentifier
+        }
+    kotlin:
+      vulnerable: |
+        val adId = AdvertisingIdClient.getAdvertisingIdInfo(context).id
+      secure: |
+        if (consent.adPersonalization)
+            val adId = AdvertisingIdClient.getAdvertisingIdInfo(context).id
+    java:
+      vulnerable: |
+        String adId = AdvertisingIdClient.getAdvertisingIdInfo(ctx).getId();
+      secure: |
+        AdvertisingIdClient.Info info =
+            AdvertisingIdClient.getAdvertisingIdInfo(ctx);
+        String adId = info.isLimitAdTrackingEnabled() ? null : info.getId();
+    dart:
+      vulnerable: |
+        final id = await AppTrackingTransparency.getAdvertisingIdentifier();
+      secure: |
+        final status =
+            await AppTrackingTransparency.requestTrackingAuthorization();
+        final id = status == TrackingStatus.authorized
+            ? await AppTrackingTransparency.getAdvertisingIdentifier() : null;
+
+# ---------------------------------------------------------------------------
+# Sensitive Data in the UI and Backgrounding
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.7
+  facet: Privacy
+  section: Sensitive Data Exposure in UI
+  security_rule: >-
+    The app must prevent personal and sensitive data from being captured
+    in the task-switcher snapshot, in screenshots, or shown in plain
+    text where a bystander could read it.
+  vulnerability_pattern: >-
+    A screen showing account balances, health data, or credentials stays
+    fully rendered when the app moves to the background, so the OS
+    snapshot stores that data in the recents view.
+  secure_pattern: >-
+    Sensitive screens are masked, blurred, or marked secure before the
+    app is backgrounded, and sensitive fields are obscured so they do
+    not appear in snapshots or screenshots.
+  code_patterns:
+    generic:
+      vulnerable: |
+        onBackground: leaveSensitiveScreenVisible()
+      secure: |
+        onBackground: coverWindowWithBlankOverlay()
+    swift:
+      vulnerable: |
+        func sceneDidEnterBackground(_ scene: UIScene) { }
+      secure: |
+        func sceneDidEnterBackground(_ scene: UIScene) {
+            window?.addSubview(privacyBlurOverlay)
+        }
+    kotlin:
+      vulnerable: |
+        // balance screen with no flags — captured in recents
+        setContentView(R.layout.activity_balance)
+      secure: |
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                        WindowManager.LayoutParams.FLAG_SECURE)
+    java:
+      vulnerable: |
+        setContentView(R.layout.activity_account);
+      secure: |
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                             WindowManager.LayoutParams.FLAG_SECURE);
+    dart:
+      vulnerable: |
+        // sensitive page rendered with no protection
+        runApp(const AccountApp());
+      secure: |
+        await ScreenProtector.protectDataLeakageOn();   // mask in app switcher
+
+# ---------------------------------------------------------------------------
+# Transparency of Data Handling
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.8
+  facet: Privacy
+  section: Transparency of Data Handling
+  security_rule: >-
+    The categories of personal data the app collects and shares must be
+    accurately and completely declared in the store privacy disclosure
+    and any in-app privacy notice.
+  vulnerability_pattern: >-
+    The app collects or transmits a data category, for example precise
+    location or contacts, that is missing from the store privacy label
+    or in-app privacy notice, leaving users misinformed.
+  secure_pattern: >-
+    Every data category the code actually accesses or sends is reflected
+    in the privacy manifest, the store privacy label, and the in-app
+    notice, and the disclosure is updated whenever collection changes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        code collects: location, contacts
+        disclosure lists: location           # contacts undisclosed
+      secure: |
+        disclosure lists every category the code actually collects
+    swift:
+      vulnerable: |
+        // PrivacyInfo.xcprivacy omits NSPrivacyCollectedDataTypeContacts
+        let store = CNContactStore()
+      secure: |
+        // PrivacyInfo.xcprivacy declares the Contacts collected-data type
+        let store = CNContactStore()
+    kotlin:
+      vulnerable: |
+        // Play Data safety form omits "Precise location"
+        fusedLocationClient.lastLocation
+      secure: |
+        // Play Data safety form declares precise location collection
+        fusedLocationClient.lastLocation
+
+# ---------------------------------------------------------------------------
+# User Control Over Personal Data
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PRIVACY.9
+  facet: Privacy
+  section: User Control and Data Deletion
+  security_rule: >-
+    The app must give the user a way to withdraw consent, export their
+    personal data, and request deletion, and a deletion request must
+    remove the data from local storage and trigger server-side erasure.
+  vulnerability_pattern: >-
+    Account or data deletion only signs the user out or hides the data,
+    leaving personal records in local storage and on the server with no
+    way for the user to revoke consent.
+  secure_pattern: >-
+    A deletion action clears local caches, databases, and keychain
+    entries and calls a server delete endpoint, and consent settings can
+    be toggled off at any time.
+  code_patterns:
+    generic:
+      vulnerable: |
+        deleteAccount(): clearSessionToken()        # data left behind
+      secure: |
+        deleteAccount(): wipeLocalData(); api.deleteUserData(); revokeConsent()
+    swift:
+      vulnerable: |
+        func deleteAccount() { KeychainStore.shared.removeToken() }
+      secure: |
+        func deleteAccount() async {
+            try await api.deleteUser()
+            CoreDataStore.shared.wipeAll()
+            KeychainStore.shared.removeAll()
+        }
+    kotlin:
+      vulnerable: |
+        fun onDeleteAccount() { sessionManager.logout() }
+      secure: |
+        suspend fun onDeleteAccount() {
+            api.deleteUserData()
+            db.clearAllTables()
+            context.filesDir.deleteRecursively()
+        }
+    java:
+      vulnerable: |
+        void deleteAccount() { prefs.edit().remove("token").apply(); }
+      secure: |
+        void deleteAccount() {
+            api.deleteUserData();
+            db.clearAllTables();
+            prefs.edit().clear().apply();
+        }
+    dart:
+      vulnerable: |
+        Future<void> deleteAccount() async { await authService.signOut(); }
+      secure: |
+        Future<void> deleteAccount() async {
+          await api.deleteUserData();
+          await localDb.wipe();
+          await secureStorage.deleteAll();
+        }

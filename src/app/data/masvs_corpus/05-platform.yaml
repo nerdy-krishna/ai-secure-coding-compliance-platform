@@ -1,0 +1,386 @@
+# OWASP MASVS v2 — Control Group: MASVS-PLATFORM
+# Secure interaction with the underlying mobile platform — IPC, WebViews,
+# deep links, and the user interface.
+#
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the mobile languages: swift/kotlin/java/dart).
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.1 — Exported IPC Components
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.1
+  facet: Platform Interaction
+  section: Restricting Exported IPC Components
+  security_rule: >-
+    Activities, services, broadcast receivers, and content providers must
+    not be exported to other apps unless they are explicitly intended to be
+    public, and any exported component must enforce a permission or caller
+    check.
+  vulnerability_pattern: >-
+    A component is exported to all other apps on the device, either by
+    default because it declares an intent filter or explicitly, with no
+    permission requirement, so any installed app can invoke it and reach
+    internal functionality.
+  secure_pattern: >-
+    Components are kept private unless they must be public, and every
+    component that genuinely needs to be reachable declares a signature
+    level permission or verifies the calling package before acting.
+  code_patterns:
+    generic:
+      vulnerable: |
+        component exported = true, no permission required
+      secure: |
+        component exported = false, or guarded by a signature permission
+    kotlin:
+      vulnerable: |
+        <activity android:name=".AdminActivity" android:exported="true"/>
+      secure: |
+        <activity android:name=".AdminActivity" android:exported="false"/>
+    java:
+      vulnerable: |
+        <provider android:name=".DataProvider" android:exported="true"/>
+      secure: |
+        <provider android:name=".DataProvider" android:exported="false"
+                  android:permission="com.app.permission.PRIVATE"/>
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.2 — Validating Data Received From IPC
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.2
+  facet: Platform Interaction
+  section: Validating Data Received From IPC
+  security_rule: >-
+    Data and extras received through Intents, deep links, or other IPC
+    channels are untrusted input and must be validated, type-checked, and
+    bounds-checked before they are used to make decisions or reach a sink.
+  vulnerability_pattern: >-
+    An Intent extra, query parameter, or IPC payload is read and used
+    directly to load a URL, build a file path, or pick an action, so a
+    hostile caller controls the value reaching a sensitive sink.
+  secure_pattern: >-
+    Every value pulled from an Intent or IPC message is validated against
+    an allowlist of expected values or a strict format before it is
+    trusted, and unexpected input is rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        target = intent.extra("next")
+        navigate(target)
+      secure: |
+        target = intent.extra("next")
+        if target in ALLOWED_DESTINATIONS: navigate(target)
+    kotlin:
+      vulnerable: |
+        val path = intent.getStringExtra("file")
+        File(filesDir, path).readText()
+      secure: |
+        val name = intent.getStringExtra("file") ?: return
+        require(name.matches(Regex("^[A-Za-z0-9_.-]+$")))
+        File(filesDir, name).readText()
+    java:
+      vulnerable: |
+        String url = getIntent().getStringExtra("url");
+        webView.loadUrl(url);
+      secure: |
+        String url = getIntent().getStringExtra("url");
+        if (url != null && url.startsWith("https://app.example.com/"))
+            webView.loadUrl(url);
+    swift:
+      vulnerable: |
+        let id = url.queryParam("recordId")!
+        loadRecord(at: "/records/\(id)")
+      secure: |
+        guard let id = url.queryParam("recordId"),
+              id.allSatisfy({ $0.isNumber }) else { return }
+        loadRecord(at: "/records/\(id)")
+    dart:
+      vulnerable: |
+        final route = uri.queryParameters['screen'];
+        Navigator.pushNamed(context, route!);
+      secure: |
+        final route = uri.queryParameters['screen'];
+        if (kKnownRoutes.contains(route)) Navigator.pushNamed(context, route!);
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.3 — Deep Link Verification
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.3
+  facet: Platform Interaction
+  section: Deep Link and App Link Verification
+  security_rule: >-
+    Deep links must be verified so they cannot be hijacked by another app —
+    use Android verified App Links or iOS Universal Links backed by a
+    domain association file rather than custom URL schemes.
+  vulnerability_pattern: >-
+    The app registers a custom URL scheme or an unverified host so any
+    other app can claim the same scheme, intercept inbound links, and
+    receive sensitive parameters such as tokens or session identifiers.
+  secure_pattern: >-
+    The app uses verified App Links or Universal Links tied to a domain it
+    controls through a hosted association file, so the operating system
+    routes the link only to the legitimate app.
+  code_patterns:
+    generic:
+      vulnerable: |
+        register custom scheme myapp:// with no domain verification
+      secure: |
+        register https links with a hosted domain association file
+    kotlin:
+      vulnerable: |
+        <intent-filter>
+          <data android:scheme="myapp" android:host="pay"/>
+        </intent-filter>
+      secure: |
+        <intent-filter android:autoVerify="true">
+          <data android:scheme="https" android:host="app.example.com"/>
+        </intent-filter>
+    swift:
+      vulnerable: |
+        <!-- Info.plist registers a custom CFBundleURLScheme "myapp" -->
+      secure: |
+        <!-- com.apple.developer.associated-domains: applinks:app.example.com -->
+        <!-- backed by /.well-known/apple-app-site-association -->
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.4 — WebView JavaScript Bridge Exposure
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.4
+  facet: Platform Interaction
+  section: WebView JavaScript Bridge Exposure
+  security_rule: >-
+    Native functionality must not be exposed to WebView JavaScript unless
+    it is required, and any exposed bridge must be limited to trusted
+    origins and must never grant access to sensitive native APIs.
+  vulnerability_pattern: >-
+    A native object is injected into a WebView through a JavaScript bridge
+    while the WebView can load remote or attacker-influenced content, so
+    that content calls native methods and reaches device functionality.
+  secure_pattern: >-
+    The JavaScript bridge is added only when needed, restricted to content
+    loaded from a trusted origin, and the exposed interface is minimal and
+    explicitly annotated for JavaScript access.
+  code_patterns:
+    generic:
+      vulnerable: |
+        webview.addJavascriptBridge(nativeApi)
+        webview.load(remoteUntrustedUrl)
+      secure: |
+        if origin is trusted: webview.addJavascriptBridge(minimalApi)
+    kotlin:
+      vulnerable: |
+        webView.addJavascriptInterface(NativeBridge(), "Android")
+        webView.loadUrl(untrustedUrl)
+      secure: |
+        if (url.host == "app.example.com")
+            webView.addJavascriptInterface(SafeBridge(), "Android")
+    java:
+      vulnerable: |
+        webView.addJavascriptInterface(new FileBridge(), "fs");
+      secure: |
+        // SafeBridge methods carry @JavascriptInterface and expose no file APIs
+        webView.addJavascriptInterface(new SafeBridge(), "app");
+    swift:
+      vulnerable: |
+        contentController.add(self, name: "native")  // handler runs shell ops
+      secure: |
+        contentController.add(self, name: "native")  // handler whitelists actions
+        // and the WKWebView only loads bundled local content
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.5 — WebView Configuration Hardening
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.5
+  facet: Platform Interaction
+  section: WebView Configuration Hardening
+  security_rule: >-
+    WebViews must be configured with the least capability needed —
+    JavaScript, file access, and content access disabled unless required —
+    and must not load mixed or untrusted content.
+  vulnerability_pattern: >-
+    A WebView is left with permissive defaults such as file URL access,
+    universal access from file URLs, or content access enabled, so loaded
+    content can read local files and cross security boundaries.
+  secure_pattern: >-
+    The WebView enables only the settings the feature requires, keeps file
+    and content access disabled by default, and blocks mixed content so it
+    cannot downgrade to insecure transport.
+  code_patterns:
+    generic:
+      vulnerable: |
+        webview.settings.allowFileAccess = true
+        webview.settings.javaScriptEnabled = true
+      secure: |
+        webview.settings.allowFileAccess = false
+        webview.settings.mixedContentMode = NEVER_ALLOW
+    kotlin:
+      vulnerable: |
+        webView.settings.allowFileAccessFromFileURLs = true
+        webView.settings.allowUniversalAccessFromFileURLs = true
+      secure: |
+        webView.settings.allowFileAccessFromFileURLs = false
+        webView.settings.allowUniversalAccessFromFileURLs = false
+    java:
+      vulnerable: |
+        webView.getSettings().setAllowContentAccess(true);
+      secure: |
+        webView.getSettings().setAllowContentAccess(false);
+        webView.getSettings().setMixedContentMode(
+            WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+    swift:
+      vulnerable: |
+        let cfg = WKWebViewConfiguration()
+        cfg.preferences.javaScriptEnabled = true  // even for local-only content
+      secure: |
+        let cfg = WKWebViewConfiguration()
+        cfg.defaultWebpagePreferences.allowsContentJavaScript = false
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.6 — Sensitive Data on the Clipboard
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.6
+  facet: Platform Interaction
+  section: Sensitive Data on the Clipboard
+  security_rule: >-
+    The app must not copy sensitive data to the shared system clipboard,
+    and where copying is unavoidable it must mark the data as sensitive and
+    clear it after a short interval.
+  vulnerability_pattern: >-
+    Secrets such as passwords, one-time codes, or tokens are written to the
+    system pasteboard, where any other app can read them and clipboard
+    history or sync may retain them.
+  secure_pattern: >-
+    Sensitive values are kept off the clipboard, or, when the user must
+    copy them, the entry is flagged as sensitive so the platform hides it
+    from previews and history, and it is cleared shortly afterwards.
+  code_patterns:
+    generic:
+      vulnerable: |
+        clipboard.set(password)
+      secure: |
+        clipboard.setSensitive(otp); scheduleClear(after = 30s)
+    kotlin:
+      vulnerable: |
+        clipboard.setPrimaryClip(ClipData.newPlainText("pw", password))
+      secure: |
+        val clip = ClipData.newPlainText("otp", code)
+        clip.description.extras = PersistableBundle().apply {
+            putBoolean("android.content.extra.IS_SENSITIVE", true) }
+        clipboard.setPrimaryClip(clip)
+    java:
+      vulnerable: |
+        clipboard.setPrimaryClip(ClipData.newPlainText("token", token));
+      secure: |
+        // do not place the auth token on the shared clipboard at all
+        showTokenInSecureFieldOnly(token);
+    swift:
+      vulnerable: |
+        UIPasteboard.general.string = password
+      secure: |
+        UIPasteboard.general.setItems(
+            [["public.text": otp]],
+            options: [.expirationDate: Date().addingTimeInterval(30)])
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.7 — Background Screen Content Protection
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.7
+  facet: Platform Interaction
+  section: Background Screen and Screenshot Protection
+  security_rule: >-
+    Screens that display sensitive information must hide that content when
+    the app moves to the background, so it does not leak into the task
+    switcher snapshot or screenshots.
+  vulnerability_pattern: >-
+    A screen showing account details, balances, or tokens stays fully
+    rendered as the app is backgrounded, so the operating system captures a
+    snapshot that exposes the data in the recent-apps view.
+  secure_pattern: >-
+    Sensitive screens mark the window as secure or overlay a blank or
+    branded placeholder when the app resigns the foreground, so the
+    captured snapshot reveals nothing sensitive.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sensitive screen remains visible during backgrounding
+      secure: |
+        on background: mark window secure or overlay a blank cover view
+    kotlin:
+      vulnerable: |
+        // Activity shows account balance with no FLAG_SECURE
+      secure: |
+        window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                        WindowManager.LayoutParams.FLAG_SECURE)
+    java:
+      vulnerable: |
+        // onCreate sets up the statement view with no secure flag
+      secure: |
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                             WindowManager.LayoutParams.FLAG_SECURE);
+    swift:
+      vulnerable: |
+        func sceneWillResignActive(_ scene: UIScene) { }  // nothing hidden
+      secure: |
+        func sceneWillResignActive(_ scene: UIScene) {
+            window?.addSubview(privacyCoverView)
+        }
+    dart:
+      vulnerable: |
+        // sensitive page with no secure-display protection
+      secure: |
+        // ScreenProtector / FlutterWindowManager FLAG_SECURE on this route
+        await ScreenProtector.protectDataLeakageOn();
+
+# ---------------------------------------------------------------------------
+# MASVS-PLATFORM.8 — Tapjacking and Overlay Protection
+# ---------------------------------------------------------------------------
+
+- id: MASVS-PLATFORM.8
+  facet: Platform Interaction
+  section: Tapjacking and Overlay Protection
+  security_rule: >-
+    Security-sensitive UI elements must be protected against tapjacking and
+    overlay attacks, so a window drawn on top of the app cannot trick the
+    user into approving an action they cannot see.
+  vulnerability_pattern: >-
+    A consent, payment, or permission control accepts touches even while
+    another window is drawn over it, so a malicious overlay obscures the
+    real screen and the user authorises something unintended.
+  secure_pattern: >-
+    Sensitive controls ignore touches that are passed through an obscuring
+    overlay, by filtering obscured touch events, so an action is confirmed
+    only when the genuine screen is visible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sensitive button handles touch even when overlaid
+      secure: |
+        sensitive button drops touches flagged as obscured by an overlay
+    kotlin:
+      vulnerable: |
+        confirmButton.setOnClickListener { transferFunds() }
+      secure: |
+        confirmButton.filterTouchesWhenObscured = true
+        confirmButton.setOnClickListener { transferFunds() }
+    java:
+      vulnerable: |
+        confirmButton.setOnClickListener(v -> transferFunds());
+      secure: |
+        confirmButton.setFilterTouchesWhenObscured(true);
+        confirmButton.setOnClickListener(v -> transferFunds());
+    swift:
+      vulnerable: |
+        // no check for window capture / screen recording before showing secret
+      secure: |
+        if UIScreen.main.isCaptured { hideSensitiveControls() }

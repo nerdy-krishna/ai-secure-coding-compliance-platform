@@ -35,6 +35,7 @@ _CORPORA = {
     "cheatsheets": ("cheatsheets_corpus.csv", 10),
     "llm_top10": ("llm_top10_corpus.csv", 10),
     "agentic_top10": ("agentic_top10_corpus.csv", 10),
+    "masvs": ("masvs_corpus.csv", 8),
 }
 
 

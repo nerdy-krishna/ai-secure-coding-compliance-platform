@@ -1,0 +1,479 @@
+# OWASP MASVS v2 — Control Group: MASVS-CRYPTO (Cryptography)
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the mobile languages swift/kotlin/java/dart).
+#
+# MASVS-CRYPTO covers MASVS-CRYPTO-1 (the app uses current, strong
+# cryptography and uses it according to industry best practices) and
+# MASVS-CRYPTO-2 (the app performs key management according to industry
+# best practices). The two top-level controls are expanded here into the
+# distinct, individually testable requirements behind them.
+
+# ---------------------------------------------------------------------------
+# MASVS-CRYPTO-1 — Strong, current cryptography used correctly
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CRYPTO.1
+  facet: Cryptography
+  section: Strong Cryptographic Primitives
+  security_rule: >-
+    The app must rely only on current, standard cryptographic primitives
+    for both ciphers and hashes, and must not use algorithms that are
+    broken or deprecated such as DES, 3DES, RC4, Blowfish, MD5, or SHA-1.
+  vulnerability_pattern: >-
+    A cipher or hash that is broken or deprecated is selected, so an
+    attacker can recover plaintext from captured ciphertext or craft a
+    second input with the same digest with feasible effort.
+  secure_pattern: >-
+    A current, well-vetted primitive such as AES with a 256-bit key for
+    encryption and a SHA-2 or SHA-3 hash for integrity is selected,
+    ideally through a high-level library that exposes only modern algorithms.
+  code_patterns:
+    generic:
+      vulnerable: |
+        cipher = newCipher("DES")          # broken 56-bit cipher
+        digest = md5(content)              # collisions are practical
+      secure: |
+        cipher = newCipher("AES-256")
+        digest = sha256(content)
+    swift:
+      vulnerable: |
+        let algo = CCAlgorithm(kCCAlgorithm3DES)
+        let h = Insecure.MD5.hash(data: content)
+      secure: |
+        let sealed = try AES.GCM.seal(plaintext, using: key)
+        let h = SHA256.hash(data: content)
+    kotlin:
+      vulnerable: |
+        val cipher = Cipher.getInstance("DES/ECB/PKCS5Padding")
+      secure: |
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    java:
+      vulnerable: |
+        Cipher c = Cipher.getInstance("Blowfish");
+        MessageDigest md = MessageDigest.getInstance("SHA-1");
+      secure: |
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+    dart:
+      vulnerable: |
+        final cipher = encrypt.Encrypter(encrypt.Salsa20(key));
+      secure: |
+        final algo = AesGcm.with256bits();   // package:cryptography
+
+- id: MASVS-CRYPTO.2
+  facet: Cryptography
+  section: Authenticated Symmetric Encryption
+  security_rule: >-
+    Symmetric encryption of data must use an authenticated mode such as
+    AES-GCM, and must never use ECB mode or an unauthenticated mode
+    without a separate integrity check.
+  vulnerability_pattern: >-
+    Data is encrypted with ECB mode or with a mode that provides no
+    integrity, so identical plaintext blocks leak structure and an
+    attacker can tamper with ciphertext undetected.
+  secure_pattern: >-
+    An authenticated encryption mode such as GCM is used, so each
+    encryption is randomized and any modification of the ciphertext is
+    detected on decryption.
+  code_patterns:
+    generic:
+      vulnerable: |
+        encrypt(data, key, mode="ECB")
+      secure: |
+        encrypt(data, key, mode="GCM")     # confidentiality and integrity
+    swift:
+      vulnerable: |
+        let out = try AES(key: key, blockMode: ECB()).encrypt(bytes)
+      secure: |
+        let sealed = try AES.GCM.seal(data, using: SymmetricKey(data: key))
+    kotlin:
+      vulnerable: |
+        val c = Cipher.getInstance("AES/ECB/PKCS5Padding")
+      secure: |
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+    java:
+      vulnerable: |
+        Cipher c = Cipher.getInstance("AES/ECB/PKCS5Padding");
+      secure: |
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        c.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+    dart:
+      vulnerable: |
+        final enc = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.ecb));
+      secure: |
+        final enc = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
+
+- id: MASVS-CRYPTO.3
+  facet: Cryptography
+  section: Initialization Vectors and Nonces
+  security_rule: >-
+    Initialization vectors and nonces must be generated fresh for every
+    encryption operation using a cryptographically secure random source,
+    and must never be hardcoded, zeroed, or reused with the same key.
+  vulnerability_pattern: >-
+    A fixed, zeroed, or counter-derived IV or nonce is used across many
+    encryptions with the same key, so the keystream repeats and an
+    attacker can recover or forge plaintext.
+  secure_pattern: >-
+    A unique IV or nonce is drawn from a secure random generator for
+    each operation and stored or transmitted alongside the ciphertext
+    rather than being reused.
+  code_patterns:
+    generic:
+      vulnerable: |
+        iv = bytes(16)                     # all-zero IV reused every time
+      secure: |
+        iv = secureRandomBytes(12)         # fresh per encryption
+    swift:
+      vulnerable: |
+        let nonce = try AES.GCM.Nonce(data: Data(repeating: 0, count: 12))
+      secure: |
+        let nonce = AES.GCM.Nonce()        # random per call
+    kotlin:
+      vulnerable: |
+        val iv = IvParameterSpec(ByteArray(16))
+      secure: |
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+    java:
+      vulnerable: |
+        IvParameterSpec iv = new IvParameterSpec(new byte[16]);
+      secure: |
+        byte[] iv = new byte[12];
+        SecureRandom.getInstanceStrong().nextBytes(iv);
+    dart:
+      vulnerable: |
+        final iv = encrypt.IV(Uint8List(16));
+      secure: |
+        final iv = encrypt.IV.fromSecureRandom(12);
+
+- id: MASVS-CRYPTO.4
+  facet: Cryptography
+  section: Secure Random Number Generation
+  security_rule: >-
+    Any value requiring unpredictability — keys, IVs, salts, tokens, or
+    session identifiers — must come from a cryptographically secure
+    random number generator, never from a statistical PRNG.
+  vulnerability_pattern: >-
+    A non-cryptographic generator seeded from time or a predictable
+    state produces a value that needs to be unguessable, so an attacker
+    can reproduce or narrow the value.
+  secure_pattern: >-
+    A platform cryptographically secure random API is used to generate
+    all security-sensitive values.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = weakRandom()               # statistical PRNG
+      secure: |
+        token = cryptoSecureRandom()
+    swift:
+      vulnerable: |
+        let token = UInt32.random(in: 0...UInt32.max)
+      secure: |
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+    kotlin:
+      vulnerable: |
+        val token = Random().nextLong()
+      secure: |
+        val token = ByteArray(32).also { SecureRandom().nextBytes(it) }
+    java:
+      vulnerable: |
+        long token = new Random().nextLong();
+      secure: |
+        byte[] token = new byte[32];
+        SecureRandom.getInstanceStrong().nextBytes(token);
+    dart:
+      vulnerable: |
+        final token = Random().nextInt(1 << 32);
+      secure: |
+        final token = Random.secure().nextInt(1 << 32);
+
+- id: MASVS-CRYPTO.5
+  facet: Cryptography
+  section: Password Hashing
+  security_rule: >-
+    Passwords and other low-entropy secrets must be hashed with a
+    dedicated, memory-hard or work-factored algorithm such as Argon2id,
+    scrypt, bcrypt, or PBKDF2 with a per-secret salt.
+  vulnerability_pattern: >-
+    A fast general-purpose hash or an unsalted hash is used to store
+    passwords, so an attacker who obtains the digests can crack them
+    quickly with precomputed tables or brute force.
+  secure_pattern: >-
+    A purpose-built password hashing function with a tuned work factor
+    and a unique random salt per password is used, so each guess is
+    expensive.
+  code_patterns:
+    generic:
+      vulnerable: |
+        stored = sha256(password)          # fast, unsalted
+      secure: |
+        stored = argon2id(password, salt=secureRandomBytes(16))
+    swift:
+      vulnerable: |
+        let digest = SHA256.hash(data: Data(password.utf8))
+      secure: |
+        let key = try Argon2.hash(password: password, salt: salt)
+    kotlin:
+      vulnerable: |
+        val digest = MessageDigest.getInstance("SHA-256").digest(pw.toByteArray())
+      secure: |
+        val hash = BCrypt.withDefaults().hashToString(12, pw.toCharArray())
+    java:
+      vulnerable: |
+        byte[] d = MessageDigest.getInstance("MD5").digest(pw.getBytes());
+      secure: |
+        String hash = new Argon2PasswordEncoder(16, 32, 1, 65536, 3).encode(pw);
+    dart:
+      vulnerable: |
+        final digest = sha256.convert(utf8.encode(password));
+      secure: |
+        final hash = DBCrypt().hashpw(password, DBCrypt().gensalt());
+
+- id: MASVS-CRYPTO.6
+  facet: Cryptography
+  section: Message Authentication and Constant-Time Comparison
+  security_rule: >-
+    Message authentication codes must be computed with a keyed
+    construction such as HMAC, and any comparison of MACs, tokens, or
+    digests must be performed in constant time.
+  vulnerability_pattern: >-
+    A MAC is built from a plain hash of key and message, or two secret
+    values are compared with an ordinary equality check, so an attacker
+    can forge tags or use timing differences to recover the secret.
+  secure_pattern: >-
+    A standard HMAC construction is used for authentication and all
+    comparisons of secret-derived values use a constant-time equality
+    routine.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if mac == sha256(key + message): accept()
+      secure: |
+        if constantTimeEquals(mac, hmacSha256(key, message)): accept()
+    swift:
+      vulnerable: |
+        if tag == Data(SHA256.hash(data: key + message)) { accept() }
+      secure: |
+        let valid = HMAC<SHA256>.isValidAuthenticationCode(tag, authenticating: message, using: key)
+    kotlin:
+      vulnerable: |
+        if (tag.contentEquals(sha256(key + message))) accept()
+      secure: |
+        val mac = Mac.getInstance("HmacSHA256").apply { init(key) }.doFinal(message)
+        if (MessageDigest.isEqual(tag, mac)) accept()
+    java:
+      vulnerable: |
+        if (Arrays.equals(tag, sha256(concat(key, message)))) accept();
+      secure: |
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(key);
+        if (MessageDigest.isEqual(tag, mac.doFinal(message))) accept();
+    dart:
+      vulnerable: |
+        if (tag == sha256.convert(key + message).bytes) accept();
+      secure: |
+        final mac = Hmac(sha256, key).convert(message).bytes;
+        if (constantTimeBytesEquality(tag, mac)) accept();
+
+# ---------------------------------------------------------------------------
+# MASVS-CRYPTO-2 — Key management according to best practices
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CRYPTO.7
+  facet: Cryptography
+  section: No Hardcoded Keys or Secrets
+  security_rule: >-
+    Cryptographic keys, passwords, and other secrets must never be
+    hardcoded in source code, resource files, or the app binary, where
+    anyone who extracts the package can read them.
+  vulnerability_pattern: >-
+    A key or secret is embedded as a literal in code or in a bundled
+    resource, so it is identical for every install and is trivially
+    recovered by decompiling or unzipping the app.
+  secure_pattern: >-
+    Keys are generated on the device at first run or derived from user
+    input, and are stored in the platform hardware-backed keystore
+    rather than shipped inside the app.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = "S3cr3tAESKey0123456789ABCDEF0123"   # baked into the binary
+      secure: |
+        key = keystore.getOrCreateKey("data-key")  # device-generated, in keystore
+    swift:
+      vulnerable: |
+        let key = SymmetricKey(data: Data("S3cr3tAESKey0123".utf8))
+      secure: |
+        let key = SymmetricKey(size: .bits256)      # stored via Keychain
+    kotlin:
+      vulnerable: |
+        val key = SecretKeySpec("S3cr3tAESKey0123".toByteArray(), "AES")
+      secure: |
+        val key = (KeyStore.getInstance("AndroidKeyStore")
+            .apply { load(null) }.getEntry("data-key", null) as SecretKeyEntry).secretKey
+    java:
+      vulnerable: |
+        SecretKeySpec key = new SecretKeySpec("S3cr3tAESKey0123".getBytes(), "AES");
+      secure: |
+        KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+        ks.load(null);
+        SecretKey key = ((SecretKeyEntry) ks.getEntry("data-key", null)).getSecretKey();
+    dart:
+      vulnerable: |
+        const key = "S3cr3tAESKey0123456789ABCDEF0123";
+      secure: |
+        final key = await secureStorage.read(key: "data-key");  # flutter_secure_storage
+
+- id: MASVS-CRYPTO.8
+  facet: Cryptography
+  section: Hardware-Backed Key Storage
+  security_rule: >-
+    Cryptographic keys must be stored in the platform secure key store —
+    the Android Keystore or iOS Keychain backed by the Secure Enclave —
+    so that key material cannot be exported from the device.
+  vulnerability_pattern: >-
+    Key material is held in a shared preference, plist, plain file, or
+    in memory longer than needed, so a backup, a rooted device, or
+    another app can read the raw key.
+  secure_pattern: >-
+    Keys are generated and held inside the hardware-backed keystore and
+    are referenced by alias for crypto operations, so the raw bytes
+    never leave secure hardware.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeFile("prefs", key)            # raw key on the filesystem
+      secure: |
+        keystore.generateKey(alias="data-key", hardwareBacked=true)
+    swift:
+      vulnerable: |
+        UserDefaults.standard.set(keyData, forKey: "encKey")
+      secure: |
+        let access = SecAccessControlCreateWithFlags(nil,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .privateKeyUsage, nil)
+    kotlin:
+      vulnerable: |
+        prefs.edit().putString("encKey", Base64.encodeToString(key.encoded, 0)).apply()
+      secure: |
+        val spec = KeyGenParameterSpec.Builder("data-key", PURPOSE_ENCRYPT or PURPOSE_DECRYPT)
+            .setBlockModes(BLOCK_MODE_GCM).setEncryptionPaddings(ENCRYPTION_PADDING_NONE).build()
+    java:
+      vulnerable: |
+        prefs.edit().putString("encKey",
+            Base64.getEncoder().encodeToString(key.getEncoded())).apply();
+      secure: |
+        KeyGenerator kg = KeyGenerator.getInstance("AES", "AndroidKeyStore");
+        kg.init(new KeyGenParameterSpec.Builder("data-key",
+            KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT).build());
+    dart:
+      vulnerable: |
+        await File("key.txt").writeAsString(base64Encode(key));
+      secure: |
+        const storage = FlutterSecureStorage(
+            aOptions: AndroidOptions(encryptedSharedPreferences: true));
+
+- id: MASVS-CRYPTO.9
+  facet: Cryptography
+  section: Key Derivation from Passwords
+  security_rule: >-
+    Encryption keys derived from a user passphrase must use a standard
+    key derivation function with a unique random salt and a high
+    iteration or cost factor, never the raw passphrase as the key.
+  vulnerability_pattern: >-
+    A passphrase is used directly as a key, or is run through a fast
+    derivation with no salt or a low iteration count, so the resulting
+    key is weak and quick to brute force offline.
+  secure_pattern: >-
+    A vetted key derivation function such as PBKDF2, scrypt, or Argon2
+    is applied with a per-user random salt and a deliberately high cost
+    factor to produce the key.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = padTo32(passphrase)          # passphrase used directly
+      secure: |
+        key = pbkdf2(passphrase, salt=secureRandomBytes(16), iterations=210000)
+    swift:
+      vulnerable: |
+        let key = SymmetricKey(data: Data(passphrase.utf8))
+      secure: |
+        let key = try KDF.PBKDF2.deriveKey(from: Data(passphrase.utf8),
+            salt: salt, outputByteCount: 32, rounds: 210000)
+    kotlin:
+      vulnerable: |
+        val key = SecretKeySpec(passphrase.toByteArray().copyOf(32), "AES")
+      secure: |
+        val spec = PBEKeySpec(passphrase.toCharArray(), salt, 210000, 256)
+        val key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec)
+    java:
+      vulnerable: |
+        SecretKeySpec key = new SecretKeySpec(passphrase.getBytes(), "AES");
+      secure: |
+        PBEKeySpec spec = new PBEKeySpec(passphrase.toCharArray(), salt, 210000, 256);
+        SecretKey key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            .generateSecret(spec);
+    dart:
+      vulnerable: |
+        final key = utf8.encode(passphrase).sublist(0, 32);
+      secure: |
+        final key = await Pbkdf2(macAlgorithm: Hmac.sha256(), iterations: 210000,
+            bits: 256).deriveKey(secretKey: SecretKey(utf8.encode(passphrase)), nonce: salt);
+
+- id: MASVS-CRYPTO.10
+  facet: Cryptography
+  section: Key Lifecycle, Rotation, and Separation
+  security_rule: >-
+    Cryptographic keys must have a defined lifecycle — rotatable,
+    revocable on compromise, and securely destroyed when retired — and a
+    given key must serve one purpose only, never both encryption and
+    authentication.
+  vulnerability_pattern: >-
+    A single static key is created once, reused for every purpose for
+    the life of the install, and never rotated, so one compromise or one
+    oracle permanently exposes all data the key ever protected.
+  secure_pattern: >-
+    Keys carry a version or alias, distinct keys are derived per purpose
+    via a key derivation function with context labels, the app can
+    re-encrypt under a new key, and retired material is deleted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = loadStaticKey()                       # one key, every use, forever
+        encrypt(data, key); mac(data, key)
+      secure: |
+        encKey = derive(masterKey, "enc"); macKey = derive(masterKey, "mac")
+        onCompromise: keystore.delete(oldKeyVersion)
+    swift:
+      vulnerable: |
+        let key = loadKeyOnce()
+      secure: |
+        let encKey = HKDF<SHA256>.deriveKey(inputKeyMaterial: master,
+            info: Data("enc".utf8), outputByteCount: 32)
+        SecItemDelete(retiredKeyQuery)               # destroy old key from Keychain
+    kotlin:
+      vulnerable: |
+        val key = keyStore.getKey("data-key", null)  # single permanent alias
+      secure: |
+        val encKey = hkdf(master, "enc"); val macKey = hkdf(master, "mac")
+        keyStore.deleteEntry("data-key-v1")          # rotate to data-key-v2
+    java:
+      vulnerable: |
+        SecretKey key = (SecretKey) keyStore.getKey("data-key", null);
+      secure: |
+        SecretKey encKey = hkdfExpand(master, "enc");
+        SecretKey macKey = hkdfExpand(master, "mac");
+        keyStore.deleteEntry("data-key-v1");         # after re-encrypt under v2
+    dart:
+      vulnerable: |
+        final key = await secureStorage.read(key: "data-key");
+      secure: |
+        final encKey = await Hkdf(hmac: Hmac.sha256(), outputLength: 32)
+            .deriveKey(secretKey: master, info: utf8.encode("enc"));
+        await secureStorage.delete(key: "data-key-v1");   # post-rotation cleanup

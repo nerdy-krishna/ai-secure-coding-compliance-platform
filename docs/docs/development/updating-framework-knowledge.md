@@ -64,7 +64,7 @@ Large Git repos (hundreds of files) can take a couple of minutes.
 
 ## Bundled corpora
 
-Seven frameworks ship their enriched RAG corpus inside the repository
+Eight frameworks ship their enriched RAG corpus inside the repository
 rather than fetching it from an upstream Git repo:
 
 - **OWASP ASVS** — 345 verification requirements across 17 chapters.
@@ -76,8 +76,9 @@ rather than fetching it from an upstream Git repo:
 - **OWASP Cheatsheets** — 112 entries across 10 domains.
 - **OWASP LLM Top 10** — 88 entries across the 10 items (2025 edition).
 - **OWASP Agentic Top 10** — 95 entries across the 10 threats.
+- **OWASP MASVS** — 69 entries across the 8 mobile control groups (v2).
 
-For all seven, the framework, its agents, and their prompt templates
+For all eight, the framework, its agents, and their prompt templates
 are created automatically by the seed (and by the data migration for
 existing deployments).
 
@@ -117,7 +118,7 @@ docker compose exec app python scripts/ingest_bundled_corpora.py
 This is idempotent — it replaces a framework's documents rather than
 duplicating them.
 
-The corpus CSVs are **generated**, never hand-edited. All seven are
+The corpus CSVs are **generated**, never hand-edited. All eight are
 rendered from hand-authored enriched YAML by the same harness,
 `scripts/build_enriched_corpus.py`:
 
@@ -135,6 +136,8 @@ rendered from hand-authored enriched YAML by the same harness,
 - `llm_top10_corpus.csv` / `agentic_top10_corpus.csv` — from per-item
   YAML under `src/app/data/llm_top10_corpus/` and
   `src/app/data/agentic_top10_corpus/` (one file per Top-10 item).
+- `masvs_corpus.csv` — from per-control-group YAML under
+  `src/app/data/masvs_corpus/` (one file per MASVS v2 control group).
 
 Each entry carries a security rule, vulnerability/secure pattern
 descriptions, and per-language code samples. Edit the YAML, then

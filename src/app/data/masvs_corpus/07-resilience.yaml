@@ -1,0 +1,407 @@
+# OWASP MASVS v2 — Control Group: MASVS-RESILIENCE
+# Resilience Against Reverse Engineering and Tampering.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns. MASVS
+# targets mobile apps, so languages are generic + swift / kotlin / java /
+# dart (iOS, Android, Flutter). Many resilience controls are build-config
+# or design measures — generic-only entries are expected for those.
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-1 — Platform integrity: the app validates the integrity
+# of the platform it runs on (root/jailbreak/emulator detection).
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.1
+  facet: Resilience Against Reverse Engineering
+  section: Root and Jailbreak Detection
+  security_rule: >-
+    The app must detect when it runs on a rooted or jailbroken device and
+    respond defensively, since such a device removes the OS sandbox and
+    lets an attacker inspect memory, hook APIs, and tamper with the app.
+  vulnerability_pattern: >-
+    The app performs no platform integrity check and runs identically on a
+    rooted or jailbroken device, so an attacker can freely instrument it,
+    dump secrets, and bypass client-side controls.
+  secure_pattern: >-
+    The app runs multiple independent root or jailbreak signals such as
+    test-keys build tags, presence of su or Cydia, and writable system
+    paths, and degrades or refuses high-risk functionality when triggered.
+  code_patterns:
+    generic:
+      vulnerable: |
+        startApp()                       # no platform integrity check at all
+      secure: |
+        if isRooted() or isJailbroken(): restrictSensitiveFeatures()
+        startApp()
+    kotlin:
+      vulnerable: |
+        fun isDeviceSafe() = true        // root check stubbed out
+      secure: |
+        fun isRooted() = Build.TAGS?.contains("test-keys") == true ||
+            listOf("/system/bin/su", "/system/xbin/su").any { File(it).exists() }
+    swift:
+      vulnerable: |
+        func isJailbroken() -> Bool { return false }
+      secure: |
+        func isJailbroken() -> Bool {
+            FileManager.default.fileExists(atPath: "/Applications/Cydia.app") ||
+            ((try? "x".write(toFile: "/private/jb", atomically: true, encoding: .utf8)) != nil)
+        }
+    java:
+      vulnerable: |
+        boolean rooted = false;          // never actually checked
+      secure: |
+        boolean rooted = new File("/system/app/Superuser.apk").exists()
+            || Build.TAGS != null && Build.TAGS.contains("test-keys");
+    dart:
+      vulnerable: |
+        bool jailbroken = false;         // FlutterJailbreakDetection never called
+      secure: |
+        final jailbroken = await FlutterJailbreakDetection.jailbroken;
+        if (jailbroken) _disableSecureFeatures();
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-2 — Anti-tampering: the app detects modification of its
+# own code or resources at install time and at runtime.
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.2
+  facet: Resilience Against Reverse Engineering
+  section: App Integrity and Signature Verification
+  security_rule: >-
+    The app must verify at runtime that its own code, resources, and
+    signing certificate have not been altered, so a repackaged or patched
+    build is detected and rejected.
+  vulnerability_pattern: >-
+    The app never checks its installer source or signing certificate, so a
+    cracked build resigned with an attacker key installs and runs without
+    any objection.
+  secure_pattern: >-
+    The app pins the hash of its expected signing certificate and verifies
+    it at startup against the live signature, refusing to run when the
+    signature does not match the pinned value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run()                            # no signature or installer check
+      secure: |
+        if signingCertHash() != EXPECTED_CERT_HASH: refuseToRun()
+        run()
+    kotlin:
+      vulnerable: |
+        val signatures = packageInfo.signingInfo  // fetched but never compared
+      secure: |
+        val live = sha256(packageInfo.signingInfo.apkContentsSigners[0].toByteArray())
+        if (live != EXPECTED_CERT_SHA256) throw SecurityException("tampered build")
+    java:
+      vulnerable: |
+        Signature[] sigs = pkgInfo.signatures;     // result ignored
+      secure: |
+        String hash = sha256(pkgInfo.signatures[0].toByteArray());
+        if (!EXPECTED_CERT_SHA256.equals(hash)) throw new SecurityException("tampered");
+    swift:
+      vulnerable: |
+        // iOS code-sign integrity assumed; no embedded.mobileprovision check
+        launch()
+      secure: |
+        guard let p = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"),
+              sha256(ofFile: p) == EXPECTED_PROFILE_HASH else { abortLaunch() }
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-3 — Anti-debugging: the app prevents and detects being
+# attached to by a debugger.
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.3
+  facet: Resilience Against Reverse Engineering
+  section: Anti-Debugging Defenses
+  security_rule: >-
+    The app must detect and impede dynamic analysis by a debugger, both by
+    refusing to expose debug interfaces in release builds and by checking
+    for an attached debugger at runtime.
+  vulnerability_pattern: >-
+    A release build ships with the debuggable flag enabled or never checks
+    whether a debugger is attached, so an analyst can attach freely and
+    single-step through security logic.
+  secure_pattern: >-
+    Release builds disable the debuggable flag, and the app actively probes
+    for an attached debugger using a platform call, terminating or
+    degrading when one is detected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        debuggable = true                # debug interface left open in release
+      secure: |
+        if debuggerAttached(): terminate()
+    kotlin:
+      vulnerable: |
+        if (Debug.isDebuggerConnected()) { /* logged only, app continues */ }
+      secure: |
+        if (Debug.isDebuggerConnected() || Debug.waitingForDebugger())
+            exitProcess(0)
+    java:
+      vulnerable: |
+        boolean dbg = (appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+      secure: |
+        if ((appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+            throw new SecurityException("debuggable release build");
+    swift:
+      vulnerable: |
+        func isDebugged() -> Bool { return false }   // never probes sysctl
+      secure: |
+        var info = kinfo_proc(); var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        sysctl(&mib, 4, &info, &size, nil, 0)
+        let traced = (info.kp_proc.p_flag & P_TRACED) != 0
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-4 — Anti-hooking / runtime instrumentation detection:
+# the app detects framework hooks and dynamic instrumentation toolkits.
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.4
+  facet: Resilience Against Reverse Engineering
+  section: Runtime Instrumentation Detection
+  security_rule: >-
+    The app must detect runtime instrumentation and hooking frameworks such
+    as Frida, Xposed, or Cydia Substrate, since these let an attacker
+    rewrite method behaviour and bypass client-side security checks.
+  vulnerability_pattern: >-
+    The app does not look for instrumentation artefacts, so a hooking
+    framework can patch methods like the root check or license validation
+    to always return a safe result with no resistance.
+  secure_pattern: >-
+    The app scans for instrumentation artefacts such as the frida-server
+    listening port, suspicious loaded libraries, and known hooking package
+    names, and responds defensively when any are found.
+  code_patterns:
+    generic:
+      vulnerable: |
+        proceed()                        # no hooking-framework detection
+      secure: |
+        if fridaPortOpen() or hookLibraryLoaded(): abortAndWipeSession()
+        proceed()
+    kotlin:
+      vulnerable: |
+        val hooked = false               // Xposed presence never inspected
+      secure: |
+        val hooked = runCatching {
+            File("/proc/self/maps").readText().contains("frida")
+        }.getOrDefault(false) || classExists("de.robv.android.xposed.XposedBridge")
+    java:
+      vulnerable: |
+        boolean instrumented = false;    // /proc maps not scanned
+      secure: |
+        boolean instrumented = false;
+        for (String line : Files.readAllLines(Paths.get("/proc/self/maps")))
+            if (line.contains("frida") || line.contains("substrate")) instrumented = true;
+    swift:
+      vulnerable: |
+        let hooked = false               // dyld image list never checked
+      secure: |
+        var hooked = false
+        for i in 0..<_dyld_image_count() {
+            let n = String(cString: _dyld_get_image_name(i))
+            if n.contains("FridaGadget") || n.contains("cynject") { hooked = true }
+        }
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-5 — Code obfuscation: security-relevant code and data
+# are obfuscated to raise the cost of static reverse engineering.
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.5
+  facet: Resilience Against Reverse Engineering
+  section: Code and String Obfuscation
+  security_rule: >-
+    Security-relevant code paths and embedded data must be obfuscated in
+    release builds so that names, control flow, and string constants do
+    not directly reveal the app's logic to a static analyst.
+  vulnerability_pattern: >-
+    Release builds ship with full debug symbols, original class and method
+    names, and plaintext string constants, so decompiling the app reveals
+    its security logic and embedded values at a glance.
+  secure_pattern: >-
+    The release build pipeline applies name and control-flow obfuscation,
+    strips debug symbols, and encrypts or splits sensitive string
+    constants so they are not readable in the shipped binary.
+  code_patterns:
+    generic:
+      vulnerable: |
+        release_build: { obfuscate: false, strip_symbols: false }
+      secure: |
+        release_build: { obfuscate: true, strip_symbols: true, encrypt_strings: true }
+    kotlin:
+      vulnerable: |
+        buildTypes { release { isMinifyEnabled = false } }
+      secure: |
+        buildTypes { release {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+        } }
+    dart:
+      vulnerable: |
+        flutter build apk --release
+      secure: |
+        flutter build apk --release --obfuscate --split-debug-info=build/symbols
+    swift:
+      vulnerable: |
+        // Release scheme keeps DWARF symbols embedded in the binary
+        SWIFT_OPTIMIZATION_LEVEL = -Onone
+      secure: |
+        SWIFT_OPTIMIZATION_LEVEL = -O
+        DEBUG_INFORMATION_FORMAT = dwarf-with-dsym   // symbols split into dSYM
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-6 — The app does not contain sensitive data or secrets
+# in plaintext that aid reverse engineering.
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.6
+  facet: Resilience Against Reverse Engineering
+  section: No Hardcoded Secrets in the Binary
+  security_rule: >-
+    The app must not embed API keys, cryptographic keys, or other secrets
+    as plaintext constants, since anyone who decompiles the binary can
+    extract them and they cannot be rotated without a new release.
+  vulnerability_pattern: >-
+    A secret is stored as a string literal compiled into the app, so it
+    appears in the decompiled code or in a plain strings dump of the
+    package and is trivially harvested at scale.
+  secure_pattern: >-
+    Secrets are fetched at runtime from a server after authentication, or
+    held in hardware-backed secure storage, and the binary contains at
+    most short-lived tokens that can be revoked.
+  code_patterns:
+    generic:
+      vulnerable: |
+        API_KEY = "sk_live_9f3a2c8e1b7d"      # plaintext in the binary
+      secure: |
+        API_KEY = fetchScopedTokenFromServer(after=authentication)
+    kotlin:
+      vulnerable: |
+        const val STRIPE_KEY = "sk_live_9f3a2c8e1b7d"
+      secure: |
+        val stripeKey = secureBackend.issueEphemeralKey(userSession)
+    swift:
+      vulnerable: |
+        let apiKey = "AIzaSyD9f3a2c8e1b7d4e5f6"
+      secure: |
+        let apiKey = try await tokenService.fetchScopedToken(for: session)
+    java:
+      vulnerable: |
+        private static final String AWS_SECRET = "wJalrXUtnFEMI/K7MDENG";
+      secure: |
+        String awsToken = stsClient.requestSessionToken(authenticatedUser);
+    dart:
+      vulnerable: |
+        const apiKey = 'AIzaSyD9f3a2c8e1b7d4e5f6';
+      secure: |
+        final apiKey = await backend.fetchEphemeralToken(authToken);
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-7 — Device binding: tokens, keys, and sessions are bound
+# to the device so they cannot be lifted and replayed elsewhere.
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.7
+  facet: Resilience Against Reverse Engineering
+  section: Device Binding
+  security_rule: >-
+    Authentication tokens and keys must be bound to the specific device
+    instance so that data extracted from one device cannot be replayed
+    from another, and so cloned-app instances are detectable.
+  vulnerability_pattern: >-
+    A long-lived token or key is portable and carries no device identity,
+    so an attacker who extracts it from one device can reuse it on any
+    other device or an emulator without restriction.
+  secure_pattern: >-
+    Credentials are tied to a hardware-backed, per-install device key, so a
+    token presented from a different device fails an attestation or
+    signature check and is rejected by the backend.
+  code_patterns:
+    generic:
+      vulnerable: |
+        token = login(user, pass)        # portable, no device identity
+      secure: |
+        token = login(user, pass, deviceKey=hardwareBackedDeviceKey())
+    kotlin:
+      vulnerable: |
+        val token = api.login(user, pass)               // not device-bound
+      secure: |
+        val kp = KeyGenParameterSpec.Builder("deviceKey",
+            KeyProperties.PURPOSE_SIGN).setIsStrongBoxBacked(true).build()
+        val token = api.login(user, pass, attestation = signWithDeviceKey(kp))
+    swift:
+      vulnerable: |
+        let token = try await api.login(user, pass)      // replayable anywhere
+      secure: |
+        let attest = try await DCAppAttestService.shared.generateKey()
+        let token = try await api.login(user, pass, deviceAttestation: attest)
+    java:
+      vulnerable: |
+        String token = api.login(user, pass);
+      secure: |
+        KeyPair dk = androidKeyStoreDeviceKey();         // non-exportable
+        String token = api.login(user, pass, sign(nonce, dk.getPrivate()));
+    dart:
+      vulnerable: |
+        final token = await api.login(user, pass);
+      secure: |
+        final integrity = await PlayIntegrity.requestToken(nonce);
+        final token = await api.login(user, pass, integrityToken: integrity);
+
+# ---------------------------------------------------------------------------
+# MASVS-RESILIENCE-8 — All detection mechanisms respond defensively and are
+# enforced server-side, not merely logged on the client.
+# ---------------------------------------------------------------------------
+
+- id: MASVS-RESILIENCE.8
+  facet: Resilience Against Reverse Engineering
+  section: Defensive Response and Server-Side Enforcement
+  security_rule: >-
+    When a resilience check detects a compromised environment, the app must
+    respond meaningfully and report the signal to the backend, so
+    enforcement does not depend solely on a client an attacker controls.
+  vulnerability_pattern: >-
+    A detection result is only written to a local log or a boolean while
+    the app continues normally, so an attacker patches out the single
+    client-side branch and the backend never learns the device is unsafe.
+  secure_pattern: >-
+    The detection signal is sent to the server as part of an attested
+    request, the server makes the trust decision and can revoke the
+    session, and the client also degrades sensitive functionality locally.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if isCompromised(): log("device unsafe")     # app keeps running
+      secure: |
+        if isCompromised(): { reportToServer(signedSignal); lockSensitiveFeatures() }
+    kotlin:
+      vulnerable: |
+        if (isRooted()) Log.w("sec", "rooted")        // client-only, no report
+      secure: |
+        if (isRooted()) {
+            api.reportIntegrity(attestedPayload(rooted = true))
+            navigateToRestrictedMode()
+        }
+    swift:
+      vulnerable: |
+        if isJailbroken() { print("jailbroken") }     // observed, not acted on
+      secure: |
+        if isJailbroken() {
+            try await api.reportIntegrity(attestedPayload(jailbroken: true))
+            session.invalidate()
+        }
+    dart:
+      vulnerable: |
+        if (compromised) debugPrint('unsafe device');
+      secure: |
+        if (compromised) {
+          await api.reportIntegrity(signedSignal);
+          appState.enterRestrictedMode();
+        }

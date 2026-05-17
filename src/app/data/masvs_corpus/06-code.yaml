@@ -1,0 +1,415 @@
+# OWASP MASVS v2 — Control Group: MASVS-CODE
+# Code Quality and Exploit Mitigation.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the mobile languages: swift/kotlin/java/dart).
+#
+# MASVS-CODE concerns the platform-version baseline the app targets,
+# the integrity and currency of its third-party dependencies, the
+# handling of untrusted external input, the use of compiler and linker
+# exploit-mitigation features, and freedom from known vulnerabilities.
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Platform baseline and update enforcement
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.1
+  facet: Code Quality and Exploit Mitigation
+  section: Supported Platform Baseline
+  security_rule: >-
+    The app must require an up-to-date and still-supported version of the
+    mobile operating system, so it never runs on a release that no longer
+    receives security patches.
+  vulnerability_pattern: >-
+    The app declares a very old minimum OS version, or none at all, so it
+    installs and runs on platform releases that stopped receiving security
+    fixes and expose users to known unpatched OS vulnerabilities.
+  secure_pattern: >-
+    The build configuration sets a minimum OS version that is still
+    vendor-supported, and the app refuses to run on older releases so it
+    can rely on current platform security patches.
+  code_patterns:
+    generic:
+      vulnerable: |
+        minimumOsVersion = "very old, unsupported release"
+      secure: |
+        minimumOsVersion = "current vendor-supported release"
+        if osVersion < minimumOsVersion: refuseToRun()
+    swift:
+      vulnerable: |
+        // Deployment Target left at iOS 11.0 (out of support)
+        IPHONEOS_DEPLOYMENT_TARGET = 11.0
+      secure: |
+        IPHONEOS_DEPLOYMENT_TARGET = 16.0   // current supported baseline
+    kotlin:
+      vulnerable: |
+        defaultConfig { minSdk = 19 }   // Android 4.4, unsupported
+      secure: |
+        defaultConfig { minSdk = 28 }   // Android 9+, still patched
+    java:
+      vulnerable: |
+        defaultConfig { minSdkVersion 19 }
+      secure: |
+        defaultConfig { minSdkVersion 28 }
+    dart:
+      vulnerable: |
+        # ios/Podfile
+        platform :ios, '11.0'
+      secure: |
+        platform :ios, '16.0'   # supported baseline; min SDK raised in build.gradle too
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Third-party dependency currency
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.2
+  facet: Code Quality and Exploit Mitigation
+  section: Dependency Currency
+  security_rule: >-
+    All third-party components used by the app must be up to date, with
+    security patches applied promptly so no shipped dependency carries a
+    known unpatched vulnerability.
+  vulnerability_pattern: >-
+    A dependency is pinned to an old release for years, or floated with no
+    bound and never refreshed, so the app keeps shipping a component with
+    publicly disclosed vulnerabilities.
+  secure_pattern: >-
+    Dependencies are pinned to current, patched releases, refreshed on a
+    regular cadence, and a software composition analysis tool fails the
+    build when a component with a known vulnerability is detected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dependency okhttp version 3.10.0   # years old, known CVEs
+      secure: |
+        dependency okhttp version 4.12.0   # current patched release
+    swift:
+      vulnerable: |
+        .package(url: "https://github.com/Alamofire/Alamofire", from: "4.0.0")
+      secure: |
+        .package(url: "https://github.com/Alamofire/Alamofire", from: "5.9.1")
+    kotlin:
+      vulnerable: |
+        implementation("com.squareup.okhttp3:okhttp:3.10.0")
+      secure: |
+        implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    java:
+      vulnerable: |
+        implementation 'com.fasterxml.jackson.core:jackson-databind:2.9.8'
+      secure: |
+        implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+    dart:
+      vulnerable: |
+        dependencies:
+          http: ^0.12.0   # stale, unpatched
+      secure: |
+        dependencies:
+          http: ^1.2.1    # current patched release
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Dependency integrity and provenance
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.3
+  facet: Code Quality and Exploit Mitigation
+  section: Dependency Integrity
+  security_rule: >-
+    Third-party components must be obtained from trusted sources and
+    verified for integrity, so a tampered or substituted package cannot be
+    pulled into the build.
+  vulnerability_pattern: >-
+    Dependencies are fetched from an unauthenticated mirror or with a
+    floating version and no checksum, so a compromised registry or a
+    typosquatted package can inject malicious code into the build.
+  secure_pattern: >-
+    Dependencies are pulled only from trusted registries over a verified
+    channel, pinned to an exact version, and validated against a committed
+    lockfile of cryptographic checksums.
+  code_patterns:
+    generic:
+      vulnerable: |
+        fetch(dependency, version="latest", verifyChecksum=false)
+      secure: |
+        fetch(dependency, version="1.2.3", verifyChecksum=true)   # checksum locked
+    swift:
+      vulnerable: |
+        .package(url: "http://mirror.example.net/SomeLib", branch: "main")
+      secure: |
+        .package(url: "https://github.com/org/SomeLib", exact: "1.2.3")
+        // Package.resolved committed; pins are checksum-verified
+    kotlin:
+      vulnerable: |
+        repositories { maven { url = uri("http://insecure.repo/") } }
+      secure: |
+        repositories { mavenCentral() }
+        // gradle/verification-metadata.xml enforces artifact checksums
+    java:
+      vulnerable: |
+        repositories { maven { url 'http://insecure.repo/' } }
+      secure: |
+        repositories { mavenCentral() }   // dependency verification enabled
+    dart:
+      vulnerable: |
+        # pubspec.yaml with no committed lockfile, hosted on an unknown server
+        some_lib: any
+      secure: |
+        some_lib: 1.2.3   # pubspec.lock committed; pulled from pub.dev
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Validation of untrusted external inputs
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.4
+  facet: Code Quality and Exploit Mitigation
+  section: External Input Validation
+  security_rule: >-
+    The app must validate and sanitize all data received from external
+    sources or untrusted users before it is processed, so malformed or
+    hostile input cannot drive unsafe behaviour.
+  vulnerability_pattern: >-
+    Data from a network response, file, or user field is consumed without
+    any type, range, or format check, so unexpected or malicious values
+    flow straight into parsing and business logic.
+  secure_pattern: >-
+    Every external input is checked against an expected type, length,
+    range, and format at the trust boundary, and rejected or normalized
+    before any further processing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        amount = parse(networkResponse.field)
+        process(amount)
+      secure: |
+        amount = parse(networkResponse.field)
+        if isValidRange(amount): process(amount) else reject()
+    swift:
+      vulnerable: |
+        let qty = Int(json["qty"] as! String)!
+      secure: |
+        guard let raw = json["qty"] as? String, let qty = Int(raw),
+              (1...999).contains(qty) else { return reject() }
+    kotlin:
+      vulnerable: |
+        val qty = intent.getStringExtra("qty")!!.toInt()
+      secure: |
+        val qty = intent.getStringExtra("qty")?.toIntOrNull()
+        require(qty != null && qty in 1..999) { "invalid qty" }
+    java:
+      vulnerable: |
+        int qty = Integer.parseInt(request.getParameter("qty"));
+      secure: |
+        Integer qty = tryParseInt(request.getParameter("qty"));
+        if (qty == null || qty < 1 || qty > 999) return reject();
+    dart:
+      vulnerable: |
+        final qty = int.parse(jsonBody['qty']);
+      secure: |
+        final qty = int.tryParse('${jsonBody['qty']}');
+        if (qty == null || qty < 1 || qty > 999) return reject();
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Safe handling of untrusted IPC and URL-scheme input
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.5
+  facet: Code Quality and Exploit Mitigation
+  section: Untrusted IPC Input
+  security_rule: >-
+    Data arriving through inter-process communication, deep links, or
+    custom URL schemes must be treated as untrusted and fully validated
+    before it influences app state or sensitive actions.
+  vulnerability_pattern: >-
+    Parameters from an incoming intent, app link, or custom URL scheme are
+    used directly to choose a screen, build a request, or load content, so
+    another app can drive the victim app into unintended actions.
+  secure_pattern: >-
+    Deep-link and IPC parameters are parsed, checked against an allowlist
+    of expected values, and authorized, before they are allowed to affect
+    navigation or sensitive operations.
+  code_patterns:
+    generic:
+      vulnerable: |
+        openScreen(incomingLink.parameter)
+      secure: |
+        target = incomingLink.parameter
+        if target in ALLOWED_SCREENS: openScreen(target) else openScreen(HOME)
+    swift:
+      vulnerable: |
+        func handle(_ url: URL) { loadPage(url.host!) }
+      secure: |
+        func handle(_ url: URL) {
+            guard let h = url.host, allowedHosts.contains(h) else { return }
+            loadPage(h)
+        }
+    kotlin:
+      vulnerable: |
+        val next = intent.data?.getQueryParameter("next")
+        startActivity(Intent(this, Class.forName(next)))
+      secure: |
+        val next = intent.data?.getQueryParameter("next")
+        if (next in ALLOWED_ROUTES) navigateTo(next) else navigateTo(HOME)
+    java:
+      vulnerable: |
+        String cls = getIntent().getStringExtra("target");
+        startActivity(new Intent(this, Class.forName(cls)));
+      secure: |
+        String route = getIntent().getStringExtra("target");
+        if (ALLOWED_ROUTES.contains(route)) navigateTo(route); else navigateTo(HOME);
+    dart:
+      vulnerable: |
+        void onDeepLink(Uri uri) => Navigator.pushNamed(context, uri.path);
+      secure: |
+        void onDeepLink(Uri uri) {
+          if (allowedRoutes.contains(uri.path)) Navigator.pushNamed(context, uri.path);
+        }
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Compiler and linker exploit mitigations
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.6
+  facet: Code Quality and Exploit Mitigation
+  section: Exploit Mitigation Build Flags
+  security_rule: >-
+    The app must be built with the toolchain's exploit-mitigation features
+    enabled, such as stack canaries, position-independent code, and
+    automatic reference counting, so memory-corruption bugs are harder to
+    exploit.
+  vulnerability_pattern: >-
+    The build disables or omits exploit-mitigation flags, shipping a binary
+    without stack protection, address-space randomization, or fortified
+    library calls, so a memory bug becomes a reliable exploit.
+  secure_pattern: >-
+    The release build enables the full set of exploit-mitigation flags
+    provided by the toolchain so the shipped binary keeps stack canaries,
+    position independence, and fortified runtime checks intact.
+  code_patterns:
+    generic:
+      vulnerable: |
+        compile(flags="-fno-stack-protector -fno-PIC")
+      secure: |
+        compile(flags="-fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2")
+    swift:
+      vulnerable: |
+        OTHER_CFLAGS = -fno-stack-protector
+        // ARC disabled with -fno-objc-arc on Objective-C sources
+      secure: |
+        ENABLE_STACK_PROTECTOR = YES
+        CLANG_ENABLE_OBJC_ARC = YES   // automatic reference counting on
+    kotlin:
+      vulnerable: |
+        // NDK module built without mitigations
+        externalNativeBuild { cmake { arguments "-DANDROID_PIE=OFF" } }
+      secure: |
+        externalNativeBuild { cmake { cppFlags "-fstack-protector-strong -fPIE" } }
+    java:
+      vulnerable: |
+        cppFlags "-fno-stack-protector"
+      secure: |
+        cppFlags "-fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2"
+    dart:
+      vulnerable: |
+        # building the release with debug symbols and obfuscation off
+        flutter build apk --debug
+      secure: |
+        flutter build apk --release --obfuscate --split-debug-info=build/symbols
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Free of known vulnerabilities
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.7
+  facet: Code Quality and Exploit Mitigation
+  section: Free of Known Vulnerabilities
+  security_rule: >-
+    The app and all its components must be free of security vulnerabilities
+    that are publicly known at release time, verified by scanning before
+    every release.
+  vulnerability_pattern: >-
+    The app ships without any vulnerability scan, so a component with a
+    published CVE or a flagged code pattern reaches production unnoticed
+    and unremediated.
+  secure_pattern: >-
+    Static analysis and software composition analysis run in the build
+    pipeline before every release, and the release is blocked until known
+    findings are remediated or formally accepted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        releasePipeline = [build, sign, publish]   # no security scan stage
+      secure: |
+        releasePipeline = [build, sastScan, scaScan, gateOnFindings, sign, publish]
+    kotlin:
+      vulnerable: |
+        # CI: build and upload only
+        - run: ./gradlew assembleRelease
+      secure: |
+        - run: ./gradlew assembleRelease
+        - run: ./gradlew dependencyCheckAnalyze   # fails on known CVEs
+    java:
+      vulnerable: |
+        <build><plugins></plugins></build>
+      secure: |
+        <plugin>
+          <groupId>org.owasp</groupId><artifactId>dependency-check-maven</artifactId>
+        </plugin>
+    dart:
+      vulnerable: |
+        # CI runs flutter build with no audit
+        - run: flutter build appbundle
+      secure: |
+        - run: flutter pub outdated --show-all
+        - run: flutter build appbundle   # release gated on dependency review
+
+# ---------------------------------------------------------------------------
+# MASVS-CODE — Debugging artifacts removed from release builds
+# ---------------------------------------------------------------------------
+
+- id: MASVS-CODE.8
+  facet: Code Quality and Exploit Mitigation
+  section: Release Build Hardening
+  security_rule: >-
+    Release builds must disable debugging, verbose logging, and developer
+    backdoors, so shipped binaries do not expose diagnostic surfaces an
+    attacker can use.
+  vulnerability_pattern: >-
+    The release build leaves the debuggable flag on, keeps verbose logging
+    enabled, or compiles in test-only shortcuts, so a production binary
+    leaks internal data and is easy to instrument.
+  secure_pattern: >-
+    Release builds turn off the debuggable flag, strip verbose and
+    diagnostic logging, and exclude every test-only code path so the
+    shipped binary exposes no debugging surface.
+  code_patterns:
+    generic:
+      vulnerable: |
+        releaseConfig = {debuggable: true, verboseLogging: true}
+      secure: |
+        releaseConfig = {debuggable: false, verboseLogging: false}
+    swift:
+      vulnerable: |
+        // logging unconditional in all configurations
+        print("token=\(authToken)")
+      secure: |
+        #if DEBUG
+        print("token=\(authToken)")
+        #endif
+    kotlin:
+      vulnerable: |
+        buildTypes { release { isDebuggable = true } }
+      secure: |
+        buildTypes { release { isDebuggable = false; isMinifyEnabled = true } }
+    java:
+      vulnerable: |
+        buildTypes { release { debuggable true } }
+      secure: |
+        buildTypes { release { debuggable false; minifyEnabled true } }
+    dart:
+      vulnerable: |
+        debugPrint("session=$sessionId");   // runs in release too
+      secure: |
+        if (kDebugMode) debugPrint("session=$sessionId");

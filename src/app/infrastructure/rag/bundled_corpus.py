@@ -39,6 +39,7 @@ BUNDLED_CORPORA: Dict[str, Dict[str, str]] = {
     "cheatsheets": {"csv": "cheatsheets_corpus.csv", "facet": "concern_area"},
     "llm_top10": {"csv": "llm_top10_corpus.csv", "facet": "concern_area"},
     "agentic_top10": {"csv": "agentic_top10_corpus.csv", "facet": "concern_area"},
+    "masvs": {"csv": "masvs_corpus.csv", "facet": "concern_area"},
 }
 
 

@@ -112,6 +112,7 @@ def test_only_if_empty_skips_already_populated_frameworks():
             "cheatsheets": 112,
             "llm_top10": 88,
             "agentic_top10": 95,
+            "masvs": 69,
         }
     )
     result = ingest_all_bundled_corpora(store, only_if_empty=True)

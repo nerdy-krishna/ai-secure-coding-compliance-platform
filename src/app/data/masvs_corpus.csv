@@ -1,0 +1,4048 @@
+id,document,embed_text,concern_area
+MASVS-STORAGE.1,"**Security Rule:** Sensitive data such as credentials, tokens, and keys must be stored in the platform credential store — the iOS Keychain or the Android Keystore-backed store — and never in plain application files or preferences.
+
+**Vulnerability Pattern (Description):** A secret such as an auth token or password is written to a plain preferences file, plist, or local file, where it is readable by anyone with filesystem or backup access to the device.
+
+**Secure Pattern (Description):** Secrets are written to the operating system credential store, which is hardware-backed where available, so the value is encrypted at rest and scoped to the application.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await SharedPreferences.getInstance()
+  ..then((p) => p.setString(""token"", token));
+```
+Secure:
+```
+await const FlutterSecureStorage().write(key: ""token"", value: token);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+preferences.write(""auth_token"", token)   # plain on-disk file
+```
+Secure:
+```
+keychainStore.set(""auth_token"", token)   # OS credential store
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+getSharedPreferences(""p"", MODE_PRIVATE).edit().putString(""token"", token).apply();
+```
+Secure:
+```
+SharedPreferences prefs = EncryptedSharedPreferences.create(context,
+    ""secure_p"", masterKey, AES256_SIV, AES256_GCM);
+prefs.edit().putString(""token"", token).apply();
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+getSharedPreferences(""p"", MODE_PRIVATE).edit().putString(""token"", token).apply()
+```
+Secure:
+```
+val prefs = EncryptedSharedPreferences.create(context, ""secure_p"", masterKey,
+    AES256_SIV, AES256_GCM)
+prefs.edit().putString(""token"", token).apply()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+UserDefaults.standard.set(token, forKey: ""authToken"")
+```
+Secure:
+```
+let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+    kSecAttrAccount as String: ""authToken"",
+    kSecValueData as String: Data(token.utf8)]
+SecItemAdd(q as CFDictionary, nil)
+```","Sensitive data such as credentials, tokens, and keys must be stored in the platform credential store — the iOS Keychain or the Android Keystore-backed store — and never in plain application files or preferences.
+A secret such as an auth token or password is written to a plain preferences file, plist, or local file, where it is readable by anyone with filesystem or backup access to the device.
+Secrets are written to the operating system credential store, which is hardware-backed where available, so the value is encrypted at rest and scoped to the application.",Data Storage
+MASVS-STORAGE.2,"**Security Rule:** The application must not store sensitive data in locations that are world-readable, externally accessible, or unencrypted, such as external storage, the SD card, or a local database without encryption.
+
+**Vulnerability Pattern (Description):** Sensitive data is written to external or shared storage or to an unencrypted local database, so any other app or any user with device access can read it.
+
+**Secure Pattern (Description):** Sensitive data is confined to the app-private sandbox and held in an encrypted database or store, so it is not reachable by other apps and is unreadable without the app's key.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+File(""${(await getExternalStorageDirectory())!.path}/data.json"")
+  .writeAsStringSync(sensitiveJson);
+```
+Secure:
+```
+final db = await openDatabase(""${(await getApplicationSupportDirectory())
+  .path}/data.db"", password: passphrase);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+writeFile(externalStorageDir + ""/profile.db"", sensitiveData)
+```
+Secure:
+```
+encryptedDb.openInPrivateSandbox(key).write(sensitiveData)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+new FileOutputStream(new File(Environment.getExternalStorageDirectory(),
+    ""cards.db"")).write(sensitiveBytes);
+```
+Secure:
+```
+SQLiteDatabase db = SQLiteDatabase.openOrCreateDatabase(
+    new File(getFilesDir(), ""cards.db""), passphrase, null);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+File(getExternalFilesDir(null), ""cards.db"").writeBytes(sensitiveBytes)
+```
+Secure:
+```
+val db = SQLiteDatabase.openOrCreateDatabase(
+    File(filesDir, ""cards.db""), passphrase, null)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+try data.write(to: sharedContainerURL.appendingPathComponent(""notes.txt""))
+```
+Secure:
+```
+try data.write(to: appSupportURL.appendingPathComponent(""notes.txt""),
+    options: .completeFileProtection)
+```","The application must not store sensitive data in locations that are world-readable, externally accessible, or unencrypted, such as external storage, the SD card, or a local database without encryption.
+Sensitive data is written to external or shared storage or to an unencrypted local database, so any other app or any user with device access can read it.
+Sensitive data is confined to the app-private sandbox and held in an encrypted database or store, so it is not reachable by other apps and is unreadable without the app's key.",Data Storage
+MASVS-STORAGE.3,"**Security Rule:** Sensitive data must be excluded from cloud and local device backups so it cannot be extracted from an unencrypted backup of the device.
+
+**Vulnerability Pattern (Description):** A file or preference holding a secret is left eligible for iCloud, iTunes, or Android auto-backup, so the secret is copied off-device into a backup an attacker may obtain.
+
+**Secure Pattern (Description):** Secrets are stored in the credential store, which is not backed up by default, or files holding them are explicitly flagged as excluded from backup and from the auto-backup ruleset.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await File(secretPath).writeAsString(secret);   // auto-backup eligible
+```
+Secure:
+```
+await const FlutterSecureStorage(
+  aOptions: AndroidOptions(encryptedSharedPreferences: true))
+  .write(key: ""secret"", value: secret);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+saveSecretFile(path)                  # included in device backup
+```
+Secure:
+```
+saveSecretFile(path); markExcludedFromBackup(path)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+// AndroidManifest.xml
+<application android:allowBackup=""true"">
+```
+Secure:
+```
+// AndroidManifest.xml — exclude secrets dir from auto-backup
+<application android:allowBackup=""false"">
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+<application android:allowBackup=""true"" android:fullBackupContent=""true"">
+```
+Secure:
+```
+<application android:allowBackup=""false""
+    android:dataExtractionRules=""@xml/data_extraction_rules"">
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+try data.write(to: secretURL)         # backed up to iCloud by default
+```
+Secure:
+```
+var url = secretURL
+var rv = URLResourceValues(); rv.isExcludedFromBackup = true
+try url.setResourceValues(rv)
+```","Sensitive data must be excluded from cloud and local device backups so it cannot be extracted from an unencrypted backup of the device.
+A file or preference holding a secret is left eligible for iCloud, iTunes, or Android auto-backup, so the secret is copied off-device into a backup an attacker may obtain.
+Secrets are stored in the credential store, which is not backed up by default, or files holding them are explicitly flagged as excluded from backup and from the auto-backup ruleset.",Data Storage
+MASVS-STORAGE.4,"**Security Rule:** Sensitive data must not be written to application logs, including the system log, crash logs, and console output, where other apps or support tooling could read it.
+
+**Vulnerability Pattern (Description):** Credentials, tokens, or personal data are passed to a logging call, so the secret is persisted to a log buffer that is readable by diagnostics tools or shipped to a crash service.
+
+**Secure Pattern (Description):** Log statements emit only non-sensitive identifiers, and any secret is redacted or omitted, with verbose and debug logging disabled in release builds.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+debugPrint(""api key: $apiKey"");
+```
+Secure:
+```
+debugPrint(""request completed: status=$statusCode"");
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+log.debug(""login ok, token="" + token)
+```
+Secure:
+```
+log.debug(""login ok for userId="" + userId)   # no secret in log
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+Log.d(""Auth"", ""token="" + token);
+```
+Secure:
+```
+Log.d(""Auth"", ""auth succeeded for user "" + userId);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+Log.d(""Auth"", ""password=$password"")
+```
+Secure:
+```
+Log.d(""Auth"", ""auth succeeded for user $userId"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+print(""session token: \(token)"")
+```
+Secure:
+```
+os_log(""session established"", log: .default, type: .info)
+```","Sensitive data must not be written to application logs, including the system log, crash logs, and console output, where other apps or support tooling could read it.
+Credentials, tokens, or personal data are passed to a logging call, so the secret is persisted to a log buffer that is readable by diagnostics tools or shipped to a crash service.
+Log statements emit only non-sensitive identifiers, and any secret is redacted or omitted, with verbose and debug logging disabled in release builds.",Data Storage
+MASVS-STORAGE.5,"**Security Rule:** The application must not expose sensitive data through unprotected inter-process communication channels such as exported content providers, broadcasts, clipboard, or shared activities.
+
+**Vulnerability Pattern (Description):** Sensitive data is placed on a channel reachable by other apps — an exported content provider, an implicit broadcast, or the global clipboard — so any installed app can read it.
+
+**Secure Pattern (Description):** IPC components are not exported, are guarded by a signature-level permission, and sensitive values are kept off the shared clipboard or flagged as sensitive when they must be copied.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await Clipboard.setData(ClipboardData(text: sessionToken));
+```
+Secure:
+```
+// keep secrets off the shared clipboard; pass in-process instead
+sessionService.useTokenInMemory(sessionToken);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+broadcast(intentWith(secret))          # any app can receive it
+```
+Secure:
+```
+sendToSelfOnly(intentWith(secret), signaturePermission)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+ClipData clip = ClipData.newPlainText(""token"", token);
+clipboard.setPrimaryClip(clip);
+```
+Secure:
+```
+PersistableBundle extras = new PersistableBundle();
+extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true);
+clip.getDescription().setExtras(extras);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+<provider android:name="".SecretProvider"" android:exported=""true""/>
+```
+Secure:
+```
+<provider android:name="".SecretProvider"" android:exported=""false""
+    android:permission=""com.app.permission.SIGNATURE""/>
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+UIPasteboard.general.string = creditCardNumber
+```
+Secure:
+```
+let pb = UIPasteboard.general
+pb.setItems([[""cc"": creditCardNumber]],
+    options: [.expirationDate: Date().addingTimeInterval(60)])
+```","The application must not expose sensitive data through unprotected inter-process communication channels such as exported content providers, broadcasts, clipboard, or shared activities.
+Sensitive data is placed on a channel reachable by other apps — an exported content provider, an implicit broadcast, or the global clipboard — so any installed app can read it.
+IPC components are not exported, are guarded by a signature-level permission, and sensitive values are kept off the shared clipboard or flagged as sensitive when they must be copied.",Data Storage
+MASVS-STORAGE.6,"**Security Rule:** Input fields that accept sensitive data must disable third-party keyboard caching, predictive text, and autofill so secrets are not retained by the keyboard or system autofill store.
+
+**Vulnerability Pattern (Description):** A password or other sensitive field allows predictive text or autofill, so the value is cached by the keyboard dictionary or the autofill service and can leak into another context.
+
+**Secure Pattern (Description):** Sensitive fields are marked as secure or password entry and opt out of autofill, so the keyboard does not learn the value and the system does not store it.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+TextField(controller: pwController);
+```
+Secure:
+```
+TextField(controller: pwController, obscureText: true,
+    enableSuggestions: false, autocorrect: false);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+textField(sensitive=true)              # predictive text still on
+```
+Secure:
+```
+textField(sensitive=true, autocorrect=false, autofill=false)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+editText.setInputType(InputType.TYPE_CLASS_TEXT);
+```
+Secure:
+```
+editText.setInputType(InputType.TYPE_CLASS_TEXT
+    | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+editText.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+<EditText android:inputType=""text""/>
+```
+Secure:
+```
+<EditText android:inputType=""textPassword""
+    android:importantForAutofill=""no""/>
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+passwordField.autocorrectionType = .yes
+```
+Secure:
+```
+passwordField.isSecureTextEntry = true
+passwordField.autocorrectionType = .no
+```","Input fields that accept sensitive data must disable third-party keyboard caching, predictive text, and autofill so secrets are not retained by the keyboard or system autofill store.
+A password or other sensitive field allows predictive text or autofill, so the value is cached by the keyboard dictionary or the autofill service and can leak into another context.
+Sensitive fields are marked as secure or password entry and opt out of autofill, so the keyboard does not learn the value and the system does not store it.",Data Storage
+MASVS-STORAGE.7,"**Security Rule:** The application must prevent sensitive data on screen from being captured in the task-switcher snapshot the operating system takes when the app moves to the background.
+
+**Vulnerability Pattern (Description):** A screen showing sensitive data is left visible when the app is backgrounded, so the OS stores a snapshot of it that is shown in the app switcher and saved to disk.
+
+**Secure Pattern (Description):** On entering the background the sensitive view is hidden behind an overlay or blurred, or the window is flagged secure, so the captured snapshot reveals nothing sensitive.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+Widget build(BuildContext c) => AccountBalanceView();
+```
+Secure:
+```
+// flutter_windowmanager — block snapshot of sensitive screen
+await FlutterWindowManager.addFlags(FlutterWindowManager.FLAG_SECURE);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+onBackground():  pass                  # sensitive screen snapshotted
+```
+Secure:
+```
+onBackground():  showPrivacyOverlay()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+setContentView(R.layout.account);
+```
+Secure:
+```
+getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+    WindowManager.LayoutParams.FLAG_SECURE);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+// no FLAG_SECURE — balance screen captured to task snapshot
+setContentView(R.layout.account)
+```
+Secure:
+```
+window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+    WindowManager.LayoutParams.FLAG_SECURE)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func sceneWillResignActive(_ scene: UIScene) { }
+```
+Secure:
+```
+func sceneWillResignActive(_ scene: UIScene) {
+    window?.addSubview(privacyBlurOverlay)
+}
+```","The application must prevent sensitive data on screen from being captured in the task-switcher snapshot the operating system takes when the app moves to the background.
+A screen showing sensitive data is left visible when the app is backgrounded, so the OS stores a snapshot of it that is shown in the app switcher and saved to disk.
+On entering the background the sensitive view is hidden behind an overlay or blurred, or the window is flagged secure, so the captured snapshot reveals nothing sensitive.",Data Storage
+MASVS-STORAGE.8,"**Security Rule:** Encryption keys protecting stored sensitive data must be generated and held in hardware-backed storage and gated on user authentication, so the keys cannot be extracted or used outside the device.
+
+**Vulnerability Pattern (Description):** An encryption key is created in software and stored as a string or file alongside the data it protects, so an attacker who reads the storage also obtains the key.
+
+**Secure Pattern (Description):** Keys are generated inside the Secure Enclave or hardware Keystore as non-exportable, with access bound to device unlock or biometric authentication, so the key never exists in plain application memory.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final key = base64Encode(randomBytes(32));   // stored next to data
+```
+Secure:
+```
+await const FlutterSecureStorage(
+  iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device))
+  .write(key: ""dek"", value: dek);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+key = randomBytes(32); saveFile(""data.key"", key)
+```
+Secure:
+```
+key = hardwareKeystore.generateNonExportableKey(requireUserAuth=true)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+SecretKey key = KeyGenerator.getInstance(""AES"").generateKey();
+```
+Secure:
+```
+KeyGenerator kg = KeyGenerator.getInstance(""AES"", ""AndroidKeyStore"");
+kg.init(new KeyGenParameterSpec.Builder(""k"", PURPOSE_ENCRYPT | PURPOSE_DECRYPT)
+    .setUserAuthenticationRequired(true).build());
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val key = KeyGenerator.getInstance(""AES"").generateKey()  // not in Keystore
+```
+Secure:
+```
+val spec = KeyGenParameterSpec.Builder(""k"", PURPOSE_ENCRYPT or PURPOSE_DECRYPT)
+    .setUserAuthenticationRequired(true)
+    .setIsStrongBoxBacked(true).build()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let key = SymmetricKey(size: .bits256)   # lives in app memory
+```
+Secure:
+```
+let access = SecAccessControlCreateWithFlags(nil,
+    kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+    .privateKeyUsage, nil)
+```","Encryption keys protecting stored sensitive data must be generated and held in hardware-backed storage and gated on user authentication, so the keys cannot be extracted or used outside the device.
+An encryption key is created in software and stored as a string or file alongside the data it protects, so an attacker who reads the storage also obtains the key.
+Keys are generated inside the Secure Enclave or hardware Keystore as non-exportable, with access bound to device unlock or biometric authentication, so the key never exists in plain application memory.",Data Storage
+MASVS-STORAGE.9,"**Security Rule:** Sensitive data must be removed from storage and memory when it is no longer needed — on logout, on session end, or when the user revokes access — so it does not linger on the device.
+
+**Vulnerability Pattern (Description):** On logout the application clears the in-memory session but leaves cached tokens, credentials, or personal data on disk, so the next person with the device can recover the previous user's data.
+
+**Secure Pattern (Description):** Logout and account removal explicitly delete every credential-store entry, cached file, and database row holding sensitive data, and overwrite or release the corresponding in-memory buffers.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+void logout() => session = null;
+```
+Secure:
+```
+Future<void> logout() async {
+  session = null;
+  await const FlutterSecureStorage().deleteAll();
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+onLogout():  session = null            # disk cache untouched
+```
+Secure:
+```
+onLogout():  session = null; credentialStore.deleteAll(); cache.purge()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+void logout() { sessionHolder.clear(); }
+```
+Secure:
+```
+void logout() {
+    sessionHolder.clear();
+    encryptedPrefs.edit().clear().apply();
+    context.deleteDatabase(""cards.db"");
+}
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+fun logout() { sessionHolder.clear() }
+```
+Secure:
+```
+fun logout() {
+    sessionHolder.clear()
+    encryptedPrefs.edit().clear().apply()
+    context.deleteDatabase(""cards.db"")
+}
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func logout() { self.session = nil }
+```
+Secure:
+```
+func logout() {
+    self.session = nil
+    SecItemDelete([kSecClass as String: kSecClassGenericPassword] as CFDictionary)
+}
+```","Sensitive data must be removed from storage and memory when it is no longer needed — on logout, on session end, or when the user revokes access — so it does not linger on the device.
+On logout the application clears the in-memory session but leaves cached tokens, credentials, or personal data on disk, so the next person with the device can recover the previous user's data.
+Logout and account removal explicitly delete every credential-store entry, cached file, and database row holding sensitive data, and overwrite or release the corresponding in-memory buffers.",Data Storage
+MASVS-CRYPTO.1,"**Security Rule:** The app must rely only on current, standard cryptographic primitives for both ciphers and hashes, and must not use algorithms that are broken or deprecated such as DES, 3DES, RC4, Blowfish, MD5, or SHA-1.
+
+**Vulnerability Pattern (Description):** A cipher or hash that is broken or deprecated is selected, so an attacker can recover plaintext from captured ciphertext or craft a second input with the same digest with feasible effort.
+
+**Secure Pattern (Description):** A current, well-vetted primitive such as AES with a 256-bit key for encryption and a SHA-2 or SHA-3 hash for integrity is selected, ideally through a high-level library that exposes only modern algorithms.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final cipher = encrypt.Encrypter(encrypt.Salsa20(key));
+```
+Secure:
+```
+final algo = AesGcm.with256bits();   // package:cryptography
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+cipher = newCipher(""DES"")          # broken 56-bit cipher
+digest = md5(content)              # collisions are practical
+```
+Secure:
+```
+cipher = newCipher(""AES-256"")
+digest = sha256(content)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+Cipher c = Cipher.getInstance(""Blowfish"");
+MessageDigest md = MessageDigest.getInstance(""SHA-1"");
+```
+Secure:
+```
+Cipher c = Cipher.getInstance(""AES/GCM/NoPadding"");
+MessageDigest md = MessageDigest.getInstance(""SHA-256"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val cipher = Cipher.getInstance(""DES/ECB/PKCS5Padding"")
+```
+Secure:
+```
+val cipher = Cipher.getInstance(""AES/GCM/NoPadding"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let algo = CCAlgorithm(kCCAlgorithm3DES)
+let h = Insecure.MD5.hash(data: content)
+```
+Secure:
+```
+let sealed = try AES.GCM.seal(plaintext, using: key)
+let h = SHA256.hash(data: content)
+```","The app must rely only on current, standard cryptographic primitives for both ciphers and hashes, and must not use algorithms that are broken or deprecated such as DES, 3DES, RC4, Blowfish, MD5, or SHA-1.
+A cipher or hash that is broken or deprecated is selected, so an attacker can recover plaintext from captured ciphertext or craft a second input with the same digest with feasible effort.
+A current, well-vetted primitive such as AES with a 256-bit key for encryption and a SHA-2 or SHA-3 hash for integrity is selected, ideally through a high-level library that exposes only modern algorithms.",Cryptography
+MASVS-CRYPTO.2,"**Security Rule:** Symmetric encryption of data must use an authenticated mode such as AES-GCM, and must never use ECB mode or an unauthenticated mode without a separate integrity check.
+
+**Vulnerability Pattern (Description):** Data is encrypted with ECB mode or with a mode that provides no integrity, so identical plaintext blocks leak structure and an attacker can tamper with ciphertext undetected.
+
+**Secure Pattern (Description):** An authenticated encryption mode such as GCM is used, so each encryption is randomized and any modification of the ciphertext is detected on decryption.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final enc = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.ecb));
+```
+Secure:
+```
+final enc = encrypt.Encrypter(encrypt.AES(key, mode: encrypt.AESMode.gcm));
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+encrypt(data, key, mode=""ECB"")
+```
+Secure:
+```
+encrypt(data, key, mode=""GCM"")     # confidentiality and integrity
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+Cipher c = Cipher.getInstance(""AES/ECB/PKCS5Padding"");
+```
+Secure:
+```
+Cipher c = Cipher.getInstance(""AES/GCM/NoPadding"");
+c.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val c = Cipher.getInstance(""AES/ECB/PKCS5Padding"")
+```
+Secure:
+```
+val c = Cipher.getInstance(""AES/GCM/NoPadding"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let out = try AES(key: key, blockMode: ECB()).encrypt(bytes)
+```
+Secure:
+```
+let sealed = try AES.GCM.seal(data, using: SymmetricKey(data: key))
+```","Symmetric encryption of data must use an authenticated mode such as AES-GCM, and must never use ECB mode or an unauthenticated mode without a separate integrity check.
+Data is encrypted with ECB mode or with a mode that provides no integrity, so identical plaintext blocks leak structure and an attacker can tamper with ciphertext undetected.
+An authenticated encryption mode such as GCM is used, so each encryption is randomized and any modification of the ciphertext is detected on decryption.",Cryptography
+MASVS-CRYPTO.3,"**Security Rule:** Initialization vectors and nonces must be generated fresh for every encryption operation using a cryptographically secure random source, and must never be hardcoded, zeroed, or reused with the same key.
+
+**Vulnerability Pattern (Description):** A fixed, zeroed, or counter-derived IV or nonce is used across many encryptions with the same key, so the keystream repeats and an attacker can recover or forge plaintext.
+
+**Secure Pattern (Description):** A unique IV or nonce is drawn from a secure random generator for each operation and stored or transmitted alongside the ciphertext rather than being reused.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final iv = encrypt.IV(Uint8List(16));
+```
+Secure:
+```
+final iv = encrypt.IV.fromSecureRandom(12);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+iv = bytes(16)                     # all-zero IV reused every time
+```
+Secure:
+```
+iv = secureRandomBytes(12)         # fresh per encryption
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+IvParameterSpec iv = new IvParameterSpec(new byte[16]);
+```
+Secure:
+```
+byte[] iv = new byte[12];
+SecureRandom.getInstanceStrong().nextBytes(iv);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val iv = IvParameterSpec(ByteArray(16))
+```
+Secure:
+```
+val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let nonce = try AES.GCM.Nonce(data: Data(repeating: 0, count: 12))
+```
+Secure:
+```
+let nonce = AES.GCM.Nonce()        # random per call
+```","Initialization vectors and nonces must be generated fresh for every encryption operation using a cryptographically secure random source, and must never be hardcoded, zeroed, or reused with the same key.
+A fixed, zeroed, or counter-derived IV or nonce is used across many encryptions with the same key, so the keystream repeats and an attacker can recover or forge plaintext.
+A unique IV or nonce is drawn from a secure random generator for each operation and stored or transmitted alongside the ciphertext rather than being reused.",Cryptography
+MASVS-CRYPTO.4,"**Security Rule:** Any value requiring unpredictability — keys, IVs, salts, tokens, or session identifiers — must come from a cryptographically secure random number generator, never from a statistical PRNG.
+
+**Vulnerability Pattern (Description):** A non-cryptographic generator seeded from time or a predictable state produces a value that needs to be unguessable, so an attacker can reproduce or narrow the value.
+
+**Secure Pattern (Description):** A platform cryptographically secure random API is used to generate all security-sensitive values.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final token = Random().nextInt(1 << 32);
+```
+Secure:
+```
+final token = Random.secure().nextInt(1 << 32);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+token = weakRandom()               # statistical PRNG
+```
+Secure:
+```
+token = cryptoSecureRandom()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+long token = new Random().nextLong();
+```
+Secure:
+```
+byte[] token = new byte[32];
+SecureRandom.getInstanceStrong().nextBytes(token);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val token = Random().nextLong()
+```
+Secure:
+```
+val token = ByteArray(32).also { SecureRandom().nextBytes(it) }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let token = UInt32.random(in: 0...UInt32.max)
+```
+Secure:
+```
+var bytes = [UInt8](repeating: 0, count: 32)
+_ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+```","Any value requiring unpredictability — keys, IVs, salts, tokens, or session identifiers — must come from a cryptographically secure random number generator, never from a statistical PRNG.
+A non-cryptographic generator seeded from time or a predictable state produces a value that needs to be unguessable, so an attacker can reproduce or narrow the value.
+A platform cryptographically secure random API is used to generate all security-sensitive values.",Cryptography
+MASVS-CRYPTO.5,"**Security Rule:** Passwords and other low-entropy secrets must be hashed with a dedicated, memory-hard or work-factored algorithm such as Argon2id, scrypt, bcrypt, or PBKDF2 with a per-secret salt.
+
+**Vulnerability Pattern (Description):** A fast general-purpose hash or an unsalted hash is used to store passwords, so an attacker who obtains the digests can crack them quickly with precomputed tables or brute force.
+
+**Secure Pattern (Description):** A purpose-built password hashing function with a tuned work factor and a unique random salt per password is used, so each guess is expensive.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final digest = sha256.convert(utf8.encode(password));
+```
+Secure:
+```
+final hash = DBCrypt().hashpw(password, DBCrypt().gensalt());
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+stored = sha256(password)          # fast, unsalted
+```
+Secure:
+```
+stored = argon2id(password, salt=secureRandomBytes(16))
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+byte[] d = MessageDigest.getInstance(""MD5"").digest(pw.getBytes());
+```
+Secure:
+```
+String hash = new Argon2PasswordEncoder(16, 32, 1, 65536, 3).encode(pw);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val digest = MessageDigest.getInstance(""SHA-256"").digest(pw.toByteArray())
+```
+Secure:
+```
+val hash = BCrypt.withDefaults().hashToString(12, pw.toCharArray())
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let digest = SHA256.hash(data: Data(password.utf8))
+```
+Secure:
+```
+let key = try Argon2.hash(password: password, salt: salt)
+```","Passwords and other low-entropy secrets must be hashed with a dedicated, memory-hard or work-factored algorithm such as Argon2id, scrypt, bcrypt, or PBKDF2 with a per-secret salt.
+A fast general-purpose hash or an unsalted hash is used to store passwords, so an attacker who obtains the digests can crack them quickly with precomputed tables or brute force.
+A purpose-built password hashing function with a tuned work factor and a unique random salt per password is used, so each guess is expensive.",Cryptography
+MASVS-CRYPTO.6,"**Security Rule:** Message authentication codes must be computed with a keyed construction such as HMAC, and any comparison of MACs, tokens, or digests must be performed in constant time.
+
+**Vulnerability Pattern (Description):** A MAC is built from a plain hash of key and message, or two secret values are compared with an ordinary equality check, so an attacker can forge tags or use timing differences to recover the secret.
+
+**Secure Pattern (Description):** A standard HMAC construction is used for authentication and all comparisons of secret-derived values use a constant-time equality routine.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+if (tag == sha256.convert(key + message).bytes) accept();
+```
+Secure:
+```
+final mac = Hmac(sha256, key).convert(message).bytes;
+if (constantTimeBytesEquality(tag, mac)) accept();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if mac == sha256(key + message): accept()
+```
+Secure:
+```
+if constantTimeEquals(mac, hmacSha256(key, message)): accept()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+if (Arrays.equals(tag, sha256(concat(key, message)))) accept();
+```
+Secure:
+```
+Mac mac = Mac.getInstance(""HmacSHA256"");
+mac.init(key);
+if (MessageDigest.isEqual(tag, mac.doFinal(message))) accept();
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+if (tag.contentEquals(sha256(key + message))) accept()
+```
+Secure:
+```
+val mac = Mac.getInstance(""HmacSHA256"").apply { init(key) }.doFinal(message)
+if (MessageDigest.isEqual(tag, mac)) accept()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+if tag == Data(SHA256.hash(data: key + message)) { accept() }
+```
+Secure:
+```
+let valid = HMAC<SHA256>.isValidAuthenticationCode(tag, authenticating: message, using: key)
+```","Message authentication codes must be computed with a keyed construction such as HMAC, and any comparison of MACs, tokens, or digests must be performed in constant time.
+A MAC is built from a plain hash of key and message, or two secret values are compared with an ordinary equality check, so an attacker can forge tags or use timing differences to recover the secret.
+A standard HMAC construction is used for authentication and all comparisons of secret-derived values use a constant-time equality routine.",Cryptography
+MASVS-CRYPTO.7,"**Security Rule:** Cryptographic keys, passwords, and other secrets must never be hardcoded in source code, resource files, or the app binary, where anyone who extracts the package can read them.
+
+**Vulnerability Pattern (Description):** A key or secret is embedded as a literal in code or in a bundled resource, so it is identical for every install and is trivially recovered by decompiling or unzipping the app.
+
+**Secure Pattern (Description):** Keys are generated on the device at first run or derived from user input, and are stored in the platform hardware-backed keystore rather than shipped inside the app.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+const key = ""S3cr3tAESKey0123456789ABCDEF0123"";
+```
+Secure:
+```
+final key = await secureStorage.read(key: ""data-key"");  # flutter_secure_storage
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+key = ""S3cr3tAESKey0123456789ABCDEF0123""   # baked into the binary
+```
+Secure:
+```
+key = keystore.getOrCreateKey(""data-key"")  # device-generated, in keystore
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+SecretKeySpec key = new SecretKeySpec(""S3cr3tAESKey0123"".getBytes(), ""AES"");
+```
+Secure:
+```
+KeyStore ks = KeyStore.getInstance(""AndroidKeyStore"");
+ks.load(null);
+SecretKey key = ((SecretKeyEntry) ks.getEntry(""data-key"", null)).getSecretKey();
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val key = SecretKeySpec(""S3cr3tAESKey0123"".toByteArray(), ""AES"")
+```
+Secure:
+```
+val key = (KeyStore.getInstance(""AndroidKeyStore"")
+    .apply { load(null) }.getEntry(""data-key"", null) as SecretKeyEntry).secretKey
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let key = SymmetricKey(data: Data(""S3cr3tAESKey0123"".utf8))
+```
+Secure:
+```
+let key = SymmetricKey(size: .bits256)      # stored via Keychain
+```","Cryptographic keys, passwords, and other secrets must never be hardcoded in source code, resource files, or the app binary, where anyone who extracts the package can read them.
+A key or secret is embedded as a literal in code or in a bundled resource, so it is identical for every install and is trivially recovered by decompiling or unzipping the app.
+Keys are generated on the device at first run or derived from user input, and are stored in the platform hardware-backed keystore rather than shipped inside the app.",Cryptography
+MASVS-CRYPTO.8,"**Security Rule:** Cryptographic keys must be stored in the platform secure key store — the Android Keystore or iOS Keychain backed by the Secure Enclave — so that key material cannot be exported from the device.
+
+**Vulnerability Pattern (Description):** Key material is held in a shared preference, plist, plain file, or in memory longer than needed, so a backup, a rooted device, or another app can read the raw key.
+
+**Secure Pattern (Description):** Keys are generated and held inside the hardware-backed keystore and are referenced by alias for crypto operations, so the raw bytes never leave secure hardware.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await File(""key.txt"").writeAsString(base64Encode(key));
+```
+Secure:
+```
+const storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true));
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+writeFile(""prefs"", key)            # raw key on the filesystem
+```
+Secure:
+```
+keystore.generateKey(alias=""data-key"", hardwareBacked=true)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+prefs.edit().putString(""encKey"",
+    Base64.getEncoder().encodeToString(key.getEncoded())).apply();
+```
+Secure:
+```
+KeyGenerator kg = KeyGenerator.getInstance(""AES"", ""AndroidKeyStore"");
+kg.init(new KeyGenParameterSpec.Builder(""data-key"",
+    KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT).build());
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+prefs.edit().putString(""encKey"", Base64.encodeToString(key.encoded, 0)).apply()
+```
+Secure:
+```
+val spec = KeyGenParameterSpec.Builder(""data-key"", PURPOSE_ENCRYPT or PURPOSE_DECRYPT)
+    .setBlockModes(BLOCK_MODE_GCM).setEncryptionPaddings(ENCRYPTION_PADDING_NONE).build()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+UserDefaults.standard.set(keyData, forKey: ""encKey"")
+```
+Secure:
+```
+let access = SecAccessControlCreateWithFlags(nil,
+    kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .privateKeyUsage, nil)
+```","Cryptographic keys must be stored in the platform secure key store — the Android Keystore or iOS Keychain backed by the Secure Enclave — so that key material cannot be exported from the device.
+Key material is held in a shared preference, plist, plain file, or in memory longer than needed, so a backup, a rooted device, or another app can read the raw key.
+Keys are generated and held inside the hardware-backed keystore and are referenced by alias for crypto operations, so the raw bytes never leave secure hardware.",Cryptography
+MASVS-CRYPTO.9,"**Security Rule:** Encryption keys derived from a user passphrase must use a standard key derivation function with a unique random salt and a high iteration or cost factor, never the raw passphrase as the key.
+
+**Vulnerability Pattern (Description):** A passphrase is used directly as a key, or is run through a fast derivation with no salt or a low iteration count, so the resulting key is weak and quick to brute force offline.
+
+**Secure Pattern (Description):** A vetted key derivation function such as PBKDF2, scrypt, or Argon2 is applied with a per-user random salt and a deliberately high cost factor to produce the key.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final key = utf8.encode(passphrase).sublist(0, 32);
+```
+Secure:
+```
+final key = await Pbkdf2(macAlgorithm: Hmac.sha256(), iterations: 210000,
+    bits: 256).deriveKey(secretKey: SecretKey(utf8.encode(passphrase)), nonce: salt);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+key = padTo32(passphrase)          # passphrase used directly
+```
+Secure:
+```
+key = pbkdf2(passphrase, salt=secureRandomBytes(16), iterations=210000)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+SecretKeySpec key = new SecretKeySpec(passphrase.getBytes(), ""AES"");
+```
+Secure:
+```
+PBEKeySpec spec = new PBEKeySpec(passphrase.toCharArray(), salt, 210000, 256);
+SecretKey key = SecretKeyFactory.getInstance(""PBKDF2WithHmacSHA256"")
+    .generateSecret(spec);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val key = SecretKeySpec(passphrase.toByteArray().copyOf(32), ""AES"")
+```
+Secure:
+```
+val spec = PBEKeySpec(passphrase.toCharArray(), salt, 210000, 256)
+val key = SecretKeyFactory.getInstance(""PBKDF2WithHmacSHA256"").generateSecret(spec)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let key = SymmetricKey(data: Data(passphrase.utf8))
+```
+Secure:
+```
+let key = try KDF.PBKDF2.deriveKey(from: Data(passphrase.utf8),
+    salt: salt, outputByteCount: 32, rounds: 210000)
+```","Encryption keys derived from a user passphrase must use a standard key derivation function with a unique random salt and a high iteration or cost factor, never the raw passphrase as the key.
+A passphrase is used directly as a key, or is run through a fast derivation with no salt or a low iteration count, so the resulting key is weak and quick to brute force offline.
+A vetted key derivation function such as PBKDF2, scrypt, or Argon2 is applied with a per-user random salt and a deliberately high cost factor to produce the key.",Cryptography
+MASVS-CRYPTO.10,"**Security Rule:** Cryptographic keys must have a defined lifecycle — rotatable, revocable on compromise, and securely destroyed when retired — and a given key must serve one purpose only, never both encryption and authentication.
+
+**Vulnerability Pattern (Description):** A single static key is created once, reused for every purpose for the life of the install, and never rotated, so one compromise or one oracle permanently exposes all data the key ever protected.
+
+**Secure Pattern (Description):** Keys carry a version or alias, distinct keys are derived per purpose via a key derivation function with context labels, the app can re-encrypt under a new key, and retired material is deleted.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final key = await secureStorage.read(key: ""data-key"");
+```
+Secure:
+```
+final encKey = await Hkdf(hmac: Hmac.sha256(), outputLength: 32)
+    .deriveKey(secretKey: master, info: utf8.encode(""enc""));
+await secureStorage.delete(key: ""data-key-v1"");   # post-rotation cleanup
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+key = loadStaticKey()                       # one key, every use, forever
+encrypt(data, key); mac(data, key)
+```
+Secure:
+```
+encKey = derive(masterKey, ""enc""); macKey = derive(masterKey, ""mac"")
+onCompromise: keystore.delete(oldKeyVersion)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+SecretKey key = (SecretKey) keyStore.getKey(""data-key"", null);
+```
+Secure:
+```
+SecretKey encKey = hkdfExpand(master, ""enc"");
+SecretKey macKey = hkdfExpand(master, ""mac"");
+keyStore.deleteEntry(""data-key-v1"");         # after re-encrypt under v2
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val key = keyStore.getKey(""data-key"", null)  # single permanent alias
+```
+Secure:
+```
+val encKey = hkdf(master, ""enc""); val macKey = hkdf(master, ""mac"")
+keyStore.deleteEntry(""data-key-v1"")          # rotate to data-key-v2
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let key = loadKeyOnce()
+```
+Secure:
+```
+let encKey = HKDF<SHA256>.deriveKey(inputKeyMaterial: master,
+    info: Data(""enc"".utf8), outputByteCount: 32)
+SecItemDelete(retiredKeyQuery)               # destroy old key from Keychain
+```","Cryptographic keys must have a defined lifecycle — rotatable, revocable on compromise, and securely destroyed when retired — and a given key must serve one purpose only, never both encryption and authentication.
+A single static key is created once, reused for every purpose for the life of the install, and never rotated, so one compromise or one oracle permanently exposes all data the key ever protected.
+Keys carry a version or alias, distinct keys are derived per purpose via a key derivation function with context labels, the app can re-encrypt under a new key, and retired material is deleted.",Cryptography
+MASVS-AUTH.1,"**Security Rule:** Authentication and authorization decisions must be made and enforced on a trusted backend. The mobile app may reflect identity state in its UI but must never be the sole authority for granting access to data or actions.
+
+**Vulnerability Pattern (Description):** The app decides locally whether a user is authenticated or entitled to a feature and then calls a backend endpoint that trusts the request without re-checking, so anyone who tampers with the client can reach privileged data.
+
+**Secure Pattern (Description):** Every privileged request carries a server-issued credential, and the backend independently verifies identity and entitlement on each call. The client-side check is treated only as a usability hint.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+if (localUser.role == 'admin') {
+  await http.get(Uri.parse('$base/admin/users'));
+}
+```
+Secure:
+```
+await http.get(Uri.parse('$base/admin/users'),
+    headers: {'Authorization': 'Bearer ${await store.accessToken()}'});
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if localFlags.isAdmin: callApi(""/admin/users"")   # backend trusts caller
+```
+Secure:
+```
+callApi(""/admin/users"", token=session.accessToken)  # backend re-checks role
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+if (prefs.getBoolean(""is_admin"", false)) {
+    api.getAdminUsers()
+}
+```
+Secure:
+```
+api.getAdminUsers(""Bearer ${tokenStore.accessToken()}"")
+// server authorizes the request from the verified token
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+if UserDefaults.standard.bool(forKey: ""isAdmin"") {
+    api.get(""/admin/users"")
+}
+```
+Secure:
+```
+api.get(""/admin/users"", bearer: try keychain.accessToken())
+// server validates the token's role claim before responding
+```","Authentication and authorization decisions must be made and enforced on a trusted backend. The mobile app may reflect identity state in its UI but must never be the sole authority for granting access to data or actions.
+The app decides locally whether a user is authenticated or entitled to a feature and then calls a backend endpoint that trusts the request without re-checking, so anyone who tampers with the client can reach privileged data.
+Every privileged request carries a server-issued credential, and the backend independently verifies identity and entitlement on each call. The client-side check is treated only as a usability hint.",Authentication and Authorization
+MASVS-AUTH.2,"**Security Rule:** Session tokens, refresh tokens, and any cached credentials must be stored in the platform's hardware-backed secure storage and never in world-readable or unencrypted locations.
+
+**Vulnerability Pattern (Description):** Tokens or passwords are written to shared preferences, plist files, local databases, or log output, so any process with file access or a rooted or jailbroken device can read the user's session material.
+
+**Secure Pattern (Description):** Authentication material is held in the iOS Keychain or Android Keystore-backed EncryptedSharedPreferences, scoped to this app, and is never persisted to plain preferences or logs.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await SharedPreferences.getInstance()
+  ..setString('token', token);
+```
+Secure:
+```
+await const FlutterSecureStorage().write(key: 'token', value: token);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+plainPrefs.put(""auth_token"", token)
+```
+Secure:
+```
+secureStore.put(""auth_token"", token)   # hardware-backed keystore
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+getSharedPreferences(""auth"", MODE_PRIVATE)
+    .edit().putString(""token"", token).apply()
+```
+Secure:
+```
+EncryptedSharedPreferences.create(""auth"", masterKey, context,
+    PrefKeyEncryptionScheme.AES256_SIV, PrefValueEncryptionScheme.AES256_GCM)
+    .edit().putString(""token"", token).apply()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+UserDefaults.standard.set(token, forKey: ""authToken"")
+```
+Secure:
+```
+let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+    kSecAttrAccount as String: ""authToken"",
+    kSecValueData as String: Data(token.utf8)]
+SecItemAdd(q as CFDictionary, nil)
+```","Session tokens, refresh tokens, and any cached credentials must be stored in the platform's hardware-backed secure storage and never in world-readable or unencrypted locations.
+Tokens or passwords are written to shared preferences, plist files, local databases, or log output, so any process with file access or a rooted or jailbroken device can read the user's session material.
+Authentication material is held in the iOS Keychain or Android Keystore-backed EncryptedSharedPreferences, scoped to this app, and is never persisted to plain preferences or logs.",Authentication and Authorization
+MASVS-AUTH.3,"**Security Rule:** Biometric authentication must gate access to a secret or key held in secure hardware, so that a successful biometric result unlocks real cryptographic material rather than merely returning a boolean.
+
+**Vulnerability Pattern (Description):** The app calls a biometric prompt and, on a success callback, simply sets a local boolean or proceeds, so an attacker who hooks the callback or patches the binary bypasses the check without any biometric.
+
+**Secure Pattern (Description):** The biometric prompt is bound to a Keystore or Keychain key created with a biometric access control, and the protected operation can only complete by using the key the successful authentication unlocks.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final ok = await LocalAuthentication().authenticate(
+    localizedReason: 'Unlock');
+if (ok) unlocked = true;
+```
+Secure:
+```
+// gate a secure-storage read on biometrics, do not trust the bool alone
+await LocalAuthentication().authenticate(localizedReason: 'Unlock',
+    options: const AuthenticationOptions(biometricOnly: true));
+final secret = await const FlutterSecureStorage(
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.passcode))
+  .read(key: 'signing_key');
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+biometricPrompt(onSuccess: { unlocked = true })
+```
+Secure:
+```
+biometricPrompt(cryptoObject: keyRequiringBiometric,
+                onSuccess: { useUnlockedKey() })
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+BiometricPrompt(this, executor, object : AuthenticationCallback() {
+    override fun onAuthenticationSucceeded(r: AuthenticationResult) {
+        unlocked = true } }).authenticate(promptInfo)
+```
+Secure:
+```
+val key = keyGen.also { it.init(KeyGenParameterSpec.Builder(""k"",
+    PURPOSE_DECRYPT).setUserAuthenticationRequired(true).build()) }.generateKey()
+prompt.authenticate(promptInfo, CryptoObject(Cipher.getInstance(""AES/GCM/NoPadding"")))
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
+    localizedReason: ""Unlock"") { ok, _ in if ok { self.unlocked = true } }
+```
+Secure:
+```
+let acl = SecAccessControlCreateWithFlags(nil,
+    kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly, .biometryCurrentSet, nil)
+// key stored with this ACL; reading it forces a fresh biometric
+```","Biometric authentication must gate access to a secret or key held in secure hardware, so that a successful biometric result unlocks real cryptographic material rather than merely returning a boolean.
+The app calls a biometric prompt and, on a success callback, simply sets a local boolean or proceeds, so an attacker who hooks the callback or patches the binary bypasses the check without any biometric.
+The biometric prompt is bound to a Keystore or Keychain key created with a biometric access control, and the protected operation can only complete by using the key the successful authentication unlocks.",Authentication and Authorization
+MASVS-AUTH.4,"**Security Rule:** Credentials and session tokens must only ever be sent over a validated TLS connection, placed in the Authorization header rather than in URLs, and never embedded in query strings or logs.
+
+**Vulnerability Pattern (Description):** A token or password is appended to a request URL as a query parameter or sent over plain HTTP, so it leaks into server logs, proxy caches, analytics, and the device URL history.
+
+**Secure Pattern (Description):** The credential travels in the Authorization header of an HTTPS request to a host whose certificate has been validated, and is never written into a URL or referrer-visible location.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await http.get(Uri.parse('http://api.example.com/data?token=$token'));
+```
+Secure:
+```
+await http.get(Uri.parse('https://api.example.com/data'),
+    headers: {'Authorization': 'Bearer $token'});
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+httpGet(""http://api.example.com/data?token="" + token)
+```
+Secure:
+```
+httpsGet(""https://api.example.com/data"", header={""Authorization"": bearer(token)})
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val req = Request.Builder()
+    .url(""http://api.example.com/data?token=$token"").build()
+```
+Secure:
+```
+val req = Request.Builder()
+    .url(""https://api.example.com/data"")
+    .header(""Authorization"", ""Bearer $token"").build()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let url = URL(string: ""http://api.example.com/data?token=\(token)"")!
+URLSession.shared.dataTask(with: url).resume()
+```
+Secure:
+```
+var req = URLRequest(url: URL(string: ""https://api.example.com/data"")!)
+req.setValue(""Bearer \(token)"", forHTTPHeaderField: ""Authorization"")
+URLSession.shared.dataTask(with: req).resume()
+```","Credentials and session tokens must only ever be sent over a validated TLS connection, placed in the Authorization header rather than in URLs, and never embedded in query strings or logs.
+A token or password is appended to a request URL as a query parameter or sent over plain HTTP, so it leaks into server logs, proxy caches, analytics, and the device URL history.
+The credential travels in the Authorization header of an HTTPS request to a host whose certificate has been validated, and is never written into a URL or referrer-visible location.",Authentication and Authorization
+MASVS-AUTH.5,"**Security Rule:** On logout the app must call the backend to revoke the session and must erase every local copy of session and refresh tokens, so a stale token left on the device cannot be replayed.
+
+**Vulnerability Pattern (Description):** Logout only clears an in-memory flag or navigates to the login screen while the persisted token remains in storage and is still accepted by the server, so the session survives the logout.
+
+**Secure Pattern (Description):** Logout calls a server revocation endpoint and then deletes the access and refresh tokens from secure storage, ensuring the credential is invalid both on the device and on the backend.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+void logout() { user = null; context.go('/login'); }
+```
+Secure:
+```
+Future<void> logout() async {
+  await api.revoke(await storage.read(key: 'refresh'));
+  await const FlutterSecureStorage().deleteAll();
+  if (mounted) context.go('/login');
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+def logout(): navigateTo(loginScreen)   # token still on disk and valid
+```
+Secure:
+```
+def logout():
+    api.post(""/auth/revoke"", token=session.refreshToken)
+    secureStore.deleteAll(); navigateTo(loginScreen)
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+fun logout() { isLoggedIn = false; goToLogin() }
+```
+Secure:
+```
+suspend fun logout() {
+    api.revoke(tokenStore.refreshToken())
+    tokenStore.clear(); goToLogin()
+}
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func logout() { self.currentUser = nil; showLogin() }
+```
+Secure:
+```
+func logout() async {
+    try? await api.revoke(refresh: keychain.refreshToken())
+    keychain.deleteAll(); showLogin()
+}
+```","On logout the app must call the backend to revoke the session and must erase every local copy of session and refresh tokens, so a stale token left on the device cannot be replayed.
+Logout only clears an in-memory flag or navigates to the login screen while the persisted token remains in storage and is still accepted by the server, so the session survives the logout.
+Logout calls a server revocation endpoint and then deletes the access and refresh tokens from secure storage, ensuring the credential is invalid both on the device and on the backend.",Authentication and Authorization
+MASVS-AUTH.6,"**Security Rule:** The app must not ship hardcoded passwords, API keys, shared secrets, or backdoor accounts in its source, resources, or compiled binary, since anyone can extract them by decompiling the package.
+
+**Vulnerability Pattern (Description):** A password, signing secret, or privileged API key is written as a literal in code or a resource file, so it is recoverable from the distributed app by any user and cannot be rotated per install.
+
+**Secure Pattern (Description):** Authentication is performed against per-user credentials exchanged at runtime for short-lived tokens, and any required secret is provisioned server-side and never embedded in the client.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+const apiKey = 'AIzaSyD-hardcoded-key-value';
+```
+Secure:
+```
+final token = await authService.signIn(username, password);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+API_KEY = ""sk_live_9f3a2b7c""   # extractable from the binary
+```
+Secure:
+```
+token = authService.exchange(userCredential)   # short-lived, per user
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+const val ADMIN_PASSWORD = ""Sup3rS3cret!""
+```
+Secure:
+```
+val token = authService.signIn(username, password).accessToken
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let apiSecret = ""p@ssw0rd-shared-2026""
+```
+Secure:
+```
+let token = try await authService.signIn(username: u, password: p)
+// server returns a short-lived access token
+```","The app must not ship hardcoded passwords, API keys, shared secrets, or backdoor accounts in its source, resources, or compiled binary, since anyone can extract them by decompiling the package.
+A password, signing secret, or privileged API key is written as a literal in code or a resource file, so it is recoverable from the distributed app by any user and cannot be rotated per install.
+Authentication is performed against per-user credentials exchanged at runtime for short-lived tokens, and any required secret is provisioned server-side and never embedded in the client.",Authentication and Authorization
+MASVS-AUTH.7,"**Security Rule:** High-risk operations such as changing a password, transferring funds, or altering security settings must require a fresh authentication challenge rather than relying on the existing session alone.
+
+**Vulnerability Pattern (Description):** A sensitive action is permitted on the strength of an active session, so anyone who gains brief access to an unlocked device or a hijacked session can perform irreversible changes without re-proving identity.
+
+**Secure Pattern (Description):** Before a sensitive action the app forces a recent re-authentication — a password re-entry or a device biometric or passcode prompt — and the backend verifies that proof is fresh before applying the change.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+Future<void> transfer(double amt) => api.transfer(amt);
+```
+Secure:
+```
+Future<void> transfer(double amt) async {
+  final ok = await LocalAuthentication().authenticate(
+      localizedReason: 'Confirm transfer');
+  if (ok) await api.transfer(amt);
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+def transferFunds(amount): api.post(""/transfer"", amount)
+```
+Secure:
+```
+def transferFunds(amount):
+    proof = reauthenticate()
+    api.post(""/transfer"", amount, stepUpProof=proof)
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+fun changePassword(new: String) { api.setPassword(new) }
+```
+Secure:
+```
+fun changePassword(new: String) {
+    biometricPrompt.authenticate(reauthInfo)   // fresh proof required
+    // proceed to api.setPassword(new) only inside onAuthenticationSucceeded
+}
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func deleteAccount() { api.delete(""/account"") }
+```
+Secure:
+```
+func deleteAccount() async throws {
+    try await LAContext().evaluatePolicy(
+        .deviceOwnerAuthentication, localizedReason: ""Confirm deletion"")
+    api.delete(""/account"")
+}
+```","High-risk operations such as changing a password, transferring funds, or altering security settings must require a fresh authentication challenge rather than relying on the existing session alone.
+A sensitive action is permitted on the strength of an active session, so anyone who gains brief access to an unlocked device or a hijacked session can perform irreversible changes without re-proving identity.
+Before a sensitive action the app forces a recent re-authentication — a password re-entry or a device biometric or passcode prompt — and the backend verifies that proof is fresh before applying the change.",Authentication and Authorization
+MASVS-AUTH.8,"**Security Rule:** A device PIN, pattern, or biometric used to unlock the app must gate access to local data only, and must never substitute for proving identity to the backend before remote resources are accessed.
+
+**Vulnerability Pattern (Description):** Passing the local app-unlock check is treated as a full login, so the app reuses a long-lived stored token for backend calls without ever confirming the session is still valid for this user.
+
+**Secure Pattern (Description):** Local unlock only releases an encrypted refresh token, which is then exchanged with the backend for a fresh access token, so backend access always depends on a server-validated credential.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+if (await LocalAuthentication().authenticate(localizedReason: 'Unlock')) {
+  api.use(savedToken);
+}
+```
+Secure:
+```
+if (await LocalAuthentication().authenticate(localizedReason: 'Unlock')) {
+  final access = await authService.refresh(
+      await storage.read(key: 'refresh'));
+  api.use(access);
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if localUnlock(): useApp(longLivedToken)
+```
+Secure:
+```
+if localUnlock():
+    access = authService.refresh(decrypt(storedRefreshToken))
+    useApp(access)
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+prompt.authenticate(info)   // onSuccess -> api.use(savedToken)
+```
+Secure:
+```
+// onAuthenticationSucceeded:
+val access = authService.refresh(tokenStore.refreshToken())
+api.use(access)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+if try context.evaluatePolicy(.deviceOwnerAuthentication, ...) {
+    api.use(staticToken)
+}
+```
+Secure:
+```
+if try await context.evaluatePolicy(.deviceOwnerAuthentication, ...) {
+    let access = try await authService.refresh(keychain.refreshToken())
+    api.use(access)
+}
+```","A device PIN, pattern, or biometric used to unlock the app must gate access to local data only, and must never substitute for proving identity to the backend before remote resources are accessed.
+Passing the local app-unlock check is treated as a full login, so the app reuses a long-lived stored token for backend calls without ever confirming the session is still valid for this user.
+Local unlock only releases an encrypted refresh token, which is then exchanged with the backend for a fresh access token, so backend access always depends on a server-validated credential.",Authentication and Authorization
+MASVS-AUTH.9,"**Security Rule:** Authentication attempts, including local PIN or password entry, must be rate-limited or locked out after repeated failures, with the authoritative counter kept server-side where remote credentials apply.
+
+**Vulnerability Pattern (Description):** Failed login attempts are counted only in client memory or local storage, so uninstalling and reinstalling the app, clearing data, or tampering with the counter resets it and enables unlimited guessing.
+
+**Secure Pattern (Description):** The backend tracks failed attempts per account and enforces lockout or backoff, while local PIN entry uses a tamper-resistant counter and increasing delays so guessing is bounded on and off device.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+if (entered == savedPin) unlock();
+```
+Secure:
+```
+if (failedAttempts >= maxAttempts) { lockOut(); return; }
+if (entered == savedPin) { unlock(); failedAttempts = 0; }
+else { failedAttempts++; }
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if checkPin(entered): unlock()    # unlimited attempts, no counter
+```
+Secure:
+```
+if attempts >= MAX: lockUntil(backoff(attempts))
+elif checkPin(entered): unlock(); attempts = 0
+else: attempts += 1
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+if (entered == savedPin) unlock()
+```
+Secure:
+```
+if (failedAttempts >= MAX_ATTEMPTS) { lockOut(); return }
+if (entered == savedPin) { unlock(); failedAttempts = 0 }
+else failedAttempts++
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+if entered == storedPin { unlock() }
+```
+Secure:
+```
+guard failedAttempts < maxAttempts else { lockOut(); return }
+if entered == storedPin { unlock(); failedAttempts = 0 }
+else { failedAttempts += 1 }
+```","Authentication attempts, including local PIN or password entry, must be rate-limited or locked out after repeated failures, with the authoritative counter kept server-side where remote credentials apply.
+Failed login attempts are counted only in client memory or local storage, so uninstalling and reinstalling the app, clearing data, or tampering with the counter resets it and enables unlimited guessing.
+The backend tracks failed attempts per account and enforces lockout or backoff, while local PIN entry uses a tamper-resistant counter and increasing delays so guessing is bounded on and off device.",Authentication and Authorization
+MASVS-NETWORK.1,"**Security Rule:** All network traffic, including calls to APIs, third-party services, and analytics endpoints, must travel over TLS so data is encrypted in transit and cannot be read or modified on the network path.
+
+**Vulnerability Pattern (Description):** The app reaches an endpoint over plain HTTP, or accepts both HTTP and HTTPS, so traffic crosses the network unencrypted and any on-path attacker can read or tamper with it.
+
+**Secure Pattern (Description):** Every endpoint is reached over HTTPS only, and the platform transport security policy blocks cleartext connections so an accidental HTTP URL fails closed rather than leaking data.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final res = await http.get(Uri.parse(""http://api.example.com/profile""));
+```
+Secure:
+```
+final res = await http.get(Uri.parse(""https://api.example.com/profile""));
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+request(""http://api.example.com/login"", body)
+```
+Secure:
+```
+request(""https://api.example.com/login"", body)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+URL url = new URL(""http://api.example.com/profile"");
+```
+Secure:
+```
+URL url = new URL(""https://api.example.com/profile"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val request = Request.Builder().url(""http://api.example.com/profile"").build()
+```
+Secure:
+```
+val request = Request.Builder().url(""https://api.example.com/profile"").build()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let url = URL(string: ""http://api.example.com/profile"")!
+```
+Secure:
+```
+let url = URL(string: ""https://api.example.com/profile"")!
+```","All network traffic, including calls to APIs, third-party services, and analytics endpoints, must travel over TLS so data is encrypted in transit and cannot be read or modified on the network path.
+The app reaches an endpoint over plain HTTP, or accepts both HTTP and HTTPS, so traffic crosses the network unencrypted and any on-path attacker can read or tamper with it.
+Every endpoint is reached over HTTPS only, and the platform transport security policy blocks cleartext connections so an accidental HTTP URL fails closed rather than leaking data.",Network Communication
+MASVS-NETWORK.2,"**Security Rule:** The platform transport security configuration must not relax its defaults — App Transport Security on iOS and the Android Network Security Configuration must keep cleartext traffic disabled with no arbitrary-loads or permit-cleartext exceptions.
+
+**Vulnerability Pattern (Description):** A global flag in the app manifest or Info.plist re-enables cleartext or arbitrary insecure loads, silently downgrading every connection and removing the platform's transport protections.
+
+**Secure Pattern (Description):** The manifest and Info.plist keep cleartext traffic off, and any unavoidable exception is scoped to a single named domain rather than applied app-wide.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+transportSecurity: { allowArbitraryInsecureLoads: true }
+```
+Secure:
+```
+transportSecurity: { allowArbitraryInsecureLoads: false }
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+<base-config cleartextTrafficPermitted=""true""/>
+```
+Secure:
+```
+<base-config cleartextTrafficPermitted=""false""/>
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+<application android:usesCleartextTraffic=""true"">
+```
+Secure:
+```
+<application android:usesCleartextTraffic=""false"">
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+<key>NSAllowsArbitraryLoads</key><true/>
+```
+Secure:
+```
+<key>NSAllowsArbitraryLoads</key><false/>
+```","The platform transport security configuration must not relax its defaults — App Transport Security on iOS and the Android Network Security Configuration must keep cleartext traffic disabled with no arbitrary-loads or permit-cleartext exceptions.
+A global flag in the app manifest or Info.plist re-enables cleartext or arbitrary insecure loads, silently downgrading every connection and removing the platform's transport protections.
+The manifest and Info.plist keep cleartext traffic off, and any unavoidable exception is scoped to a single named domain rather than applied app-wide.",Network Communication
+MASVS-NETWORK.3,"**Security Rule:** Connections must negotiate a current TLS version, at minimum TLS 1.2, with strong cipher suites, and deprecated protocols such as SSLv3, TLS 1.0, and TLS 1.1 must be refused.
+
+**Vulnerability Pattern (Description):** The app permits an obsolete TLS or SSL protocol version or weak cipher suites, so a downgrade or weak-crypto attack lets traffic be decrypted on the network path.
+
+**Secure Pattern (Description):** The TLS client is pinned to a minimum protocol version of TLS 1.2, and the cipher list is restricted to strong, forward-secret suites so weak negotiation is impossible.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final ctx = SecurityContext()..allowLegacyUnsafeRenegotiation = true;
+```
+Secure:
+```
+final client = HttpClient(context: SecurityContext.defaultContext);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+tlsConfig.minVersion = ""SSLv3""
+```
+Secure:
+```
+tlsConfig.minVersion = ""TLS1.2""
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+SSLContext ctx = SSLContext.getInstance(""SSL"");
+```
+Secure:
+```
+SSLContext ctx = SSLContext.getInstance(""TLSv1.2"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val spec = ConnectionSpec.COMPATIBLE_TLS
+```
+Secure:
+```
+val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+    .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2).build()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+<key>NSExceptionMinimumTLSVersion</key><string>TLSv1.0</string>
+```
+Secure:
+```
+<key>NSExceptionMinimumTLSVersion</key><string>TLSv1.2</string>
+```","Connections must negotiate a current TLS version, at minimum TLS 1.2, with strong cipher suites, and deprecated protocols such as SSLv3, TLS 1.0, and TLS 1.1 must be refused.
+The app permits an obsolete TLS or SSL protocol version or weak cipher suites, so a downgrade or weak-crypto attack lets traffic be decrypted on the network path.
+The TLS client is pinned to a minimum protocol version of TLS 1.2, and the cipher list is restricted to strong, forward-secret suites so weak negotiation is impossible.",Network Communication
+MASVS-NETWORK.4,"**Security Rule:** The app must verify the server's X.509 certificate against the trusted certificate authority store and reject any chain that fails validation, has expired, or is self-signed.
+
+**Vulnerability Pattern (Description):** A custom TrustManager, SSLSocketFactory, or trust callback accepts every certificate without checking the chain, so any server can impersonate the real one and intercept traffic.
+
+**Secure Pattern (Description):** Certificate validation is left to the platform default trust evaluation, or the custom evaluator performs full chain and validity checks before trusting the connection.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+client.badCertificateCallback = (cert, host, port) => true;
+```
+Secure:
+```
+final client = HttpClient();   // default trust evaluation, no override
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+onServerCertificate = (cert) => true   # accept anything
+```
+Secure:
+```
+onServerCertificate = (cert) => platformTrustStore.validate(cert)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+TrustManager[] tm = { new X509TrustManager() {
+    public void checkServerTrusted(X509Certificate[] c, String s) {} } };
+```
+Secure:
+```
+TrustManagerFactory tmf = TrustManagerFactory.getInstance(
+    TrustManagerFactory.getDefaultAlgorithm());
+tmf.init((KeyStore) null);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val tm = object : X509TrustManager {
+    override fun checkServerTrusted(c: Array<X509Certificate>, t: String) {}
+}
+```
+Secure:
+```
+val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+tmf.init(null as KeyStore?)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+completionHandler(.useCredential, URLCredential(trust: challenge.protectionSpace.serverTrust!))
+```
+Secure:
+```
+completionHandler(.performDefaultHandling, nil)
+```","The app must verify the server's X.509 certificate against the trusted certificate authority store and reject any chain that fails validation, has expired, or is self-signed.
+A custom TrustManager, SSLSocketFactory, or trust callback accepts every certificate without checking the chain, so any server can impersonate the real one and intercept traffic.
+Certificate validation is left to the platform default trust evaluation, or the custom evaluator performs full chain and validity checks before trusting the connection.",Network Communication
+MASVS-NETWORK.5,"**Security Rule:** The app must confirm that the hostname it connected to matches a subject or subject-alternative-name entry in the server certificate, so a valid certificate for one domain cannot be used to impersonate another.
+
+**Vulnerability Pattern (Description):** Hostname verification is disabled or replaced with a stub that always returns true, so any certificate trusted by the device, even one for an unrelated domain, is accepted for the connection.
+
+**Secure Pattern (Description):** The default hostname verifier is left in place, so the connection is only trusted when the certificate identity matches the host that was requested.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+client.badCertificateCallback = (cert, host, port) => true;
+```
+Secure:
+```
+final res = await http.get(Uri.parse(""https://api.example.com/data""));
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+hostnameVerifier = (host, session) => true
+```
+Secure:
+```
+hostnameVerifier = defaultHostnameVerifier
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+conn.setHostnameVerifier((hostname, session) -> true);
+```
+Secure:
+```
+conn.setHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier());
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+builder.hostnameVerifier { _, _ -> true }
+```
+Secure:
+```
+builder.hostnameVerifier(OkHostnameVerifier)
+```","The app must confirm that the hostname it connected to matches a subject or subject-alternative-name entry in the server certificate, so a valid certificate for one domain cannot be used to impersonate another.
+Hostname verification is disabled or replaced with a stub that always returns true, so any certificate trusted by the device, even one for an unrelated domain, is accepted for the connection.
+The default hostname verifier is left in place, so the connection is only trusted when the certificate identity matches the host that was requested.",Network Communication
+MASVS-NETWORK.6,"**Security Rule:** Apps handling sensitive data should pin the expected server certificate or public key so that a connection is rejected when the presented identity is not the one the app was built to trust, even if a rogue certificate authority issued it.
+
+**Vulnerability Pattern (Description):** The app relies only on the device trust store with no pinning, so a compromised or attacker-installed certificate authority can issue a valid-looking certificate and intercept traffic undetected.
+
+**Secure Pattern (Description):** The app pins the public-key hash of the expected server, or its issuing intermediate, and aborts the connection on any mismatch, with a backup pin provisioned for key rotation.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final res = await http.get(Uri.parse(""https://api.example.com/data""));
+```
+Secure:
+```
+await HttpCertificatePinning.check(serverURL: ""https://api.example.com"",
+    sha: SHA.SHA256, allowedSHAFingerprints: pinnedHashes, timeout: 30);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+connect(host)                       # device trust store only
+```
+Secure:
+```
+connect(host, pinnedKeyHashes=[""sha256/AAAA..."", ""sha256/BBBB...""])
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+OkHttpClient client = new OkHttpClient.Builder().build();
+```
+Secure:
+```
+CertificatePinner cp = new CertificatePinner.Builder()
+    .add(""api.example.com"", ""sha256/AAAA..."").build();
+OkHttpClient client = new OkHttpClient.Builder().certificatePinner(cp).build();
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val client = OkHttpClient.Builder().build()
+```
+Secure:
+```
+val pinner = CertificatePinner.Builder()
+    .add(""api.example.com"", ""sha256/AAAA..."").build()
+val client = OkHttpClient.Builder().certificatePinner(pinner).build()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let session = URLSession(configuration: .default)
+```
+Secure:
+```
+let pinned = ServerTrustManager(evaluators:
+    [""api.example.com"": PublicKeysTrustEvaluator()])
+```","Apps handling sensitive data should pin the expected server certificate or public key so that a connection is rejected when the presented identity is not the one the app was built to trust, even if a rogue certificate authority issued it.
+The app relies only on the device trust store with no pinning, so a compromised or attacker-installed certificate authority can issue a valid-looking certificate and intercept traffic undetected.
+The app pins the public-key hash of the expected server, or its issuing intermediate, and aborts the connection on any mismatch, with a backup pin provisioned for key rotation.",Network Communication
+MASVS-NETWORK.7,"**Security Rule:** The app must not depend on transport encryption alone to protect sensitive data — secrets must still be protected at the application layer so a broken or downgraded channel does not expose them in clear.
+
+**Vulnerability Pattern (Description):** Sensitive payloads are placed in URL query parameters or sent with no application-layer protection, trusting TLS entirely, so a logged URL or a stripped TLS session leaks the data.
+
+**Secure Pattern (Description):** Sensitive values are carried in the request body, additionally encrypted or signed at the application layer, so the data stays protected even if the transport channel is compromised.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await http.get(Uri.parse(""https://api.example.com/auth?token=$token""));
+```
+Secure:
+```
+await http.post(authUri, body: jsonEncode({""token"": token}),
+    headers: {""Content-Type"": ""application/json""});
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+get(""https://api.example.com/pay?card="" + cardNumber)
+```
+Secure:
+```
+post(""https://api.example.com/pay"", body=encryptPayload({card: cardNumber}))
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+new URL(""https://api.example.com/auth?token="" + token);
+```
+Secure:
+```
+HttpURLConnection c = (HttpURLConnection) authUrl.openConnection();
+c.setRequestMethod(""POST"");
+c.getOutputStream().write(jsonBody.getBytes(StandardCharsets.UTF_8));
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val req = Request.Builder().url(""https://api.example.com/auth?token=$token"").build()
+```
+Secure:
+```
+val body = json.toRequestBody(mediaType)
+val req = Request.Builder().url(authURL).post(body).build()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+URL(string: ""https://api.example.com/auth?token=\(token)"")
+```
+Secure:
+```
+var req = URLRequest(url: authURL); req.httpMethod = ""POST""
+req.httpBody = try JSONEncoder().encode([""token"": token])
+```","The app must not depend on transport encryption alone to protect sensitive data — secrets must still be protected at the application layer so a broken or downgraded channel does not expose them in clear.
+Sensitive payloads are placed in URL query parameters or sent with no application-layer protection, trusting TLS entirely, so a logged URL or a stripped TLS session leaks the data.
+Sensitive values are carried in the request body, additionally encrypted or signed at the application layer, so the data stays protected even if the transport channel is compromised.",Network Communication
+MASVS-NETWORK.8,"**Security Rule:** Debugging aids that weaken transport security — trust-all managers, proxy-friendly user certificate trust, or cleartext debug overrides — must be confined to debug builds and never shipped in a release.
+
+**Vulnerability Pattern (Description):** A TLS bypass added for local testing, or an Android network security config that trusts user-installed certificate authorities, is left enabled in the production build and lets traffic be intercepted.
+
+**Secure Pattern (Description):** Insecure overrides are guarded by a debug-build flag or a debug-only resource, and the release configuration trusts only the system certificate store.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if true: httpClient.trustAllCertificates()
+```
+Secure:
+```
+if isDebugBuild: httpClient.trustAllCertificates()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+<debug-overrides><trust-anchors><certificates src=""user""/></trust-anchors></debug-overrides>
+```
+Secure:
+```
+<base-config><trust-anchors><certificates src=""system""/></trust-anchors></base-config>
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+if (true) builder.sslSocketFactory(trustAllFactory, trustAllManager)
+```
+Secure:
+```
+if (BuildConfig.DEBUG) builder.sslSocketFactory(trustAllFactory, trustAllManager)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+session.serverTrustPolicy = .disableEvaluation
+```
+Secure:
+```
+#if DEBUG
+session.serverTrustPolicy = .disableEvaluation
+#endif
+```","Debugging aids that weaken transport security — trust-all managers, proxy-friendly user certificate trust, or cleartext debug overrides — must be confined to debug builds and never shipped in a release.
+A TLS bypass added for local testing, or an Android network security config that trusts user-installed certificate authorities, is left enabled in the production build and lets traffic be intercepted.
+Insecure overrides are guarded by a debug-build flag or a debug-only resource, and the release configuration trusts only the system certificate store.",Network Communication
+MASVS-PLATFORM.1,"**Security Rule:** Activities, services, broadcast receivers, and content providers must not be exported to other apps unless they are explicitly intended to be public, and any exported component must enforce a permission or caller check.
+
+**Vulnerability Pattern (Description):** A component is exported to all other apps on the device, either by default because it declares an intent filter or explicitly, with no permission requirement, so any installed app can invoke it and reach internal functionality.
+
+**Secure Pattern (Description):** Components are kept private unless they must be public, and every component that genuinely needs to be reachable declares a signature level permission or verifies the calling package before acting.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+component exported = true, no permission required
+```
+Secure:
+```
+component exported = false, or guarded by a signature permission
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+<provider android:name="".DataProvider"" android:exported=""true""/>
+```
+Secure:
+```
+<provider android:name="".DataProvider"" android:exported=""false""
+          android:permission=""com.app.permission.PRIVATE""/>
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+<activity android:name="".AdminActivity"" android:exported=""true""/>
+```
+Secure:
+```
+<activity android:name="".AdminActivity"" android:exported=""false""/>
+```","Activities, services, broadcast receivers, and content providers must not be exported to other apps unless they are explicitly intended to be public, and any exported component must enforce a permission or caller check.
+A component is exported to all other apps on the device, either by default because it declares an intent filter or explicitly, with no permission requirement, so any installed app can invoke it and reach internal functionality.
+Components are kept private unless they must be public, and every component that genuinely needs to be reachable declares a signature level permission or verifies the calling package before acting.",Platform Interaction
+MASVS-PLATFORM.2,"**Security Rule:** Data and extras received through Intents, deep links, or other IPC channels are untrusted input and must be validated, type-checked, and bounds-checked before they are used to make decisions or reach a sink.
+
+**Vulnerability Pattern (Description):** An Intent extra, query parameter, or IPC payload is read and used directly to load a URL, build a file path, or pick an action, so a hostile caller controls the value reaching a sensitive sink.
+
+**Secure Pattern (Description):** Every value pulled from an Intent or IPC message is validated against an allowlist of expected values or a strict format before it is trusted, and unexpected input is rejected.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final route = uri.queryParameters['screen'];
+Navigator.pushNamed(context, route!);
+```
+Secure:
+```
+final route = uri.queryParameters['screen'];
+if (kKnownRoutes.contains(route)) Navigator.pushNamed(context, route!);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+target = intent.extra(""next"")
+navigate(target)
+```
+Secure:
+```
+target = intent.extra(""next"")
+if target in ALLOWED_DESTINATIONS: navigate(target)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+String url = getIntent().getStringExtra(""url"");
+webView.loadUrl(url);
+```
+Secure:
+```
+String url = getIntent().getStringExtra(""url"");
+if (url != null && url.startsWith(""https://app.example.com/""))
+    webView.loadUrl(url);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val path = intent.getStringExtra(""file"")
+File(filesDir, path).readText()
+```
+Secure:
+```
+val name = intent.getStringExtra(""file"") ?: return
+require(name.matches(Regex(""^[A-Za-z0-9_.-]+$"")))
+File(filesDir, name).readText()
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let id = url.queryParam(""recordId"")!
+loadRecord(at: ""/records/\(id)"")
+```
+Secure:
+```
+guard let id = url.queryParam(""recordId""),
+      id.allSatisfy({ $0.isNumber }) else { return }
+loadRecord(at: ""/records/\(id)"")
+```","Data and extras received through Intents, deep links, or other IPC channels are untrusted input and must be validated, type-checked, and bounds-checked before they are used to make decisions or reach a sink.
+An Intent extra, query parameter, or IPC payload is read and used directly to load a URL, build a file path, or pick an action, so a hostile caller controls the value reaching a sensitive sink.
+Every value pulled from an Intent or IPC message is validated against an allowlist of expected values or a strict format before it is trusted, and unexpected input is rejected.",Platform Interaction
+MASVS-PLATFORM.3,"**Security Rule:** Deep links must be verified so they cannot be hijacked by another app — use Android verified App Links or iOS Universal Links backed by a domain association file rather than custom URL schemes.
+
+**Vulnerability Pattern (Description):** The app registers a custom URL scheme or an unverified host so any other app can claim the same scheme, intercept inbound links, and receive sensitive parameters such as tokens or session identifiers.
+
+**Secure Pattern (Description):** The app uses verified App Links or Universal Links tied to a domain it controls through a hosted association file, so the operating system routes the link only to the legitimate app.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+register custom scheme myapp:// with no domain verification
+```
+Secure:
+```
+register https links with a hosted domain association file
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+<intent-filter>
+  <data android:scheme=""myapp"" android:host=""pay""/>
+</intent-filter>
+```
+Secure:
+```
+<intent-filter android:autoVerify=""true"">
+  <data android:scheme=""https"" android:host=""app.example.com""/>
+</intent-filter>
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+<!-- Info.plist registers a custom CFBundleURLScheme ""myapp"" -->
+```
+Secure:
+```
+<!-- com.apple.developer.associated-domains: applinks:app.example.com -->
+<!-- backed by /.well-known/apple-app-site-association -->
+```","Deep links must be verified so they cannot be hijacked by another app — use Android verified App Links or iOS Universal Links backed by a domain association file rather than custom URL schemes.
+The app registers a custom URL scheme or an unverified host so any other app can claim the same scheme, intercept inbound links, and receive sensitive parameters such as tokens or session identifiers.
+The app uses verified App Links or Universal Links tied to a domain it controls through a hosted association file, so the operating system routes the link only to the legitimate app.",Platform Interaction
+MASVS-PLATFORM.4,"**Security Rule:** Native functionality must not be exposed to WebView JavaScript unless it is required, and any exposed bridge must be limited to trusted origins and must never grant access to sensitive native APIs.
+
+**Vulnerability Pattern (Description):** A native object is injected into a WebView through a JavaScript bridge while the WebView can load remote or attacker-influenced content, so that content calls native methods and reaches device functionality.
+
+**Secure Pattern (Description):** The JavaScript bridge is added only when needed, restricted to content loaded from a trusted origin, and the exposed interface is minimal and explicitly annotated for JavaScript access.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+webview.addJavascriptBridge(nativeApi)
+webview.load(remoteUntrustedUrl)
+```
+Secure:
+```
+if origin is trusted: webview.addJavascriptBridge(minimalApi)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+webView.addJavascriptInterface(new FileBridge(), ""fs"");
+```
+Secure:
+```
+// SafeBridge methods carry @JavascriptInterface and expose no file APIs
+webView.addJavascriptInterface(new SafeBridge(), ""app"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+webView.addJavascriptInterface(NativeBridge(), ""Android"")
+webView.loadUrl(untrustedUrl)
+```
+Secure:
+```
+if (url.host == ""app.example.com"")
+    webView.addJavascriptInterface(SafeBridge(), ""Android"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+contentController.add(self, name: ""native"")  // handler runs shell ops
+```
+Secure:
+```
+contentController.add(self, name: ""native"")  // handler whitelists actions
+// and the WKWebView only loads bundled local content
+```","Native functionality must not be exposed to WebView JavaScript unless it is required, and any exposed bridge must be limited to trusted origins and must never grant access to sensitive native APIs.
+A native object is injected into a WebView through a JavaScript bridge while the WebView can load remote or attacker-influenced content, so that content calls native methods and reaches device functionality.
+The JavaScript bridge is added only when needed, restricted to content loaded from a trusted origin, and the exposed interface is minimal and explicitly annotated for JavaScript access.",Platform Interaction
+MASVS-PLATFORM.5,"**Security Rule:** WebViews must be configured with the least capability needed — JavaScript, file access, and content access disabled unless required — and must not load mixed or untrusted content.
+
+**Vulnerability Pattern (Description):** A WebView is left with permissive defaults such as file URL access, universal access from file URLs, or content access enabled, so loaded content can read local files and cross security boundaries.
+
+**Secure Pattern (Description):** The WebView enables only the settings the feature requires, keeps file and content access disabled by default, and blocks mixed content so it cannot downgrade to insecure transport.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+webview.settings.allowFileAccess = true
+webview.settings.javaScriptEnabled = true
+```
+Secure:
+```
+webview.settings.allowFileAccess = false
+webview.settings.mixedContentMode = NEVER_ALLOW
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+webView.getSettings().setAllowContentAccess(true);
+```
+Secure:
+```
+webView.getSettings().setAllowContentAccess(false);
+webView.getSettings().setMixedContentMode(
+    WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+webView.settings.allowFileAccessFromFileURLs = true
+webView.settings.allowUniversalAccessFromFileURLs = true
+```
+Secure:
+```
+webView.settings.allowFileAccessFromFileURLs = false
+webView.settings.allowUniversalAccessFromFileURLs = false
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let cfg = WKWebViewConfiguration()
+cfg.preferences.javaScriptEnabled = true  // even for local-only content
+```
+Secure:
+```
+let cfg = WKWebViewConfiguration()
+cfg.defaultWebpagePreferences.allowsContentJavaScript = false
+```","WebViews must be configured with the least capability needed — JavaScript, file access, and content access disabled unless required — and must not load mixed or untrusted content.
+A WebView is left with permissive defaults such as file URL access, universal access from file URLs, or content access enabled, so loaded content can read local files and cross security boundaries.
+The WebView enables only the settings the feature requires, keeps file and content access disabled by default, and blocks mixed content so it cannot downgrade to insecure transport.",Platform Interaction
+MASVS-PLATFORM.6,"**Security Rule:** The app must not copy sensitive data to the shared system clipboard, and where copying is unavoidable it must mark the data as sensitive and clear it after a short interval.
+
+**Vulnerability Pattern (Description):** Secrets such as passwords, one-time codes, or tokens are written to the system pasteboard, where any other app can read them and clipboard history or sync may retain them.
+
+**Secure Pattern (Description):** Sensitive values are kept off the clipboard, or, when the user must copy them, the entry is flagged as sensitive so the platform hides it from previews and history, and it is cleared shortly afterwards.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+clipboard.set(password)
+```
+Secure:
+```
+clipboard.setSensitive(otp); scheduleClear(after = 30s)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+clipboard.setPrimaryClip(ClipData.newPlainText(""token"", token));
+```
+Secure:
+```
+// do not place the auth token on the shared clipboard at all
+showTokenInSecureFieldOnly(token);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+clipboard.setPrimaryClip(ClipData.newPlainText(""pw"", password))
+```
+Secure:
+```
+val clip = ClipData.newPlainText(""otp"", code)
+clip.description.extras = PersistableBundle().apply {
+    putBoolean(""android.content.extra.IS_SENSITIVE"", true) }
+clipboard.setPrimaryClip(clip)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+UIPasteboard.general.string = password
+```
+Secure:
+```
+UIPasteboard.general.setItems(
+    [[""public.text"": otp]],
+    options: [.expirationDate: Date().addingTimeInterval(30)])
+```","The app must not copy sensitive data to the shared system clipboard, and where copying is unavoidable it must mark the data as sensitive and clear it after a short interval.
+Secrets such as passwords, one-time codes, or tokens are written to the system pasteboard, where any other app can read them and clipboard history or sync may retain them.
+Sensitive values are kept off the clipboard, or, when the user must copy them, the entry is flagged as sensitive so the platform hides it from previews and history, and it is cleared shortly afterwards.",Platform Interaction
+MASVS-PLATFORM.7,"**Security Rule:** Screens that display sensitive information must hide that content when the app moves to the background, so it does not leak into the task switcher snapshot or screenshots.
+
+**Vulnerability Pattern (Description):** A screen showing account details, balances, or tokens stays fully rendered as the app is backgrounded, so the operating system captures a snapshot that exposes the data in the recent-apps view.
+
+**Secure Pattern (Description):** Sensitive screens mark the window as secure or overlay a blank or branded placeholder when the app resigns the foreground, so the captured snapshot reveals nothing sensitive.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+// sensitive page with no secure-display protection
+```
+Secure:
+```
+// ScreenProtector / FlutterWindowManager FLAG_SECURE on this route
+await ScreenProtector.protectDataLeakageOn();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+sensitive screen remains visible during backgrounding
+```
+Secure:
+```
+on background: mark window secure or overlay a blank cover view
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+// onCreate sets up the statement view with no secure flag
+```
+Secure:
+```
+getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                     WindowManager.LayoutParams.FLAG_SECURE);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+// Activity shows account balance with no FLAG_SECURE
+```
+Secure:
+```
+window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func sceneWillResignActive(_ scene: UIScene) { }  // nothing hidden
+```
+Secure:
+```
+func sceneWillResignActive(_ scene: UIScene) {
+    window?.addSubview(privacyCoverView)
+}
+```","Screens that display sensitive information must hide that content when the app moves to the background, so it does not leak into the task switcher snapshot or screenshots.
+A screen showing account details, balances, or tokens stays fully rendered as the app is backgrounded, so the operating system captures a snapshot that exposes the data in the recent-apps view.
+Sensitive screens mark the window as secure or overlay a blank or branded placeholder when the app resigns the foreground, so the captured snapshot reveals nothing sensitive.",Platform Interaction
+MASVS-PLATFORM.8,"**Security Rule:** Security-sensitive UI elements must be protected against tapjacking and overlay attacks, so a window drawn on top of the app cannot trick the user into approving an action they cannot see.
+
+**Vulnerability Pattern (Description):** A consent, payment, or permission control accepts touches even while another window is drawn over it, so a malicious overlay obscures the real screen and the user authorises something unintended.
+
+**Secure Pattern (Description):** Sensitive controls ignore touches that are passed through an obscuring overlay, by filtering obscured touch events, so an action is confirmed only when the genuine screen is visible.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+sensitive button handles touch even when overlaid
+```
+Secure:
+```
+sensitive button drops touches flagged as obscured by an overlay
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+confirmButton.setOnClickListener(v -> transferFunds());
+```
+Secure:
+```
+confirmButton.setFilterTouchesWhenObscured(true);
+confirmButton.setOnClickListener(v -> transferFunds());
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+confirmButton.setOnClickListener { transferFunds() }
+```
+Secure:
+```
+confirmButton.filterTouchesWhenObscured = true
+confirmButton.setOnClickListener { transferFunds() }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+// no check for window capture / screen recording before showing secret
+```
+Secure:
+```
+if UIScreen.main.isCaptured { hideSensitiveControls() }
+```","Security-sensitive UI elements must be protected against tapjacking and overlay attacks, so a window drawn on top of the app cannot trick the user into approving an action they cannot see.
+A consent, payment, or permission control accepts touches even while another window is drawn over it, so a malicious overlay obscures the real screen and the user authorises something unintended.
+Sensitive controls ignore touches that are passed through an obscuring overlay, by filtering obscured touch events, so an action is confirmed only when the genuine screen is visible.",Platform Interaction
+MASVS-CODE.1,"**Security Rule:** The app must require an up-to-date and still-supported version of the mobile operating system, so it never runs on a release that no longer receives security patches.
+
+**Vulnerability Pattern (Description):** The app declares a very old minimum OS version, or none at all, so it installs and runs on platform releases that stopped receiving security fixes and expose users to known unpatched OS vulnerabilities.
+
+**Secure Pattern (Description):** The build configuration sets a minimum OS version that is still vendor-supported, and the app refuses to run on older releases so it can rely on current platform security patches.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+# ios/Podfile
+platform :ios, '11.0'
+```
+Secure:
+```
+platform :ios, '16.0'   # supported baseline; min SDK raised in build.gradle too
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+minimumOsVersion = ""very old, unsupported release""
+```
+Secure:
+```
+minimumOsVersion = ""current vendor-supported release""
+if osVersion < minimumOsVersion: refuseToRun()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+defaultConfig { minSdkVersion 19 }
+```
+Secure:
+```
+defaultConfig { minSdkVersion 28 }
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+defaultConfig { minSdk = 19 }   // Android 4.4, unsupported
+```
+Secure:
+```
+defaultConfig { minSdk = 28 }   // Android 9+, still patched
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+// Deployment Target left at iOS 11.0 (out of support)
+IPHONEOS_DEPLOYMENT_TARGET = 11.0
+```
+Secure:
+```
+IPHONEOS_DEPLOYMENT_TARGET = 16.0   // current supported baseline
+```","The app must require an up-to-date and still-supported version of the mobile operating system, so it never runs on a release that no longer receives security patches.
+The app declares a very old minimum OS version, or none at all, so it installs and runs on platform releases that stopped receiving security fixes and expose users to known unpatched OS vulnerabilities.
+The build configuration sets a minimum OS version that is still vendor-supported, and the app refuses to run on older releases so it can rely on current platform security patches.",Code Quality and Exploit Mitigation
+MASVS-CODE.2,"**Security Rule:** All third-party components used by the app must be up to date, with security patches applied promptly so no shipped dependency carries a known unpatched vulnerability.
+
+**Vulnerability Pattern (Description):** A dependency is pinned to an old release for years, or floated with no bound and never refreshed, so the app keeps shipping a component with publicly disclosed vulnerabilities.
+
+**Secure Pattern (Description):** Dependencies are pinned to current, patched releases, refreshed on a regular cadence, and a software composition analysis tool fails the build when a component with a known vulnerability is detected.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+dependencies:
+  http: ^0.12.0   # stale, unpatched
+```
+Secure:
+```
+dependencies:
+  http: ^1.2.1    # current patched release
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+dependency okhttp version 3.10.0   # years old, known CVEs
+```
+Secure:
+```
+dependency okhttp version 4.12.0   # current patched release
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+implementation 'com.fasterxml.jackson.core:jackson-databind:2.9.8'
+```
+Secure:
+```
+implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+implementation(""com.squareup.okhttp3:okhttp:3.10.0"")
+```
+Secure:
+```
+implementation(""com.squareup.okhttp3:okhttp:4.12.0"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+.package(url: ""https://github.com/Alamofire/Alamofire"", from: ""4.0.0"")
+```
+Secure:
+```
+.package(url: ""https://github.com/Alamofire/Alamofire"", from: ""5.9.1"")
+```","All third-party components used by the app must be up to date, with security patches applied promptly so no shipped dependency carries a known unpatched vulnerability.
+A dependency is pinned to an old release for years, or floated with no bound and never refreshed, so the app keeps shipping a component with publicly disclosed vulnerabilities.
+Dependencies are pinned to current, patched releases, refreshed on a regular cadence, and a software composition analysis tool fails the build when a component with a known vulnerability is detected.",Code Quality and Exploit Mitigation
+MASVS-CODE.3,"**Security Rule:** Third-party components must be obtained from trusted sources and verified for integrity, so a tampered or substituted package cannot be pulled into the build.
+
+**Vulnerability Pattern (Description):** Dependencies are fetched from an unauthenticated mirror or with a floating version and no checksum, so a compromised registry or a typosquatted package can inject malicious code into the build.
+
+**Secure Pattern (Description):** Dependencies are pulled only from trusted registries over a verified channel, pinned to an exact version, and validated against a committed lockfile of cryptographic checksums.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+# pubspec.yaml with no committed lockfile, hosted on an unknown server
+some_lib: any
+```
+Secure:
+```
+some_lib: 1.2.3   # pubspec.lock committed; pulled from pub.dev
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+fetch(dependency, version=""latest"", verifyChecksum=false)
+```
+Secure:
+```
+fetch(dependency, version=""1.2.3"", verifyChecksum=true)   # checksum locked
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+repositories { maven { url 'http://insecure.repo/' } }
+```
+Secure:
+```
+repositories { mavenCentral() }   // dependency verification enabled
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+repositories { maven { url = uri(""http://insecure.repo/"") } }
+```
+Secure:
+```
+repositories { mavenCentral() }
+// gradle/verification-metadata.xml enforces artifact checksums
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+.package(url: ""http://mirror.example.net/SomeLib"", branch: ""main"")
+```
+Secure:
+```
+.package(url: ""https://github.com/org/SomeLib"", exact: ""1.2.3"")
+// Package.resolved committed; pins are checksum-verified
+```","Third-party components must be obtained from trusted sources and verified for integrity, so a tampered or substituted package cannot be pulled into the build.
+Dependencies are fetched from an unauthenticated mirror or with a floating version and no checksum, so a compromised registry or a typosquatted package can inject malicious code into the build.
+Dependencies are pulled only from trusted registries over a verified channel, pinned to an exact version, and validated against a committed lockfile of cryptographic checksums.",Code Quality and Exploit Mitigation
+MASVS-CODE.4,"**Security Rule:** The app must validate and sanitize all data received from external sources or untrusted users before it is processed, so malformed or hostile input cannot drive unsafe behaviour.
+
+**Vulnerability Pattern (Description):** Data from a network response, file, or user field is consumed without any type, range, or format check, so unexpected or malicious values flow straight into parsing and business logic.
+
+**Secure Pattern (Description):** Every external input is checked against an expected type, length, range, and format at the trust boundary, and rejected or normalized before any further processing.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final qty = int.parse(jsonBody['qty']);
+```
+Secure:
+```
+final qty = int.tryParse('${jsonBody['qty']}');
+if (qty == null || qty < 1 || qty > 999) return reject();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+amount = parse(networkResponse.field)
+process(amount)
+```
+Secure:
+```
+amount = parse(networkResponse.field)
+if isValidRange(amount): process(amount) else reject()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+int qty = Integer.parseInt(request.getParameter(""qty""));
+```
+Secure:
+```
+Integer qty = tryParseInt(request.getParameter(""qty""));
+if (qty == null || qty < 1 || qty > 999) return reject();
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val qty = intent.getStringExtra(""qty"")!!.toInt()
+```
+Secure:
+```
+val qty = intent.getStringExtra(""qty"")?.toIntOrNull()
+require(qty != null && qty in 1..999) { ""invalid qty"" }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let qty = Int(json[""qty""] as! String)!
+```
+Secure:
+```
+guard let raw = json[""qty""] as? String, let qty = Int(raw),
+      (1...999).contains(qty) else { return reject() }
+```","The app must validate and sanitize all data received from external sources or untrusted users before it is processed, so malformed or hostile input cannot drive unsafe behaviour.
+Data from a network response, file, or user field is consumed without any type, range, or format check, so unexpected or malicious values flow straight into parsing and business logic.
+Every external input is checked against an expected type, length, range, and format at the trust boundary, and rejected or normalized before any further processing.",Code Quality and Exploit Mitigation
+MASVS-CODE.5,"**Security Rule:** Data arriving through inter-process communication, deep links, or custom URL schemes must be treated as untrusted and fully validated before it influences app state or sensitive actions.
+
+**Vulnerability Pattern (Description):** Parameters from an incoming intent, app link, or custom URL scheme are used directly to choose a screen, build a request, or load content, so another app can drive the victim app into unintended actions.
+
+**Secure Pattern (Description):** Deep-link and IPC parameters are parsed, checked against an allowlist of expected values, and authorized, before they are allowed to affect navigation or sensitive operations.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+void onDeepLink(Uri uri) => Navigator.pushNamed(context, uri.path);
+```
+Secure:
+```
+void onDeepLink(Uri uri) {
+  if (allowedRoutes.contains(uri.path)) Navigator.pushNamed(context, uri.path);
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+openScreen(incomingLink.parameter)
+```
+Secure:
+```
+target = incomingLink.parameter
+if target in ALLOWED_SCREENS: openScreen(target) else openScreen(HOME)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+String cls = getIntent().getStringExtra(""target"");
+startActivity(new Intent(this, Class.forName(cls)));
+```
+Secure:
+```
+String route = getIntent().getStringExtra(""target"");
+if (ALLOWED_ROUTES.contains(route)) navigateTo(route); else navigateTo(HOME);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val next = intent.data?.getQueryParameter(""next"")
+startActivity(Intent(this, Class.forName(next)))
+```
+Secure:
+```
+val next = intent.data?.getQueryParameter(""next"")
+if (next in ALLOWED_ROUTES) navigateTo(next) else navigateTo(HOME)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func handle(_ url: URL) { loadPage(url.host!) }
+```
+Secure:
+```
+func handle(_ url: URL) {
+    guard let h = url.host, allowedHosts.contains(h) else { return }
+    loadPage(h)
+}
+```","Data arriving through inter-process communication, deep links, or custom URL schemes must be treated as untrusted and fully validated before it influences app state or sensitive actions.
+Parameters from an incoming intent, app link, or custom URL scheme are used directly to choose a screen, build a request, or load content, so another app can drive the victim app into unintended actions.
+Deep-link and IPC parameters are parsed, checked against an allowlist of expected values, and authorized, before they are allowed to affect navigation or sensitive operations.",Code Quality and Exploit Mitigation
+MASVS-CODE.6,"**Security Rule:** The app must be built with the toolchain's exploit-mitigation features enabled, such as stack canaries, position-independent code, and automatic reference counting, so memory-corruption bugs are harder to exploit.
+
+**Vulnerability Pattern (Description):** The build disables or omits exploit-mitigation flags, shipping a binary without stack protection, address-space randomization, or fortified library calls, so a memory bug becomes a reliable exploit.
+
+**Secure Pattern (Description):** The release build enables the full set of exploit-mitigation flags provided by the toolchain so the shipped binary keeps stack canaries, position independence, and fortified runtime checks intact.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+# building the release with debug symbols and obfuscation off
+flutter build apk --debug
+```
+Secure:
+```
+flutter build apk --release --obfuscate --split-debug-info=build/symbols
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+compile(flags=""-fno-stack-protector -fno-PIC"")
+```
+Secure:
+```
+compile(flags=""-fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2"")
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+cppFlags ""-fno-stack-protector""
+```
+Secure:
+```
+cppFlags ""-fstack-protector-strong -fPIE -D_FORTIFY_SOURCE=2""
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+// NDK module built without mitigations
+externalNativeBuild { cmake { arguments ""-DANDROID_PIE=OFF"" } }
+```
+Secure:
+```
+externalNativeBuild { cmake { cppFlags ""-fstack-protector-strong -fPIE"" } }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+OTHER_CFLAGS = -fno-stack-protector
+// ARC disabled with -fno-objc-arc on Objective-C sources
+```
+Secure:
+```
+ENABLE_STACK_PROTECTOR = YES
+CLANG_ENABLE_OBJC_ARC = YES   // automatic reference counting on
+```","The app must be built with the toolchain's exploit-mitigation features enabled, such as stack canaries, position-independent code, and automatic reference counting, so memory-corruption bugs are harder to exploit.
+The build disables or omits exploit-mitigation flags, shipping a binary without stack protection, address-space randomization, or fortified library calls, so a memory bug becomes a reliable exploit.
+The release build enables the full set of exploit-mitigation flags provided by the toolchain so the shipped binary keeps stack canaries, position independence, and fortified runtime checks intact.",Code Quality and Exploit Mitigation
+MASVS-CODE.7,"**Security Rule:** The app and all its components must be free of security vulnerabilities that are publicly known at release time, verified by scanning before every release.
+
+**Vulnerability Pattern (Description):** The app ships without any vulnerability scan, so a component with a published CVE or a flagged code pattern reaches production unnoticed and unremediated.
+
+**Secure Pattern (Description):** Static analysis and software composition analysis run in the build pipeline before every release, and the release is blocked until known findings are remediated or formally accepted.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+# CI runs flutter build with no audit
+- run: flutter build appbundle
+```
+Secure:
+```
+- run: flutter pub outdated --show-all
+- run: flutter build appbundle   # release gated on dependency review
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+releasePipeline = [build, sign, publish]   # no security scan stage
+```
+Secure:
+```
+releasePipeline = [build, sastScan, scaScan, gateOnFindings, sign, publish]
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+<build><plugins></plugins></build>
+```
+Secure:
+```
+<plugin>
+  <groupId>org.owasp</groupId><artifactId>dependency-check-maven</artifactId>
+</plugin>
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+# CI: build and upload only
+- run: ./gradlew assembleRelease
+```
+Secure:
+```
+- run: ./gradlew assembleRelease
+- run: ./gradlew dependencyCheckAnalyze   # fails on known CVEs
+```","The app and all its components must be free of security vulnerabilities that are publicly known at release time, verified by scanning before every release.
+The app ships without any vulnerability scan, so a component with a published CVE or a flagged code pattern reaches production unnoticed and unremediated.
+Static analysis and software composition analysis run in the build pipeline before every release, and the release is blocked until known findings are remediated or formally accepted.",Code Quality and Exploit Mitigation
+MASVS-CODE.8,"**Security Rule:** Release builds must disable debugging, verbose logging, and developer backdoors, so shipped binaries do not expose diagnostic surfaces an attacker can use.
+
+**Vulnerability Pattern (Description):** The release build leaves the debuggable flag on, keeps verbose logging enabled, or compiles in test-only shortcuts, so a production binary leaks internal data and is easy to instrument.
+
+**Secure Pattern (Description):** Release builds turn off the debuggable flag, strip verbose and diagnostic logging, and exclude every test-only code path so the shipped binary exposes no debugging surface.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+debugPrint(""session=$sessionId"");   // runs in release too
+```
+Secure:
+```
+if (kDebugMode) debugPrint(""session=$sessionId"");
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+releaseConfig = {debuggable: true, verboseLogging: true}
+```
+Secure:
+```
+releaseConfig = {debuggable: false, verboseLogging: false}
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+buildTypes { release { debuggable true } }
+```
+Secure:
+```
+buildTypes { release { debuggable false; minifyEnabled true } }
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+buildTypes { release { isDebuggable = true } }
+```
+Secure:
+```
+buildTypes { release { isDebuggable = false; isMinifyEnabled = true } }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+// logging unconditional in all configurations
+print(""token=\(authToken)"")
+```
+Secure:
+```
+#if DEBUG
+print(""token=\(authToken)"")
+#endif
+```","Release builds must disable debugging, verbose logging, and developer backdoors, so shipped binaries do not expose diagnostic surfaces an attacker can use.
+The release build leaves the debuggable flag on, keeps verbose logging enabled, or compiles in test-only shortcuts, so a production binary leaks internal data and is easy to instrument.
+Release builds turn off the debuggable flag, strip verbose and diagnostic logging, and exclude every test-only code path so the shipped binary exposes no debugging surface.",Code Quality and Exploit Mitigation
+MASVS-RESILIENCE.1,"**Security Rule:** The app must detect when it runs on a rooted or jailbroken device and respond defensively, since such a device removes the OS sandbox and lets an attacker inspect memory, hook APIs, and tamper with the app.
+
+**Vulnerability Pattern (Description):** The app performs no platform integrity check and runs identically on a rooted or jailbroken device, so an attacker can freely instrument it, dump secrets, and bypass client-side controls.
+
+**Secure Pattern (Description):** The app runs multiple independent root or jailbreak signals such as test-keys build tags, presence of su or Cydia, and writable system paths, and degrades or refuses high-risk functionality when triggered.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+bool jailbroken = false;         // FlutterJailbreakDetection never called
+```
+Secure:
+```
+final jailbroken = await FlutterJailbreakDetection.jailbroken;
+if (jailbroken) _disableSecureFeatures();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+startApp()                       # no platform integrity check at all
+```
+Secure:
+```
+if isRooted() or isJailbroken(): restrictSensitiveFeatures()
+startApp()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+boolean rooted = false;          // never actually checked
+```
+Secure:
+```
+boolean rooted = new File(""/system/app/Superuser.apk"").exists()
+    || Build.TAGS != null && Build.TAGS.contains(""test-keys"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+fun isDeviceSafe() = true        // root check stubbed out
+```
+Secure:
+```
+fun isRooted() = Build.TAGS?.contains(""test-keys"") == true ||
+    listOf(""/system/bin/su"", ""/system/xbin/su"").any { File(it).exists() }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func isJailbroken() -> Bool { return false }
+```
+Secure:
+```
+func isJailbroken() -> Bool {
+    FileManager.default.fileExists(atPath: ""/Applications/Cydia.app"") ||
+    ((try? ""x"".write(toFile: ""/private/jb"", atomically: true, encoding: .utf8)) != nil)
+}
+```","The app must detect when it runs on a rooted or jailbroken device and respond defensively, since such a device removes the OS sandbox and lets an attacker inspect memory, hook APIs, and tamper with the app.
+The app performs no platform integrity check and runs identically on a rooted or jailbroken device, so an attacker can freely instrument it, dump secrets, and bypass client-side controls.
+The app runs multiple independent root or jailbreak signals such as test-keys build tags, presence of su or Cydia, and writable system paths, and degrades or refuses high-risk functionality when triggered.",Resilience Against Reverse Engineering
+MASVS-RESILIENCE.2,"**Security Rule:** The app must verify at runtime that its own code, resources, and signing certificate have not been altered, so a repackaged or patched build is detected and rejected.
+
+**Vulnerability Pattern (Description):** The app never checks its installer source or signing certificate, so a cracked build resigned with an attacker key installs and runs without any objection.
+
+**Secure Pattern (Description):** The app pins the hash of its expected signing certificate and verifies it at startup against the live signature, refusing to run when the signature does not match the pinned value.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+run()                            # no signature or installer check
+```
+Secure:
+```
+if signingCertHash() != EXPECTED_CERT_HASH: refuseToRun()
+run()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+Signature[] sigs = pkgInfo.signatures;     // result ignored
+```
+Secure:
+```
+String hash = sha256(pkgInfo.signatures[0].toByteArray());
+if (!EXPECTED_CERT_SHA256.equals(hash)) throw new SecurityException(""tampered"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val signatures = packageInfo.signingInfo  // fetched but never compared
+```
+Secure:
+```
+val live = sha256(packageInfo.signingInfo.apkContentsSigners[0].toByteArray())
+if (live != EXPECTED_CERT_SHA256) throw SecurityException(""tampered build"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+// iOS code-sign integrity assumed; no embedded.mobileprovision check
+launch()
+```
+Secure:
+```
+guard let p = Bundle.main.path(forResource: ""embedded"", ofType: ""mobileprovision""),
+      sha256(ofFile: p) == EXPECTED_PROFILE_HASH else { abortLaunch() }
+```","The app must verify at runtime that its own code, resources, and signing certificate have not been altered, so a repackaged or patched build is detected and rejected.
+The app never checks its installer source or signing certificate, so a cracked build resigned with an attacker key installs and runs without any objection.
+The app pins the hash of its expected signing certificate and verifies it at startup against the live signature, refusing to run when the signature does not match the pinned value.",Resilience Against Reverse Engineering
+MASVS-RESILIENCE.3,"**Security Rule:** The app must detect and impede dynamic analysis by a debugger, both by refusing to expose debug interfaces in release builds and by checking for an attached debugger at runtime.
+
+**Vulnerability Pattern (Description):** A release build ships with the debuggable flag enabled or never checks whether a debugger is attached, so an analyst can attach freely and single-step through security logic.
+
+**Secure Pattern (Description):** Release builds disable the debuggable flag, and the app actively probes for an attached debugger using a platform call, terminating or degrading when one is detected.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+debuggable = true                # debug interface left open in release
+```
+Secure:
+```
+if debuggerAttached(): terminate()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+boolean dbg = (appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+```
+Secure:
+```
+if ((appInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+    throw new SecurityException(""debuggable release build"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+if (Debug.isDebuggerConnected()) { /* logged only, app continues */ }
+```
+Secure:
+```
+if (Debug.isDebuggerConnected() || Debug.waitingForDebugger())
+    exitProcess(0)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func isDebugged() -> Bool { return false }   // never probes sysctl
+```
+Secure:
+```
+var info = kinfo_proc(); var size = MemoryLayout<kinfo_proc>.stride
+var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+sysctl(&mib, 4, &info, &size, nil, 0)
+let traced = (info.kp_proc.p_flag & P_TRACED) != 0
+```","The app must detect and impede dynamic analysis by a debugger, both by refusing to expose debug interfaces in release builds and by checking for an attached debugger at runtime.
+A release build ships with the debuggable flag enabled or never checks whether a debugger is attached, so an analyst can attach freely and single-step through security logic.
+Release builds disable the debuggable flag, and the app actively probes for an attached debugger using a platform call, terminating or degrading when one is detected.",Resilience Against Reverse Engineering
+MASVS-RESILIENCE.4,"**Security Rule:** The app must detect runtime instrumentation and hooking frameworks such as Frida, Xposed, or Cydia Substrate, since these let an attacker rewrite method behaviour and bypass client-side security checks.
+
+**Vulnerability Pattern (Description):** The app does not look for instrumentation artefacts, so a hooking framework can patch methods like the root check or license validation to always return a safe result with no resistance.
+
+**Secure Pattern (Description):** The app scans for instrumentation artefacts such as the frida-server listening port, suspicious loaded libraries, and known hooking package names, and responds defensively when any are found.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+proceed()                        # no hooking-framework detection
+```
+Secure:
+```
+if fridaPortOpen() or hookLibraryLoaded(): abortAndWipeSession()
+proceed()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+boolean instrumented = false;    // /proc maps not scanned
+```
+Secure:
+```
+boolean instrumented = false;
+for (String line : Files.readAllLines(Paths.get(""/proc/self/maps"")))
+    if (line.contains(""frida"") || line.contains(""substrate"")) instrumented = true;
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val hooked = false               // Xposed presence never inspected
+```
+Secure:
+```
+val hooked = runCatching {
+    File(""/proc/self/maps"").readText().contains(""frida"")
+}.getOrDefault(false) || classExists(""de.robv.android.xposed.XposedBridge"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let hooked = false               // dyld image list never checked
+```
+Secure:
+```
+var hooked = false
+for i in 0..<_dyld_image_count() {
+    let n = String(cString: _dyld_get_image_name(i))
+    if n.contains(""FridaGadget"") || n.contains(""cynject"") { hooked = true }
+}
+```","The app must detect runtime instrumentation and hooking frameworks such as Frida, Xposed, or Cydia Substrate, since these let an attacker rewrite method behaviour and bypass client-side security checks.
+The app does not look for instrumentation artefacts, so a hooking framework can patch methods like the root check or license validation to always return a safe result with no resistance.
+The app scans for instrumentation artefacts such as the frida-server listening port, suspicious loaded libraries, and known hooking package names, and responds defensively when any are found.",Resilience Against Reverse Engineering
+MASVS-RESILIENCE.5,"**Security Rule:** Security-relevant code paths and embedded data must be obfuscated in release builds so that names, control flow, and string constants do not directly reveal the app's logic to a static analyst.
+
+**Vulnerability Pattern (Description):** Release builds ship with full debug symbols, original class and method names, and plaintext string constants, so decompiling the app reveals its security logic and embedded values at a glance.
+
+**Secure Pattern (Description):** The release build pipeline applies name and control-flow obfuscation, strips debug symbols, and encrypts or splits sensitive string constants so they are not readable in the shipped binary.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+flutter build apk --release
+```
+Secure:
+```
+flutter build apk --release --obfuscate --split-debug-info=build/symbols
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+release_build: { obfuscate: false, strip_symbols: false }
+```
+Secure:
+```
+release_build: { obfuscate: true, strip_symbols: true, encrypt_strings: true }
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+buildTypes { release { isMinifyEnabled = false } }
+```
+Secure:
+```
+buildTypes { release {
+    isMinifyEnabled = true
+    proguardFiles(getDefaultProguardFile(""proguard-android-optimize.txt""))
+} }
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+// Release scheme keeps DWARF symbols embedded in the binary
+SWIFT_OPTIMIZATION_LEVEL = -Onone
+```
+Secure:
+```
+SWIFT_OPTIMIZATION_LEVEL = -O
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym   // symbols split into dSYM
+```","Security-relevant code paths and embedded data must be obfuscated in release builds so that names, control flow, and string constants do not directly reveal the app's logic to a static analyst.
+Release builds ship with full debug symbols, original class and method names, and plaintext string constants, so decompiling the app reveals its security logic and embedded values at a glance.
+The release build pipeline applies name and control-flow obfuscation, strips debug symbols, and encrypts or splits sensitive string constants so they are not readable in the shipped binary.",Resilience Against Reverse Engineering
+MASVS-RESILIENCE.6,"**Security Rule:** The app must not embed API keys, cryptographic keys, or other secrets as plaintext constants, since anyone who decompiles the binary can extract them and they cannot be rotated without a new release.
+
+**Vulnerability Pattern (Description):** A secret is stored as a string literal compiled into the app, so it appears in the decompiled code or in a plain strings dump of the package and is trivially harvested at scale.
+
+**Secure Pattern (Description):** Secrets are fetched at runtime from a server after authentication, or held in hardware-backed secure storage, and the binary contains at most short-lived tokens that can be revoked.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+const apiKey = 'AIzaSyD9f3a2c8e1b7d4e5f6';
+```
+Secure:
+```
+final apiKey = await backend.fetchEphemeralToken(authToken);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+API_KEY = ""sk_live_9f3a2c8e1b7d""      # plaintext in the binary
+```
+Secure:
+```
+API_KEY = fetchScopedTokenFromServer(after=authentication)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+private static final String AWS_SECRET = ""wJalrXUtnFEMI/K7MDENG"";
+```
+Secure:
+```
+String awsToken = stsClient.requestSessionToken(authenticatedUser);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+const val STRIPE_KEY = ""sk_live_9f3a2c8e1b7d""
+```
+Secure:
+```
+val stripeKey = secureBackend.issueEphemeralKey(userSession)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let apiKey = ""AIzaSyD9f3a2c8e1b7d4e5f6""
+```
+Secure:
+```
+let apiKey = try await tokenService.fetchScopedToken(for: session)
+```","The app must not embed API keys, cryptographic keys, or other secrets as plaintext constants, since anyone who decompiles the binary can extract them and they cannot be rotated without a new release.
+A secret is stored as a string literal compiled into the app, so it appears in the decompiled code or in a plain strings dump of the package and is trivially harvested at scale.
+Secrets are fetched at runtime from a server after authentication, or held in hardware-backed secure storage, and the binary contains at most short-lived tokens that can be revoked.",Resilience Against Reverse Engineering
+MASVS-RESILIENCE.7,"**Security Rule:** Authentication tokens and keys must be bound to the specific device instance so that data extracted from one device cannot be replayed from another, and so cloned-app instances are detectable.
+
+**Vulnerability Pattern (Description):** A long-lived token or key is portable and carries no device identity, so an attacker who extracts it from one device can reuse it on any other device or an emulator without restriction.
+
+**Secure Pattern (Description):** Credentials are tied to a hardware-backed, per-install device key, so a token presented from a different device fails an attestation or signature check and is rejected by the backend.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final token = await api.login(user, pass);
+```
+Secure:
+```
+final integrity = await PlayIntegrity.requestToken(nonce);
+final token = await api.login(user, pass, integrityToken: integrity);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+token = login(user, pass)        # portable, no device identity
+```
+Secure:
+```
+token = login(user, pass, deviceKey=hardwareBackedDeviceKey())
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+String token = api.login(user, pass);
+```
+Secure:
+```
+KeyPair dk = androidKeyStoreDeviceKey();         // non-exportable
+String token = api.login(user, pass, sign(nonce, dk.getPrivate()));
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val token = api.login(user, pass)               // not device-bound
+```
+Secure:
+```
+val kp = KeyGenParameterSpec.Builder(""deviceKey"",
+    KeyProperties.PURPOSE_SIGN).setIsStrongBoxBacked(true).build()
+val token = api.login(user, pass, attestation = signWithDeviceKey(kp))
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let token = try await api.login(user, pass)      // replayable anywhere
+```
+Secure:
+```
+let attest = try await DCAppAttestService.shared.generateKey()
+let token = try await api.login(user, pass, deviceAttestation: attest)
+```","Authentication tokens and keys must be bound to the specific device instance so that data extracted from one device cannot be replayed from another, and so cloned-app instances are detectable.
+A long-lived token or key is portable and carries no device identity, so an attacker who extracts it from one device can reuse it on any other device or an emulator without restriction.
+Credentials are tied to a hardware-backed, per-install device key, so a token presented from a different device fails an attestation or signature check and is rejected by the backend.",Resilience Against Reverse Engineering
+MASVS-RESILIENCE.8,"**Security Rule:** When a resilience check detects a compromised environment, the app must respond meaningfully and report the signal to the backend, so enforcement does not depend solely on a client an attacker controls.
+
+**Vulnerability Pattern (Description):** A detection result is only written to a local log or a boolean while the app continues normally, so an attacker patches out the single client-side branch and the backend never learns the device is unsafe.
+
+**Secure Pattern (Description):** The detection signal is sent to the server as part of an attested request, the server makes the trust decision and can revoke the session, and the client also degrades sensitive functionality locally.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+if (compromised) debugPrint('unsafe device');
+```
+Secure:
+```
+if (compromised) {
+  await api.reportIntegrity(signedSignal);
+  appState.enterRestrictedMode();
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if isCompromised(): log(""device unsafe"")     # app keeps running
+```
+Secure:
+```
+if isCompromised(): { reportToServer(signedSignal); lockSensitiveFeatures() }
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+if (isRooted()) Log.w(""sec"", ""rooted"")        // client-only, no report
+```
+Secure:
+```
+if (isRooted()) {
+    api.reportIntegrity(attestedPayload(rooted = true))
+    navigateToRestrictedMode()
+}
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+if isJailbroken() { print(""jailbroken"") }     // observed, not acted on
+```
+Secure:
+```
+if isJailbroken() {
+    try await api.reportIntegrity(attestedPayload(jailbroken: true))
+    session.invalidate()
+}
+```","When a resilience check detects a compromised environment, the app must respond meaningfully and report the signal to the backend, so enforcement does not depend solely on a client an attacker controls.
+A detection result is only written to a local log or a boolean while the app continues normally, so an attacker patches out the single client-side branch and the backend never learns the device is unsafe.
+The detection signal is sent to the server as part of an attested request, the server makes the trust decision and can revoke the session, and the client also degrades sensitive functionality locally.",Resilience Against Reverse Engineering
+MASVS-PRIVACY.1,"**Security Rule:** The app must collect and process only the personal data that is strictly necessary for the feature in use, avoiding precise or bulk collection when a coarser or narrower value would suffice.
+
+**Vulnerability Pattern (Description):** The app requests precise location, the full contact list, or other high-sensitivity data when the feature only needs a coarse or partial value, gathering far more personal data than it uses.
+
+**Secure Pattern (Description):** The app requests the least precise and least extensive data that satisfies the feature, for example a coarse location or a single picked contact instead of the entire address book.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final pos = await Geolocator.getCurrentPosition(
+    desiredAccuracy: LocationAccuracy.best);
+```
+Secure:
+```
+final pos = await Geolocator.getCurrentPosition(
+    desiredAccuracy: LocationAccuracy.low);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+request(PRECISE_LOCATION)        # feature only needs the city
+```
+Secure:
+```
+request(COARSE_LOCATION)         # least precise value that works
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+Cursor c = resolver.query(ContactsContract.Contacts.CONTENT_URI,
+                          null, null, null, null);   // whole address book
+```
+Secure:
+```
+Intent pick = new Intent(Intent.ACTION_PICK,
+                         ContactsContract.Contacts.CONTENT_URI);
+startActivityForResult(pick, RC_ONE_CONTACT);        // user picks one
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), RC)
+```
+Secure:
+```
+requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), RC)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+locationManager.requestWhenInUseAuthorization()
+let exact = locationManager.location?.coordinate   # full precision
+```
+Secure:
+```
+locationManager.desiredAccuracy = kCLLocationAccuracyReduced
+locationManager.requestWhenInUseAuthorization()
+```","The app must collect and process only the personal data that is strictly necessary for the feature in use, avoiding precise or bulk collection when a coarser or narrower value would suffice.
+The app requests precise location, the full contact list, or other high-sensitivity data when the feature only needs a coarse or partial value, gathering far more personal data than it uses.
+The app requests the least precise and least extensive data that satisfies the feature, for example a coarse location or a single picked contact instead of the entire address book.",Privacy
+MASVS-PRIVACY.2,"**Security Rule:** The app must declare and request only the runtime permissions its features actually use, requesting each one in context at the moment it is needed rather than all of them up front.
+
+**Vulnerability Pattern (Description):** The app declares broad or unused sensitive permissions in its manifest, or prompts for every permission at first launch before the related feature is ever opened.
+
+**Secure Pattern (Description):** Only permissions tied to a shipped feature are declared, and each is requested just in time when the user invokes the feature that needs it, so the grant is tied to a clear purpose.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+await [Permission.camera, Permission.microphone,
+       Permission.location, Permission.contacts].request();
+```
+Secure:
+```
+if (await Permission.camera.request().isGranted) openScanner();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+onLaunch: requestAll(CAMERA, MIC, LOCATION, CONTACTS)
+```
+Secure:
+```
+onUserTapsScanButton: request(CAMERA)   # just-in-time, per feature
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+ActivityCompat.requestPermissions(this, ALL_PERMS, RC);  // on first run
+```
+Secure:
+```
+if (needsCamera) ActivityCompat.requestPermissions(this,
+    new String[]{Manifest.permission.CAMERA}, RC_CAMERA);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+// AndroidManifest.xml declares RECORD_AUDIO but no feature records audio
+<uses-permission android:name=""android.permission.RECORD_AUDIO"" />
+```
+Secure:
+```
+// declare only what ships; request in the camera screen
+cameraPermission.launch(Manifest.permission.CAMERA)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+AVCaptureDevice.requestAccess(for: .video) { _ in }   # at app start
+```
+Secure:
+```
+@IBAction func scanTapped() {
+    AVCaptureDevice.requestAccess(for: .video) { granted in }
+}
+```","The app must declare and request only the runtime permissions its features actually use, requesting each one in context at the moment it is needed rather than all of them up front.
+The app declares broad or unused sensitive permissions in its manifest, or prompts for every permission at first launch before the related feature is ever opened.
+Only permissions tied to a shipped feature are declared, and each is requested just in time when the user invokes the feature that needs it, so the grant is tied to a clear purpose.",Privacy
+MASVS-PRIVACY.3,"**Security Rule:** Personal and sensitive data must never be written to application logs, console output, or crash reports where other apps, support staff, or analytics back ends could read it.
+
+**Vulnerability Pattern (Description):** The app prints personal data such as email addresses, tokens, location, or health values to the system log or attaches them to a crash report, exposing them beyond the app sandbox.
+
+**Secure Pattern (Description):** Logging of personal data is removed or guarded behind debug-only builds, and any unavoidable identifier in a log is masked or replaced with a non-reversible reference.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+debugPrint('Card: ${card.number} CVV: ${card.cvv}');
+```
+Secure:
+```
+debugPrint('Payment method added');
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+log(""user="" + email + "" token="" + authToken)
+```
+Secure:
+```
+log(""user="" + maskEmail(email))     # no token, identifier masked
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+Log.i(""Profile"", ""Address: "" + user.getHomeAddress());
+```
+Secure:
+```
+if (BuildConfig.DEBUG) Log.i(""Profile"", ""profile loaded"");
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+Log.d(""Auth"", ""email=${user.email} session=${session.token}"")
+```
+Secure:
+```
+Log.d(""Auth"", ""login ok for user ${user.id.hashCode()}"")
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+print(""Logged in as \(user.email), token \(authToken)"")
+```
+Secure:
+```
+os_log(""Login succeeded for user %{private}@"", log: .auth, user.id)
+```","Personal and sensitive data must never be written to application logs, console output, or crash reports where other apps, support staff, or analytics back ends could read it.
+The app prints personal data such as email addresses, tokens, location, or health values to the system log or attaches them to a crash report, exposing them beyond the app sandbox.
+Logging of personal data is removed or guarded behind debug-only builds, and any unavoidable identifier in a log is masked or replaced with a non-reversible reference.",Privacy
+MASVS-PRIVACY.4,"**Security Rule:** The app must not send personal data to analytics, advertising, or other third-party SDKs without a clear purpose and a lawful basis, and must not transmit it before the user has had a chance to consent.
+
+**Vulnerability Pattern (Description):** A third-party analytics or ad SDK is initialised at startup and receives identifiers, contacts, or precise location automatically, sending personal data off device before any consent is gathered.
+
+**Secure Pattern (Description):** Third-party SDKs are initialised only after consent is granted, and personal data is either withheld from them entirely or sent only as aggregated, de-identified values for the agreed purpose.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+FirebaseAnalytics.instance.setUserId(id: user.email);
+```
+Secure:
+```
+if (consent.analytics)
+  FirebaseAnalytics.instance.logEvent(name: 'screen_view');
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+onStart: analyticsSdk.init(); analyticsSdk.send(deviceId, contacts)
+```
+Secure:
+```
+if consentGranted: analyticsSdk.init()   # de-identified events only
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+tracker.setUserId(user.getEmail());
+tracker.send(new HitBuilders.ScreenViewBuilder().build());
+```
+Secure:
+```
+if (consentStore.isAnalyticsAllowed())
+    tracker.send(new HitBuilders.ScreenViewBuilder().build());
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+FirebaseAnalytics.getInstance(this)
+    .setUserProperty(""phone"", user.phoneNumber)
+```
+Secure:
+```
+if (consent.analytics)
+    FirebaseAnalytics.getInstance(this).logEvent(""screen_view"", null)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+Analytics.logEvent(""open"", parameters: [""email"": user.email])
+```
+Secure:
+```
+if consent.analyticsAllowed {
+    Analytics.logEvent(""open"", parameters: [""plan"": user.tier])
+}
+```","The app must not send personal data to analytics, advertising, or other third-party SDKs without a clear purpose and a lawful basis, and must not transmit it before the user has had a chance to consent.
+A third-party analytics or ad SDK is initialised at startup and receives identifiers, contacts, or precise location automatically, sending personal data off device before any consent is gathered.
+Third-party SDKs are initialised only after consent is granted, and personal data is either withheld from them entirely or sent only as aggregated, de-identified values for the agreed purpose.",Privacy
+MASVS-PRIVACY.5,"**Security Rule:** Processing of personal data that requires consent must begin only after the user has given a free, specific, and informed opt-in, and the recorded consent state must be honoured on every code path.
+
+**Vulnerability Pattern (Description):** Personal data is collected or shared with consent assumed to default on, or the consent flag is written but never checked before the data-processing call runs.
+
+**Secure Pattern (Description):** Consent defaults to off, is captured through an explicit opt-in, and every personal-data operation is gated on the stored consent value before it executes.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+bool consent = true;
+await uploadCrashLogs();
+```
+Secure:
+```
+if (await consentStore.isGranted(Purpose.crashReports))
+  await uploadCrashLogs();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+consent = true                # assumed; never asked
+collect(personalData)
+```
+Secure:
+```
+if consentStore.get(PURPOSE) == GRANTED: collect(personalData)
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+prefs.edit().putBoolean(""analytics"", true).apply();  // default on
+```
+Secure:
+```
+if (prefs.getBoolean(""analytics_consent"", false)) analytics.enable();
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+var marketingOptIn = true        // pre-checked default
+mailer.subscribe(user.email)
+```
+Secure:
+```
+if (consentRepo.isGranted(Purpose.MARKETING)) mailer.subscribe(user.email)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+var trackingConsent = true
+sendUsageData()
+```
+Secure:
+```
+guard ConsentStore.shared.isGranted(.usage) else { return }
+sendUsageData()
+```","Processing of personal data that requires consent must begin only after the user has given a free, specific, and informed opt-in, and the recorded consent state must be honoured on every code path.
+Personal data is collected or shared with consent assumed to default on, or the consent flag is written but never checked before the data-processing call runs.
+Consent defaults to off, is captured through an explicit opt-in, and every personal-data operation is gated on the stored consent value before it executes.",Privacy
+MASVS-PRIVACY.6,"**Security Rule:** Before accessing a cross-app tracking identifier or correlating user activity across other apps and websites, the app must request and receive the platform tracking-transparency authorization.
+
+**Vulnerability Pattern (Description):** The app reads the advertising identifier or builds a cross-app profile without first obtaining tracking-transparency authorization, tracking the user against platform policy.
+
+**Secure Pattern (Description):** The app calls the tracking-transparency request, waits for the authorized result, and only then reads the advertising identifier or performs cross-app correlation.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+final id = await AppTrackingTransparency.getAdvertisingIdentifier();
+```
+Secure:
+```
+final status =
+    await AppTrackingTransparency.requestTrackingAuthorization();
+final id = status == TrackingStatus.authorized
+    ? await AppTrackingTransparency.getAdvertisingIdentifier() : null;
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+adId = getAdvertisingId()        # no tracking authorization checked
+```
+Secure:
+```
+if requestTrackingAuthorization() == AUTHORIZED: adId = getAdvertisingId()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+String adId = AdvertisingIdClient.getAdvertisingIdInfo(ctx).getId();
+```
+Secure:
+```
+AdvertisingIdClient.Info info =
+    AdvertisingIdClient.getAdvertisingIdInfo(ctx);
+String adId = info.isLimitAdTrackingEnabled() ? null : info.getId();
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+val adId = AdvertisingIdClient.getAdvertisingIdInfo(context).id
+```
+Secure:
+```
+if (consent.adPersonalization)
+    val adId = AdvertisingIdClient.getAdvertisingIdInfo(context).id
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+let idfa = ASIdentifierManager.shared().advertisingIdentifier
+```
+Secure:
+```
+ATTrackingManager.requestTrackingAuthorization { status in
+    guard status == .authorized else { return }
+    let idfa = ASIdentifierManager.shared().advertisingIdentifier
+}
+```","Before accessing a cross-app tracking identifier or correlating user activity across other apps and websites, the app must request and receive the platform tracking-transparency authorization.
+The app reads the advertising identifier or builds a cross-app profile without first obtaining tracking-transparency authorization, tracking the user against platform policy.
+The app calls the tracking-transparency request, waits for the authorized result, and only then reads the advertising identifier or performs cross-app correlation.",Privacy
+MASVS-PRIVACY.7,"**Security Rule:** The app must prevent personal and sensitive data from being captured in the task-switcher snapshot, in screenshots, or shown in plain text where a bystander could read it.
+
+**Vulnerability Pattern (Description):** A screen showing account balances, health data, or credentials stays fully rendered when the app moves to the background, so the OS snapshot stores that data in the recents view.
+
+**Secure Pattern (Description):** Sensitive screens are masked, blurred, or marked secure before the app is backgrounded, and sensitive fields are obscured so they do not appear in snapshots or screenshots.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+// sensitive page rendered with no protection
+runApp(const AccountApp());
+```
+Secure:
+```
+await ScreenProtector.protectDataLeakageOn();   // mask in app switcher
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+onBackground: leaveSensitiveScreenVisible()
+```
+Secure:
+```
+onBackground: coverWindowWithBlankOverlay()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+setContentView(R.layout.activity_account);
+```
+Secure:
+```
+getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                     WindowManager.LayoutParams.FLAG_SECURE);
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+// balance screen with no flags — captured in recents
+setContentView(R.layout.activity_balance)
+```
+Secure:
+```
+window.setFlags(WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE)
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func sceneDidEnterBackground(_ scene: UIScene) { }
+```
+Secure:
+```
+func sceneDidEnterBackground(_ scene: UIScene) {
+    window?.addSubview(privacyBlurOverlay)
+}
+```","The app must prevent personal and sensitive data from being captured in the task-switcher snapshot, in screenshots, or shown in plain text where a bystander could read it.
+A screen showing account balances, health data, or credentials stays fully rendered when the app moves to the background, so the OS snapshot stores that data in the recents view.
+Sensitive screens are masked, blurred, or marked secure before the app is backgrounded, and sensitive fields are obscured so they do not appear in snapshots or screenshots.",Privacy
+MASVS-PRIVACY.8,"**Security Rule:** The categories of personal data the app collects and shares must be accurately and completely declared in the store privacy disclosure and any in-app privacy notice.
+
+**Vulnerability Pattern (Description):** The app collects or transmits a data category, for example precise location or contacts, that is missing from the store privacy label or in-app privacy notice, leaving users misinformed.
+
+**Secure Pattern (Description):** Every data category the code actually accesses or sends is reflected in the privacy manifest, the store privacy label, and the in-app notice, and the disclosure is updated whenever collection changes.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+code collects: location, contacts
+disclosure lists: location           # contacts undisclosed
+```
+Secure:
+```
+disclosure lists every category the code actually collects
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+// Play Data safety form omits ""Precise location""
+fusedLocationClient.lastLocation
+```
+Secure:
+```
+// Play Data safety form declares precise location collection
+fusedLocationClient.lastLocation
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+// PrivacyInfo.xcprivacy omits NSPrivacyCollectedDataTypeContacts
+let store = CNContactStore()
+```
+Secure:
+```
+// PrivacyInfo.xcprivacy declares the Contacts collected-data type
+let store = CNContactStore()
+```","The categories of personal data the app collects and shares must be accurately and completely declared in the store privacy disclosure and any in-app privacy notice.
+The app collects or transmits a data category, for example precise location or contacts, that is missing from the store privacy label or in-app privacy notice, leaving users misinformed.
+Every data category the code actually accesses or sends is reflected in the privacy manifest, the store privacy label, and the in-app notice, and the disclosure is updated whenever collection changes.",Privacy
+MASVS-PRIVACY.9,"**Security Rule:** The app must give the user a way to withdraw consent, export their personal data, and request deletion, and a deletion request must remove the data from local storage and trigger server-side erasure.
+
+**Vulnerability Pattern (Description):** Account or data deletion only signs the user out or hides the data, leaving personal records in local storage and on the server with no way for the user to revoke consent.
+
+**Secure Pattern (Description):** A deletion action clears local caches, databases, and keychain entries and calls a server delete endpoint, and consent settings can be toggled off at any time.
+
+[[DART PATTERNS]]
+Vulnerable:
+```
+Future<void> deleteAccount() async { await authService.signOut(); }
+```
+Secure:
+```
+Future<void> deleteAccount() async {
+  await api.deleteUserData();
+  await localDb.wipe();
+  await secureStorage.deleteAll();
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+deleteAccount(): clearSessionToken()        # data left behind
+```
+Secure:
+```
+deleteAccount(): wipeLocalData(); api.deleteUserData(); revokeConsent()
+```
+
+[[JAVA PATTERNS]]
+Vulnerable:
+```
+void deleteAccount() { prefs.edit().remove(""token"").apply(); }
+```
+Secure:
+```
+void deleteAccount() {
+    api.deleteUserData();
+    db.clearAllTables();
+    prefs.edit().clear().apply();
+}
+```
+
+[[KOTLIN PATTERNS]]
+Vulnerable:
+```
+fun onDeleteAccount() { sessionManager.logout() }
+```
+Secure:
+```
+suspend fun onDeleteAccount() {
+    api.deleteUserData()
+    db.clearAllTables()
+    context.filesDir.deleteRecursively()
+}
+```
+
+[[SWIFT PATTERNS]]
+Vulnerable:
+```
+func deleteAccount() { KeychainStore.shared.removeToken() }
+```
+Secure:
+```
+func deleteAccount() async {
+    try await api.deleteUser()
+    CoreDataStore.shared.wipeAll()
+    KeychainStore.shared.removeAll()
+}
+```","The app must give the user a way to withdraw consent, export their personal data, and request deletion, and a deletion request must remove the data from local storage and trigger server-side erasure.
+Account or data deletion only signs the user out or hides the data, leaving personal records in local storage and on the server with no way for the user to revoke consent.
+A deletion action clears local caches, databases, and keychain entries and calls a server delete endpoint, and consent settings can be toggled off at any time.",Privacy
