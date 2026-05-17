@@ -50,32 +50,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _DATA_DIR = REPO_ROOT / "src" / "app" / "data"
 
 # framework → (corpus source-dir stem, retrieval facet column name).
+# The entry `facet` (an ASVS chapter name) is written verbatim to the
+# CSV: every chapter has a dedicated agent that filters retrieval on it.
 _FRAMEWORKS: Dict[str, Dict[str, str]] = {
     "asvs": {"dir": "asvs_corpus", "facet": "control_family"},
-}
-
-# ASVS 5.0 chapter name → the `control_family` value the current `Asvs*`
-# agents filter retrieval on. Three chapters whose ASVS 5.0 name has no
-# matching agent are aliased onto an existing agent's family. This is a
-# temporary bridge: it keeps every requirement reachable until the agents
-# are realigned 1:1 to the 17 ASVS chapters, at which point this map is
-# dropped. The YAML `facet` stays the true chapter name throughout.
-_ASVS_CONTROL_FAMILY_ALIAS: Dict[str, str] = {
-    "Web Frontend Security": "Client Side",
-    "Self-contained Tokens": "Session Management",
-    "WebRTC": "Client Side",
 }
 
 
 def _facet(framework: str) -> str:
     return _FRAMEWORKS[framework]["facet"]
-
-
-def _facet_value(framework: str, raw: str) -> str:
-    """Map an entry's `facet` to the retrieval value written to the CSV."""
-    if framework == "asvs":
-        return _ASVS_CONTROL_FAMILY_ALIAS.get(raw, raw)
-    return raw
 
 
 def _render_document(entry: Dict) -> str:
@@ -153,7 +136,7 @@ def _rows(framework: str) -> List[Dict[str, str]]:
                     "id": entry["id"],
                     "document": _render_document(entry),
                     "embed_text": _render_embed_text(entry),
-                    facet: _facet_value(framework, entry["facet"]),
+                    facet: entry["facet"],
                 }
             )
     return rows

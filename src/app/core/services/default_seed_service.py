@@ -163,6 +163,13 @@ _LEGACY_AGENT_NAMES = [
     "BuildDeploymentAgent",
     "ClientSideAgent",
     "CloudContainerAgent",
+    # Prefixed ASVS agents superseded by the 1:1 chapter realignment —
+    # listed here so "Restore defaults" clears them; the data migration
+    # leaves them as unmapped orphans on the non-force upgrade path.
+    "AsvsCodeIntegrityAgent",
+    "AsvsBuildDeploymentAgent",
+    "AsvsClientSideAgent",
+    "AsvsCloudContainerAgent",
 ]
 
 
@@ -185,31 +192,33 @@ _ASVS_AGENT_SPECS: List[Dict[str, Any]] = [
     {
         "name": "ApiSecurityAgent",
         "description": (
-            "Focuses on the security of API endpoints, including REST, GraphQL, "
-            "and other web services."
+            "Focuses on the security of API and web service endpoints — "
+            "REST, GraphQL, and RPC — including schema validation, rate "
+            "limiting, and HTTP message handling."
         ),
         "domain_query": {
             "keywords": (
-                "API security, REST, GraphQL, API keys, rate limiting, API "
-                "authentication, API authorization, endpoint security, JWT, "
-                "OAuth, mass assignment"
+                "API security, REST, GraphQL, RPC, API keys, rate "
+                "limiting, API authentication, API authorization, endpoint "
+                "security, mass assignment, HTTP method, content type, "
+                "web service"
             ),
-            "metadata_filter": {
-                "control_family": ["API and Web Service", "OAuth and OIDC"]
-            },
+            "metadata_filter": {"control_family": ["API and Web Service"]},
         },
     },
     {
         "name": "ArchitectureAgent",
         "description": (
-            "Assesses the overall security architecture, design patterns, "
-            "and data flow."
+            "Assesses secure coding and architecture — design patterns, "
+            "data flow, trust boundaries, dependency and supply-chain "
+            "integrity, defensive coding, and safe concurrency."
         ),
         "domain_query": {
             "keywords": (
                 "security architecture, design patterns, data flow, trust "
-                "boundaries, tiering, segregation, component separation, "
-                "security principles, microservices security"
+                "boundaries, defensive coding, dependency security, supply "
+                "chain, software integrity, third-party libraries, safe "
+                "concurrency, race conditions, secure coding"
             ),
             "metadata_filter": {"control_family": ["Secure Coding and Architecture"]},
         },
@@ -243,21 +252,6 @@ _ASVS_AGENT_SPECS: List[Dict[str, Any]] = [
                 "price manipulation, excessive computation"
             ),
             "metadata_filter": {"control_family": ["Validation and Business Logic"]},
-        },
-    },
-    {
-        "name": "CodeIntegrityAgent",
-        "description": (
-            "Verifies the integrity of code and dependencies to prevent " "tampering."
-        ),
-        "domain_query": {
-            "keywords": (
-                "software integrity, code signing, dependency security, "
-                "supply chain attacks, insecure deserialization, code "
-                "tampering, third-party libraries, SCA, software composition "
-                "analysis"
-            ),
-            "metadata_filter": {"control_family": ["Secure Coding and Architecture"]},
         },
     },
     {
@@ -380,57 +374,74 @@ _ASVS_AGENT_SPECS: List[Dict[str, Any]] = [
                 "validation, sanitization, denylisting, allowlisting, "
                 "parameter tampering"
             ),
-            "metadata_filter": {
-                "control_family": [
-                    "Encoding and Sanitization",
-                    "Validation and Business Logic",
-                ]
-            },
+            "metadata_filter": {"control_family": ["Encoding and Sanitization"]},
         },
     },
     {
-        "name": "BuildDeploymentAgent",
+        "name": "WebFrontendAgent",
         "description": (
-            "Ensures security in the build and deployment pipeline, including "
-            "CI/CD security and reproducible builds."
+            "Analyzes browser-facing security — content security policy, "
+            "CORS, security headers, cookie attributes, DOM-based XSS, "
+            "clickjacking, and subresource integrity."
         ),
         "domain_query": {
             "keywords": (
-                "build security, deployment security, CI/CD, pipeline "
-                "security, reproducible builds, software bill of materials, "
-                "SBOM, artifact integrity, git security"
-            ),
-            "metadata_filter": {"control_family": ["Build and Deployment"]},
-        },
-    },
-    {
-        "name": "ClientSideAgent",
-        "description": (
-            "Analyzes client-side security risks, including DOM XSS, WebRTC, "
-            "and modern frontend framework vulnerabilities."
-        ),
-        "domain_query": {
-            "keywords": (
-                "client-side security, DOM XSS, WebRTC, frontend security, "
-                "CORS, CSP, subresource integrity, javascript security, "
+                "web frontend security, content security policy, CSP, "
+                "CORS, security headers, cookie security, SameSite, DOM "
+                "XSS, clickjacking, subresource integrity, postMessage, "
                 "browser security"
             ),
-            "metadata_filter": {"control_family": ["Client Side"]},
+            "metadata_filter": {"control_family": ["Web Frontend Security"]},
         },
     },
     {
-        "name": "CloudContainerAgent",
+        "name": "SelfContainedTokenAgent",
         "description": (
-            "Focuses on cloud-native security, container hardening, and "
-            "orchestration security."
+            "Reviews self-contained, stateless tokens such as JWT for "
+            "signature verification, algorithm confusion, claims "
+            "validation, expiry, and revocation."
         ),
         "domain_query": {
             "keywords": (
-                "cloud security, container security, docker security, "
-                "kubernetes, orchestration, cloud misconfiguration, "
-                "serverless security, cloud storage, IAM roles"
+                "self-contained tokens, JWT, JSON web token, signature "
+                "verification, algorithm confusion, none algorithm, claims "
+                "validation, audience, issuer, token expiry, token "
+                "revocation"
             ),
-            "metadata_filter": {"control_family": ["Cloud and Container"]},
+            "metadata_filter": {"control_family": ["Self-contained Tokens"]},
+        },
+    },
+    {
+        "name": "OauthOidcAgent",
+        "description": (
+            "Audits OAuth 2.0 and OpenID Connect flows — authorization "
+            "code with PKCE, redirect URI validation, state and nonce, "
+            "token handling, and client authentication."
+        ),
+        "domain_query": {
+            "keywords": (
+                "OAuth, OAuth 2.0, OpenID Connect, OIDC, authorization "
+                "code, PKCE, redirect URI validation, state parameter, "
+                "nonce, access token, refresh token, client "
+                "authentication, ID token"
+            ),
+            "metadata_filter": {"control_family": ["OAuth and OIDC"]},
+        },
+    },
+    {
+        "name": "WebRtcAgent",
+        "description": (
+            "Analyzes WebRTC real-time communication security — DTLS-SRTP "
+            "media encryption, signaling, ICE and TURN configuration, and "
+            "peer connection handling."
+        ),
+        "domain_query": {
+            "keywords": (
+                "WebRTC, real-time communication, DTLS, SRTP, media "
+                "encryption, signaling security, ICE, STUN, TURN, peer "
+                "connection, RTCPeerConnection, SDP"
+            ),
+            "metadata_filter": {"control_family": ["WebRTC"]},
         },
     },
 ]

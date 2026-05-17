@@ -9332,7 +9332,7 @@ if addr.is_global: relay.allocate(peer_ip)
 else: raise PermissionError(""non-public relay target"")
 ```","The TURN relay must refuse to allocate or relay traffic to IP addresses reserved for special purposes — internal, loopback, broadcast, link-local — across both IPv4 and IPv6.
 The TURN server relays peer traffic to any destination a client requests, so a client can use the relay to reach internal hosts, loopback, or broadcast ranges and pivot into the private network.
-Each requested relay destination is checked against a denylist of reserved and private address ranges for both IP families, and the allocation is rejected when the target is not a public address.",Client Side
+Each requested relay destination is checked against a denylist of reserved and private address ranges for both IP families, and the allocation is rejected when the target is not a public address.",WebRTC
 V17.1.2,"**Security Rule:** The TURN service must bound the number of relay ports and allocations a single user or client can hold so a legitimate account cannot exhaust the server's port pool.
 
 **Vulnerability Pattern (Description):** The TURN server grants every allocation request without per-user quotas, so one client can open ports until the relay's port range or memory is exhausted and other users are denied service.
@@ -9398,7 +9398,7 @@ if len(ports[user]) >= MAX_PER_USER:
 ports[user].append(open_relay_port())
 ```","The TURN service must bound the number of relay ports and allocations a single user or client can hold so a legitimate account cannot exhaust the server's port pool.
 The TURN server grants every allocation request without per-user quotas, so one client can open ports until the relay's port range or memory is exhausted and other users are denied service.
-A per-user and per-IP allocation quota is enforced, idle allocations time out and are reclaimed, and requests beyond the quota are rejected with an error rather than served.",Client Side
+A per-user and per-IP allocation quota is enforced, idle allocations time out and are reclaimed, and requests beyond the quota are rejected with an error rather than served.",WebRTC
 V17.2.1,"**Security Rule:** The private key for the DTLS certificate must be generated, stored, rotated, and protected according to the organization's documented cryptographic key management policy.
 
 **Vulnerability Pattern (Description):** The DTLS certificate key is committed to source, left world-readable on disk, or never rotated, so anyone who reads the repository or the host filesystem can impersonate the media server.
@@ -9446,7 +9446,7 @@ key = boto3.client(""secretsmanager"").get_secret_value(
     SecretId=""dtls/media-key"")[""SecretString""]
 ```","The private key for the DTLS certificate must be generated, stored, rotated, and protected according to the organization's documented cryptographic key management policy.
 The DTLS certificate key is committed to source, left world-readable on disk, or never rotated, so anyone who reads the repository or the host filesystem can impersonate the media server.
-The DTLS key is generated and held in a secrets manager or hardware keystore with restricted permissions, loaded at runtime, and rotated on the schedule the key management policy defines.",Client Side
+The DTLS key is generated and held in a secrets manager or hardware keystore with restricted permissions, loaded at runtime, and rotated on the schedule the key management policy defines.",WebRTC
 V17.2.2,"**Security Rule:** The media server must negotiate only approved DTLS cipher suites and a secure DTLS-SRTP protection profile, rejecting weak or deprecated algorithms during the handshake.
 
 **Vulnerability Pattern (Description):** The media server allows any DTLS cipher suite or SRTP protection profile the peer offers, so a downgrade to a weak cipher or a null profile leaves the media stream effectively unprotected.
@@ -9511,7 +9511,7 @@ ctx.set_ciphers(""ECDHE+AESGCM"")
 ctx.minimum_version = ssl.TLSVersion.TLSv1_2
 ```","The media server must negotiate only approved DTLS cipher suites and a secure DTLS-SRTP protection profile, rejecting weak or deprecated algorithms during the handshake.
 The media server allows any DTLS cipher suite or SRTP protection profile the peer offers, so a downgrade to a weak cipher or a null profile leaves the media stream effectively unprotected.
-The DTLS context is pinned to a curated list of strong cipher suites and an authenticated SRTP protection profile, and handshakes offering only weaker options are aborted.",Client Side
+The DTLS context is pinned to a curated list of strong cipher suites and an authenticated SRTP protection profile, and handshakes offering only weaker options are aborted.",WebRTC
 V17.2.3,"**Security Rule:** The media server must verify SRTP packet authentication tags before accepting RTP, so forged packets cannot inject media or trigger a denial of service.
 
 **Vulnerability Pattern (Description):** Incoming RTP is processed without checking the SRTP authentication tag, so an attacker can inject spoofed packets that corrupt the stream, insert audio or video, or crash the decoder.
@@ -9575,7 +9575,7 @@ except SrtpAuthError:
     metrics.dropped += 1
 ```","The media server must verify SRTP packet authentication tags before accepting RTP, so forged packets cannot inject media or trigger a denial of service.
 Incoming RTP is processed without checking the SRTP authentication tag, so an attacker can inject spoofed packets that corrupt the stream, insert audio or video, or crash the decoder.
-Every RTP packet is unprotected through the SRTP context, which verifies the authentication tag, and packets that fail verification are dropped and counted rather than handed to the decoder.",Client Side
+Every RTP packet is unprotected through the SRTP context, which verifies the authentication tag, and packets that fail verification are dropped and counted rather than handed to the decoder.",WebRTC
 V17.2.4,"**Security Rule:** The media server must remain available when it receives malformed SRTP packets, dropping the bad packet and continuing rather than crashing or stalling the stream.
 
 **Vulnerability Pattern (Description):** A malformed SRTP packet — truncated header, bad length field, or impossible offset — is parsed without bounds checks, causing an unhandled exception or crash that ends the media session.
@@ -9638,7 +9638,7 @@ if len(packet) < 12:
 ssrc = struct.unpack("">I"", packet[8:12])[0]
 ```","The media server must remain available when it receives malformed SRTP packets, dropping the bad packet and continuing rather than crashing or stalling the stream.
 A malformed SRTP packet — truncated header, bad length field, or impossible offset — is parsed without bounds checks, causing an unhandled exception or crash that ends the media session.
-Packet parsing validates lengths and offsets before use, wraps per-packet processing in error handling, and discards any packet that fails validation while keeping the receive loop running.",Client Side
+Packet parsing validates lengths and offsets before use, wraps per-packet processing in error handling, and discards any packet that fails validation while keeping the receive loop running.",WebRTC
 V17.2.5,"**Security Rule:** The media server must keep processing legitimate media during a flood of SRTP packets from valid users, applying rate limiting or pacing so a traffic spike cannot saturate it.
 
 **Vulnerability Pattern (Description):** The media server processes every inbound SRTP packet with no per-flow rate limit, so a burst from legitimate clients overruns the receive buffers and starves other sessions.
@@ -9702,7 +9702,7 @@ else:
     metrics.throttled += 1
 ```","The media server must keep processing legitimate media during a flood of SRTP packets from valid users, applying rate limiting or pacing so a traffic spike cannot saturate it.
 The media server processes every inbound SRTP packet with no per-flow rate limit, so a burst from legitimate clients overruns the receive buffers and starves other sessions.
-Each media flow is rate limited or paced, excess packets are dropped early before expensive decoding, and the server applies backpressure so no single flow can monopolize processing.",Client Side
+Each media flow is rate limited or paced, excess packets are dropped early before expensive decoding, and the server applies backpressure so no single flow can monopolize processing.",WebRTC
 V17.2.6,"**Security Rule:** The media server must not be vulnerable to the DTLS ClientHello race condition, verified by confirming the implementation is patched or by running the race condition test.
 
 **Vulnerability Pattern (Description):** The DTLS stack creates and binds handshake state on the first ClientHello before the peer is verified, so racing ClientHello messages can hijack or corrupt a forming media association.
@@ -9753,7 +9753,7 @@ Secure:
 dtls = DTLSServer(require_cookie_exchange=True)  # patched build
 ```","The media server must not be vulnerable to the DTLS ClientHello race condition, verified by confirming the implementation is patched or by running the race condition test.
 The DTLS stack creates and binds handshake state on the first ClientHello before the peer is verified, so racing ClientHello messages can hijack or corrupt a forming media association.
-The DTLS implementation is a current patched version that uses a stateless HelloVerifyRequest cookie exchange before allocating handshake state, and the race condition test is run to confirm it.",Client Side
+The DTLS implementation is a current patched version that uses a stateless HelloVerifyRequest cookie exchange before allocating handshake state, and the race condition test is run to confirm it.",WebRTC
 V17.2.7,"**Security Rule:** Any audio or video recording component attached to the media server must keep processing media during an SRTP packet flood from legitimate users without dropping the recording session.
 
 **Vulnerability Pattern (Description):** The recording pipeline writes every inbound packet synchronously to storage, so a traffic burst blocks the writer, backs up the receive path, and aborts the recording.
@@ -9816,7 +9816,7 @@ except queue.Full:
     metrics.record_dropped += 1
 ```","Any audio or video recording component attached to the media server must keep processing media during an SRTP packet flood from legitimate users without dropping the recording session.
 The recording pipeline writes every inbound packet synchronously to storage, so a traffic burst blocks the writer, backs up the receive path, and aborts the recording.
-The recorder ingests media through a bounded, backpressured queue with an asynchronous writer, so a flood is absorbed or shed gracefully while the recording continues.",Client Side
+The recorder ingests media through a bounded, backpressured queue with an asynchronous writer, so a flood is absorbed or shed gracefully while the recording continues.",WebRTC
 V17.2.8,"**Security Rule:** The media server must compare the peer's DTLS certificate against the SDP fingerprint attribute and terminate the media stream if the fingerprint does not match.
 
 **Vulnerability Pattern (Description):** The media server completes the DTLS handshake without checking the peer certificate against the fingerprint signaled in the SDP, so a man in the middle can substitute its own certificate.
@@ -9884,7 +9884,7 @@ else:
     start_media(session)
 ```","The media server must compare the peer's DTLS certificate against the SDP fingerprint attribute and terminate the media stream if the fingerprint does not match.
 The media server completes the DTLS handshake without checking the peer certificate against the fingerprint signaled in the SDP, so a man in the middle can substitute its own certificate.
-After the DTLS handshake the peer certificate is hashed with the algorithm named in the SDP fingerprint and compared to the signaled value, and the media stream is dropped on any mismatch.",Client Side
+After the DTLS handshake the peer certificate is hashed with the algorithm named in the SDP fingerprint and compared to the signaled value, and the media stream is dropped on any mismatch.",WebRTC
 V17.3.1,"**Security Rule:** The signaling server must rate limit incoming signaling messages so that a flood of messages cannot stop it from processing legitimate signaling traffic.
 
 **Vulnerability Pattern (Description):** The signaling server handles every inbound message with no per-client rate limit, so a burst of offers, candidates, or join requests saturates it and blocks legitimate session setup.
@@ -9957,7 +9957,7 @@ async def on_message(ws, msg):
     await handle_signal(msg)
 ```","The signaling server must rate limit incoming signaling messages so that a flood of messages cannot stop it from processing legitimate signaling traffic.
 The signaling server handles every inbound message with no per-client rate limit, so a burst of offers, candidates, or join requests saturates it and blocks legitimate session setup.
-Each signaling connection is rate limited with a token bucket or sliding window, and messages exceeding the limit are rejected or delayed so legitimate traffic continues to be served.",Client Side
+Each signaling connection is rate limited with a token bucket or sliding window, and messages exceeding the limit are rejected or delayed so legitimate traffic continues to be served.",WebRTC
 V17.3.2,"**Security Rule:** The signaling server must validate incoming signaling messages and handle malformed input safely — guarding against integer overflow and buffer overflow — so a bad message cannot cause a denial of service.
 
 **Vulnerability Pattern (Description):** A malformed signaling message — invalid JSON, missing fields, or an out-of-range numeric value — is parsed and used without validation, causing an unhandled exception or overflow that crashes the server.
@@ -10027,7 +10027,7 @@ except ValidationError:
 route(msg.type, msg.payload)
 ```","The signaling server must validate incoming signaling messages and handle malformed input safely — guarding against integer overflow and buffer overflow — so a bad message cannot cause a denial of service.
 A malformed signaling message — invalid JSON, missing fields, or an out-of-range numeric value — is parsed and used without validation, causing an unhandled exception or overflow that crashes the server.
-Every signaling message is parsed against a strict schema with bounds checks on numeric and length fields, and parse or validation failures return an error to the sender while the server keeps running.",Client Side
+Every signaling message is parsed against a strict schema with bounds checks on numeric and length fields, and parse or validation failures return an error to the sender while the server keeps running.",WebRTC
 V2.1.1,"**Security Rule:** The application's documentation must define input validation rules that describe how each data item is checked against its expected structure, covering common formats such as email addresses or card numbers as well as any internal data formats.
 
 **Vulnerability Pattern (Description):** Validation rules live only in scattered, undocumented code, so the expected structure of each field is unknown, applied inconsistently across endpoints, and impossible to review or test against.
@@ -10818,7 +10818,7 @@ Secure:
 # SECURITY.md: requires HTTPS + HSTS + CSP; missing -> block with warning.
 ```","Application documentation must state the browser security features the application depends on, such as HTTPS, HSTS, and Content Security Policy, and must define how the application behaves when those features are unavailable, for example by warning the user or blocking access.
 The browser security mechanisms the application relies on are never written down, and there is no defined fallback behaviour, so a browser that lacks a feature silently degrades the application's protections.
-A documented baseline lists every required browser security feature and the application's defined response when one is missing, so degraded environments are detected and handled deliberately.",Client Side
+A documented baseline lists every required browser security feature and the application's defined response when one is missing, so degraded environments are detected and handled deliberately.",Web Frontend Security
 V3.2.1,"**Security Rule:** Controls must stop the browser from rendering an HTTP response in the wrong context — for example an API payload or an uploaded file requested directly — by checking Sec-Fetch request headers, using the CSP sandbox directive, or returning a Content-Disposition attachment.
 
 **Vulnerability Pattern (Description):** A user-uploaded file or API response is served with a renderable content type and no contextual guard, so requesting it directly lets the browser execute it as a document in the application's origin.
@@ -10877,7 +10877,7 @@ Secure:
 return FileResponse(upload_path, content_disposition_type=""attachment"")
 ```","Controls must stop the browser from rendering an HTTP response in the wrong context — for example an API payload or an uploaded file requested directly — by checking Sec-Fetch request headers, using the CSP sandbox directive, or returning a Content-Disposition attachment.
 A user-uploaded file or API response is served with a renderable content type and no contextual guard, so requesting it directly lets the browser execute it as a document in the application's origin.
-Responses that should never be rendered as documents are forced to download with a Content-Disposition attachment header, sandboxed via CSP, or gated on Sec-Fetch headers that confirm the expected request context.",Client Side
+Responses that should never be rendered as documents are forced to download with a Content-Disposition attachment header, sandboxed via CSP, or gated on Sec-Fetch headers that confirm the expected request context.",Web Frontend Security
 V3.2.2,"**Security Rule:** Content meant to be shown as text rather than rendered as markup must be inserted with safe rendering APIs such as createTextNode or textContent so that embedded HTML or JavaScript is displayed literally.
 
 **Vulnerability Pattern (Description):** Untrusted text is written into the page through innerHTML or an equivalent HTML-parsing sink, so any markup it contains is parsed and any script it contains executes.
@@ -10924,7 +10924,7 @@ Secure:
 el.textContent = userComment;
 ```","Content meant to be shown as text rather than rendered as markup must be inserted with safe rendering APIs such as createTextNode or textContent so that embedded HTML or JavaScript is displayed literally.
 Untrusted text is written into the page through innerHTML or an equivalent HTML-parsing sink, so any markup it contains is parsed and any script it contains executes.
-Text is placed into the DOM with textContent or createTextNode, which treat the value as literal characters and never parse it as HTML.",Client Side
+Text is placed into the DOM with textContent or createTextNode, which treat the value as literal characters and never parse it as HTML.",Web Frontend Security
 V3.2.3,"**Security Rule:** Client-side JavaScript must avoid DOM clobbering by declaring variables explicitly, type-checking values before use, not storing globals on the document object, and isolating application state in a namespace.
 
 **Vulnerability Pattern (Description):** Code reads a property such as document.config or window.user without an explicit declaration or type check, so an attacker-injected element with a matching id or name clobbers it with an HTML element reference.
@@ -10953,7 +10953,7 @@ const token = String(App.state.authToken ?? """");
 if (token) { ... }
 ```","Client-side JavaScript must avoid DOM clobbering by declaring variables explicitly, type-checking values before use, not storing globals on the document object, and isolating application state in a namespace.
 Code reads a property such as document.config or window.user without an explicit declaration or type check, so an attacker-injected element with a matching id or name clobbers it with an HTML element reference.
-Application state lives in explicitly declared variables inside an isolated namespace or module scope, and values are type-checked before use so a clobbered DOM property cannot be mistaken for real data.",Client Side
+Application state lives in explicitly declared variables inside an isolated namespace or module scope, and values are type-checked before use so a clobbered DOM property cannot be mistaken for real data.",Web Frontend Security
 V3.3.1,"**Security Rule:** Cookies must carry the Secure attribute, and unless the cookie name uses the __Host- prefix it must use the __Secure- prefix, so the cookie is only ever sent over HTTPS.
 
 **Vulnerability Pattern (Description):** A cookie is set without the Secure attribute and with a plain name, so it is transmitted over plaintext HTTP and a network attacker can read or inject it.
@@ -11011,7 +11011,7 @@ Secure:
 response.set_cookie(""__Host-session"", value, secure=True, path=""/"")
 ```","Cookies must carry the Secure attribute, and unless the cookie name uses the __Host- prefix it must use the __Secure- prefix, so the cookie is only ever sent over HTTPS.
 A cookie is set without the Secure attribute and with a plain name, so it is transmitted over plaintext HTTP and a network attacker can read or inject it.
-The cookie is set with the Secure attribute and a __Host- or __Secure- prefixed name, which browsers only accept when the cookie was set securely over HTTPS.",Client Side
+The cookie is set with the Secure attribute and a __Host- or __Secure- prefixed name, which browsers only accept when the cookie was set securely over HTTPS.",Web Frontend Security
 V3.3.2,"**Security Rule:** Each cookie's SameSite attribute must be set to a value appropriate to that cookie's purpose so that exposure to clickjacking and cross-site request forgery is limited.
 
 **Vulnerability Pattern (Description):** A session or state-changing cookie is set with no SameSite attribute, so the browser attaches it to cross-site requests and the application is open to CSRF.
@@ -11070,7 +11070,7 @@ Secure:
 response.set_cookie(""session"", value, secure=True, samesite=""Strict"")
 ```","Each cookie's SameSite attribute must be set to a value appropriate to that cookie's purpose so that exposure to clickjacking and cross-site request forgery is limited.
 A session or state-changing cookie is set with no SameSite attribute, so the browser attaches it to cross-site requests and the application is open to CSRF.
-The cookie is set with an explicit SameSite value — Strict or Lax for session cookies — so the browser withholds it from unsafe cross-site requests.",Client Side
+The cookie is set with an explicit SameSite value — Strict or Lax for session cookies — so the browser withholds it from unsafe cross-site requests.",Web Frontend Security
 V3.3.3,"**Security Rule:** Cookies must use the __Host- name prefix unless they are explicitly designed to be shared with other hosts, binding the cookie to a single origin with a fixed path and the Secure attribute.
 
 **Vulnerability Pattern (Description):** A cookie that should belong to one host is given a plain name and a Domain attribute, so a sibling subdomain can read or overwrite it and a subdomain takeover can fixate the session.
@@ -11129,7 +11129,7 @@ Secure:
 response.set_cookie(""__Host-session"", value, secure=True, path=""/"")
 ```","Cookies must use the __Host- name prefix unless they are explicitly designed to be shared with other hosts, binding the cookie to a single origin with a fixed path and the Secure attribute.
 A cookie that should belong to one host is given a plain name and a Domain attribute, so a sibling subdomain can read or overwrite it and a subdomain takeover can fixate the session.
-The cookie name carries the __Host- prefix, set with Secure, path of slash, and no Domain attribute, so the browser scopes it strictly to the issuing host.",Client Side
+The cookie name carries the __Host- prefix, set with Secure, path of slash, and no Domain attribute, so the browser scopes it strictly to the issuing host.",Web Frontend Security
 V3.3.4,"**Security Rule:** Cookies whose value must not be reachable by client-side scripts, such as session tokens, must carry the HttpOnly attribute, and that value must only be delivered to the client through the Set-Cookie header.
 
 **Vulnerability Pattern (Description):** A session cookie is set without HttpOnly, or the token is also exposed to JavaScript through the page body or a JSON response, so a single XSS flaw can read and exfiltrate it.
@@ -11188,7 +11188,7 @@ Secure:
 response.set_cookie(""session"", token, secure=True, httponly=True)
 ```","Cookies whose value must not be reachable by client-side scripts, such as session tokens, must carry the HttpOnly attribute, and that value must only be delivered to the client through the Set-Cookie header.
 A session cookie is set without HttpOnly, or the token is also exposed to JavaScript through the page body or a JSON response, so a single XSS flaw can read and exfiltrate it.
-The session cookie is set with HttpOnly so scripts cannot read it, and the token is only ever sent in the Set-Cookie header and never embedded in markup or an API response body.",Client Side
+The session cookie is set with HttpOnly so scripts cannot read it, and the token is only ever sent in the Set-Cookie header and never embedded in markup or an API response body.",Web Frontend Security
 V3.3.5,"**Security Rule:** When the application writes a cookie, the combined length of its name and value must stay within 4096 bytes so the browser will store the cookie and send it back on later requests.
 
 **Vulnerability Pattern (Description):** A large value such as a serialized object or a long token is written into a cookie, exceeding the browser's 4096-byte limit, so the cookie is silently dropped and functionality that depends on it breaks.
@@ -11249,7 +11249,7 @@ sid = cache.put(large_object)
 response.set_cookie(""state"", sid)   # short server-side key
 ```","When the application writes a cookie, the combined length of its name and value must stay within 4096 bytes so the browser will store the cookie and send it back on later requests.
 A large value such as a serialized object or a long token is written into a cookie, exceeding the browser's 4096-byte limit, so the cookie is silently dropped and functionality that depends on it breaks.
-The cookie carries only a short opaque identifier and large state is kept server-side, and the application checks that the cookie name and value together stay under 4096 bytes before setting it.",Client Side
+The cookie carries only a short opaque identifier and large state is kept server-side, and the application checks that the cookie name and value together stay under 4096 bytes before setting it.",Web Frontend Security
 V3.4.1,"**Security Rule:** Every response must include a Strict-Transport-Security header with a max-age of at least one year, and from L2 upward the policy must apply to all subdomains via includeSubDomains.
 
 **Vulnerability Pattern (Description):** Responses omit the Strict-Transport-Security header, or set a short max-age, so a browser can be downgraded to plaintext HTTP and the first request is exposed to a man-in-the-middle.
@@ -11310,7 +11310,7 @@ response.headers[""Strict-Transport-Security""] = \
     ""max-age=31536000; includeSubDomains""
 ```","Every response must include a Strict-Transport-Security header with a max-age of at least one year, and from L2 upward the policy must apply to all subdomains via includeSubDomains.
 Responses omit the Strict-Transport-Security header, or set a short max-age, so a browser can be downgraded to plaintext HTTP and the first request is exposed to a man-in-the-middle.
-Every response carries Strict-Transport-Security with a max-age of at least 31536000 seconds and includeSubDomains, so the browser refuses any non-HTTPS connection to the site and its subdomains.",Client Side
+Every response carries Strict-Transport-Security with a max-age of at least 31536000 seconds and includeSubDomains, so the browser refuses any non-HTTPS connection to the site and its subdomains.",Web Frontend Security
 V3.4.2,"**Security Rule:** The CORS Access-Control-Allow-Origin header must be a fixed value or, if derived from the request Origin, validated against an allowlist of trusted origins, and a wildcard origin must never accompany sensitive data.
 
 **Vulnerability Pattern (Description):** The application reflects the request Origin straight into Access-Control-Allow-Origin, or sends a wildcard alongside credentials, so any site can read authenticated cross-origin responses.
@@ -11372,7 +11372,7 @@ if origin in ALLOWED_ORIGINS:
     resp.headers[""Access-Control-Allow-Origin""] = origin
 ```","The CORS Access-Control-Allow-Origin header must be a fixed value or, if derived from the request Origin, validated against an allowlist of trusted origins, and a wildcard origin must never accompany sensitive data.
 The application reflects the request Origin straight into Access-Control-Allow-Origin, or sends a wildcard alongside credentials, so any site can read authenticated cross-origin responses.
-The response Origin is checked against an allowlist of trusted origins and only an exact allowed value is echoed back, and wildcard responses never carry sensitive or credentialed data.",Client Side
+The response Origin is checked against an allowlist of trusted origins and only an exact allowed value is echoed back, and wildcard responses never carry sensitive or credentialed data.",Web Frontend Security
 V3.4.3,"**Security Rule:** HTTP responses must include a Content-Security-Policy header that, at a minimum, sets object-src to none and base-uri to none and uses an allowlist, nonces, or hashes to constrain which scripts the browser will execute.
 
 **Vulnerability Pattern (Description):** Responses ship with no Content-Security-Policy, or a permissive one that allows inline script or unsafe-inline, so an injected script tag runs unhindered.
@@ -11434,7 +11434,7 @@ response.headers[""Content-Security-Policy""] = (
     ""object-src 'none'; base-uri 'none'; script-src 'nonce-"" + nonce + ""'"")
 ```","HTTP responses must include a Content-Security-Policy header that, at a minimum, sets object-src to none and base-uri to none and uses an allowlist, nonces, or hashes to constrain which scripts the browser will execute.
 Responses ship with no Content-Security-Policy, or a permissive one that allows inline script or unsafe-inline, so an injected script tag runs unhindered.
-A Content-Security-Policy header is sent on every response with object-src none, base-uri none, and a script-src restricted to a per-response nonce or hash so only trusted scripts execute.",Client Side
+A Content-Security-Policy header is sent on every response with object-src none, base-uri none, and a script-src restricted to a per-response nonce or hash so only trusted scripts execute.",Web Frontend Security
 V3.4.4,"**Security Rule:** Every HTTP response must include the X-Content-Type-Options header set to nosniff so the browser never guesses a MIME type and instead trusts the declared Content-Type.
 
 **Vulnerability Pattern (Description):** Responses omit X-Content-Type-Options, so a browser may sniff an uploaded file or text response into an executable type such as HTML or JavaScript.
@@ -11491,7 +11491,7 @@ Secure:
 response.headers[""X-Content-Type-Options""] = ""nosniff""
 ```","Every HTTP response must include the X-Content-Type-Options header set to nosniff so the browser never guesses a MIME type and instead trusts the declared Content-Type.
 Responses omit X-Content-Type-Options, so a browser may sniff an uploaded file or text response into an executable type such as HTML or JavaScript.
-Every response carries X-Content-Type-Options set to nosniff, so the browser only treats a resource as the type its Content-Type header declares.",Client Side
+Every response carries X-Content-Type-Options set to nosniff, so the browser only treats a resource as the type its Content-Type header declares.",Web Frontend Security
 V3.4.5,"**Security Rule:** The application must set a referrer policy, via the Referrer-Policy header or HTML attributes, to keep technically sensitive data such as URL paths, query strings, and internal hostnames out of the Referer header sent to third parties.
 
 **Vulnerability Pattern (Description):** No referrer policy is set, so the browser sends the full URL including path and query — and for internal apps the hostname — in the Referer header to any external site the user navigates to.
@@ -11548,7 +11548,7 @@ Secure:
 response.headers[""Referrer-Policy""] = ""strict-origin-when-cross-origin""
 ```","The application must set a referrer policy, via the Referrer-Policy header or HTML attributes, to keep technically sensitive data such as URL paths, query strings, and internal hostnames out of the Referer header sent to third parties.
 No referrer policy is set, so the browser sends the full URL including path and query — and for internal apps the hostname — in the Referer header to any external site the user navigates to.
-A restrictive Referrer-Policy such as strict-origin-when-cross-origin or no-referrer is set so cross-origin requests reveal at most the origin and never the sensitive parts of the URL.",Client Side
+A restrictive Referrer-Policy such as strict-origin-when-cross-origin or no-referrer is set so cross-origin requests reveal at most the origin and never the sensitive parts of the URL.",Web Frontend Security
 V3.4.6,"**Security Rule:** Every HTTP response must use the Content-Security-Policy frame-ancestors directive so the application cannot be framed by default, with embedding permitted only for explicitly allowed origins; the obsolete X-Frame-Options header must not be relied upon.
 
 **Vulnerability Pattern (Description):** Responses set no frame-ancestors directive, or rely solely on the obsolete X-Frame-Options header, so the page can be embedded in a hidden frame and used for clickjacking.
@@ -11605,7 +11605,7 @@ Secure:
 response.headers[""Content-Security-Policy""] = ""frame-ancestors 'none'""
 ```","Every HTTP response must use the Content-Security-Policy frame-ancestors directive so the application cannot be framed by default, with embedding permitted only for explicitly allowed origins; the obsolete X-Frame-Options header must not be relied upon.
 Responses set no frame-ancestors directive, or rely solely on the obsolete X-Frame-Options header, so the page can be embedded in a hidden frame and used for clickjacking.
-A Content-Security-Policy frame-ancestors directive is sent on every response, set to none by default and to a specific allowlist of origins only where embedding is genuinely required.",Client Side
+A Content-Security-Policy frame-ancestors directive is sent on every response, set to none by default and to a specific allowlist of origins only where embedding is genuinely required.",Web Frontend Security
 V3.4.7,"**Security Rule:** The Content-Security-Policy header must specify a reporting location so the browser can deliver violation reports back to the application.
 
 **Vulnerability Pattern (Description):** The Content-Security-Policy has no report-to or report-uri directive, so the browser silently drops violation reports and policy gaps or attacks go unnoticed.
@@ -11666,7 +11666,7 @@ response.headers[""Content-Security-Policy""] = \
     ""default-src 'self'; report-to csp-endpoint""
 ```","The Content-Security-Policy header must specify a reporting location so the browser can deliver violation reports back to the application.
 The Content-Security-Policy has no report-to or report-uri directive, so the browser silently drops violation reports and policy gaps or attacks go unnoticed.
-The Content-Security-Policy includes a report-to directive pointing at a configured reporting endpoint, so the application receives and can act on violation reports.",Client Side
+The Content-Security-Policy includes a report-to directive pointing at a configured reporting endpoint, so the application receives and can act on violation reports.",Web Frontend Security
 V3.4.8,"**Security Rule:** Every response that renders a document, such as a text/html response, must include a Cross-Origin-Opener-Policy header set to same-origin or same-origin-allow-popups to block abuse of shared Window access like tabnabbing.
 
 **Vulnerability Pattern (Description):** Document responses omit the Cross-Origin-Opener-Policy header, so a page opened by or opening another origin shares a browsing context group and is exposed to tabnabbing and cross-window probing.
@@ -11727,7 +11727,7 @@ resp = HTMLResponse(html)
 resp.headers[""Cross-Origin-Opener-Policy""] = ""same-origin""
 ```","Every response that renders a document, such as a text/html response, must include a Cross-Origin-Opener-Policy header set to same-origin or same-origin-allow-popups to block abuse of shared Window access like tabnabbing.
 Document responses omit the Cross-Origin-Opener-Policy header, so a page opened by or opening another origin shares a browsing context group and is exposed to tabnabbing and cross-window probing.
-Every document response sends Cross-Origin-Opener-Policy with same-origin, isolating the page in its own browsing context group and severing the window opener relationship across origins.",Client Side
+Every document response sends Cross-Origin-Opener-Policy with same-origin, isolating the page in its own browsing context group and severing the window opener relationship across origins.",Web Frontend Security
 V3.5.1,"**Security Rule:** Sensitive state-changing functionality not protected by a CORS preflight must verify that requests originate from the application itself, using anti-forgery tokens or a required non-safelisted header, to defend against cross-site request forgery.
 
 **Vulnerability Pattern (Description):** A state-changing endpoint relies only on the ambient session cookie and accepts any request that carries it, so an attacker page can forge the request on the victim's behalf.
@@ -11790,7 +11790,7 @@ def transfer():
     do_transfer()
 ```","Sensitive state-changing functionality not protected by a CORS preflight must verify that requests originate from the application itself, using anti-forgery tokens or a required non-safelisted header, to defend against cross-site request forgery.
 A state-changing endpoint relies only on the ambient session cookie and accepts any request that carries it, so an attacker page can forge the request on the victim's behalf.
-The endpoint requires and validates an anti-forgery token, or a custom header that browsers cannot send cross-site without a preflight, so forged cross-site requests are rejected.",Client Side
+The endpoint requires and validates an anti-forgery token, or a custom header that browsers cannot send cross-site without a preflight, so forged cross-site requests are rejected.",Web Frontend Security
 V3.5.2,"**Security Rule:** When the application relies on the CORS preflight to block disallowed cross-origin use of sensitive functionality, it must be impossible to invoke that functionality with a simple request that does not trigger a preflight.
 
 **Vulnerability Pattern (Description):** Sensitive functionality accepts a simple request — a form-encoded or plain-text POST — that browsers send cross-site without a preflight, so the assumed CORS protection never engages.
@@ -11861,7 +11861,7 @@ def delete():
     do_delete()
 ```","When the application relies on the CORS preflight to block disallowed cross-origin use of sensitive functionality, it must be impossible to invoke that functionality with a simple request that does not trigger a preflight.
 Sensitive functionality accepts a simple request — a form-encoded or plain-text POST — that browsers send cross-site without a preflight, so the assumed CORS protection never engages.
-The endpoint requires conditions that force a preflight, such as a JSON content type and a custom header, and rejects any request that arrives without those, ensuring the preflight check is always exercised.",Client Side
+The endpoint requires conditions that force a preflight, such as a JSON content type and a custom header, and rejects any request that arrives without those, ensuring the preflight check is always exercised.",Web Frontend Security
 V3.5.3,"**Security Rule:** Sensitive functionality must be reached only through unsafe HTTP methods such as POST, PUT, PATCH, or DELETE, never via safe methods like GET, or alternatively must strictly validate Sec-Fetch request headers.
 
 **Vulnerability Pattern (Description):** A state-changing action is exposed over GET, so it can be triggered by an image tag, a link, or a prefetch, making cross-site request forgery trivial.
@@ -11922,7 +11922,7 @@ Secure:
 def delete(): delete_account()
 ```","Sensitive functionality must be reached only through unsafe HTTP methods such as POST, PUT, PATCH, or DELETE, never via safe methods like GET, or alternatively must strictly validate Sec-Fetch request headers.
 A state-changing action is exposed over GET, so it can be triggered by an image tag, a link, or a prefetch, making cross-site request forgery trivial.
-State-changing actions are bound only to unsafe methods such as POST or DELETE, or the handler validates Sec-Fetch headers to confirm the request was not a cross-origin navigation or resource load.",Client Side
+State-changing actions are bound only to unsafe methods such as POST or DELETE, or the handler validates Sec-Fetch headers to confirm the request was not a cross-origin navigation or resource load.",Web Frontend Security
 V3.5.4,"**Security Rule:** Separate applications must be hosted on different hostnames so that the same-origin policy and hostname-scoped cookie restrictions isolate one application's documents, scripts, and cookies from another's.
 
 **Vulnerability Pattern (Description):** Distinct applications share one hostname under different paths, so they fall in the same origin and a flaw in one can read the other's DOM, scripts, and cookies.
@@ -11939,7 +11939,7 @@ Secure:
 # admin.example.com and shop.example.com — separate origins
 ```","Separate applications must be hosted on different hostnames so that the same-origin policy and hostname-scoped cookie restrictions isolate one application's documents, scripts, and cookies from another's.
 Distinct applications share one hostname under different paths, so they fall in the same origin and a flaw in one can read the other's DOM, scripts, and cookies.
-Each application is deployed on its own hostname, so the browser's same-origin policy and host-scoped cookies keep the applications isolated from one another.",Client Side
+Each application is deployed on its own hostname, so the browser's same-origin policy and host-scoped cookies keep the applications isolated from one another.",Web Frontend Security
 V3.5.5,"**Security Rule:** Messages received through the postMessage interface must be discarded when the message origin is not trusted or when the message does not match the expected syntax.
 
 **Vulnerability Pattern (Description):** A message event handler processes event data without checking event.origin, so any site that holds a window reference can inject commands or data into the application.
@@ -11970,7 +11970,7 @@ window.addEventListener(""message"", e => {
 });
 ```","Messages received through the postMessage interface must be discarded when the message origin is not trusted or when the message does not match the expected syntax.
 A message event handler processes event data without checking event.origin, so any site that holds a window reference can inject commands or data into the application.
-The handler first checks event.origin against an allowlist of trusted origins and validates the message shape, discarding anything that fails either check.",Client Side
+The handler first checks event.origin against an allowlist of trusted origins and validates the message shape, discarding anything that fails either check.",Web Frontend Security
 V3.5.6,"**Security Rule:** JSONP functionality must not be enabled anywhere in the application, as it allows authorized data to be read cross-origin through Cross-Site Script Inclusion.
 
 **Vulnerability Pattern (Description):** An endpoint wraps its response in a caller-supplied callback function name and serves it as JavaScript, so any third-party page can include it with a script tag and read the data.
@@ -12028,7 +12028,7 @@ Secure:
 return jsonify(data)   # application/json, no callback wrapper
 ```","JSONP functionality must not be enabled anywhere in the application, as it allows authorized data to be read cross-origin through Cross-Site Script Inclusion.
 An endpoint wraps its response in a caller-supplied callback function name and serves it as JavaScript, so any third-party page can include it with a script tag and read the data.
-The application returns data only as JSON with an application/json content type through CORS-controlled endpoints, and exposes no callback-wrapping JSONP responses.",Client Side
+The application returns data only as JSON with an application/json content type through CORS-controlled endpoints, and exposes no callback-wrapping JSONP responses.",Web Frontend Security
 V3.5.7,"**Security Rule:** Data requiring authorization must not be embedded in script resource responses such as JavaScript files, so it cannot be stolen cross-origin via Cross-Site Script Inclusion.
 
 **Vulnerability Pattern (Description):** Authorized user data is written into a served JavaScript file, for example as a global variable assignment, so a third-party page can include the script and read the data from the global scope.
@@ -12087,7 +12087,7 @@ Secure:
 return jsonify(user)   # JSON endpoint, not a script resource
 ```","Data requiring authorization must not be embedded in script resource responses such as JavaScript files, so it cannot be stolen cross-origin via Cross-Site Script Inclusion.
 Authorized user data is written into a served JavaScript file, for example as a global variable assignment, so a third-party page can include the script and read the data from the global scope.
-Authorized data is delivered only through non-script endpoints, such as JSON APIs protected by CORS and an XSSI-safe response prefix, and never baked into static or generated script files.",Client Side
+Authorized data is delivered only through non-script endpoints, such as JSON APIs protected by CORS and an XSSI-safe response prefix, and never baked into static or generated script files.",Web Frontend Security
 V3.5.8,"**Security Rule:** Authenticated resources such as images, videos, and scripts must be loadable or embeddable on the user's behalf only when intended, enforced by validating Sec-Fetch headers or by a restrictive Cross-Origin-Resource-Policy response header.
 
 **Vulnerability Pattern (Description):** Authenticated resources are served with no Cross-Origin-Resource-Policy and no Sec-Fetch checks, so any external page can embed them using the victim's ambient session.
@@ -12148,7 +12148,7 @@ return FileResponse(private_image,
                     headers={""Cross-Origin-Resource-Policy"": ""same-origin""})
 ```","Authenticated resources such as images, videos, and scripts must be loadable or embeddable on the user's behalf only when intended, enforced by validating Sec-Fetch headers or by a restrictive Cross-Origin-Resource-Policy response header.
 Authenticated resources are served with no Cross-Origin-Resource-Policy and no Sec-Fetch checks, so any external page can embed them using the victim's ambient session.
-Authenticated resource responses carry Cross-Origin-Resource-Policy set to same-origin, or the handler validates Sec-Fetch headers, so the browser blocks unintended cross-origin embedding.",Client Side
+Authenticated resource responses carry Cross-Origin-Resource-Policy set to same-origin, or the handler validates Sec-Fetch headers, so the browser blocks unintended cross-origin embedding.",Web Frontend Security
 V3.6.1,"**Security Rule:** Client-side assets hosted externally, such as scripts, stylesheets, or fonts, must be static, versioned, and protected with Subresource Integrity, or there must be a documented security decision justifying each exception.
 
 **Vulnerability Pattern (Description):** A script or stylesheet is loaded from an external CDN with no integrity attribute, so a CDN compromise or tampering substitutes malicious code that the browser runs in the application's origin.
@@ -12177,7 +12177,7 @@ Secure:
         crossorigin=""anonymous""></script>
 ```","Client-side assets hosted externally, such as scripts, stylesheets, or fonts, must be static, versioned, and protected with Subresource Integrity, or there must be a documented security decision justifying each exception.
 A script or stylesheet is loaded from an external CDN with no integrity attribute, so a CDN compromise or tampering substitutes malicious code that the browser runs in the application's origin.
-Externally hosted assets are pinned to a specific version and loaded with a Subresource Integrity hash and crossorigin attribute, so the browser refuses any asset whose content does not match the hash.",Client Side
+Externally hosted assets are pinned to a specific version and loaded with a Subresource Integrity hash and crossorigin attribute, so the browser refuses any asset whose content does not match the hash.",Web Frontend Security
 V3.7.1,"**Security Rule:** The application must only use client-side technologies that are still supported and considered secure, avoiding obsolete plugins such as Flash, Silverlight, ActiveX, or client-side Java applets.
 
 **Vulnerability Pattern (Description):** The frontend embeds an obsolete plugin technology such as Flash or Silverlight, which no longer receives security fixes and exposes users to unpatched vulnerabilities.
@@ -12204,7 +12204,7 @@ Secure:
 <video src=""clip.mp4"" controls></video>
 ```","The application must only use client-side technologies that are still supported and considered secure, avoiding obsolete plugins such as Flash, Silverlight, ActiveX, or client-side Java applets.
 The frontend embeds an obsolete plugin technology such as Flash or Silverlight, which no longer receives security fixes and exposes users to unpatched vulnerabilities.
-The application is built entirely on supported standard web technologies such as HTML5, CSS, and JavaScript, with no reliance on retired browser plugins.",Client Side
+The application is built entirely on supported standard web technologies such as HTML5, CSS, and JavaScript, with no reliance on retired browser plugins.",Web Frontend Security
 V3.7.2,"**Security Rule:** The application must automatically redirect a user to a different hostname or domain only when the destination appears on an allowlist of approved targets.
 
 **Vulnerability Pattern (Description):** A redirect destination is taken from a request parameter and followed without validation, so an attacker can craft a link that bounces the user to a malicious site under the application's name.
@@ -12267,7 +12267,7 @@ if urlparse(target).hostname in ALLOWED_HOSTS:
 return redirect(""/"")
 ```","The application must automatically redirect a user to a different hostname or domain only when the destination appears on an allowlist of approved targets.
 A redirect destination is taken from a request parameter and followed without validation, so an attacker can craft a link that bounces the user to a malicious site under the application's name.
-The redirect target is checked against an allowlist of approved hosts or is restricted to relative same-site paths, so an unapproved external destination is rejected.",Client Side
+The redirect target is checked against an allowlist of approved hosts or is restricted to relative same-site paths, so an unapproved external destination is rejected.",Web Frontend Security
 V3.7.3,"**Security Rule:** When the application redirects a user to a URL outside its own control, it must show a notification of the external navigation and offer an option to cancel it.
 
 **Vulnerability Pattern (Description):** The application silently redirects users to external URLs, so a victim cannot tell they are leaving the trusted site and may be carried straight into a phishing page.
@@ -12304,7 +12304,7 @@ Secure:
 return render_template(""leaving.html"", destination=external_url)
 ```","When the application redirects a user to a URL outside its own control, it must show a notification of the external navigation and offer an option to cancel it.
 The application silently redirects users to external URLs, so a victim cannot tell they are leaving the trusted site and may be carried straight into a phishing page.
-Outbound links to external destinations route through an interstitial page that names the destination and lets the user confirm or cancel before the browser leaves the application.",Client Side
+Outbound links to external destinations route through an interstitial page that names the destination and lets the user confirm or cancel before the browser leaves the application.",Web Frontend Security
 V3.7.4,"**Security Rule:** The application's top-level domain must be submitted to the public HSTS preload list so that browsers enforce TLS for the site from the very first request, independent of the Strict-Transport-Security header.
 
 **Vulnerability Pattern (Description):** The domain is not on the HSTS preload list, so a brand-new browser's first request to the site can still be made over plaintext HTTP and intercepted before any HSTS header is seen.
@@ -12366,7 +12366,7 @@ response.headers[""Strict-Transport-Security""] = \
     ""max-age=63072000; includeSubDomains; preload""
 ```","The application's top-level domain must be submitted to the public HSTS preload list so that browsers enforce TLS for the site from the very first request, independent of the Strict-Transport-Security header.
 The domain is not on the HSTS preload list, so a brand-new browser's first request to the site can still be made over plaintext HTTP and intercepted before any HSTS header is seen.
-The Strict-Transport-Security header includes the preload directive with includeSubDomains and a long max-age, and the domain is registered on the public preload list so TLS is enforced from the first request.",Client Side
+The Strict-Transport-Security header includes the preload directive with includeSubDomains and a long max-age, and the domain is registered on the public preload list so TLS is enforced from the first request.",Web Frontend Security
 V3.7.5,"**Security Rule:** The application must behave as documented — for example by warning the user or blocking access — when the browser used to reach it does not support the expected security features.
 
 **Vulnerability Pattern (Description):** The application proceeds normally on a browser that lacks a required security feature, with no detection or fallback, so the user runs in a silently degraded and unprotected state.
@@ -12395,7 +12395,7 @@ if (window.isSecureContext && ""trustedTypes"" in window) startApp();
 else showUnsupportedBrowserWarning();
 ```","The application must behave as documented — for example by warning the user or blocking access — when the browser used to reach it does not support the expected security features.
 The application proceeds normally on a browser that lacks a required security feature, with no detection or fallback, so the user runs in a silently degraded and unprotected state.
-The application detects whether the browser supports the required security features and follows the documented fallback — warning the user or blocking access — when support is missing.",Client Side
+The application detects whether the browser supports the required security features and follows the documented fallback — warning the user or blocking access — when support is missing.",Web Frontend Security
 V4.1.1,"**Security Rule:** Every HTTP response that carries a body must declare a Content-Type header that accurately describes the body, including an explicit charset such as UTF-8 for textual and XML media types.
 
 **Vulnerability Pattern (Description):** A response body is returned with a missing, generic, or mismatched Content-Type, or with no charset, so the browser sniffs the type and may treat the bytes as a different, more dangerous media type.
@@ -18367,7 +18367,7 @@ Secure:
 claims = jwt.decode(token, key, algorithms=[""RS256""])
 ```","A self-contained token must have its digital signature or MAC verified successfully before any of its claims are read or trusted, so that a tampered or forged token is rejected outright.
 The application decodes a token and reads its payload without verifying the signature, so an attacker can change claims such as the user id or role and have the modified token accepted.
-The token is verified against the issuer's signing key, and the call that returns the claims is the same call that checks the signature, so no claim is available until integrity has been confirmed.",Session Management
+The token is verified against the issuer's signing key, and the call that returns the claims is the same call that checks the signature, so no claim is available until integrity has been confirmed.",Self-contained Tokens
 V9.1.2,"**Security Rule:** Only signing algorithms on an explicit allowlist may be used to create or verify self-contained tokens; the allowlist must exclude the 'none' algorithm and ideally pin a single algorithm family for the context.
 
 **Vulnerability Pattern (Description):** Verification trusts the algorithm named in the token header, so an attacker can set it to 'none' or downgrade an asymmetric token to an HMAC verified with the public key, bypassing the signature check.
@@ -18425,7 +18425,7 @@ Secure:
 jwt.decode(token, public_key, algorithms=[""RS256""])
 ```","Only signing algorithms on an explicit allowlist may be used to create or verify self-contained tokens; the allowlist must exclude the 'none' algorithm and ideally pin a single algorithm family for the context.
 Verification trusts the algorithm named in the token header, so an attacker can set it to 'none' or downgrade an asymmetric token to an HMAC verified with the public key, bypassing the signature check.
-The verifier ignores the header algorithm and accepts only algorithms from a fixed allowlist, so a 'none' or mismatched algorithm token is rejected before its claims are read.",Session Management
+The verifier ignores the header algorithm and accepts only algorithms from a fixed allowlist, so a 'none' or mismatched algorithm token is rejected before its claims are read.",Self-contained Tokens
 V9.1.3,"**Security Rule:** Key material used to validate self-contained tokens must come only from trusted pre-configured sources; for JWS, headers such as 'jku', 'x5u', and 'jwk' must be checked against an allowlist of trusted URIs.
 
 **Vulnerability Pattern (Description):** The verifier fetches the signing key from a location named inside the token, such as a 'jku' or 'x5u' header, so an attacker points it at a key they control and forges a valid signature.
@@ -18485,7 +18485,7 @@ jwks = PyJWKClient(""https://issuer.example.com/.well-known/jwks.json"")
 key = jwks.get_signing_key_from_jwt(token).key
 ```","Key material used to validate self-contained tokens must come only from trusted pre-configured sources; for JWS, headers such as 'jku', 'x5u', and 'jwk' must be checked against an allowlist of trusted URIs.
 The verifier fetches the signing key from a location named inside the token, such as a 'jku' or 'x5u' header, so an attacker points it at a key they control and forges a valid signature.
-The signing key is resolved only from a pre-configured trusted issuer or a JWKS endpoint on an allowlist, and any key-source header in the token is ignored or validated against that allowlist.",Session Management
+The signing key is resolved only from a pre-configured trusted issuer or a JWKS endpoint on an allowlist, and any key-source header in the token is ignored or validated against that allowlist.",Self-contained Tokens
 V9.2.1,"**Security Rule:** When a token carries a validity time span, it must be accepted only if the current verification time falls within that span; for JWTs the 'nbf' and 'exp' claims must both be checked.
 
 **Vulnerability Pattern (Description):** Expiry and not-before claims are ignored or verification of them is disabled, so an expired or not-yet-valid token continues to be accepted indefinitely.
@@ -18545,7 +18545,7 @@ Secure:
 jwt.decode(token, key, algorithms=[""RS256""], leeway=30)
 ```","When a token carries a validity time span, it must be accepted only if the current verification time falls within that span; for JWTs the 'nbf' and 'exp' claims must both be checked.
 Expiry and not-before claims are ignored or verification of them is disabled, so an expired or not-yet-valid token continues to be accepted indefinitely.
-The verifier evaluates the 'nbf' and 'exp' claims against the current time, with at most a small clock-skew tolerance, and rejects any token outside its declared validity window.",Session Management
+The verifier evaluates the 'nbf' and 'exp' claims against the current time, with at most a small clock-skew tolerance, and rejects any token outside its declared validity window.",Self-contained Tokens
 V9.2.2,"**Security Rule:** A service must confirm a token is the correct type and was issued for the intended purpose before trusting it; for example only access tokens may drive authorization and only ID tokens may prove authn.
 
 **Vulnerability Pattern (Description):** Any well-signed token is accepted regardless of type, so an ID token is used to make an authorization decision, or a token minted for one purpose is replayed for another.
@@ -18612,7 +18612,7 @@ claims = jwt.decode(token, key, algorithms=[""RS256""])
 if claims.get(""token_use"") != ""access"": raise InvalidToken()
 ```","A service must confirm a token is the correct type and was issued for the intended purpose before trusting it; for example only access tokens may drive authorization and only ID tokens may prove authn.
 Any well-signed token is accepted regardless of type, so an ID token is used to make an authorization decision, or a token minted for one purpose is replayed for another.
-The verifier checks a type indicator — such as the 'typ' header or a purpose claim — and accepts the token only when that type matches the operation being performed.",Session Management
+The verifier checks a type indicator — such as the 'typ' header or a purpose claim — and accepts the token only when that type matches the operation being performed.",Self-contained Tokens
 V9.2.3,"**Security Rule:** A service must accept only tokens whose audience is itself; for JWTs the 'aud' claim must be validated against an allowlist of audience identifiers defined by the service.
 
 **Vulnerability Pattern (Description):** The audience claim is not checked, so a token legitimately issued for a different service is replayed against this service and accepted.
@@ -18671,7 +18671,7 @@ Secure:
 jwt.decode(token, key, algorithms=[""RS256""], audience=""api.example.com"")
 ```","A service must accept only tokens whose audience is itself; for JWTs the 'aud' claim must be validated against an allowlist of audience identifiers defined by the service.
 The audience claim is not checked, so a token legitimately issued for a different service is replayed against this service and accepted.
-The verifier compares the token's 'aud' claim against the service's own configured audience identifier and rejects any token whose audience does not match.",Session Management
+The verifier compares the token's 'aud' claim against the service's own configured audience identifier and rejects any token whose audience does not match.",Self-contained Tokens
 V9.2.4,"**Security Rule:** When one issuer signs tokens for several audiences with the same private key, each token must carry an audience restriction uniquely identifying its intended audiences, and dynamically supplied audiences must be validated by the issuer to prevent audience impersonation.
 
 **Vulnerability Pattern (Description):** An issuer signs tokens for multiple audiences with one key but omits or weakly populates the audience claim, or copies a client-supplied audience without checking it, so a token meant for one audience is accepted by another.
@@ -18737,4 +18737,4 @@ token = jwt.encode({""sub"": user, ""aud"": requested_aud}, key,
                    algorithm=""RS256"")
 ```","When one issuer signs tokens for several audiences with the same private key, each token must carry an audience restriction uniquely identifying its intended audiences, and dynamically supplied audiences must be validated by the issuer to prevent audience impersonation.
 An issuer signs tokens for multiple audiences with one key but omits or weakly populates the audience claim, or copies a client-supplied audience without checking it, so a token meant for one audience is accepted by another.
-Every issued token carries an explicit audience claim that uniquely names its intended recipients, and any audience value provided by a client is validated against a registered allowlist before it is embedded in the token.",Session Management
+Every issued token carries an explicit audience claim that uniquely names its intended recipients, and any audience value provided by a client is validated against a registered allowlist before it is embedded in the token.",Self-contained Tokens
