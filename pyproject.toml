@@ -21,7 +21,7 @@ email-validator = ">=2.2.0,<3.0.0" # Useful for FastAPI Users
 # Range widened from `<0.116.0` to allow starlette ≥ 0.47.2 (CVE
 # fixes — GHSA-2c2j-9gv5-cj73 / GHSA-7f5h-v6xp-fcq8). FastAPI 0.115
 # pinned starlette `<0.47.0`; 0.116+ relaxes that.
-fastapi = ">=0.115.9,<0.121.0"
+fastapi = ">=0.115.9,<0.137.0"
 fastapi-mail = ">=1.5.9,<1.6.0"
 # Bumped 14.x → 15.x for GHSA-5j53-63w8-8625 (the 14.x line pins
 # pyjwt = 2.10.1 and python-multipart = 0.0.20 as exact versions,
