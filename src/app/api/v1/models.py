@@ -486,6 +486,9 @@ class VulnerabilityFindingResponse(BaseModel):
     description: str
     severity: str
     line_number: int = Field(..., ge=0)
+    # Exact verbatim vulnerable code — the UI matches it against the file
+    # to highlight the precise span. NULL for legacy / scanner findings.
+    vulnerable_snippet: Optional[str] = None
     remediation: str
     confidence: str
     # Originating scanner/agent for the finding. Mirrors the DB

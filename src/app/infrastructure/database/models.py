@@ -242,6 +242,10 @@ class Finding(Base):
     )
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     line_number: Mapped[Optional[int]] = mapped_column(Integer)
+    # Exact verbatim vulnerable code, located in the file to anchor
+    # line_number and the UI highlight span. NULL for legacy findings and
+    # scanner findings without a snippet.
+    vulnerable_snippet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # V02.2.1: hard-capped at 512 characters at the persistence layer
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)

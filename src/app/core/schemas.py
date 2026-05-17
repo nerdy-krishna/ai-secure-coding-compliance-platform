@@ -94,6 +94,16 @@ class VulnerabilityFinding(BaseModel):
     )
     cvss_vector: Optional[str] = Field(None, description="The CVSS 3.1 vector string.")
     file_path: str = Field(max_length=4096)
+    vulnerable_snippet: Optional[str] = Field(
+        default=None,
+        max_length=20_000,
+        description=(
+            "The exact, verbatim vulnerable code for this finding — a "
+            "substring of the file under review. Anchors the finding's "
+            "line number and the UI highlight span. None for legacy "
+            "findings and scanner findings without a snippet."
+        ),
+    )
     fixes: Optional[FixSuggestion] = Field(
         default=None,
         description="The suggested code fix, including original and new snippets.",

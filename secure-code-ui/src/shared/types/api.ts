@@ -173,6 +173,9 @@ export interface Finding {
   description: string;
   severity: string;
   line_number: number;
+  // Exact verbatim vulnerable code; the UI matches it against the file
+  // to highlight the precise span. null for legacy / scanner findings.
+  vulnerable_snippet?: string | null;
   remediation: string;
   confidence: string;
   // Originating scanner/agent for the finding. Mirrors the

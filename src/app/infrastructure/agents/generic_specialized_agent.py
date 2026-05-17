@@ -156,7 +156,21 @@ class InitialFinding(BaseModel):
         description="The confidence level of the finding (e.g., 'High', 'Medium', 'Low')."
     )
     line_number: int = Field(
-        description="The line number in the code where the vulnerability occurs."
+        description=(
+            "The 1-based line number where the vulnerability occurs, read "
+            "directly from the line-number prefix shown on each line of the "
+            "code under review."
+        )
+    )
+    vulnerable_snippet: str = Field(
+        description=(
+            "The exact vulnerable code, copied character-for-character from "
+            "the code under review. Copy ONLY the code itself — do NOT "
+            "include the 'NNN| ' line-number prefixes. Keep it minimal: just "
+            "the line (or few contiguous lines) that constitute the flaw, "
+            "not the whole function. It must be a verbatim substring of the "
+            "file so it can be located precisely."
+        )
     )
     cvss_vector: str = Field(
         description="The full CVSS 3.1 vector string, e.g., 'CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N'."
@@ -447,14 +461,69 @@ def _build_rag_context(
     return vulnerability_patterns_str, secure_patterns_str
 
 
+# A line-number prefix the LLM may have copied into a snippet despite
+# being told not to — e.g. "  81| code" or "81: code".
+_LINE_PREFIX_RE = re.compile(r"^\s*\d{1,6}\s*[|:]\s?")
+
+
+def _strip_line_prefixes(text: str) -> str:
+    """Drop any 'NNN| ' / 'NNN:' line-number prefix from each line."""
+    return "\n".join(_LINE_PREFIX_RE.sub("", ln) for ln in text.split("\n"))
+
+
+def _clean_snippet(snippet: Optional[str]) -> Optional[str]:
+    """Normalise an LLM-returned vulnerable snippet for storage + matching."""
+    if not snippet:
+        return None
+    cleaned = _strip_line_prefixes(snippet).strip("\n")
+    return cleaned or None
+
+
+def _resolve_finding_line(
+    snippet: Optional[str], reported_line: int, file_content: Optional[str]
+) -> int:
+    """Derive the true 1-based line number for a finding.
+
+    Locates the snippet's anchor line (its first non-blank line) in
+    `file_content`: exactly one match wins; multiple matches pick the
+    one nearest `reported_line`; no match — or no snippet / file — falls
+    back to the LLM's `reported_line`.
+    """
+    fallback = reported_line if reported_line and reported_line > 0 else 0
+    cleaned = _clean_snippet(snippet)
+    if not cleaned or not file_content:
+        return fallback
+    anchor = next((ln for ln in cleaned.split("\n") if ln.strip()), "")
+    if not anchor.strip():
+        return fallback
+    file_lines = file_content.split("\n")
+    matches = [i for i, ln in enumerate(file_lines, 1) if ln == anchor]
+    if not matches:
+        # Indentation-insensitive retry.
+        target = anchor.strip()
+        matches = [i for i, ln in enumerate(file_lines, 1) if ln.strip() == target]
+    if not matches:
+        return fallback
+    if len(matches) == 1:
+        return matches[0]
+    if fallback > 0:
+        return min(matches, key=lambda ln: abs(ln - fallback))
+    return matches[0]
+
+
 def _build_finding_object(
     initial_finding: "InitialFinding",
     cwe: Optional[str],
     filename: str,
     agent_name: str,
+    file_content: Optional[str] = None,
 ) -> VulnerabilityFinding:
     """Convert the LLM's initial finding into a `VulnerabilityFinding`
     with CVSS-parsed score and the agent's name attached.
+
+    The finding is text-anchored: `line_number` is derived by locating
+    `vulnerable_snippet` in `file_content` rather than trusting the
+    LLM's count (`_resolve_finding_line`).
     """
     cvss_score = None
     try:
@@ -510,7 +579,14 @@ def _build_finding_object(
         title=initial_finding.title,
         description=initial_finding.description,
         severity=severity,
-        line_number=initial_finding.line_number,
+        line_number=_resolve_finding_line(
+            getattr(initial_finding, "vulnerable_snippet", None),
+            initial_finding.line_number,
+            file_content,
+        ),
+        vulnerable_snippet=_clean_snippet(
+            getattr(initial_finding, "vulnerable_snippet", None)
+        ),
         remediation=initial_finding.remediation,
         confidence=initial_finding.confidence,
         references=initial_finding.references,
@@ -811,7 +887,13 @@ async def analysis_node(
             break
         _llm_call_count += 1  # count CWE classification call
         cwe = await _get_cwe_from_description(llm_client, initial_finding)
-        finding_obj = _build_finding_object(initial_finding, cwe, filename, agent_name)
+        finding_obj = _build_finding_object(
+            initial_finding,
+            cwe,
+            filename,
+            agent_name,
+            file_content=state.get("file_content_for_verification"),
+        )
 
         if workflow_mode == "remediate" and initial_finding.fix:
             # --- STRICT DIFF CHECK ---

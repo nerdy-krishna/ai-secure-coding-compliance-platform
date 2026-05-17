@@ -35,6 +35,21 @@ logger = logging.getLogger(__name__)
 CONCURRENT_LLM_LIMIT = 5
 
 
+def _number_lines(code: str, start_line: int) -> str:
+    """Prefix each line with its 1-based *file* line number (`NNN| `).
+
+    The agent sees accurate file-relative line numbers — even for a
+    chunk drawn from the middle of a large file — so the `line_number`
+    it reports is a real anchor and the `vulnerable_snippet` it copies
+    can be located precisely. The prompt tells it to drop the prefix.
+    """
+    lines = code.split("\n")
+    width = len(str(start_line + len(lines) - 1))
+    return "\n".join(
+        f"{start_line + i:>{width}}| {line}" for i, line in enumerate(lines)
+    )
+
+
 async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     """Single-pass analysis: every agent runs against the original code.
 
@@ -219,8 +234,20 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         ]
 
         for chunk in chunks:
+            # The file-under-review code is line-numbered (file-relative);
+            # dep_summary is kept as a separate, un-numbered context block
+            # so the agent never confuses dependency context with the
+            # file it must report line numbers and snippets against.
+            numbered_code = _number_lines(chunk["code"], chunk["start_line"])
+            code_under_review = (
+                "=== CODE UNDER REVIEW "
+                "(line-numbered; copy snippets WITHOUT the 'NNN| ' prefix) ===\n"
+                f"{numbered_code}"
+            )
             enriched_code = (
-                f"{dep_summary}{chunk['code']}" if dep_summary else chunk["code"]
+                f"{dep_summary}\n{code_under_review}"
+                if dep_summary
+                else code_under_review
             )
             tasks = []
             for agent in relevant_agents:

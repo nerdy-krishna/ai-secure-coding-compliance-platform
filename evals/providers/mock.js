@@ -47,6 +47,8 @@ function findingFor(kind) {
           severity: "Critical",
           confidence: "High",
           line_number: 1,
+          vulnerable_snippet:
+            'cursor.execute(f"SELECT * FROM users WHERE id={user_id}")',
           cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
           remediation:
             "Use parameterised queries with the DB driver's `?` / `%s` placeholders.",
@@ -62,6 +64,7 @@ function findingFor(kind) {
           severity: "High",
           confidence: "High",
           line_number: 1,
+          vulnerable_snippet: "element.innerHTML = userInput;",
           cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
           remediation:
             "Remove the `safe` filter or escape the value with `bleach.clean` / `html.escape` before rendering.",
@@ -77,6 +80,7 @@ function findingFor(kind) {
           severity: "High",
           confidence: "High",
           line_number: 1,
+          vulnerable_snippet: '@app.get("/users/{user_id}")',
           cvss_vector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
           remediation:
             "Add `user = Depends(current_active_user)` to the route signature, or `Depends(current_superuser)` for admin-only paths.",

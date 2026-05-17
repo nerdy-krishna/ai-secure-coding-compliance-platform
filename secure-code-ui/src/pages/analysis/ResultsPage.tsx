@@ -1144,15 +1144,27 @@ const DiffViewer: React.FC<{
   fixed: string;
   startLine: number;
   filePath: string;
+  fileContent?: string | null;
   maxHeight?: number | string;
-}> = ({ original, fixed, startLine, filePath, maxHeight = 480 }) => {
+}> = ({ original, fixed, startLine, filePath, fileContent, maxHeight = 480 }) => {
   const trimLines = (s: string) => { const ls = s.split("\n"); if (ls[ls.length - 1] === "") ls.pop(); return ls; };
   const before = trimLines(original || "");
   const after  = trimLines(fixed   || "");
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const splitRows = useMemo(() => buildSplitView(before, after), [original, fixed]);
-  const base = startLine - 1;
+
+  // Number the diff by locating original_snippet in the file — not from
+  // the finding's line_number. `approx` is set only when we had the file
+  // but couldn't match the snippet (paraphrase / whitespace drift).
+  const { base, approx } = useMemo(() => {
+    if (fileContent && original.trim()) {
+      const loc = locateSnippet(fileContent, original);
+      if (loc) return { base: loc[0] - 1, approx: false };
+      return { base: startLine - 1, approx: true };
+    }
+    return { base: startLine - 1, approx: false };
+  }, [fileContent, original, startLine]);
 
   const renderChunks = (side: SplitSide) => {
     if (!side.chunks) return side.text || " ";
@@ -1177,6 +1189,11 @@ const DiffViewer: React.FC<{
         <div style={{ padding: "7px 12px", display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ color: "var(--critical)", fontWeight: 700 }}>−</span>
           <span>before · <span style={{ color: "var(--fg)" }}>{filePath}</span></span>
+          {approx && (
+            <span style={{ color: "var(--fg-subtle)", fontStyle: "italic" }}>
+              · line numbers approximate
+            </span>
+          )}
         </div>
         <div style={{ background: "var(--border)" }} />
         <div style={{ padding: "7px 12px", display: "flex", alignItems: "center", gap: 6 }}>
@@ -1300,11 +1317,12 @@ const FindingDetail: React.FC<{
       <div className="sccap-divider" />
 
       {/* Code snippet — shown for all findings that have source code available */}
-      {(fileContent || f.fixes?.original_snippet) && (
+      {(fileContent || f.vulnerable_snippet || f.fixes?.original_snippet) && (
         <div style={{ marginBottom: 18 }}>
           <CodeSnippet
             fileContent={fileContent}
-            snippet={f.fixes?.original_snippet ?? null}
+            snippet={f.vulnerable_snippet ?? f.fixes?.original_snippet ?? null}
+            vulnerableSnippet={f.vulnerable_snippet ?? null}
             lineNumber={f.line_number ?? 0}
             filePath={f.file_path}
             severityColor={sevColor}
@@ -1447,6 +1465,7 @@ const FindingDetail: React.FC<{
               original={f.fixes?.original_snippet ?? ""}
               fixed={f.fixes?.code ?? ""}
               startLine={f.line_number ?? 1}
+              fileContent={fileContent}
               filePath={f.file_path}
             />
           </div>
@@ -1740,20 +1759,71 @@ const FileTree: React.FC<{
 // Code snippet viewer
 // ============================================================================
 
+/**
+ * Locate a (possibly multi-line) snippet inside file content. Returns the
+ * 1-based [startLine, endLine] span it occupies, or null when it can't be
+ * matched. Tries an exact match first, then an indentation-insensitive one.
+ */
+function locateSnippet(
+  fileContent: string,
+  snippet: string,
+): [number, number] | null {
+  const fileLines = fileContent.split("\n");
+  const snip = snippet.replace(/\r/g, "").split("\n");
+  while (snip.length && snip[snip.length - 1].trim() === "") snip.pop();
+  while (snip.length && snip[0].trim() === "") snip.shift();
+  if (!snip.length) return null;
+  for (const strip of [false, true]) {
+    const norm = (s: string) => (strip ? s.trim() : s);
+    const target = snip.map(norm);
+    for (let i = 0; i + target.length <= fileLines.length; i++) {
+      let ok = true;
+      for (let j = 0; j < target.length; j++) {
+        if (norm(fileLines[i + j]) !== target[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return [i + 1, i + target.length];
+    }
+  }
+  return null;
+}
+
 const CodeSnippet: React.FC<{
   fileContent: string | null;
   snippet: string | null;
+  vulnerableSnippet?: string | null;
   lineNumber: number;
   filePath: string;
   severityColor: string;
   contextLines?: number;
-}> = ({ fileContent, snippet, lineNumber, filePath, severityColor, contextLines = 5 }) => {
+}> = ({
+  fileContent,
+  snippet,
+  vulnerableSnippet,
+  lineNumber,
+  filePath,
+  severityColor,
+  contextLines = 5,
+}) => {
   // Prefer full file content (from original_code_map) over snippet-only
   const source = useMemo(() => {
     if (fileContent) return fileContent;
     if (snippet) return snippet;
     return null;
   }, [fileContent, snippet]);
+
+  // Highlight span: locate the vulnerable snippet in the file so the
+  // exact lines light up. Fall back to the single reported line when
+  // the snippet can't be matched (legacy finding, or whitespace drift).
+  const [hlStart, hlEnd] = useMemo<[number, number]>(() => {
+    if (fileContent && vulnerableSnippet) {
+      const loc = locateSnippet(fileContent, vulnerableSnippet);
+      if (loc) return loc;
+    }
+    return [lineNumber, lineNumber];
+  }, [fileContent, vulnerableSnippet, lineNumber]);
 
   if (!source || lineNumber <= 0) return null;
 
@@ -1763,8 +1833,8 @@ const CodeSnippet: React.FC<{
   let startLineNum: number;
 
   if (fileContent) {
-    const start = Math.max(0, lineNumber - contextLines - 1);
-    const end = Math.min(allLines.length, lineNumber + contextLines);
+    const start = Math.max(0, hlStart - contextLines - 1);
+    const end = Math.min(allLines.length, hlEnd + contextLines);
     displayLines = allLines.slice(start, end);
     startLineNum = start + 1;
   } else {
@@ -1773,8 +1843,6 @@ const CodeSnippet: React.FC<{
     if (displayLines[displayLines.length - 1] === "") displayLines.pop();
     startLineNum = lineNumber;
   }
-
-  const flaggedLine = fileContent ? lineNumber : startLineNum;
 
   return (
     <div>
@@ -1796,13 +1864,17 @@ const CodeSnippet: React.FC<{
         </svg>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>{filePath}</span>
         <span style={{ color: "var(--fg-subtle)" }}>·</span>
-        <span style={{ color: severityColor, fontWeight: 600 }}>line {lineNumber}</span>
+        <span style={{ color: severityColor, fontWeight: 600 }}>
+          {hlEnd > hlStart ? `lines ${hlStart}–${hlEnd}` : `line ${hlStart}`}
+        </span>
       </div>
       {/* Code block — reuses .diff container for consistent look */}
       <div className="diff" style={{ maxHeight: 220, overflowY: "auto" }}>
         {displayLines.map((line, i) => {
           const lineNum = startLineNum + i;
-          const isFlagged = lineNum === flaggedLine;
+          const isFlagged = fileContent
+            ? lineNum >= hlStart && lineNum <= hlEnd
+            : lineNum === startLineNum;
           return (
             <div
               key={i}
@@ -1833,10 +1905,9 @@ const CodeSnippet: React.FC<{
               <span
                 className="diff-code"
                 style={{
-                  padding: "0 12px",
-                  whiteSpace: "pre",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
+                  padding: "2px 12px",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
                   lineHeight: "22px",
                   color: isFlagged ? "var(--fg)" : "var(--fg-muted)",
                   fontWeight: isFlagged ? 500 : 400,
