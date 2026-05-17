@@ -45,16 +45,16 @@ appear below the defaults.
 
 ## Pick LLM slots
 
-Three slots:
+Two slots:
 
-- **Utility** — cheap model used for summaries, triage, symbol-map.
-- **Fast** — quick responder for per-file chunk analysis.
-- **Reasoning** — heavyweight model for cross-file correlation +
-  final reports.
+- **Utility** — a cheap model. Drives the per-file profiler and
+  fix-snippet verification.
+- **Reasoning** — a capable model. Drives the per-file analysis,
+  finding consolidation, and the remediation merge agent.
 
-You can use the same `LLMConfiguration` for all three; the UI
-defaults to the first registered config when you haven't picked a
-slot explicitly.
+You can use the same `LLMConfiguration` for both; the UI defaults
+both to the first registered config, and a submitted utility slot
+falls back to the reasoning config when omitted.
 
 ## Submit → estimate → approve
 

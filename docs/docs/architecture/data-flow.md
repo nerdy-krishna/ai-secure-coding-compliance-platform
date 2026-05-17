@@ -41,60 +41,99 @@ pointer-heavy summary.
   subscribe to `/scans/{id}/stream` (SSE) and paint a live progress
   rail.
 
-### 4. Audit pass (LangGraph path A)
+### 4. Context + deterministic prescan
 
-`retrieve_and_prepare_data` →
-`RepositoryMappingEngine` + `ContextBundlingEngine` → `estimate_cost`:
+`retrieve_and_prepare_data` → `RepositoryMappingEngine` +
+`ContextBundlingEngine` → `deterministic_prescan`:
 
-- Tree-sitter builds a symbol index for every file.
-- The dependency graph bundles import chains so specialized agents
-  see the right cross-file context later.
-- Cost estimation tokenizes the full prompt set with
-  `litellm.token_counter` and prices it against
-  `litellm.cost_per_token` (honoring any per-`LLMConfiguration`
-  override).
+- Tree-sitter builds a symbol index for every file; the dependency
+  graph bundles import chains for later cross-file context.
+- `deterministic_prescan` runs Bandit, Semgrep, Gitleaks, and
+  OSV-Scanner against a staged copy of the tree, seeds
+  `WorkerState.findings` with `source="<scanner>"` rows, and persists
+  a CycloneDX BOM. No LLM has been called yet.
+- If the prescan produced findings, the graph pauses at
+  `pending_prescan_approval` (status `PENDING_PRESCAN_APPROVAL`) for
+  operator review. A declined gate ends the scan at
+  `BLOCKED_USER_DECLINE`; an unacknowledged Critical secret ends it
+  at `BLOCKED_PRE_LLM`.
+
+### 5. Profiling-cost gate + per-file profiler
+
+`estimate_profiling_cost` → `profile_files`:
+
+- `estimate_profiling_cost` token-counts every file on the **utility**
+  LLM slot, persists the estimate, and pauses at `interrupt()` with
+  status `PENDING_PROFILING_APPROVAL`. This gate fires even when the
+  prescan found nothing.
+- On approval, `profile_files` runs the `FileProfiler` over every
+  file on the utility slot. Each profile carries a summary, the
+  file's security-relevant operations, and its **applicable
+  domains** — the subset of the scan's agent roster relevant to the
+  file. Profiles are persisted to `Scan.file_profiles`.
+
+### 6. Analysis-cost gate
+
+`estimate_cost`:
+
+- For each file, resolves the **content-routed agent set** from its
+  profile's applicable domains (`resolve_agents_for_file`).
+- Tokenizes the routed prompt set with `litellm.token_counter` and
+  prices it against `litellm.cost_per_token` (honoring any
+  per-`LLMConfiguration` override) — the estimate reflects the agents
+  each file is actually routed to, not a worst-case roster.
 - `cost_details` is persisted, status flips to
-  `PENDING_COST_APPROVAL`, and the node calls **`interrupt()`** with
-  the estimate payload. LangGraph serializes state into the
-  checkpointer and **the graph pauses**.
+  `PENDING_COST_APPROVAL`, and the node calls **`interrupt()`**.
 
-### 5. User approves (or cancels)
+### 7. User approves (or cancels)
 
-- UI shows the estimate. The user:
-  - **Approves** → API publishes to `analysis_approved_queue`; the
-    worker invokes the same LangGraph thread with
-    `Command(resume=payload)`. The graph continues from where it
-    paused.
-  - **Cancels** → `scan_service.cancel_scan` sets status
-    `CANCELLED`; the checkpointer state is left in place so admins
-    can inspect it.
+Each gate works the same way. The UI shows the estimate / findings;
+the user:
 
-### 6. Single-pass parallel analysis
+- **Approves** → API publishes to `analysis_approved_queue` with a
+  `kind` discriminator (`prescan_approval` / `profiling_approval` /
+  `cost_approval`); the worker invokes the same LangGraph thread with
+  `Command(resume=payload)` and execution continues from the pause.
+- **Cancels / declines** → `cancel_scan` sets `CANCELLED`, or a
+  declined prescan/profiling gate routes to `BLOCKED_USER_DECLINE`.
+  Checkpointer state is left in place for inspection.
+
+### 8. Single-pass parallel analysis
 
 `analyze_files_parallel`:
 
-- Every relevant agent runs against every file from the
-  `ORIGINAL_SUBMISSION` snapshot in parallel — **no topological
-  ordering, no cross-file patch propagation**. The dependency graph
-  is still consulted to inject per-file dependency context
-  (symbol signatures from successors) into each chunk's prompt.
-- Per-file agent triage happens inline via
-  `resolve_agents_for_file(file_path, all_relevant_agents)` —
-  extension-based routing.
+- Every file from the `ORIGINAL_SUBMISSION` snapshot is analyzed in
+  parallel — **no topological ordering, no cross-file patch
+  propagation**. The dependency graph is consulted to inject per-file
+  dependency context (symbol signatures from successors) into each
+  chunk's prompt.
+- **Content-based routing**: each file is analyzed only by the agents
+  its profile routed to (`resolve_agents_for_file` narrowed by the
+  profile's applicable domains, systems/web gating applied first). A
+  file with no profile falls back to extension-only routing.
 - Files larger than `CHUNK_ONLY_IF_LARGER_THAN` (~150 000 chars) are
   split with `semantic_chunker`; small files run as a single chunk.
 - Concurrency is bounded by a single
   `asyncio.Semaphore(CONCURRENT_LLM_LIMIT=5)` over the union of
   file × chunk × agent calls.
 - No mid-graph DB writes. Findings + `proposed_fixes` flow through
-  state to `consolidate_and_patch` and `save_results`.
+  state to `consolidate_findings` and beyond.
 
-`correlate_findings` groups duplicates by
-`(file_path, CWE, line_number)` and merges agent corroborations.
+### 9. Consolidation
 
-### 7. Remediation (REMEDIATE only)
+`consolidate_findings` (backed by the `FindingConsolidator`, reasoning
+slot) replaces the old exact-key `correlate_findings`. Per file, it
+feeds the source plus all raw findings to the reasoning LLM in one
+pass: findings describing the same root cause merge into one root
+finding (leading with the root cause + fix, listing every
+`affected_location`, unioning `corroborating_agents`, re-assessing
+CVSS); false positives, fully-subsumed duplicates, and non-actionable
+noise are dropped. `save_results_node` then deletes the raw prescan
+rows and writes the consolidated set fresh.
 
-`consolidate_and_patch` runs after `correlate_findings`:
+### 10. Remediation (REMEDIATE only)
+
+`consolidate_and_patch` runs after `consolidate_findings`:
 
 - Groups `proposed_fixes` by file.
 - Detects line-range conflicts and runs `_run_merge_agent` to
@@ -105,24 +144,23 @@ pointer-heavy summary.
   by `save_results_node`, so users can diff against the
   `ORIGINAL_SUBMISSION`.
 
-For AUDIT it's a no-op. For SUGGEST the correlated findings keep
+For AUDIT it's a no-op. For SUGGEST the consolidated findings keep
 their embedded `fixes` field (so the UI shows suggested fixes) but
 no `POST_REMEDIATION` snapshot is built.
 
-### 8. Final report
+### 11. Final report
 
 `save_final_report`:
 
-- Computes a coarse 0–10 `risk_score` from the highest non-zero
-  severity bucket (`CRITICAL → 9+`, `HIGH → 7+`, `MEDIUM → 4+`,
-  `LOW → 1+`).
+- Computes the CVSS-weighted 0–10 `risk_score` via
+  `shared.lib.risk_score.compute_cvss_aggregate`.
 - Persists the `summary` JSON.
 - Sets final status `COMPLETED` or `REMEDIATION_COMPLETED`.
 
-Note: this `Scan.risk_score` is **not** the same as the Dashboard /
-Compliance posture score. The dashboard uses a weighted-findings
-heuristic (`critical*15 + high*6 + medium*2 + low*1`, clamped to
-[5, 100]) across the visibility scope.
+The per-scan `Scan.risk_score` and the Dashboard / Compliance posture
+score share this one calculation: the worker stores it as a 0–10
+intensity value, and `to_posture_score` maps it to a 0–100 posture
+scale (higher = healthier) for the dashboard. Same math, two views.
 
 ## Chat (Advisor) flow
 
@@ -164,12 +202,14 @@ Wired from `src/app/config/config.py`:
 Canonical values live at the top of
 `src/app/shared/lib/scan_status.py`:
 
-`QUEUED`, `PENDING_COST_APPROVAL`, `QUEUED_FOR_SCAN`,
-`ANALYZING_CONTEXT`, `RUNNING_AGENTS`, `GENERATING_REPORTS`,
-`COMPLETED`, `REMEDIATION_COMPLETED`, `FAILED`, `CANCELLED`.
+`QUEUED`, `PENDING_PRESCAN_APPROVAL`, `PENDING_PROFILING_APPROVAL`,
+`PENDING_COST_APPROVAL`, `QUEUED_FOR_SCAN`, `ANALYZING_CONTEXT`,
+`RUNNING_AGENTS`, `GENERATING_REPORTS`, `COMPLETED`,
+`REMEDIATION_COMPLETED`, `BLOCKED_PRE_LLM`, `BLOCKED_USER_DECLINE`,
+`FAILED`, `CANCELLED`.
 
 `ACTIVE_SCAN_STATUSES` and `COMPLETED_SCAN_STATUSES` tuples are
-exported for the filters used across services. (The
-`GENERATING_REPORTS` constant is preserved for tuple membership +
-future re-introduction of an impact / SARIF reporting node, but no
-node sets that status today.)
+exported for the filters used across services. `BLOCKED_PRE_LLM` and
+`BLOCKED_USER_DECLINE` are the two terminal states a gate decline can
+produce; the `GENERATING_REPORTS` constant is preserved for tuple
+membership but no node sets it today.

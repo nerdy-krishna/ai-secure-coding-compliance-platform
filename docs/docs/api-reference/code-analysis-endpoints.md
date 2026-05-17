@@ -53,9 +53,10 @@ Required form fields:
 | Field | Description |
 | ----- | ----------- |
 | `project_name` | Creates the project on first use; reuses it on subsequent submissions. |
-| `scan_type` | `AUDIT` (read-only) or `REMEDIATE` (includes fix application later). |
+| `scan_type` | `AUDIT` (read-only), `SUGGEST` (findings + inline suggested fixes), or `REMEDIATE` (applies fixes + builds a patched snapshot). |
 | `frameworks` | Comma-separated framework names (e.g. `asvs,proactive_controls`). |
-| `utility_llm_config_id` / `fast_llm_config_id` / `reasoning_llm_config_id` | UUIDs of registered `LLMConfiguration` rows. Any missing slot falls back to the first registered config. |
+| `reasoning_llm_config_id` | UUID of the registered `LLMConfiguration` for the **reasoning** slot (analysis, consolidation, merge). Falls back to the first registered config when omitted. |
+| `utility_llm_config_id` | UUID for the **utility** slot (per-file profiler, fix verification). Falls back to the reasoning slot's config when omitted — "the same model in both slots" is the baseline. |
 
 Exactly one submission method:
 
@@ -71,15 +72,28 @@ submitted files outside this list are excluded from the scan.
 Response: `{ scan_id, project_id, message }`. The scan enters the
 `QUEUED` state; poll status via SSE or `GET /scans/{id}`.
 
-## Approve / cancel the cost estimate
+## Approve / cancel an interrupt gate
 
 ```http
-POST /scans/{scan_id}/approve        # flip from PENDING_COST_APPROVAL → QUEUED_FOR_SCAN
+POST /scans/{scan_id}/approve        # resume the scan past its current gate
 POST /scans/{scan_id}/cancel         # flip to CANCELLED
 ```
 
-Approve publishes to `analysis_approved_queue`; the worker resumes
-the paused LangGraph thread with `Command(resume=...)`.
+A scan can pause at three native-`interrupt()` gates. The `approve`
+body's `kind` field discriminates which one is being resumed; the
+service validates `kind` against the scan's current status:
+
+| `kind` | Gate status | Body |
+| ------ | ----------- | ---- |
+| `prescan_approval` | `PENDING_PRESCAN_APPROVAL` | `{ "kind", "approved", "override_critical_secret" }` |
+| `profiling_approval` | `PENDING_PROFILING_APPROVAL` | `{ "kind", "approved" }` |
+| `cost_approval` | `PENDING_COST_APPROVAL` | `{ "kind", "approved" }` (empty body also accepted, defaults to `cost_approval` + approved) |
+
+`approved=false` at the prescan or profiling gate ends the scan at
+`BLOCKED_USER_DECLINE`. Approve publishes to `analysis_approved_queue`;
+the worker resumes the paused LangGraph thread with
+`Command(resume=...)`. Scans left at the prescan or profiling gate
+for over 24 h are auto-declined by a background sweeper.
 
 ## Stream scan progress (SSE)
 

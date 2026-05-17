@@ -16,12 +16,12 @@ tag controls:
 ## Picking frameworks at submit time
 
 The framework picker on the Submit page is a multi-select. SCCAP
-ships with three **default** frameworks; admins can add more via
-**Admin → Frameworks**. See
+ships with eight **bundled** OWASP frameworks; admins can add more
+via **Admin → Frameworks**. See
 [Supported Frameworks](../../security-frameworks/supported-frameworks.md)
 for the full list + ingestion modes.
 
-Default set:
+Bundled set:
 
 - **OWASP ASVS** — application security verification controls.
   Best for comprehensive auditing.
@@ -29,6 +29,11 @@ Default set:
   practices. Great chat context.
 - **OWASP Cheatsheets** — topic-specific guidance (SQL injection,
   XSS, JWT, etc.).
+- **CWE Essentials** — the MITRE CWE Top 25, for systems / native code.
+- **OWASP ISVS** — IoT Security Verification Standard.
+- **OWASP LLM Top 10** — weakness classes for LLM-integrated apps.
+- **OWASP Agentic Top 10** — weakness classes for autonomous-agent apps.
+- **OWASP MASVS** — Mobile Application Security Verification Standard.
 
 ## Framework tagging vs. RAG retrieval
 

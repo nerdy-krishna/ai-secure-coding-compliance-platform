@@ -18,16 +18,35 @@ Admins register each model they want to use under
 | Column | Notes |
 | ------ | ----- |
 | `name` | Human-readable label shown in the submit UI. |
-| `provider` | `openai` / `anthropic` / `google` (lowercase). |
+| `provider` | `openai` / `anthropic` / `google` / `deepseek` / `xai` (lowercase). |
 | `model_name` | Provider-native model id, e.g. `gpt-4o`, `claude-sonnet-4-5`, `gemini-2.5-flash`. |
 | `tokenizer` | Optional override for LiteLLM's tokenizer selection. |
 | `encrypted_api_key` | Fernet-encrypted at rest using `ENCRYPTION_KEY`. |
 | `input_cost_per_million` | Optional override (USD). Zero ⇒ use LiteLLM. |
 | `output_cost_per_million` | Optional override (USD). Zero ⇒ use LiteLLM. |
 
-A scan references three of these rows — `utility`, `fast`,
-`reasoning` — so the same deployment can mix a cheap model for
-summaries and an expensive one for the deep analysis.
+## Two LLM slots per scan
+
+A scan is configured with **two** `LLMConfiguration` rows — a
+**utility** (cheap) slot and a **reasoning** (capable) slot — stored
+as `Scan.utility_llm_config_id` and `Scan.reasoning_llm_config_id`.
+The same model can sit in both, or they can be split. When the submit
+omits the utility slot it defaults to the reasoning config.
+
+Step-to-slot routing is centralised in `shared/lib/llm_slots.py` — no
+node hard-codes a config id:
+
+| Step | Slot |
+| ---- | ---- |
+| Per-file analysis | reasoning |
+| Finding consolidation | reasoning |
+| Remediation merge agent | reasoning |
+| Per-file profiler | utility |
+| Fix-snippet verification | utility |
+
+`resolve_llm_config_id(step, state)` picks the config; utility-slot
+steps fall back to the reasoning config when the utility slot is
+unset, so legacy scans keep working.
 
 ## Token counting
 
@@ -52,6 +71,15 @@ predicted_output_ratio=0.25)` predicts a 25%-of-input response
 
 The result is persisted as `scan.cost_details` before the scan pauses
 at `PENDING_COST_APPROVAL`.
+
+Two cost gates run per scan: `estimate_profiling_cost` prices the
+per-file profiling pass on the **utility** slot
+(`PENDING_PROFILING_APPROVAL`), and `estimate_cost` prices the deep
+analysis on the **reasoning** slot. The analysis estimate counts
+tokens only against each file's content-routed agent set (driven by
+its profile), so it reflects the agents the file will actually be
+analysed by rather than a worst-case full roster. `estimate_cost_two_slot`
+sums usage across both slots at each config's own price.
 
 ## Post-call actuals
 

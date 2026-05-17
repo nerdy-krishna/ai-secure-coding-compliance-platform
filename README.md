@@ -3,9 +3,10 @@
 An open-source, AI-powered platform that helps developers and security
 teams audit code for vulnerabilities and apply intelligent
 remediations. SCCAP follows an **"Audit-First, Remediate-Intelligently"**
-approach: every scan runs a cheap preliminary pass, surfaces an
-explicit cost estimate, and waits for your approval before spending on
-the deep analysis. Remediation is a separate, opt-in step.
+approach: every scan runs a cheap deterministic pass, profiles each
+file, surfaces explicit cost estimates, and waits for your approval at
+each gate before spending on the deep analysis. Remediation is a
+separate, opt-in step.
 
 ## Key Features
 
@@ -16,10 +17,24 @@ the deep analysis. Remediation is a separate, opt-in step.
 - **Versatile submission** — upload individual files, pick a Git
   repository URL, or drop in a `.zip` / `.tar.gz` archive. The
   selective-files tree lets you exclude what you don't want analyzed.
-- **Two-phase, user-approved scan** — the API publishes a job, the
-  worker runs a cheap *audit* pass to estimate cost, pauses the
-  LangGraph workflow with a native `interrupt()`, and waits for the UI
-  to approve before the expensive deep analysis runs.
+- **Gated, user-approved scan** — the worker pauses the LangGraph
+  workflow with native `interrupt()`s at up to three gates: a
+  deterministic-prescan review, a profiling-cost approval, and the
+  deep-analysis cost approval. Nothing expensive runs without your
+  explicit OK.
+- **Per-file profiler + content-based routing** — before analysis,
+  every file is profiled (summary, security-relevant operations,
+  applicable security domains) on a cheap *utility* model. Each file
+  is then analysed only by the agents relevant to its content, and the
+  cost estimate reflects that routed set.
+- **Consolidated findings** — a reasoning-model consolidation pass
+  merges the raw per-agent findings into one root finding per real
+  issue: it leads with the root cause and fix, lists every affected
+  location, carries corroborating agents, and drops false positives
+  and noise. No more duplicate rows for the same bug.
+- **Downloadable findings report** — export any scan's findings as a
+  self-contained HTML page, a CSV (one row per finding), or a
+  paginated PDF, straight from the Results page.
 - **Intelligent remediation** — pick findings, let the multi-agent
   system generate code fixes, and download the patched codebase as a
   zip. Remediation runs incrementally with a merge agent to resolve
@@ -34,12 +49,15 @@ the deep analysis. Remediation is a separate, opt-in step.
   chat against your RAG-ingested guidelines, with a right-hand rail
   that surfaces the knowledge sources, referenced findings, and files
   most likely discussed.
-- **Compliance page** — per-framework coverage card for each of the 3
-  default OWASP frameworks (ASVS, Proactive Controls, Cheatsheets)
-  plus any custom frameworks, with an AI-computed posture score.
-- **Multi-provider LLM support** — OpenAI, Anthropic, and Google
-  configured per slot (utility / fast / reasoning) with encrypted API
-  keys stored server-side.
+- **Compliance page** — per-framework coverage card for each of the 8
+  bundled OWASP frameworks (ASVS, Proactive Controls, Cheatsheets, CWE
+  Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) plus any custom
+  frameworks, with an AI-computed posture score.
+- **Multi-provider LLM support** — OpenAI, Anthropic, Google, DeepSeek,
+  and xAI. Each scan is configured with two slots: a *utility* (cheap)
+  model for profiling and verification, and a *reasoning* (capable)
+  model for analysis and consolidation. API keys are Fernet-encrypted
+  server-side.
 
 ### For security admins
 - **User Groups + scoped visibility** — an admin creates groups and
@@ -82,23 +100,32 @@ the deep analysis. Remediation is a separate, opt-in step.
 ## How It Works
 
 1. **Submit** code (upload, Git URL, or archive) and pick frameworks +
-   LLM slots.
+   the two LLM slots (utility + reasoning).
 2. **Pre-LLM scan** — deterministic SAST (Bandit · Semgrep · Gitleaks ·
    OSV) builds a repo map + dependency graph and runs first. If it
    finds anything the scan pauses at `PENDING_PRESCAN_APPROVAL` so you
    can review the deterministic findings before any code is sent to an
    LLM. Critical secrets need an explicit override to continue.
-3. **Estimate** — once you continue past the prescan gate, a dry run
-   produces an explicit cost estimate. The scan pauses at
-   `PENDING_COST_APPROVAL`.
-4. **Approve** (or cancel) in the UI. Live SSE stream surfaces the
-   estimate and reconnects through token expiry; the worker resumes
-   the same LangGraph thread from the checkpoint.
-5. **Analyze** — triaged specialized agents run in parallel (five at a
-   time under `CONCURRENT_LLM_LIMIT`) in topological dependency order.
-6. **Review** findings in the Results page — both deterministic and
-   LLM-emitted, tagged by source.
-7. **Remediate** — select findings, apply fixes incrementally with a
+3. **Profiling gate** — the scan pauses at `PENDING_PROFILING_APPROVAL`
+   with a profiling-cost estimate. On approval, every file is profiled
+   on the utility model: a summary, its security-relevant operations,
+   and the security domains that apply to it.
+4. **Cost gate** — a dry run, scoped to each file's content-routed
+   agent set, produces the deep-analysis cost estimate. The scan
+   pauses at `PENDING_COST_APPROVAL`.
+5. **Approve** (or cancel) each gate in the UI. A live SSE stream
+   surfaces estimates and reconnects through token expiry; the worker
+   resumes the same LangGraph thread from the checkpoint.
+6. **Analyze** — specialized agents run in parallel (five at a time
+   under `CONCURRENT_LLM_LIMIT`); each file is analysed only by the
+   agents its profile routed to.
+7. **Consolidate** — a reasoning-model pass merges same-root-cause
+   findings into one root finding per real issue and drops false
+   positives and noise.
+8. **Review** findings in the Results page — both deterministic and
+   LLM-emitted, tagged by source — and download the report as HTML,
+   CSV, or PDF.
+9. **Remediate** — select findings, apply fixes incrementally with a
    merge agent to resolve conflicts, then download the patched tree.
 
 The full worker graph and state transitions live in
@@ -154,9 +181,10 @@ troubleshooting.
 
 Python 3.12 + FastAPI + Poetry · SQLAlchemy async + Alembic ·
 LangGraph 1.x + LangChain 1.x · LiteLLM · Pydantic AI · FastMCP ·
-fastapi-users (JWT Bearer) · Postgres 16 · RabbitMQ · Qdrant
-(fastembed `all-MiniLM-L6-v2`) · Fluentd → Loki → Grafana · React 18 + Vite
-+ TypeScript · Ant Design · TanStack Query · React Router v7.
+WeasyPrint (PDF reports) · fastapi-users (JWT Bearer) · Postgres 16 ·
+RabbitMQ · Qdrant (fastembed `all-MiniLM-L6-v2`) · Fluentd → Loki →
+Grafana · React 18 + Vite + TypeScript · Ant Design · TanStack Query ·
+React Router v7.
 
 Full breakdown in
 [`docs/docs/overview/technology-stack.md`](docs/docs/overview/technology-stack.md).

@@ -5,10 +5,12 @@ title: Supported Frameworks
 
 # Supported Frameworks
 
-SCCAP ships with three baseline OWASP frameworks. The auto-seed
+SCCAP ships with eight bundled OWASP frameworks. The auto-seed
 service (`default_seed_service.seed_defaults`) inserts them on a
 fresh install; admins can re-seed them at any time via
-**Admin → Frameworks → Restore defaults**.
+**Admin → Frameworks → Restore defaults**. ASVS auto-ingests its
+corpus on startup; the others are opt-in — select them at scan time
+and ingest their bundled corpus from the Admin console.
 
 ## Defaults
 
@@ -81,6 +83,38 @@ IoT / embedded / connected-device codebases.
   for the step-by-step.
 - **Pinned edition**: OWASP ISVS 1.0.
 - **Typical use**: security audits of IoT / embedded device code.
+
+### OWASP LLM Top 10 (`llm_top10`)
+
+The OWASP Top 10 for Large Language Model Applications (2025) —
+LLM01 Prompt Injection through LLM10 Unbounded Consumption. Covers
+the weakness classes specific to LLM-integrated applications.
+
+- **Ingestion mode**: CSV — bundled at
+  `src/app/data/llm_top10_corpus.csv`.
+- **Typical use**: audits of AI / LLM-integrated apps.
+
+### OWASP Agentic Top 10 (`agentic_top10`)
+
+The OWASP Top 10 for Agentic AI Applications (2026) — AGENT01 Memory
+Poisoning through AGENT10 Overwhelming Human-in-the-Loop. Covers the
+weakness classes specific to autonomous and multi-agent systems.
+
+- **Ingestion mode**: CSV — bundled at
+  `src/app/data/agentic_top10_corpus.csv`.
+- **Typical use**: audits of autonomous-agent / multi-agent / MCP apps.
+
+### OWASP MASVS (`masvs`)
+
+The OWASP Mobile Application Security Verification Standard (v2) —
+eight control groups spanning data storage, cryptography,
+authentication, network communication, platform interaction, code
+quality, resilience, and privacy.
+
+- **Ingestion mode**: CSV — bundled at
+  `src/app/data/masvs_corpus.csv`.
+- **Typical use**: audits of iOS, Android, and cross-platform mobile
+  codebases (Swift, Kotlin, Java, Dart).
 
 ## Adding a custom framework
 

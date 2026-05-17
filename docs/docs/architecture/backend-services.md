@@ -62,7 +62,7 @@ that spans multiple repositories in a single operation:
   projects / scans / findings, scoped through `visible_user_ids`.
 - `rag_preprocessor_service` / `security_standards_service` — ingest
   pipelines for framework knowledge bases.
-- `default_seed_service` — idempotent seed of the three baseline
+- `default_seed_service` — idempotent seed of the eight bundled
   frameworks + their agents + prompt templates.
 
 ## Repositories

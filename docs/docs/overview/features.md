@@ -31,15 +31,29 @@ admins see everything.
 
 - File upload, Git repository URL, or archive (`.zip` / `.tar.gz`).
 - Selective-files tree that lets you prune before cost estimation.
-- Per-slot LLM selection (utility / fast / reasoning).
-- Framework multi-select (3 defaults plus any admin-added custom
-  framework).
+- Two LLM slots per scan — a **utility** (cheap) model for the
+  per-file profiler and fix verification, and a **reasoning**
+  (capable) model for analysis and consolidation. Put the same model
+  in both, or split them.
+- Framework multi-select (8 bundled OWASP frameworks plus any
+  admin-added custom framework).
 
-The deep analysis runs in a single parallel pass: every relevant
-agent sees every file from the original submission concurrently
-(bounded by `CONCURRENT_LLM_LIMIT=5`). Per-file dependency context
-is still injected from the repository map so agents have visibility
-into imports.
+Before the deep analysis, every file is profiled on the utility model
+(see [Data Flow](../architecture/data-flow.md)). The deep analysis
+then runs as a single parallel pass, but each file is analysed only by
+the agents its profile routed to — not the whole roster — bounded by
+`CONCURRENT_LLM_LIMIT=5`. Per-file dependency context is injected from
+the repository map so agents have visibility into imports.
+
+## Results
+
+- Per-file finding panels: severity, CVSS score, suggested fix, and —
+  for a consolidated finding — every affected location and the agents
+  that corroborated it.
+- **Download report** buttons export the scan's findings as a
+  self-contained HTML page, a CSV (one row per finding), or a
+  paginated PDF.
+- Timeline and LLM-logs drill-downs for the full scan trail.
 
 ## Projects
 
@@ -51,8 +65,8 @@ into imports.
 
 ## Compliance
 
-- Per-framework card for the 3 OWASP defaults plus every custom
-  framework in the `frameworks` table.
+- Per-framework card for the 8 bundled OWASP frameworks plus every
+  custom framework in the `frameworks` table.
 - Posture score + RAG document count + matched / open finding
   counts.
 - Admins can deep-link to `/admin/rag` from the card to ingest the

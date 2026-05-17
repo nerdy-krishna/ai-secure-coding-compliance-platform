@@ -7,9 +7,9 @@ sidebar_position: 2
 
 SCCAP builds on **LangGraph 1.x** — every long-running workflow is a
 compiled `StateGraph` whose state is persisted per scan in the
-Postgres checkpointer. This gives us durable pauses (the cost
-approval gate is a native `interrupt()` + `Command(resume=...)`),
-clean step-level retries, and structured parallelism.
+Postgres checkpointer. This gives us durable pauses (each approval
+gate is a native `interrupt()` + `Command(resume=...)`), clean
+step-level retries, and structured parallelism.
 
 ## Top-level graph
 
@@ -18,38 +18,56 @@ clean step-level retries, and structured parallelism.
 
 ```
 retrieve_and_prepare_data
-  → estimate_cost            (interrupt → resume via Command)
+  → deterministic_prescan
+  → pending_prescan_approval    (interrupt — only when prescan findings exist)
+  → estimate_profiling_cost     (interrupt → resume via Command)
+  → profile_files               (per-file FileProfiler, utility slot)
+  → estimate_cost               (interrupt → resume via Command)
   → analyze_files_parallel
-  → correlate_findings
-  → consolidate_and_patch    (no-op for AUDIT / SUGGEST)
+  → consolidate_findings        (FindingConsolidator, reasoning slot)
+  → consolidate_and_patch       (no-op for AUDIT / SUGGEST)
   → save_results
   → save_final_report → END
 ```
 
 `handle_error` is reachable from every node via `should_continue`
-conditional edges and sets status `FAILED`.
+conditional edges and sets status `FAILED`. A declined prescan gate
+routes to the terminal `user_decline` / `blocked_pre_llm` nodes; a
+declined profiling gate routes to `user_decline`.
 
-### Audit pass
+### Gated audit pass
 
-`retrieve_and_prepare_data` → builds the `RepositoryMappingEngine` +
-`ContextBundlingEngine` dependency graph → `estimate_cost` computes
-projected token + dollar cost via LiteLLM, sets status to
-`PENDING_COST_APPROVAL`, and calls `interrupt()`. The graph pauses
-with full state in the checkpointer; the UI polls `/scans/{id}` or
-streams `/scans/{id}/stream` for status changes.
+`retrieve_and_prepare_data` builds the `RepositoryMappingEngine` +
+`ContextBundlingEngine` dependency graph; `deterministic_prescan` runs
+the SAST scanners. The graph then crosses up to three native-
+`interrupt()` gates — prescan-approval (when the prescan found
+something), profiling-cost, and analysis-cost — pausing with full
+state in the checkpointer at each. The UI streams `/scans/{id}/stream`
+for status changes and posts to `/scans/{id}/approve` to resume.
+
+### Per-file profiling
+
+Between the profiling-cost gate and the analysis-cost gate,
+`profile_files` runs the **FileProfiler** over every file on the
+*utility* LLM slot. Each profile records a summary, the file's
+security-relevant operations, and its **applicable domains** — the
+agents relevant to the file's content — and is persisted to
+`Scan.file_profiles`.
 
 ### Single-pass parallel analysis
 
-When the user approves, the worker resumes the **same** thread with
-`Command(resume=...)` and execution falls through to
+When the user approves the analysis-cost gate, the worker resumes the
+**same** thread and execution falls through to
 `analyze_files_parallel`. Key properties:
 
 - **No topological ordering, no cross-file patch propagation.** Every
   agent sees the original code from the `ORIGINAL_SUBMISSION`
   snapshot.
-- **Per-file agent triage is inline** via
-  `resolve_agents_for_file(file_path, all_relevant_agents)` —
-  extension-based routing, not a separate LLM triage node.
+- **Content-based routing** — `resolve_agents_for_file` narrows the
+  roster by the file profile's applicable domains (systems/web gating
+  applied first). A file with a narrow profile is analysed by fewer
+  agents than the full framework roster; a file with no profile falls
+  back to extension-only routing.
 - **Per-file dependency context** is injected from the repository
   map: `build_dep_summary(file_path)` reads symbol signatures from
   successors in the dependency graph and prefixes each chunk with a
@@ -57,12 +75,17 @@ When the user approves, the worker resumes the **same** thread with
 - **Concurrency** is a single `asyncio.Semaphore(CONCURRENT_LLM_LIMIT)`
   (default 5) over the union of file × chunk × agent calls.
 - **No mid-graph DB writes.** Findings + `proposed_fixes` flow through
-  state to `consolidate_and_patch` and `save_results`.
+  state to `consolidate_findings` and beyond.
 
-### Correlation + remediation
+### Consolidation + remediation
 
-`correlate_findings` groups duplicate findings by
-`(file_path, CWE, line_number)` and merges agent corroborations.
+`consolidate_findings` is backed by the **FindingConsolidator**: per
+file, the reasoning LLM merges raw findings describing the same root
+cause into one root finding (with every `affected_location`, unioned
+`corroborating_agents`, and a re-assessed CVSS) and drops false
+positives, duplicates, and noise — a qualitative quality gate with no
+severity floor. It replaces the old exact-key `correlate_findings`.
+
 `consolidate_and_patch` is REMEDIATE-only: groups `proposed_fixes`
 by file, resolves line-range conflicts via `_run_merge_agent`,
 tree-sitter syntax-verifies the patched content, and builds
@@ -70,9 +93,10 @@ tree-sitter syntax-verifies the patched content, and builds
 no-op; SUGGEST keeps the embedded `fixes` field on each finding but
 doesn't build a snapshot.
 
-`save_results` persists everything; `save_final_report` writes the
-coarse 0–10 severity-bucket `risk_score` and the `summary` JSON, and
-sets the final status (`COMPLETED` or `REMEDIATION_COMPLETED`).
+`save_results` deletes the raw prescan rows and writes the
+consolidated finding set fresh; `save_final_report` writes the
+CVSS-weighted 0–10 `risk_score` and the `summary` JSON, and sets the
+final status (`COMPLETED` or `REMEDIATION_COMPLETED`).
 
 ## Specialized agents
 
@@ -80,19 +104,24 @@ Specialized agents live under `src/app/infrastructure/agents/`:
 
 - **`generic_specialized_agent`** — parameterized per finding type;
   the workhorse called by `analyze_files_parallel`. Takes a chunk +
-  a finding-type prompt template, calls the LLM, returns a
+  a finding-type prompt template, calls the reasoning LLM, returns a
   validated Pydantic model.
+- **`file_profiler`** — the FileProfiler (#71); profiles each file on
+  the utility slot into a summary + security-relevant operations +
+  applicable domains.
+- **`finding_consolidator`** — the FindingConsolidator (#72); merges
+  and quality-gates raw findings per file on the reasoning slot.
 - **`chat_agent`** — one-shot LLM call used by the Advisor. Runs RAG
   retrieval scoped to the session's `frameworks`, injects the docs
   into the prompt, and returns a response + usage metadata.
 - **`symbol_map_agent`** — builds the repo-map symbol index used by
   `ContextBundlingEngine`.
 
-Impact-summary and SARIF generation were removed in the
-2026-04-26 cleanup (the impact-reporting node was registered but
-never wired into the graph). Re-introducing them is a future
-work item; the existing `save_final_report` is the right insertion
-point for an additional reporting node.
+Impact-summary and SARIF generation were removed in the 2026-04-26
+cleanup. The downloadable HTML / CSV / PDF findings report
+(`GET /scans/{id}/report`) is rendered directly from the consolidated
+findings — see [Reporting](../user-guide/reporting.md) — so no
+separate reporting node is needed.
 
 ## Structured output with Pydantic AI
 

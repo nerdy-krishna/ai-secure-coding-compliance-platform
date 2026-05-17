@@ -36,13 +36,31 @@ final scan `status`.
 
 Use this for the Results page.
 
-!!! note "SARIF + Executive Summary endpoints removed"
+## Downloadable findings report
 
-    The previous `/scans/{id}/sarif` and
-    `/scans/{id}/executive-summary/download` endpoints were removed in
-    the 2026-04-26 cleanup — the impact-reporting node that backed
-    them was never wired into the graph, so both endpoints returned
-    404 in practice. They'll come back as a focused feature later.
+```http
+GET /scans/{scan_id}/report?format=html|csv|pdf
+```
+
+Renders the scan's consolidated findings as a downloadable report and
+streams it as a file attachment (`Content-Disposition`). `format`
+defaults to `html`; an unsupported value returns `400`.
+
+| `format` | Media type | Content |
+| -------- | ---------- | ------- |
+| `html` | `text/html` | A self-contained styled HTML document (inline CSS, no external assets). |
+| `csv` | `text/csv` | One row per finding; columns for file, line, severity, CVSS, confidence, CWE, source, title, description, remediation, corroborating agents, affected lines. |
+| `pdf` | `application/pdf` | A paginated, print-oriented PDF — cover page, running header/footer, a card per finding. Rendered with WeasyPrint. |
+
+Scoped by H.2 visibility — the same `404`-not-`403` rule applies.
+
+!!! note "SARIF export"
+
+    SCCAP previously exposed `/scans/{id}/sarif` and an
+    `/executive-summary/download` endpoint; both were removed in the
+    2026-04-26 cleanup (the impact-reporting node that backed them was
+    never wired into the graph). The HTML / CSV / PDF report above is
+    the replacement. SARIF export is not currently offered.
 
 ## LLM interactions for a scan
 
