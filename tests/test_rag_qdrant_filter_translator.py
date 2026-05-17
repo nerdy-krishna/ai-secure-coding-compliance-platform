@@ -174,3 +174,25 @@ def test_qdrant_id_is_uuid():
     assert a1 != b
     # UUID-shaped (5 hyphen-separated groups).
     assert len(a1.split("-")) == 5
+
+
+def test_check_framework_name_accepts_any_configured_framework():
+    """Framework name is validated by format — `get_by_framework` /
+    `delete_by_framework` must accept frameworks added after the
+    original three (CWE Essentials, ISVS) and admin-added custom ones,
+    not a stale hardcoded enum."""
+    from app.infrastructure.rag.qdrant_store import _check_framework_name
+
+    # No raise — every one of these is a safe identifier.
+    for name in ("asvs", "cwe_essentials", "isvs", "my-custom_framework"):
+        _check_framework_name(name)
+
+
+def test_check_framework_name_rejects_unsafe_input():
+    """The format check still bounds charset + length so nothing unsafe
+    reaches a Qdrant filter."""
+    from app.infrastructure.rag.qdrant_store import _check_framework_name
+
+    for bad in ("", "has spaces", "drop;table", "a" * 65, "../etc"):
+        with pytest.raises(ValueError):
+            _check_framework_name(bad)

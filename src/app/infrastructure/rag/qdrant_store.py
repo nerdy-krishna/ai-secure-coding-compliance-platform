@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
@@ -51,8 +52,24 @@ MAX_QUERY_TEXTS = 32
 # V02.3.2 — cap on how many docs we retrieve per framework in a single scroll.
 MAX_FRAMEWORK_DOCS = 50_000
 
-# Allowlist of valid framework names (mirrors get_framework_stats usage).
-_ALLOWED_FRAMEWORKS = {"asvs", "proactive_controls", "cheatsheets"}
+# V02.3.2 — framework_name is validated by *format*, not against a fixed
+# enum. A static allow-list went stale the moment a framework was added
+# (CWE Essentials, ISVS) or an admin created a custom one — and made
+# `get_by_framework` / `delete_by_framework` raise for those, which
+# surfaced in the UI as "error loading documents". The format check
+# still bounds length and charset so nothing unsafe reaches a Qdrant
+# filter; it mirrors `admin_rag._validate_framework_name`.
+_FRAMEWORK_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _check_framework_name(framework_name: str) -> None:
+    """Raise ValueError unless `framework_name` is a safe identifier."""
+    if not _FRAMEWORK_NAME_RE.match(framework_name or ""):
+        raise ValueError(
+            f"Invalid framework name {framework_name!r}; "
+            "must match [A-Za-z0-9_-]{1,64}"
+        )
+
 
 # V02.4.1 — anti-automation semaphore: cap concurrent Qdrant calls at 8.
 _RAG_CALL_SEM = threading.Semaphore(8)
@@ -370,11 +387,9 @@ class QdrantStore:
         }
 
     def get_by_framework(self, framework_name: str) -> Dict[str, Any]:
-        # V02.3.2 — validate framework_name against the known allow-list.
-        if framework_name not in _ALLOWED_FRAMEWORKS:
-            raise ValueError(
-                f"Unknown framework {framework_name!r}; must be one of {_ALLOWED_FRAMEWORKS}"
-            )
+        # V02.3.2 — validate framework_name by format (any configured
+        # framework is allowed; an un-ingested one simply scrolls empty).
+        _check_framework_name(framework_name)
         flt = _translate_filter({"framework_name": {"$eq": framework_name}})
         # V02.3.2 / V02.4.1 — paginate with a hard cap so a huge framework
         # cannot drive unbounded memory or repeated large scrolls.
@@ -423,17 +438,37 @@ class QdrantStore:
         }
 
     def get_framework_stats(self) -> Dict[str, int]:
+        """Document count per `framework_name` across the guidelines
+        collection — dynamic, so every ingested framework is reported."""
         stats: Dict[str, int] = {}
-        for fw in ["asvs", "proactive_controls", "cheatsheets"]:
-            stats[fw] = len(self.get_by_framework(fw).get("ids", []))
+        offset = None
+        scanned = 0
+        with _RAG_CALL_SEM:
+            while True:
+                try:
+                    batch, next_offset = self._client.scroll(
+                        collection_name=SECURITY_GUIDELINES_COLLECTION,
+                        limit=1_000,
+                        offset=offset,
+                        with_payload=["framework_name"],
+                        with_vectors=False,
+                    )
+                except Exception as e:
+                    logger.warning("qdrant_store: scroll (stats) failed: %s", e)
+                    break
+                for point in batch:
+                    fw = (point.payload or {}).get("framework_name")
+                    if isinstance(fw, str) and fw:
+                        stats[fw] = stats.get(fw, 0) + 1
+                scanned += len(batch)
+                if next_offset is None or scanned >= MAX_FRAMEWORK_DOCS:
+                    break
+                offset = next_offset
         return stats
 
     def delete_by_framework(self, framework_name: str) -> int:
-        # V02.3.2 — validate framework_name.
-        if framework_name not in _ALLOWED_FRAMEWORKS:
-            raise ValueError(
-                f"Unknown framework {framework_name!r}; must be one of {_ALLOWED_FRAMEWORKS}"
-            )
+        # V02.3.2 — validate framework_name by format.
+        _check_framework_name(framework_name)
         # V02.3.3 — use a single server-side filter delete (atomic) instead
         # of the prior query-then-delete two-call pattern which exposed a
         # partial-delete window on failure.
