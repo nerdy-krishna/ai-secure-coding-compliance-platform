@@ -45,6 +45,7 @@ const STATUS_TABLE: Record<string, StatusMeta> = {
   QUEUED_FOR_SCAN: { label: "Queued for scan", kind: "running", tone: "info" },
   RUNNING_AGENTS: { label: "Running security agents", kind: "running", tone: "info" },
   CORRELATING: { label: "Correlating findings", kind: "running", tone: "info" },
+  CONSOLIDATING: { label: "Consolidating findings", kind: "running", tone: "info" },
   GENERATING_REPORTS: { label: "Generating reports", kind: "running", tone: "info" },
 
   // Human-gate states

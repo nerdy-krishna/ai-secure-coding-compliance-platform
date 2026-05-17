@@ -41,7 +41,9 @@ from app.infrastructure.workflows.nodes.consolidate import (
     _verify_syntax_with_treesitter,
     consolidate_and_patch_node,
 )
-from app.infrastructure.workflows.nodes.correlate import correlate_findings_node
+from app.infrastructure.workflows.nodes.consolidate_findings import (
+    consolidate_findings_node,
+)
 from app.infrastructure.workflows.nodes.cost import (
     CHUNK_ONLY_IF_LARGER_THAN,
     estimate_cost_node,
@@ -108,7 +110,7 @@ __all__ = [
     "profile_files_node",
     "estimate_cost_node",
     "analyze_files_parallel_node",
-    "correlate_findings_node",
+    "consolidate_findings_node",
     "consolidate_and_patch_node",
     "verify_patches_node",
     "save_results_node",
@@ -143,7 +145,7 @@ workflow.add_node("estimate_profiling_cost", estimate_profiling_cost_node)
 workflow.add_node("profile_files", profile_files_node)
 workflow.add_node("estimate_cost", estimate_cost_node)
 workflow.add_node("analyze_files_parallel", analyze_files_parallel_node)
-workflow.add_node("correlate_findings", correlate_findings_node)
+workflow.add_node("consolidate_findings", consolidate_findings_node)
 workflow.add_node("consolidate_and_patch", consolidate_and_patch_node)
 workflow.add_node("verify_patches", verify_patches_node)
 workflow.add_node("save_results", save_results_node)
@@ -351,10 +353,10 @@ workflow.add_conditional_edges(
 workflow.add_conditional_edges(
     "analyze_files_parallel",
     should_continue,
-    {"continue": "correlate_findings", "handle_error": "handle_error"},
+    {"continue": "consolidate_findings", "handle_error": "handle_error"},
 )
 workflow.add_conditional_edges(
-    "correlate_findings",
+    "consolidate_findings",
     should_continue,
     {"continue": "consolidate_and_patch", "handle_error": "handle_error"},
 )

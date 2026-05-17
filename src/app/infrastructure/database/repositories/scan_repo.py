@@ -516,6 +516,32 @@ class ScanRepository:
         for schema, row in zip(new_findings, db_findings):
             schema.id = row.id
 
+    async def delete_findings_for_scan(self, scan_id: uuid.UUID) -> int:
+        """Delete every persisted Finding row for a scan. Returns the
+        row count deleted.
+
+        Used by `save_results_node` (#72): after the consolidation pass
+        the in-memory `state["findings"]` is the authoritative final
+        set, so the node clears the deterministic-prescan rows inserted
+        earlier and re-inserts the consolidated set. This keeps a
+        merged cluster from leaving its pre-merge prescan rows behind.
+        """
+        result = await self.db.execute(
+            db_models.Finding.__table__.delete().where(
+                db_models.Finding.scan_id == scan_id
+            )
+        )
+        try:
+            await self.db.commit()
+        except SQLAlchemyError as e:
+            logger.error(
+                "scan_repo.delete_findings_for_scan.commit_failed",
+                extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
+                exc_info=True,
+            )
+            raise
+        return result.rowcount or 0
+
     async def update_correlated_findings(
         self, findings: List[agent_schemas.VulnerabilityFinding]
     ):

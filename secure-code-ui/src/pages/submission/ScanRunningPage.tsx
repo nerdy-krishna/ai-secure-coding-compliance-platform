@@ -97,7 +97,7 @@ const KNOWN_STAGES: Stage[] = [
   { key: "ESTIMATING_COST", label: "Estimating cost", icon: <Icon.Dollar size={14} /> },
   { key: "COST_REVIEW", label: "Cost review", icon: <Icon.Dollar size={14} /> },
   { key: "RUNNING_AGENTS", label: "Running security agents", icon: <Icon.Cpu size={14} /> },
-  { key: "CORRELATING", label: "Correlating findings", icon: <Icon.Layers size={14} /> },
+  { key: "CONSOLIDATING", label: "Consolidating findings", icon: <Icon.Layers size={14} /> },
   { key: "GENERATING_REPORTS", label: "Generating reports", icon: <Icon.File size={14} /> },
 ];
 
@@ -114,7 +114,7 @@ const POST_PRESCAN_EVENTS = [
 const POST_COST_EVENTS = [
   "RUNNING_AGENTS",
   "FILE_ANALYZED",
-  "CORRELATING",
+  "CONSOLIDATING",
   "PATCH_VERIFICATION",
   "GENERATING_REPORTS",
 ];

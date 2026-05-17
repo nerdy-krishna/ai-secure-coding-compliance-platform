@@ -37,31 +37,19 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
 
+            # After the consolidation pass (#72), `state["findings"]` is
+            # the authoritative final finding set: merged root findings
+            # plus whatever survived the quality gate. The deterministic-
+            # prescan node inserted its raw rows earlier (so the prescan-
+            # approval card could render them) — clear those and write
+            # the consolidated set fresh so a merged cluster never leaves
+            # its pre-merge rows behind. The consolidation node strips
+            # `id` from every output finding, so `save_findings` inserts
+            # the whole set. Always delete first, even when `findings` is
+            # empty — the quality gate may have dropped everything.
+            await repo.delete_findings_for_scan(scan_id)
             if findings:
-                # Findings flowing into this node are a mix of:
-                #   (a) deterministic prescan rows already inserted by
-                #       `deterministic_prescan_node` — they carry a
-                #       populated `.id` — and
-                #   (b) fresh LLM-agent findings produced by
-                #       analyze_files_parallel — `.id is None`.
-                # We must NOT re-insert (a); doing so was the primary
-                # source of triple-duped bandit rows in the DB. Insert
-                # only the fresh ones, and apply any correlation /
-                # confidence updates the LLM phase made to the
-                # existing rows.
-                #
-                # This applies to REMEDIATE too: the prior code only
-                # called `update_correlated_findings(findings)`, which
-                # silently drops any finding without an id. That was
-                # masking 100 % of the LLM-agent findings — REMEDIATE
-                # scans came back with the deterministic 2 only,
-                # never the 20–30 the agents had actually produced.
-                fresh = [f for f in findings if getattr(f, "id", None) is None]
-                existing = [f for f in findings if getattr(f, "id", None) is not None]
-                if fresh:
-                    await repo.save_findings(scan_id, fresh)
-                if existing:
-                    await repo.update_correlated_findings(existing)
+                await repo.save_findings(scan_id, findings)
 
             if scan_type == "REMEDIATE" and final_file_map:
                 logger.info("Saving POST_REMEDIATION snapshot for scan %s.", scan_id)

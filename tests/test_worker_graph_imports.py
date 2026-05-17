@@ -56,7 +56,7 @@ _REEXPORTED_NAMES = (
     "profile_files_node",
     "estimate_cost_node",
     "analyze_files_parallel_node",
-    "correlate_findings_node",
+    "consolidate_findings_node",
     "consolidate_and_patch_node",
     "verify_patches_node",
     "save_results_node",
