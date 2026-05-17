@@ -1329,6 +1329,21 @@ const FindingDetail: React.FC<{
             filePath={f.file_path}
             severityColor={sevColor}
           />
+          {f.affected_locations && f.affected_locations.length > 0 && (
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 11,
+                color: "var(--fg-muted)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              <span style={{ color: "var(--fg-subtle)" }}>also affects: </span>
+              {f.affected_locations
+                .map((loc) => `line ${loc.line_number}`)
+                .join(", ")}
+            </div>
+          )}
         </div>
       )}
 

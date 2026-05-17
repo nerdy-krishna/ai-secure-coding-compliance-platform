@@ -246,6 +246,12 @@ class Finding(Base):
     # line_number and the UI highlight span. NULL for legacy findings and
     # scanner findings without a snippet.
     vulnerable_snippet: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Every site this finding manifests beyond the primary location —
+    # a list of {line_number, snippet}. Set by the consolidation pass
+    # for merged findings; NULL for single-site and legacy findings.
+    affected_locations: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+        JSONB, nullable=True
+    )
     # V02.2.1: hard-capped at 512 characters at the persistence layer
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)

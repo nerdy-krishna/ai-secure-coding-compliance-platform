@@ -177,6 +177,8 @@ export interface Finding {
   // Exact verbatim vulnerable code; the UI matches it against the file
   // to highlight the precise span. null for legacy / scanner findings.
   vulnerable_snippet?: string | null;
+  // Every site a merged finding manifests, beyond the primary location.
+  affected_locations?: { line_number: number; snippet?: string | null }[] | null;
   remediation: string;
   confidence: string;
   // Originating scanner/agent for the finding. Mirrors the

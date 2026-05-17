@@ -50,6 +50,19 @@ class FixSuggestion(BaseModel):
     )
 
 
+class AffectedLocation(BaseModel):
+    """One site at which a finding's vulnerability manifests.
+
+    A consolidated finding's primary `line_number` / `vulnerable_snippet`
+    is the fix-anchor location; `affected_locations` lists every site the
+    same issue occurs, so a bug repeated across call sites stays
+    navigable under one finding.
+    """
+
+    line_number: int = Field(ge=0)
+    snippet: Optional[str] = Field(default=None, max_length=20_000)
+
+
 class VulnerabilityFinding(BaseModel):
     id: Optional[int] = None
     cwe: Optional[str] = Field(
@@ -106,6 +119,15 @@ class VulnerabilityFinding(BaseModel):
             "substring of the file under review. Anchors the finding's "
             "line number and the UI highlight span. None for legacy "
             "findings and scanner findings without a snippet."
+        ),
+    )
+    affected_locations: Optional[List[AffectedLocation]] = Field(
+        default=None,
+        description=(
+            "Every site this finding's vulnerability manifests, beyond "
+            "the primary fix-anchor location. Set by the consolidation "
+            "pass when a finding is merged from multiple sites; None for "
+            "single-site and legacy findings."
         ),
     )
     fixes: Optional[FixSuggestion] = Field(

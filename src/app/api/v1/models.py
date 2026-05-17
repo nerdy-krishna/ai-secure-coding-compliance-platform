@@ -490,6 +490,9 @@ class VulnerabilityFindingResponse(BaseModel):
     # Exact verbatim vulnerable code — the UI matches it against the file
     # to highlight the precise span. NULL for legacy / scanner findings.
     vulnerable_snippet: Optional[str] = None
+    # Every site a merged finding manifests — list of {line_number, snippet}.
+    # NULL for single-site and legacy findings.
+    affected_locations: Optional[List[Dict[str, Any]]] = None
     remediation: str
     confidence: str
     # Originating scanner/agent for the finding. Mirrors the DB

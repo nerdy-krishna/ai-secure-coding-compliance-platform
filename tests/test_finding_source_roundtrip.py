@@ -15,7 +15,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from app.core.schemas import VulnerabilityFinding
+from app.core.schemas import AffectedLocation, VulnerabilityFinding
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 
@@ -122,3 +122,56 @@ async def test_save_findings_persists_finding_without_cwe(db_session, seeded_use
     assert len(rows) == 1
     assert rows[0].cwe is None
     assert rows[0].source == "agent"
+
+
+@pytest.mark.asyncio
+async def test_save_findings_persists_affected_locations(db_session, seeded_user):
+    """A merged finding's `affected_locations` survives the model_dump
+    round-trip into the JSONB column and reads back intact."""
+    project = db_models.Project(user_id=seeded_user.id, name="affloc-test")
+    db_session.add(project)
+    await db_session.flush()
+
+    scan = db_models.Scan(
+        id=uuid.uuid4(),
+        project_id=project.id,
+        user_id=seeded_user.id,
+        scan_type="AUDIT",
+        status="COMPLETED",
+        frameworks=["asvs"],
+    )
+    db_session.add(scan)
+    await db_session.flush()
+
+    finding = VulnerabilityFinding(
+        title="Unbounded allocation",
+        description="Repeated at several call sites.",
+        severity="High",
+        line_number=117,
+        remediation="Add a hard cap.",
+        confidence="High",
+        file_path="sack.c",
+        source="agent",
+        affected_locations=[
+            AffectedLocation(line_number=91, snippet="pool_get(...)"),
+            AffectedLocation(line_number=184, snippet="pool_get(...)"),
+        ],
+    )
+
+    repo = ScanRepository(db_session)
+    await repo.save_findings(scan.id, [finding])
+    await db_session.flush()
+
+    rows = (
+        (
+            await db_session.execute(
+                select(db_models.Finding).where(db_models.Finding.scan_id == scan.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    locs = rows[0].affected_locations
+    assert isinstance(locs, list) and len(locs) == 2
+    assert {loc["line_number"] for loc in locs} == {91, 184}
