@@ -47,6 +47,10 @@ _ALLOWED_META_COLS = {
     "section",
     "category",
     "language",
+    # `concern_area` is the framework-agnostic facet (Framework
+    # Expansion #56) — the bundled CWE Essentials corpus CSV carries it
+    # so a CWE agent retrieves only its own concern-area's content.
+    "concern_area",
 }
 
 

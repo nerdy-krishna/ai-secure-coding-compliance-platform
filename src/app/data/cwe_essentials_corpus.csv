@@ -1,0 +1,437 @@
+id,document,concern_area
+01-spatial-memory-safety,"# Spatial Memory Safety
+
+Spatial memory weaknesses occur when code reads or writes a memory
+location outside the bounds of the buffer it was meant to touch. They
+are the dominant defect class in C and C++ and the leading cause of
+remote code execution and information disclosure in native software.
+This concern-area covers out-of-bounds writes (CWE-787), out-of-bounds
+reads (CWE-125), the general failure to restrict operations within a
+buffer's bounds (CWE-119), heap- and stack-based buffer overflows
+(CWE-122, CWE-121), accesses before the start or after the end of a
+buffer (CWE-786, CWE-788), and buffer access driven by an incorrect
+length value (CWE-805).
+
+The recurring root cause is an index, offset, or length that is
+derived from untrusted input — or from an arithmetic result — without
+being checked against the real size of the allocation. Copy loops that
+trust a caller-supplied count, pointer arithmetic that walks past a
+sentinel, and fixed-size stack buffers filled from variable-length
+input are the classic shapes. Off-by-one errors at array boundaries
+and confusion between element count and byte count are frequent
+contributors.
+
+Mitigation starts with never trusting a length: validate every index
+and size against the destination capacity before the access, and treat
+the smaller of source and destination size as the authoritative bound.
+Prefer memory-safe constructs — bounded string and container types,
+`std::span` or slice types, and standard-library algorithms — over raw
+pointer arithmetic. In Rust and Go, keep array and slice indexing
+inside checked APIs rather than reaching for `unsafe`. Enable
+compiler and allocator hardening (bounds-checking sanitizers in
+testing, stack canaries, fortified libc routines) so that residual
+defects fail closed instead of corrupting adjacent memory.
+",Spatial Memory Safety
+02-temporal-memory-safety,"# Temporal Memory Safety
+
+Temporal memory weaknesses occur when code accesses memory at the
+wrong point in its lifetime — before it is initialized, or after it
+has been freed. Unlike spatial errors, the access can be perfectly
+in-bounds; what is wrong is the timing. This concern-area covers
+use-after-free (CWE-416), NULL pointer dereference (CWE-476), double
+free (CWE-415), missing release of memory after its effective lifetime
+(CWE-401), use of an uninitialized pointer (CWE-824), and dereference
+of an expired or dangling pointer (CWE-825).
+
+The root cause is unclear ownership: more than one piece of code
+believes it is responsible for the lifetime of an allocation, or no
+code is. A pointer is freed on one path and used on another; an object
+is released while a reference, iterator, or callback still holds it; an
+error path frees a resource the success path also frees; or a pointer
+is declared but used before being assigned. Use-after-free is
+particularly dangerous because the freed region is often reallocated
+under attacker influence, turning a stale read or write into
+controlled corruption.
+
+Mitigation centres on giving every allocation a single, explicit
+owner. Use RAII and smart pointers in C++ so release is tied to scope;
+set pointers to NULL immediately after freeing and guard frees so they
+run exactly once. Check every pointer that could be NULL — especially
+allocation and lookup results — before dereferencing it. In Rust, lean
+on the borrow checker and avoid `unsafe` aliasing; in garbage-collected
+and Go code, watch for resources (files, handles, native buffers) that
+escape their intended scope. AddressSanitizer and similar tools should
+gate merges, since temporal bugs are otherwise easy to miss in review.
+",Temporal Memory Safety
+03-numeric-type-conversion-errors,"# Numeric, Type & Conversion Errors
+
+Numeric and type weaknesses occur when a value behaves differently
+from what the developer assumed because of the limits of its
+representation. They rarely cause harm on their own, but they routinely
+feed a more serious defect — an undersized allocation, a bypassed
+bounds check, or a corrupted decision. This concern-area covers integer
+overflow and wraparound (CWE-190), integer underflow (CWE-191), divide
+by zero (CWE-369), incorrect conversion between numeric types (CWE-681),
+unexpected sign extension (CWE-194), signed-to-unsigned conversion
+errors (CWE-195), incorrect type conversion or cast (CWE-704), and type
+confusion (CWE-843).
+
+The recurring root cause is arithmetic or conversion performed without
+regard for range and signedness. A size computed by multiplying two
+attacker-influenced values wraps to a small number, so the subsequent
+allocation is too small. A length stored as a signed integer goes
+negative and defeats a `length < limit` check. A wide value is
+truncated when narrowed, or a negative value becomes huge when
+reinterpreted as unsigned. Type confusion arises when memory is
+interpreted as the wrong object type, often after an unchecked cast or
+a tagged-union mismatch.
+
+Mitigation begins with validating numeric inputs against an explicit
+range before they are used in arithmetic, indexing, or allocation.
+Perform size calculations in a width that cannot overflow, or use
+checked-arithmetic helpers that signal overflow instead of wrapping.
+Be deliberate about signedness — prefer unsigned types for sizes and
+counts, and avoid mixing signed and unsigned operands. Guard divisors
+against zero. Treat every cast as a place where an assumption is being
+made, and verify the runtime type before down-casting.
+","Numeric, Type & Conversion Errors"
+04-os-command-injection,"# OS & Command Injection
+
+Command injection weaknesses occur when untrusted input reaches an
+operating-system command interpreter or process launcher and is able
+to change what gets executed rather than only what data is processed.
+This concern-area covers improper neutralization of special elements
+used in an OS command (CWE-78), the broader command injection class
+(CWE-77), and argument injection or modification (CWE-88).
+
+The root cause is building a command line by string concatenation and
+handing it to a shell. The shell then interprets metacharacters —
+semicolons, pipes, backticks, `$()`, ampersands, redirections — that
+the attacker supplied, so a parameter that was meant to be a filename
+becomes a second command. Argument injection is the subtler variant:
+even with no shell involved, untrusted text inserted into an argument
+list can introduce option flags that change a program's behaviour, for
+example turning a search term into a flag that writes a file.
+
+Mitigation starts with avoiding the shell entirely. Invoke programs
+through array-based APIs that pass arguments as a vector, so the
+operating system never re-parses them; never pass `shell=True` or its
+equivalents with untrusted content. Where a value must be an argument,
+validate it against a strict allowlist of expected forms and reject
+anything else, and use `--` to terminate option parsing so input cannot
+masquerade as a flag. Prefer a native library call over spawning a
+process at all. If a shell is unavoidable, the only safe approach is a
+rigorous allowlist of permitted values — escaping is error-prone and
+should not be relied on.
+",OS & Command Injection
+05-code-injection-unsafe-deserialization,"# Code Injection & Unsafe Deserialization
+
+These weaknesses occur when untrusted input is interpreted as code,
+markup, or a serialized object graph instead of as inert data. The
+result is that the attacker, not the developer, decides what logic the
+program runs. This concern-area covers improper control of generation
+of code (CWE-94), deserialization of untrusted data (CWE-502), eval
+injection (CWE-95), and improper neutralization of special elements in
+a template engine, also known as server-side template injection
+(CWE-1336).
+
+The root cause is feeding attacker-influenced data into a
+language-level evaluation primitive. Dynamic-evaluation functions —
+`eval`, `exec`, `Function`, runtime compilation — execute whatever they
+are given. Native deserializers reconstruct arbitrary object types and
+may invoke constructors, setters, or magic methods during the rebuild,
+so a crafted payload can reach a gadget chain that runs code. Template
+engines are an injection surface whenever user input is concatenated
+into the template source rather than passed as a bound value.
+
+Mitigation begins with never evaluating untrusted input as code. Remove
+dynamic-evaluation calls where a data-driven design — a lookup table, a
+dispatch map, a parser for a constrained grammar — will do. For
+serialized data, prefer a pure data format such as JSON with a schema,
+and deserialize into known, explicitly-typed structures; if a native
+serializer must be used, restrict it to an allowlist of permitted
+classes and apply integrity protection so payloads cannot be tampered
+with. Pass user data to template engines only as context variables,
+never as part of the template text, and keep template definitions out
+of attacker control.
+",Code Injection & Unsafe Deserialization
+06-web-injection,"# Web Injection
+
+Web injection weaknesses occur when untrusted input crosses into an
+interpreted context — an HTML page, a SQL statement, an LDAP filter, an
+XML document, or another query language — and is treated as structure
+rather than as a value. This concern-area covers cross-site scripting
+(CWE-79), SQL injection (CWE-89), LDAP injection (CWE-90), XML
+injection (CWE-91), and the general improper neutralization of special
+elements in data query logic (CWE-943), which spans NoSQL and other
+query languages.
+
+The root cause is the same across all of them: a string is assembled
+by concatenating a fixed template with untrusted input, then handed to
+an interpreter that cannot tell which characters came from the
+developer and which from the attacker. In SQL and similar query
+languages this lets input add clauses or terminate the statement; in
+HTML it lets input introduce `<script>` or event handlers that run in
+the victim's session.
+
+Mitigation is to keep code and data separate by construction. For
+databases, use parameterized queries or prepared statements so values
+are bound, never concatenated; an ORM or query builder achieves the
+same when used without raw string fragments. For LDAP, XML, and NoSQL,
+use the binding or builder APIs the platform provides and escape
+special elements with a context-aware encoder when binding is not
+available. For XSS, apply output encoding appropriate to the exact
+sink — HTML body, attribute, JavaScript, URL — at the point of output,
+prefer frameworks that auto-escape, and add a Content Security Policy
+as defence in depth. Input validation narrows the attack surface but
+is not a substitute for context-correct encoding at the sink.
+",Web Injection
+07-improper-input-validation,"# Improper Input Validation
+
+Input-validation weaknesses occur when a program accepts data without
+confirming that it has the properties the rest of the code assumes. The
+data then violates an invariant somewhere downstream — an index goes
+out of range, a quantity drives an oversized loop, a value of the wrong
+type reaches code that cannot handle it. This concern-area covers
+improper input validation in general (CWE-20), improper validation of
+an array index (CWE-129), improper validation of a specified quantity
+in input (CWE-1284), and improper validation of a specified type of
+input (CWE-1287).
+
+The root cause is an implicit trust boundary. Code at the edge of the
+system — request handlers, file parsers, message consumers, IPC
+endpoints — treats incoming data as already well-formed, so the checks
+that should happen once at entry are scattered, partial, or absent.
+Validation that exists is often incomplete: it checks format but not
+range, or rejects known-bad values instead of requiring known-good
+ones, leaving every unanticipated input to slip through.
+
+Mitigation is to validate at the trust boundary, before the data is
+used, against a positive specification. Define what each field must be
+— its type, length, range, format, and permitted set — and reject
+anything that does not match, rather than trying to enumerate bad
+input. Validate array indices and quantities against the actual size
+of the structure they will drive. Convert input to its intended type
+explicitly and handle the failure case. Centralise validation so it
+cannot be skipped on an alternate code path, and fail closed when a
+value cannot be confirmed safe.
+",Improper Input Validation
+08-external-resource-access,"# External Resource Access
+
+These weaknesses occur when untrusted input controls *which* external
+resource a program reaches — a file, a directory, or a network
+endpoint — rather than only the data exchanged with it. This
+concern-area covers path traversal (CWE-22), unrestricted upload of a
+file with a dangerous type (CWE-434), server-side request forgery
+(CWE-918), relative and absolute path traversal (CWE-23, CWE-36),
+improper link resolution before file access (CWE-59), and external
+control of a file name or path (CWE-73).
+
+The root cause is using attacker-influenced input to build a resource
+identifier without confirming the identifier stays inside the intended
+boundary. A filename containing `../` escapes the base directory; a
+symlink redirects an access to a sensitive target; an uploaded file
+with an executable extension lands in a served directory; a URL fetched
+on the user's behalf points instead at an internal service or a cloud
+metadata endpoint, turning the server into a proxy for the attacker.
+
+Mitigation is to constrain the resource, not just sanitise the input.
+For file paths, resolve the candidate to its canonical absolute form
+and verify it is still within the permitted base directory before
+opening it; prefer mapping user input through an indirection table to
+known paths. For uploads, validate type by content rather than
+extension, store files outside any served or executable location, and
+assign server-generated names. For outbound requests, validate the
+destination against an allowlist of permitted hosts, resolve and
+re-check the address to defeat DNS rebinding, block private and
+link-local ranges, and disable automatic redirects so a benign URL
+cannot be bounced to an internal one.
+",External Resource Access
+09-authentication-credential-management,"# Authentication & Credential Management
+
+These weaknesses occur when a system fails to reliably establish who is
+making a request, or fails to protect the secrets that identity
+depends on. This concern-area covers improper authentication
+(CWE-287), missing authentication for a critical function (CWE-306),
+use of hard-coded credentials (CWE-798), use of a hard-coded password
+(CWE-259), insufficiently protected credentials (CWE-522), weak
+password requirements (CWE-521), and session fixation (CWE-384).
+
+The root causes split into two families. The first is gaps in
+enforcement: a sensitive endpoint, administrative function, or
+internal API is reachable without an authentication check, or the
+check can be bypassed on an alternate path. The second is mishandled
+credentials: passwords or API keys embedded in source or configuration,
+secrets stored or transmitted without protection, password rules that
+permit trivially guessable values, and session identifiers that are
+not refreshed at login so a pre-authentication identifier survives into
+the authenticated session.
+
+Mitigation requires authenticating every entry point to a protected
+resource, with the check enforced server-side and centrally so it
+cannot be skipped. Keep secrets out of code and version control; load
+them from a secrets manager or injected configuration, and rotate them.
+Store passwords only as salted hashes from a slow, purpose-built
+algorithm, never reversibly. Set credential strength by encouraging
+length and screening against known-breached values rather than
+imposing brittle composition rules. Issue a fresh session identifier
+on every authentication and privilege change, bind sessions to a
+reasonable lifetime, and prefer established identity frameworks over
+bespoke authentication code.
+",Authentication & Credential Management
+10-authorization-access-control,"# Authorization & Access Control
+
+Authorization weaknesses occur when an authenticated identity is
+allowed to perform an action or reach data it should not. Authentication
+establishes who the caller is; authorization decides what that caller
+may do, and this concern-area is about failures of the second step. It
+covers missing authorization (CWE-862), incorrect authorization
+(CWE-863), cross-site request forgery (CWE-352), authorization bypass
+through a user-controlled key (CWE-639), incorrect permission
+assignment for a critical resource (CWE-732), and improper
+authorization in general (CWE-285).
+
+The root cause is most often a check that is absent, in the wrong
+place, or trusting the wrong input. An object is fetched directly by an
+identifier taken from the request, with no test that the caller owns
+it — the insecure direct object reference pattern behind CWE-639.
+Authorization is enforced only in the UI, or only on some of the
+endpoints that expose an operation. A check uses a role or permission
+value supplied by the client. CSRF is the related failure of not
+confirming that a state-changing request was *intended* by the user
+whose credentials it carries.
+
+Mitigation is to perform an explicit authorization decision on the
+server for every request that touches a protected resource, checking
+the authenticated subject against the specific object and action.
+Derive ownership and roles from server-side state, never from the
+request body. Apply the checks through a single chokepoint so no
+endpoint is missed, and default to deny. Protect state-changing
+requests against CSRF with anti-forgery tokens or equivalent
+same-site request validation. Grant the minimum permissions a resource
+needs, and review permission assignments on files and objects so they
+are not world-accessible.
+",Authorization & Access Control
+11-privilege-management,"# Privilege Management
+
+Privilege-management weaknesses occur when a process, component, or
+user holds more capability than its task requires, or changes its
+privilege level incorrectly. The danger is amplification: a defect in a
+component that runs with high privilege becomes a far more serious
+compromise than the same defect in a constrained one. This
+concern-area covers improper privilege management (CWE-269), execution
+with unnecessary privileges (CWE-250), privilege-dropping or lowering
+errors (CWE-271), least-privilege violations (CWE-272), and weak
+authentication that undermines a privilege boundary (CWE-1390).
+
+The root cause is treating privilege as a convenience rather than a
+budget. A service runs as root or administrator because it once needed
+a privileged operation at startup and never relinquished the rights. A
+program intends to drop to an unprivileged identity but does so in the
+wrong order, ignores the failure of the drop, or leaves a supplementary
+group or capability behind. A trust boundary between privilege levels
+is guarded by an authentication step that is weak enough to cross.
+
+Mitigation is to grant the least privilege that works and to hold it
+for the shortest time. Run each component under a dedicated,
+unprivileged account; acquire an elevated capability only for the
+specific operation that needs it and release it immediately. When
+dropping privileges, perform the steps in the correct order, drop
+supplementary groups and capabilities as well as the primary identity,
+and verify the new state — treating any failure as fatal. Separate
+privileged operations into a small, well-reviewed component behind a
+narrow interface, and protect every privilege boundary with strong
+authentication.
+",Privilege Management
+12-concurrency-race-conditions,"# Concurrency & Race Conditions
+
+Concurrency weaknesses occur when the correctness of code depends on
+the timing or interleaving of operations that run concurrently, and an
+unfavourable interleaving violates an invariant. They are hard to find
+because the vulnerable window is narrow and the failure is
+intermittent. This concern-area covers concurrent execution using a
+shared resource with improper synchronization (CWE-362), the
+time-of-check to time-of-use race (CWE-367), a signal-handler race
+condition (CWE-364), unintended reentrant invocation of a non-reentrant
+routine (CWE-1265), and a race condition within a thread (CWE-366).
+
+The root cause is an operation that the developer assumed was atomic
+but is not. State is read, a decision is made, and the state is acted
+on — but between the check and the use, another thread, process, or
+signal handler changes it. The TOCTOU pattern is the classic example:
+a file's properties are validated and then the file is opened, and the
+path is swapped in the gap. Reentrancy bugs arise when a signal handler
+or callback re-enters code that was mid-update of shared state.
+
+Mitigation is to make the check-and-act sequence indivisible. Protect
+every access to shared mutable state with the same lock, hold it across
+the whole critical section, and keep lock ordering consistent to avoid
+deadlock. Prefer operating on a handle you already hold rather than
+re-resolving a name — open the file once and act on the descriptor
+instead of re-checking the path. Keep signal handlers minimal and
+async-signal-safe, touching only atomic flags. Where possible, avoid
+shared mutable state altogether through immutability, message passing,
+or confining state to a single owner, which is the model Rust and Go
+encourage.
+",Concurrency & Race Conditions
+13-resource-lifecycle-exhaustion,"# Resource Lifecycle & Exhaustion
+
+These weaknesses occur when a program acquires a finite resource —
+memory, file descriptors, threads, connections, disk space, CPU time —
+without bounding how much it consumes or reliably releasing it when
+done. The result is degradation or denial of service, often triggered
+by ordinary load rather than a sophisticated exploit. This concern-area
+covers uncontrolled resource consumption (CWE-400), allocation of
+resources without limits or throttling (CWE-770), improper resource
+shutdown or release (CWE-404), and missing release of a resource after
+its effective lifetime (CWE-772).
+
+The root causes are unbounded acquisition and unreliable release. On
+the acquisition side, a request handler allocates work proportional to
+attacker-supplied input — a declared length, a nesting depth, a result
+-set size — with no ceiling, so a small request maps to a large cost.
+On the release side, a resource opened on the success path is not
+closed on an error path, or a long-lived loop leaks a handle each
+iteration; the slow accumulation eventually exhausts the pool.
+
+Mitigation is to bound every acquisition and guarantee every release.
+Cap the size, count, depth, and rate of work a single request can
+cause, and reject input that exceeds the limit before allocating. Apply
+timeouts to operations that could otherwise run unbounded. Tie resource
+release to scope so it runs on every path — `with`/`defer`/RAII or
+`try`/`finally` — rather than relying on a manual close that an
+exception can skip. Use connection and thread pools with hard ceilings
+so that overload produces controlled rejection instead of collapse.
+",Resource Lifecycle & Exhaustion
+14-sensitive-information-exposure,"# Sensitive Information Exposure
+
+These weaknesses occur when data that should stay confidential reaches
+somewhere it can be observed by an actor who should not see it. The
+exposed data is often valuable in itself — credentials, personal
+information, keys — or it lowers the cost of a further attack by
+revealing internal structure. This concern-area covers exposure of
+sensitive information to an unauthorized actor (CWE-200), generation of
+an error message containing sensitive information (CWE-209), insertion
+of sensitive information into a log file (CWE-532), cleartext storage
+of sensitive information (CWE-312), cleartext transmission of sensitive
+information (CWE-319), and exposure of private personal information
+(CWE-359).
+
+The root cause is sensitive data leaving a controlled context through
+a channel that was not considered. Error responses carry stack traces,
+SQL fragments, or file paths to the client. Logs and telemetry record
+request bodies, tokens, or personal data in the clear, then flow to
+systems with broader access. Data is written to disk, caches, or
+backups unencrypted, or sent over an unencrypted transport. A response
+returns more fields than the caller is entitled to.
+
+Mitigation is to classify sensitive data and control every channel it
+can travel. Return generic error messages to clients and keep
+diagnostic detail server-side. Redact or omit secrets and personal data
+before logging, and treat logs as a protected store. Encrypt sensitive
+data at rest and require authenticated, encrypted transport — TLS — for
+it in transit. Shape responses to expose only the fields the caller is
+authorized to see, rather than serialising an entire internal object.
+Apply the same care to caches, backups, and temporary files, which are
+easy to overlook.
+",Sensitive Information Exposure

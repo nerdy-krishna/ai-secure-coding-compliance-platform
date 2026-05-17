@@ -43,6 +43,25 @@ Great for on-demand retrieval in the Advisor.
 - **Ingestion mode**: Git URL (same pipeline as Proactive Controls).
 - **Typical use**: ad-hoc questions, snippet generation.
 
+### CWE Essentials (`cwe_essentials`)
+
+The MITRE CWE Top 25 Most Dangerous Software Weaknesses (2025
+edition) plus selected related CWE-699 entries, organised into 14
+concern-areas (memory safety, injection, authorization, concurrency,
+and more). Covers non-web / systems code (C, C++, Rust, Go, OS
+components, native programs) that the web-centric ASVS does not.
+Opt-in; select it at scan time for systems / native codebases.
+
+- **Ingestion mode**: CSV — the corpus is *bundled* with the
+  platform at `src/app/data/cwe_essentials_corpus.csv`. Upload it via
+  **Admin → Frameworks → CWE Essentials → Ingest docs → CSV** with
+  scan-ready enabled. See
+  [Updating Framework Knowledge](../development/updating-framework-knowledge.md)
+  for the step-by-step.
+- **Pinned edition**: CWE Top 25 (2025); the corpus is refreshed
+  deliberately when MITRE republishes the list.
+- **Typical use**: weakness-class audits of native / systems code.
+
 ## Adding a custom framework
 
 Admins navigate to **Admin → Frameworks → New framework**:
