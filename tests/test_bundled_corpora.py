@@ -74,6 +74,16 @@ def test_corpus_documents_are_non_empty_prose(framework: str):
 
 
 @pytest.mark.parametrize("framework", sorted(_CORPORA))
+def test_corpus_documents_carry_pattern_blocks(framework: str):
+    """The build relabels each doc's weakness / mitigation paragraphs as
+    `**Vulnerability Pattern**` / `**Secure Pattern**` blocks — the only
+    shape the scan agent's `_extract_patterns_from_doc` consumes."""
+    for row in _csv_rows(framework):
+        assert "**Vulnerability Pattern (" in row["document"], row["id"]
+        assert "**Secure Pattern (" in row["document"], row["id"]
+
+
+@pytest.mark.parametrize("framework", sorted(_CORPORA))
 def test_corpus_csv_is_in_sync_with_source_markdown(framework: str):
     """The committed CSV must match what the build script produces from
     the corpus markdown — guards against hand-edits and stale rebuilds."""

@@ -12,6 +12,8 @@ buffer's bounds (CWE-119), heap- and stack-based buffer overflows
 buffer (CWE-786, CWE-788), and buffer access driven by an incorrect
 length value (CWE-805).
 
+**Vulnerability Pattern (Spatial Memory Safety):**
+
 The recurring root cause is an index, offset, or length that is
 derived from untrusted input — or from an arithmetic result — without
 being checked against the real size of the allocation. Copy loops that
@@ -20,6 +22,8 @@ sentinel, and fixed-size stack buffers filled from variable-length
 input are the classic shapes. Off-by-one errors at array boundaries
 and confusion between element count and byte count are frequent
 contributors.
+
+**Secure Pattern (Spatial Memory Safety):**
 
 Mitigation starts with never trusting a length: validate every index
 and size against the destination capacity before the access, and treat
@@ -43,6 +47,8 @@ free (CWE-415), missing release of memory after its effective lifetime
 (CWE-401), use of an uninitialized pointer (CWE-824), and dereference
 of an expired or dangling pointer (CWE-825).
 
+**Vulnerability Pattern (Temporal Memory Safety):**
+
 The root cause is unclear ownership: more than one piece of code
 believes it is responsible for the lifetime of an allocation, or no
 code is. A pointer is freed on one path and used on another; an object
@@ -52,6 +58,8 @@ is declared but used before being assigned. Use-after-free is
 particularly dangerous because the freed region is often reallocated
 under attacker influence, turning a stale read or write into
 controlled corruption.
+
+**Secure Pattern (Temporal Memory Safety):**
 
 Mitigation centres on giving every allocation a single, explicit
 owner. Use RAII and smart pointers in C++ so release is tied to scope;
@@ -76,6 +84,8 @@ unexpected sign extension (CWE-194), signed-to-unsigned conversion
 errors (CWE-195), incorrect type conversion or cast (CWE-704), and type
 confusion (CWE-843).
 
+**Vulnerability Pattern (Numeric, Type & Conversion Errors):**
+
 The recurring root cause is arithmetic or conversion performed without
 regard for range and signedness. A size computed by multiplying two
 attacker-influenced values wraps to a small number, so the subsequent
@@ -85,6 +95,8 @@ truncated when narrowed, or a negative value becomes huge when
 reinterpreted as unsigned. Type confusion arises when memory is
 interpreted as the wrong object type, often after an unchecked cast or
 a tagged-union mismatch.
+
+**Secure Pattern (Numeric, Type & Conversion Errors):**
 
 Mitigation begins with validating numeric inputs against an explicit
 range before they are used in arithmetic, indexing, or allocation.
@@ -104,6 +116,8 @@ This concern-area covers improper neutralization of special elements
 used in an OS command (CWE-78), the broader command injection class
 (CWE-77), and argument injection or modification (CWE-88).
 
+**Vulnerability Pattern (OS & Command Injection):**
+
 The root cause is building a command line by string concatenation and
 handing it to a shell. The shell then interprets metacharacters —
 semicolons, pipes, backticks, `$()`, ampersands, redirections — that
@@ -112,6 +126,8 @@ becomes a second command. Argument injection is the subtler variant:
 even with no shell involved, untrusted text inserted into an argument
 list can introduce option flags that change a program's behaviour, for
 example turning a search term into a flag that writes a file.
+
+**Secure Pattern (OS & Command Injection):**
 
 Mitigation starts with avoiding the shell entirely. Invoke programs
 through array-based APIs that pass arguments as a vector, so the
@@ -135,6 +151,8 @@ injection (CWE-95), and improper neutralization of special elements in
 a template engine, also known as server-side template injection
 (CWE-1336).
 
+**Vulnerability Pattern (Code Injection & Unsafe Deserialization):**
+
 The root cause is feeding attacker-influenced data into a
 language-level evaluation primitive. Dynamic-evaluation functions —
 `eval`, `exec`, `Function`, runtime compilation — execute whatever they
@@ -143,6 +161,8 @@ may invoke constructors, setters, or magic methods during the rebuild,
 so a crafted payload can reach a gadget chain that runs code. Template
 engines are an injection surface whenever user input is concatenated
 into the template source rather than passed as a bound value.
+
+**Secure Pattern (Code Injection & Unsafe Deserialization):**
 
 Mitigation begins with never evaluating untrusted input as code. Remove
 dynamic-evaluation calls where a data-driven design — a lookup table, a
@@ -166,6 +186,8 @@ injection (CWE-91), and the general improper neutralization of special
 elements in data query logic (CWE-943), which spans NoSQL and other
 query languages.
 
+**Vulnerability Pattern (Web Injection):**
+
 The root cause is the same across all of them: a string is assembled
 by concatenating a fixed template with untrusted input, then handed to
 an interpreter that cannot tell which characters came from the
@@ -173,6 +195,8 @@ developer and which from the attacker. In SQL and similar query
 languages this lets input add clauses or terminate the statement; in
 HTML it lets input introduce `<script>` or event handlers that run in
 the victim's session.
+
+**Secure Pattern (Web Injection):**
 
 Mitigation is to keep code and data separate by construction. For
 databases, use parameterized queries or prepared statements so values
@@ -198,6 +222,8 @@ an array index (CWE-129), improper validation of a specified quantity
 in input (CWE-1284), and improper validation of a specified type of
 input (CWE-1287).
 
+**Vulnerability Pattern (Improper Input Validation):**
+
 The root cause is an implicit trust boundary. Code at the edge of the
 system — request handlers, file parsers, message consumers, IPC
 endpoints — treats incoming data as already well-formed, so the checks
@@ -205,6 +231,8 @@ that should happen once at entry are scattered, partial, or absent.
 Validation that exists is often incomplete: it checks format but not
 range, or rejects known-bad values instead of requiring known-good
 ones, leaving every unanticipated input to slip through.
+
+**Secure Pattern (Improper Input Validation):**
 
 Mitigation is to validate at the trust boundary, before the data is
 used, against a positive specification. Define what each field must be
@@ -227,6 +255,8 @@ file with a dangerous type (CWE-434), server-side request forgery
 improper link resolution before file access (CWE-59), and external
 control of a file name or path (CWE-73).
 
+**Vulnerability Pattern (External Resource Access):**
+
 The root cause is using attacker-influenced input to build a resource
 identifier without confirming the identifier stays inside the intended
 boundary. A filename containing `../` escapes the base directory; a
@@ -234,6 +264,8 @@ symlink redirects an access to a sensitive target; an uploaded file
 with an executable extension lands in a served directory; a URL fetched
 on the user's behalf points instead at an internal service or a cloud
 metadata endpoint, turning the server into a proxy for the attacker.
+
+**Secure Pattern (External Resource Access):**
 
 Mitigation is to constrain the resource, not just sanitise the input.
 For file paths, resolve the candidate to its canonical absolute form
@@ -257,6 +289,8 @@ use of hard-coded credentials (CWE-798), use of a hard-coded password
 (CWE-259), insufficiently protected credentials (CWE-522), weak
 password requirements (CWE-521), and session fixation (CWE-384).
 
+**Vulnerability Pattern (Authentication & Credential Management):**
+
 The root causes split into two families. The first is gaps in
 enforcement: a sensitive endpoint, administrative function, or
 internal API is reachable without an authentication check, or the
@@ -266,6 +300,8 @@ secrets stored or transmitted without protection, password rules that
 permit trivially guessable values, and session identifiers that are
 not refreshed at login so a pre-authentication identifier survives into
 the authenticated session.
+
+**Secure Pattern (Authentication & Credential Management):**
 
 Mitigation requires authenticating every entry point to a protected
 resource, with the check enforced server-side and centrally so it
@@ -291,6 +327,8 @@ through a user-controlled key (CWE-639), incorrect permission
 assignment for a critical resource (CWE-732), and improper
 authorization in general (CWE-285).
 
+**Vulnerability Pattern (Authorization & Access Control):**
+
 The root cause is most often a check that is absent, in the wrong
 place, or trusting the wrong input. An object is fetched directly by an
 identifier taken from the request, with no test that the caller owns
@@ -298,8 +336,10 @@ it — the insecure direct object reference pattern behind CWE-639.
 Authorization is enforced only in the UI, or only on some of the
 endpoints that expose an operation. A check uses a role or permission
 value supplied by the client. CSRF is the related failure of not
-confirming that a state-changing request was *intended* by the user
-whose credentials it carries.
+confirming that a state-changing request was genuinely intended by the
+user whose credentials it carries.
+
+**Secure Pattern (Authorization & Access Control):**
 
 Mitigation is to perform an explicit authorization decision on the
 server for every request that touches a protected resource, checking
@@ -324,6 +364,8 @@ with unnecessary privileges (CWE-250), privilege-dropping or lowering
 errors (CWE-271), least-privilege violations (CWE-272), and weak
 authentication that undermines a privilege boundary (CWE-1390).
 
+**Vulnerability Pattern (Privilege Management):**
+
 The root cause is treating privilege as a convenience rather than a
 budget. A service runs as root or administrator because it once needed
 a privileged operation at startup and never relinquished the rights. A
@@ -331,6 +373,8 @@ program intends to drop to an unprivileged identity but does so in the
 wrong order, ignores the failure of the drop, or leaves a supplementary
 group or capability behind. A trust boundary between privilege levels
 is guarded by an authentication step that is weak enough to cross.
+
+**Secure Pattern (Privilege Management):**
 
 Mitigation is to grant the least privilege that works and to hold it
 for the shortest time. Run each component under a dedicated,
@@ -355,6 +399,8 @@ time-of-check to time-of-use race (CWE-367), a signal-handler race
 condition (CWE-364), unintended reentrant invocation of a non-reentrant
 routine (CWE-1265), and a race condition within a thread (CWE-366).
 
+**Vulnerability Pattern (Concurrency & Race Conditions):**
+
 The root cause is an operation that the developer assumed was atomic
 but is not. State is read, a decision is made, and the state is acted
 on — but between the check and the use, another thread, process, or
@@ -362,6 +408,8 @@ signal handler changes it. The TOCTOU pattern is the classic example:
 a file's properties are validated and then the file is opened, and the
 path is swapped in the gap. Reentrancy bugs arise when a signal handler
 or callback re-enters code that was mid-update of shared state.
+
+**Secure Pattern (Concurrency & Race Conditions):**
 
 Mitigation is to make the check-and-act sequence indivisible. Protect
 every access to shared mutable state with the same lock, hold it across
@@ -386,6 +434,8 @@ resources without limits or throttling (CWE-770), improper resource
 shutdown or release (CWE-404), and missing release of a resource after
 its effective lifetime (CWE-772).
 
+**Vulnerability Pattern (Resource Lifecycle & Exhaustion):**
+
 The root causes are unbounded acquisition and unreliable release. On
 the acquisition side, a request handler allocates work proportional to
 attacker-supplied input — a declared length, a nesting depth, a result
@@ -393,6 +443,8 @@ attacker-supplied input — a declared length, a nesting depth, a result
 On the release side, a resource opened on the success path is not
 closed on an error path, or a long-lived loop leaks a handle each
 iteration; the slow accumulation eventually exhausts the pool.
+
+**Secure Pattern (Resource Lifecycle & Exhaustion):**
 
 Mitigation is to bound every acquisition and guarantee every release.
 Cap the size, count, depth, and rate of work a single request can
@@ -417,6 +469,8 @@ of sensitive information (CWE-312), cleartext transmission of sensitive
 information (CWE-319), and exposure of private personal information
 (CWE-359).
 
+**Vulnerability Pattern (Sensitive Information Exposure):**
+
 The root cause is sensitive data leaving a controlled context through
 a channel that was not considered. Error responses carry stack traces,
 SQL fragments, or file paths to the client. Logs and telemetry record
@@ -424,6 +478,8 @@ request bodies, tokens, or personal data in the clear, then flow to
 systems with broader access. Data is written to disk, caches, or
 backups unencrypted, or sent over an unencrypted transport. A response
 returns more fields than the caller is entitled to.
+
+**Secure Pattern (Sensitive Information Exposure):**
 
 Mitigation is to classify sensitive data and control every channel it
 can travel. Return generic error messages to clients and keep

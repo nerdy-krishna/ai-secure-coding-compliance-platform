@@ -74,28 +74,33 @@ fetching it from an upstream Git repo:
 
 For both, the framework, its concern-area agents, and their prompt
 templates are created automatically by the seed (and by the data
-migration for existing deployments); only the RAG corpus is a
-deliberate post-deploy step. The corpus is shipped concern-area-tagged
-because each agent filters retrieval on the `concern_area` facet — the
-raw Git-URL ingest path cannot supply that tag.
+migration for existing deployments).
 
-To populate a bundled corpus (using ISVS as the example — substitute
-`cwe_essentials` for CWE):
+**The RAG corpus auto-ingests on app startup.** The corpora ship in the
+repo already authored in the `**Vulnerability Pattern**` /
+`**Secure Pattern**` layout the scan agents parse, so they are ingested
+through the *raw* path — no LLM enrichment, no cost, no operator action.
+The app lifespan runs the ingest once for any bundled framework whose
+collection is still empty; subsequent boots leave a populated framework
+untouched. Documents are tagged `scan_ready=True` and carry the
+`concern_area` facet each agent filters retrieval on.
 
-1. The corpus CSV lives at `src/app/data/isvs_corpus.csv`. It is
-   generated from the per-concern-area markdown under
-   `src/app/data/isvs_corpus/` — edit the markdown, never the CSV,
-   then regenerate with
-   `python scripts/build_corpus.py --framework isvs --write`.
-2. Go to **Admin → Frameworks → OWASP ISVS → Ingest docs → CSV**
-   and upload `isvs_corpus.csv`.
-3. The CSV carries an `id`, a `document` column, and a `concern_area`
-   column. `concern_area` is the metadata facet each agent filters
-   retrieval on, so it must reach the vector store — keep it intact.
-4. Ingest with **scan-ready** enabled so the corpus is visible to
-   server-side scans (not only the Advisor chat).
+To re-ingest manually (after editing the corpus, or to force a refresh):
 
-Until the corpus is ingested, a scan against the framework still
+```
+docker compose exec app python scripts/ingest_bundled_corpora.py
+```
+
+This is idempotent — it replaces a framework's documents rather than
+duplicating them.
+
+The corpus CSVs (`src/app/data/cwe_essentials_corpus.csv`,
+`src/app/data/isvs_corpus.csv`) are **generated** from the
+per-concern-area markdown under `src/app/data/<framework>_corpus/` —
+edit the markdown, never the CSV, then regenerate with
+`python scripts/build_corpus.py --framework <name> --write`.
+
+Until a corpus is ingested, a scan against the framework still
 completes — its agents simply produce findings without RAG citations.
 After ingestion the findings carry concern-area-grounded references.
 
@@ -104,7 +109,8 @@ After ingestion the findings carry concern-area-grounded references.
 Essentials to the **CWE Top 25 (2025)**, ISVS to **OWASP ISVS 1.0**.
 Adopting a newer edition is a deliberate action — update the
 concern-area markdown, bump the `edition` frontmatter, run
-`build_corpus.py --framework <name> --write`, and re-ingest.
+`build_corpus.py --framework <name> --write`, and re-ingest with the
+command above.
 
 ## Sanity-checking
 

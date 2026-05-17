@@ -85,6 +85,40 @@ def _parse_frontmatter(text: str) -> Tuple[Dict[str, str], str]:
     return front, body
 
 
+def _to_pattern_document(concern_area: str, body: str, source: str) -> str:
+    """Restructure a corpus doc into the format the scan agent parses.
+
+    The corpus markdown is authored as clean prose — a title followed by
+    three paragraphs: an intro, a weakness/anti-pattern description, and
+    a mitigation. The worker's `generic_specialized_agent` only consumes
+    `**Vulnerability Pattern (...)**` / `**Secure Pattern (...)**`
+    blocks, so the build relabels the weakness paragraph as the
+    Vulnerability Pattern and the mitigation paragraph as the Secure
+    Pattern. The markdown stays readable; the CSV carries the machine
+    format.
+    """
+    parts = [p.strip() for p in body.split("\n\n") if p.strip()]
+    if len(parts) != 4:
+        raise SystemExit(
+            f"{source}: corpus doc must be a title + 3 paragraphs "
+            f"(intro / weakness / mitigation); found {len(parts)} blocks"
+        )
+    title, intro, weakness, mitigation = parts
+    # The agent's pattern extractor captures `[^*\[]` — a paragraph with
+    # markdown emphasis or a `[` would be truncated mid-capture.
+    for label, para in (("weakness", weakness), ("mitigation", mitigation)):
+        if "*" in para or "[" in para:
+            raise SystemExit(
+                f"{source}: the {label} paragraph must not contain '*' or "
+                "'[' (breaks the agent's pattern extractor)"
+            )
+    return (
+        f"{title}\n\n{intro}\n\n"
+        f"**Vulnerability Pattern ({concern_area}):**\n\n{weakness}\n\n"
+        f"**Secure Pattern ({concern_area}):**\n\n{mitigation}\n"
+    )
+
+
 def _rows(framework: str) -> List[Dict[str, str]]:
     """Build the CSV rows from the corpus markdown, sorted by file name."""
     corpus_dir = _corpus_dir(framework)
@@ -97,7 +131,9 @@ def _rows(framework: str) -> List[Dict[str, str]]:
         rows.append(
             {
                 "id": path.stem,
-                "document": body.rstrip("\n") + "\n",
+                "document": _to_pattern_document(
+                    front["concern_area"], body, path.name
+                ),
                 "concern_area": front["concern_area"],
             }
         )

@@ -23,8 +23,8 @@ it — the insecure direct object reference pattern behind CWE-639.
 Authorization is enforced only in the UI, or only on some of the
 endpoints that expose an operation. A check uses a role or permission
 value supplied by the client. CSRF is the related failure of not
-confirming that a state-changing request was *intended* by the user
-whose credentials it carries.
+confirming that a state-changing request was genuinely intended by the
+user whose credentials it carries.
 
 Mitigation is to perform an explicit authorization decision on the
 server for every request that touches a protected resource, checking

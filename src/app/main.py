@@ -415,8 +415,24 @@ async def lifespan(app: FastAPI):
     try:
         from app.infrastructure.rag.factory import get_vector_store
 
-        get_vector_store()
+        store = get_vector_store()
         logger.info("Vector store ready (Qdrant)")
+
+        # --- Auto-ingest the bundled RAG corpora (CWE Essentials, ISVS) ---
+        # These ship in the repo and use the raw (no-LLM, free) ingest
+        # path, so populating them needs no operator action and no cost
+        # approval. `only_if_empty` makes this run once — a framework
+        # that already has documents is left untouched. Wrapped so a
+        # failure never blocks startup.
+        try:
+            from app.infrastructure.rag.bundled_corpus import (
+                ingest_all_bundled_corpora,
+            )
+
+            counts = ingest_all_bundled_corpora(store, only_if_empty=True)
+            logger.info("Bundled RAG corpora ready", extra={"counts": counts})
+        except Exception as e:
+            logger.warning("Bundled corpus auto-ingest failed: %s", e)
     except Exception as e:
         logger.warning(
             "Vector store eager-build failed; lazy retry on first call: %s",

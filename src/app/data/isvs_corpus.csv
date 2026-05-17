@@ -7,6 +7,8 @@ to the IoT ecosystem chapter of the OWASP ISVS and spans the secure
 development lifecycle, threat modeling, device identity, provisioning
 and onboarding, and supply-chain integrity.
 
+**Vulnerability Pattern (Secure Development & Provisioning):**
+
 The recurring weakness is treating a fleet of devices as if each were a
 one-off product. A device ships with a shared default credential or a
 key common to every unit, so compromising one unit compromises all of
@@ -18,6 +20,8 @@ materials for firmware and hardware is unknown, so a vulnerable
 component cannot be located when an advisory lands. Decommissioning
 leaves credentials and keys live on a device that has left the
 operator's control.
+
+**Secure Pattern (Secure Development & Provisioning):**
 
 Sound practice gives every device a unique identity established at
 manufacture and bound to hardware where possible, and provisions
@@ -37,6 +41,8 @@ runs in the device's user space — the code closest to sensors,
 actuators, and the user — together with the data that application
 holds. It maps to the user-space application chapter of the OWASP ISVS.
 
+**Vulnerability Pattern (Device Application & Data Protection):**
+
 The recurring weakness is treating the device as a trusted, private
 environment when it is in fact physically accessible to an attacker. A
 device application stores credentials, API tokens, or session keys in
@@ -49,6 +55,8 @@ are exposed without authentication, so a co-resident process can drive
 privileged functionality. Application-level access control is enforced
 only in the companion phone app or cloud, leaving the on-device
 operation itself unguarded.
+
+**Secure Pattern (Device Application & Data Protection):**
 
 Sound practice treats on-device storage as hostile. Credentials and
 keys are kept in a hardware-backed keystore or secure element rather
@@ -68,6 +76,8 @@ the software-platform chapter of the OWASP ISVS and spans secure and
 verified boot, the bootloader, firmware image signing, anti-rollback,
 and the authenticity and integrity of over-the-air updates.
 
+**Vulnerability Pattern (Firmware Integrity & Secure Boot):**
+
 The recurring weakness is a boot or update path that accepts firmware
 without proving where it came from. Secure boot is absent, so modified
 firmware runs unchallenged. A boot stage verifies the next stage with a
@@ -79,6 +89,8 @@ verifying a signature, so a network attacker can install their own
 build. There is no anti-rollback protection, so an attacker downgrades
 the device to an older, vulnerable version that is still validly
 signed.
+
+**Secure Pattern (Firmware Integrity & Secure Boot):**
 
 Sound practice establishes a hardware root of trust and verifies each
 boot stage's signature before transferring control to it, with no path
@@ -99,6 +111,8 @@ ISVS and spans OS and RTOS hardening, removal of unnecessary services,
 on-device cryptography and key storage, memory protections, and process
 isolation.
 
+**Vulnerability Pattern (Software Platform Hardening):**
+
 The recurring weakness is shipping a development configuration as the
 production image. Debug shells, verbose logging, test accounts, and
 diagnostic services are left enabled, each one an entry point. The
@@ -112,6 +126,8 @@ randomization, stack protection — are disabled or unavailable, so a
 memory-corruption bug becomes reliable code execution. Processes run
 with more privilege than they need and without isolation, so one
 compromised component owns the device.
+
+**Secure Pattern (Software Platform Hardening):**
 
 Sound practice ships a minimised production image: debug interfaces,
 test accounts, and unused services are removed or disabled, and only
@@ -131,6 +147,8 @@ services. It maps to the communication chapter of the OWASP ISVS and
 spans transport encryption, mutual authentication, certificate
 validation, and the cryptography that secures device communications.
 
+**Vulnerability Pattern (Communication Transport & Cryptography):**
+
 The recurring weakness is communication that is encrypted weakly, or
 not at all, or encrypted without confirming who is on the other end.
 Telemetry and commands travel over plaintext protocols, so anyone on
@@ -144,6 +162,8 @@ genuine one. Outdated protocol versions and weak cipher suites remain
 enabled, so the session can be downgraded. Long-lived symmetric keys
 are shared across a whole product line, so recovering one key from one
 device decrypts the fleet.
+
+**Secure Pattern (Communication Transport & Cryptography):**
 
 Sound practice encrypts every channel that carries device data or
 control with a current protocol version and strong cipher suites, and
@@ -161,6 +181,8 @@ the services it exposes, and the pairing and bonding flows by which new
 peers are admitted. It maps to the communication chapter of the OWASP
 ISVS, alongside transport security.
 
+**Vulnerability Pattern (Pairing & Network Exposure):**
+
 The recurring weakness is exposing more than the product needs, and
 admitting peers too readily. A device listens on debug, diagnostic, or
 administrative ports that were useful in development and were never
@@ -170,6 +192,8 @@ peer without a confirmation step, uses a fixed or guessable PIN, or
 leaves a pairing window open indefinitely, so an attacker in range
 bonds with the device and inherits a trusted relationship. Once paired,
 a peer is trusted forever, with no way to review or revoke bonds.
+
+**Secure Pattern (Pairing & Network Exposure):**
 
 Sound practice minimises the exposed surface: only the services the
 product requires are reachable, debug and administrative interfaces are
@@ -191,6 +215,8 @@ spans debug and test interfaces, tamper resistance, secure elements and
 trusted execution environments, and resistance to side-channel and
 fault-injection attacks.
 
+**Vulnerability Pattern (Hardware Platform Security):**
+
 The recurring weakness is leaving manufacturing and debug capabilities
 accessible on shipped units. Hardware debug ports — JTAG, SWD, UART
 consoles — remain enabled, giving anyone with physical access a direct
@@ -203,6 +229,8 @@ triggers no protective response. Cryptographic code is written without
 regard for side channels, leaking key material through timing or power
 analysis, and is not hardened against fault injection, so a glitched
 operation can skip a verification step.
+
+**Secure Pattern (Hardware Platform Security):**
 
 Sound practice disables or locks debug and test interfaces on
 production units, or gates them behind strong authentication. Secrets
