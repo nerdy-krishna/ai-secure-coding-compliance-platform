@@ -88,7 +88,7 @@ cvss = "^3.4"
 # pre-pass node (`infrastructure/scanners/bandit_runner.py`) can invoke
 # `/app/.venv/bin/bandit` as a subprocess in the worker.
 bandit = "^1.7"
-croniter = "^5.0"
+croniter = ">=5,<7"
 # Enterprise SSO. httpx-oauth provides the OIDC client used in
 # infrastructure/auth/sso/oidc.py (PKCE + state + nonce). pyjwt[crypto]
 # is needed to validate the IdP-signed id_token against the JWKS
