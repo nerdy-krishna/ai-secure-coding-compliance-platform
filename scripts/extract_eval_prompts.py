@@ -2,10 +2,11 @@
 
 The eval framework needs the same prompt strings the worker actually
 runs. Hand-copying them creates drift the moment someone edits the
-canonical seed — so we extract them at build time from the source of
-truth (`app.core.services.default_seed_service`) and commit the result.
-CI runs `--check` on every PR; the build fails if the committed files
-don't match the regenerated output.
+canonical seed — so we extract them at build time from the canonical
+seed-prompt markdown files (`app/core/services/seed_prompts/*.md`, the
+exact files `default_seed_service._load_prompt` reads) and commit the
+result. CI runs `--check` on every PR; the build fails if the committed
+files don't match the regenerated output.
 
 Usage:
     python scripts/extract_eval_prompts.py --write  # regenerate
@@ -23,15 +24,25 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable
 
-from app.core.services.default_seed_service import (
-    _AUDIT_TEMPLATE,
-    _CHAT_TEMPLATE,
-    _REMEDIATION_TEMPLATE,
-)
-
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EVALS_DIR = REPO_ROOT / "evals"
+
+# Canonical prompt templates live as markdown files under the seed's
+# `seed_prompts/` directory; `default_seed_service._load_prompt` reads
+# exactly these. Read them straight off disk here rather than importing
+# the seed module — that module pulls in the whole app (SQLAlchemy,
+# pydantic `Settings`) and is not importable in the lightweight eval CI
+# job (`poetry install --no-root`, no app env vars).
+_SEED_PROMPTS_DIR = REPO_ROOT / "src" / "app" / "core" / "services" / "seed_prompts"
+
+
+def _load_seed_prompt(filename: str) -> str:
+    return (_SEED_PROMPTS_DIR / filename).read_text(encoding="utf-8")
+
+
+_AUDIT_TEMPLATE = _load_seed_prompt("audit.md")
+_REMEDIATION_TEMPLATE = _load_seed_prompt("remediation.md")
+_CHAT_TEMPLATE = _load_seed_prompt("chat.md")
 
 
 def _targets() -> Dict[Path, str]:
