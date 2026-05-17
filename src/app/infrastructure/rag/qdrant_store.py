@@ -248,8 +248,15 @@ class QdrantStore:
         documents: List[str],
         metadatas: List[Dict[str, Any]],
         ids: List[str],
+        embed_texts: Optional[List[str]] = None,
     ) -> None:
-        embeddings = embed(documents)
+        # RAG lever 1 — embed the concept-only text when supplied, so the
+        # vector represents the security concern, not code-token soup.
+        # `documents` is still what gets stored and returned by queries.
+        texts_to_embed = embed_texts if embed_texts is not None else documents
+        if len(texts_to_embed) != len(documents):
+            raise ValueError("embed_texts must be the same length as documents")
+        embeddings = embed(texts_to_embed)
         points = [
             qmodels.PointStruct(
                 id=_qdrant_id(doc_id),

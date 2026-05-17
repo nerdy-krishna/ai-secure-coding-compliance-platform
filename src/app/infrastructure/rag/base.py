@@ -41,8 +41,16 @@ class VectorStore(Protocol):
         documents: List[str],
         metadatas: List[Dict[str, Any]],
         ids: List[str],
+        embed_texts: Optional[List[str]] = None,
     ) -> None:
-        """Upsert documents into the security-guidelines collection."""
+        """Upsert documents into the security-guidelines collection.
+
+        `documents` is what queries store and return. When `embed_texts`
+        is supplied (RAG lever 1), the embedding vector is built from it
+        instead of from `documents` — so the vector represents the
+        security concept while retrieval still returns the full,
+        code-bearing document. Must be the same length as `documents`.
+        """
 
     def query_guidelines(
         self,

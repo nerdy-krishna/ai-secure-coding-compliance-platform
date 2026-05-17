@@ -15,7 +15,7 @@ from __future__ import annotations
 import csv
 import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from app.infrastructure.rag.base import VectorStore
 
@@ -63,6 +63,13 @@ def ingest_bundled_corpus(rag_service: VectorStore, framework: str) -> int:
     if not rows:
         return 0
     documents = [row["document"] for row in rows]
+    # RAG lever 1 — when the corpus carries an `embed_text` column
+    # (concept-only text, no code), embed THAT instead of the code-heavy
+    # `document`. Only used when every row supplies it; a corpus without
+    # the column falls back to embedding the document.
+    embed_texts: Optional[List[str]] = None
+    if all(row.get("embed_text") for row in rows):
+        embed_texts = [row["embed_text"] for row in rows]
     metadatas = [
         {
             "framework_name": framework,
@@ -82,6 +89,7 @@ def ingest_bundled_corpus(rag_service: VectorStore, framework: str) -> int:
             documents=documents[start:end],
             metadatas=metadatas[start:end],
             ids=ids[start:end],
+            embed_texts=embed_texts[start:end] if embed_texts is not None else None,
         )
     logger.info(
         "bundled corpus ingested",

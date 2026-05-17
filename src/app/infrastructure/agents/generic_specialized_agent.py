@@ -279,6 +279,28 @@ def _detect_target_lang(filename: str) -> str:
     return _LANGUAGE_MAP.get(file_ext, "GENERIC")
 
 
+# Language tags that are already their own display name (others title-case).
+_LANG_DISPLAY = {"C#": "C#", "C++": "C++"}
+
+
+def _file_query_hint(filename: str, target_lang: str) -> str:
+    """RAG lever 3 — a short concept-level descriptor of the file under
+    review, blended into the RAG query so retrieval is file-aware: the
+    same agent issues a distinct query per file rather than one fixed
+    keyword query. Kept to language + filename (no code) so the query
+    vector stays concept-oriented.
+    """
+    base = (filename or "").rsplit("/", 1)[-1].strip()
+    if target_lang != "GENERIC":
+        lang = _LANG_DISPLAY.get(target_lang, target_lang.title())
+        return (
+            f"Reviewing {lang} source code in the file {base}."
+            if base
+            else f"Reviewing {lang} source code."
+        )
+    return f"Reviewing the source file {base}." if base else ""
+
+
 def _extract_patterns_from_doc(
     doc: str, target_lang: str
 ) -> tuple[Optional[str], Optional[str]]:
@@ -363,13 +385,21 @@ def _build_rag_context(
         return None
 
     query_keywords = domain_query.get("keywords", "")
+    target_lang = _detect_target_lang(filename)
+    # RAG lever 3 — file-aware query: blend the file's language and name
+    # into the agent's keyword query so retrieval leans toward the file
+    # actually under review.
+    file_hint = _file_query_hint(filename, target_lang)
+    query_text = (
+        f"{query_keywords}. {file_hint}".strip() if file_hint else query_keywords
+    )
     # Framework Expansion #56/#57 — the facet resolver owns the
     # `domain_query` → Chroma-`where` translation (anchors scan_ready,
     # honours the framework-aware facet allowlist incl. `control_family`).
     chroma_where_filter = resolve_rag_filter(domain_query)
 
     retrieved_guidelines = rag_service.query_guidelines(
-        query_texts=[query_keywords], n_results=10, where=chroma_where_filter
+        query_texts=[query_text], n_results=10, where=chroma_where_filter
     )
     # The vector store's `documents` shape is `List[List[str]]` —
     # outer list per query, inner list of hits. An empty collection
@@ -386,7 +416,6 @@ def _build_rag_context(
         extra={"agent": agent_name, "doc_count": len(documents)},
     )
 
-    target_lang = _detect_target_lang(filename)
     vulnerability_patterns: List[str] = []
     secure_patterns: List[str] = []
     for doc in documents or []:

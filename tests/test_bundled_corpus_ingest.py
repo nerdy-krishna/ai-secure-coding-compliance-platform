@@ -29,8 +29,15 @@ class _FakeStore:
         self.deleted.append(framework_name)
         return 0
 
-    def add(self, documents, metadatas, ids) -> None:  # noqa: ANN001
-        self.added.append({"documents": documents, "metadatas": metadatas, "ids": ids})
+    def add(self, documents, metadatas, ids, embed_texts=None) -> None:  # noqa: ANN001
+        self.added.append(
+            {
+                "documents": documents,
+                "metadatas": metadatas,
+                "ids": ids,
+                "embed_texts": embed_texts,
+            }
+        )
 
     def get_by_framework(self, framework_name: str) -> Dict[str, Any]:
         return {"ids": [f"x{i}" for i in range(self._existing.get(framework_name, 0))]}
@@ -64,6 +71,25 @@ def test_ingest_bundled_corpus_tags_asvs_with_control_family():
         assert meta["framework_name"] == "asvs"
         assert meta["scan_ready"] is True
         assert meta["control_family"]  # required by the Asvs* agents' filter
+
+
+def test_asvs_ingest_embeds_concept_text_not_document():
+    """RAG lever 1 — the ASVS corpus carries an `embed_text` column, so
+    ingest passes concept-only text to the embedder while still storing
+    the full code-bearing document."""
+    store = _FakeStore()
+    ingest_bundled_corpus(store, "asvs")
+
+    # The corpus is upserted in 256-doc batches; aggregate across calls.
+    embed_texts = [t for call in store.added for t in (call["embed_texts"] or [])]
+    documents = [d for call in store.added for d in call["documents"]]
+    assert len(embed_texts) == len(documents) > 300
+    for embed_text, document in zip(embed_texts, documents):
+        assert "```" not in embed_text  # concept-only — no fenced code
+        assert "[[" not in embed_text  # no [[LANG PATTERNS]] blocks either
+        assert embed_text != document  # the stored document is the richer text
+    # Most requirements carry code samples; the stored documents keep them.
+    assert sum("```" in doc for doc in documents) > 300
 
 
 def test_ingested_documents_carry_pattern_blocks():
