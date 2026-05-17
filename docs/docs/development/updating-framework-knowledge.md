@@ -62,41 +62,49 @@ Ingestion runs in-process for now (no separate worker container).
 The UI shows a spinner + the `rag_jobs` row's progress percentage.
 Large Git repos (hundreds of files) can take a couple of minutes.
 
-## CWE Essentials (bundled corpus)
+## Bundled corpora (CWE Essentials, ISVS)
 
-CWE Essentials is the one framework that ships its own RAG corpus in
-the repository — it is *bundled*, not fetched from an upstream Git
-repo. The framework, its 14 concern-area agents, and their prompt
+Two frameworks ship their RAG corpus inside the repository rather than
+fetching it from an upstream Git repo:
+
+- **CWE Essentials** — 14 concern-areas, content grounded in the MITRE
+  CWE Top 25 (2025).
+- **OWASP ISVS** — 7 concern-areas, content grounded in the OWASP IoT
+  Security Verification Standard.
+
+For both, the framework, its concern-area agents, and their prompt
 templates are created automatically by the seed (and by the data
 migration for existing deployments); only the RAG corpus is a
-deliberate post-deploy step.
+deliberate post-deploy step. The corpus is shipped concern-area-tagged
+because each agent filters retrieval on the `concern_area` facet — the
+raw Git-URL ingest path cannot supply that tag.
 
-To populate it:
+To populate a bundled corpus (using ISVS as the example — substitute
+`cwe_essentials` for CWE):
 
-1. The corpus CSV lives at
-   `src/app/data/cwe_essentials_corpus.csv`. It is generated from the
-   per-concern-area markdown under
-   `src/app/data/cwe_essentials_corpus/` — edit the markdown, never
-   the CSV, then regenerate with
-   `python scripts/build_cwe_corpus.py --write`.
-2. Go to **Admin → Frameworks → CWE Essentials → Ingest docs →
-   CSV** and upload `cwe_essentials_corpus.csv`.
-3. The CSV carries an `id`, a `document` column, and a
-   `concern_area` column. `concern_area` is the metadata facet each
-   CWE Essentials agent filters retrieval on, so it must reach the
-   vector store — keep it intact.
+1. The corpus CSV lives at `src/app/data/isvs_corpus.csv`. It is
+   generated from the per-concern-area markdown under
+   `src/app/data/isvs_corpus/` — edit the markdown, never the CSV,
+   then regenerate with
+   `python scripts/build_corpus.py --framework isvs --write`.
+2. Go to **Admin → Frameworks → OWASP ISVS → Ingest docs → CSV**
+   and upload `isvs_corpus.csv`.
+3. The CSV carries an `id`, a `document` column, and a `concern_area`
+   column. `concern_area` is the metadata facet each agent filters
+   retrieval on, so it must reach the vector store — keep it intact.
 4. Ingest with **scan-ready** enabled so the corpus is visible to
    server-side scans (not only the Advisor chat).
 
-Until the corpus is ingested, a CWE Essentials scan still completes —
-its agents simply produce findings without RAG citations. After
-ingestion the findings carry concern-area-grounded references.
+Until the corpus is ingested, a scan against the framework still
+completes — its agents simply produce findings without RAG citations.
+After ingestion the findings carry concern-area-grounded references.
 
-**Edition + refresh path.** The corpus is pinned to the **CWE Top 25
-(2025)** edition (recorded in each markdown file's frontmatter). MITRE
-republishes the Top 25 annually; adopting a new edition is a deliberate
-action — update the concern-area markdown, bump the `edition`
-frontmatter, run `build_cwe_corpus.py --write`, and re-ingest.
+**Edition + refresh path.** Each corpus is pinned to an edition
+(recorded in every markdown file's `edition` frontmatter): CWE
+Essentials to the **CWE Top 25 (2025)**, ISVS to **OWASP ISVS 1.0**.
+Adopting a newer edition is a deliberate action — update the
+concern-area markdown, bump the `edition` frontmatter, run
+`build_corpus.py --framework <name> --write`, and re-ingest.
 
 ## Sanity-checking
 

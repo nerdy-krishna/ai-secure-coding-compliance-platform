@@ -1,0 +1,217 @@
+id,document,concern_area
+01-secure-development-provisioning,"# Secure Development & Provisioning
+
+This concern-area covers the ecosystem-level practices that decide
+whether a connected device starts life in a defensible state. It maps
+to the IoT ecosystem chapter of the OWASP ISVS and spans the secure
+development lifecycle, threat modeling, device identity, provisioning
+and onboarding, and supply-chain integrity.
+
+The recurring weakness is treating a fleet of devices as if each were a
+one-off product. A device ships with a shared default credential or a
+key common to every unit, so compromising one unit compromises all of
+them. A device has no unique, attestable identity, so the back end
+cannot tell a genuine unit from an impostor. Onboarding accepts a
+device onto the network before its identity is verified, or transfers
+provisioning secrets over an unauthenticated channel. The bill of
+materials for firmware and hardware is unknown, so a vulnerable
+component cannot be located when an advisory lands. Decommissioning
+leaves credentials and keys live on a device that has left the
+operator's control.
+
+Sound practice gives every device a unique identity established at
+manufacture and bound to hardware where possible, and provisions
+per-device secrets rather than shared ones. Threat modeling is
+performed for the device, its companion app, and its cloud services
+together, since the trust boundaries that matter span all three.
+Onboarding authenticates the device before granting it network access
+and protects provisioning data in transit. A maintained software and
+hardware bill of materials makes component risk auditable. A defined
+decommissioning path revokes identity and wipes secrets when a device
+is retired, returned, or resold.
+",Secure Development & Provisioning
+02-device-application-data-protection,"# Device Application & Data Protection
+
+This concern-area covers the security of the application software that
+runs in the device's user space — the code closest to sensors,
+actuators, and the user — together with the data that application
+holds. It maps to the user-space application chapter of the OWASP ISVS.
+
+The recurring weakness is treating the device as a trusted, private
+environment when it is in fact physically accessible to an attacker. A
+device application stores credentials, API tokens, or session keys in
+plaintext on the filesystem or in shared preferences, so anyone who can
+read the storage medium recovers them. Sensitive data — personal
+information, telemetry, captured media — is written to disk
+unencrypted or copied into world-readable logs. Local inter-process
+communication channels (sockets, named pipes, intents, shared memory)
+are exposed without authentication, so a co-resident process can drive
+privileged functionality. Application-level access control is enforced
+only in the companion phone app or cloud, leaving the on-device
+operation itself unguarded.
+
+Sound practice treats on-device storage as hostile. Credentials and
+keys are kept in a hardware-backed keystore or secure element rather
+than in application files, and sensitive data at rest is encrypted with
+keys the application cannot trivially export. Logs are scrubbed of
+secrets and personal data. Local IPC endpoints authenticate their peer
+and expose the narrowest possible surface. Every privileged on-device
+operation enforces its own authorization check rather than trusting a
+remote caller, so a compromise of the companion app or a spoofed cloud
+message cannot bypass it.
+",Device Application & Data Protection
+03-firmware-integrity-secure-boot,"# Firmware Integrity & Secure Boot
+
+This concern-area covers the chain of trust that decides whether a
+device will only run firmware its manufacturer authorised. It maps to
+the software-platform chapter of the OWASP ISVS and spans secure and
+verified boot, the bootloader, firmware image signing, anti-rollback,
+and the authenticity and integrity of over-the-air updates.
+
+The recurring weakness is a boot or update path that accepts firmware
+without proving where it came from. Secure boot is absent, so modified
+firmware runs unchallenged. A boot stage verifies the next stage with a
+weak or hard-coded check, or the verification can be skipped through a
+debug or recovery path. Firmware images are unsigned, or the signature
+is checked with a key an attacker can substitute. The update mechanism
+fetches an image over an unauthenticated channel, or applies it without
+verifying a signature, so a network attacker can install their own
+build. There is no anti-rollback protection, so an attacker downgrades
+the device to an older, vulnerable version that is still validly
+signed.
+
+Sound practice establishes a hardware root of trust and verifies each
+boot stage's signature before transferring control to it, with no path
+that bypasses the check. Firmware images are signed with a key held in
+a protected store, and the verification key is immutable on the device.
+Updates are delivered over an authenticated, integrity-protected
+channel, and the device verifies the image signature and a monotonic
+version counter before installing, rejecting both tampered images and
+downgrades. The update process is atomic, with a verified fallback so a
+failed update cannot brick or weaken the device.
+",Firmware Integrity & Secure Boot
+04-software-platform-hardening,"# Software Platform Hardening
+
+This concern-area covers the configuration and runtime posture of the
+operating system or RTOS the device runs on, once a trusted firmware
+image is booting. It maps to the software-platform chapter of the OWASP
+ISVS and spans OS and RTOS hardening, removal of unnecessary services,
+on-device cryptography and key storage, memory protections, and process
+isolation.
+
+The recurring weakness is shipping a development configuration as the
+production image. Debug shells, verbose logging, test accounts, and
+diagnostic services are left enabled, each one an entry point. The
+platform runs more services and listens on more interfaces than the
+product needs, widening the attack surface for no functional benefit.
+Cryptographic operations use keys held in ordinary application memory
+or files rather than in protected storage, so a single memory-disclosure
+bug exposes them. Memory protections that the hardware and OS could
+provide — non-executable data regions, address-space layout
+randomization, stack protection — are disabled or unavailable, so a
+memory-corruption bug becomes reliable code execution. Processes run
+with more privilege than they need and without isolation, so one
+compromised component owns the device.
+
+Sound practice ships a minimised production image: debug interfaces,
+test accounts, and unused services are removed or disabled, and only
+the interfaces the product requires are reachable. Cryptographic keys
+live in a hardware-backed keystore, secure element, or trusted
+execution environment, and are used through APIs that never expose the
+raw key. Available memory-protection features are enabled. Each
+component runs under the least privilege it needs and is isolated —
+through separate accounts, namespaces, or sandboxes — so a compromise
+is contained rather than total.
+",Software Platform Hardening
+05-communication-transport-cryptography,"# Communication Transport & Cryptography
+
+This concern-area covers how a device protects data while it moves
+between the device, its companion applications, and its cloud
+services. It maps to the communication chapter of the OWASP ISVS and
+spans transport encryption, mutual authentication, certificate
+validation, and the cryptography that secures device communications.
+
+The recurring weakness is communication that is encrypted weakly, or
+not at all, or encrypted without confirming who is on the other end.
+Telemetry and commands travel over plaintext protocols, so anyone on
+the network path can read or alter them. A device uses TLS or DTLS but
+disables or ignores certificate validation — a common shortcut to make
+self-signed development certificates work — so an attacker who can
+intercept traffic presents any certificate and the device accepts it.
+Only the server is authenticated, leaving the device itself
+unverified, so a cloned or rogue device is indistinguishable from a
+genuine one. Outdated protocol versions and weak cipher suites remain
+enabled, so the session can be downgraded. Long-lived symmetric keys
+are shared across a whole product line, so recovering one key from one
+device decrypts the fleet.
+
+Sound practice encrypts every channel that carries device data or
+control with a current protocol version and strong cipher suites, and
+validates the peer's certificate or public key on every connection —
+no exceptions for convenience. Where the product's trust model
+requires it, both ends authenticate, so the cloud can be sure it is
+talking to a genuine device and vice versa. Keys are per-device and
+rotatable, session keys are ephemeral, and the device rejects
+downgrade attempts to obsolete protocols or ciphers.
+",Communication Transport & Cryptography
+06-pairing-network-exposure,"# Pairing & Network Exposure
+
+This concern-area covers the device's network-facing attack surface —
+the services it exposes, and the pairing and bonding flows by which new
+peers are admitted. It maps to the communication chapter of the OWASP
+ISVS, alongside transport security.
+
+The recurring weakness is exposing more than the product needs, and
+admitting peers too readily. A device listens on debug, diagnostic, or
+administrative ports that were useful in development and were never
+closed for production. Network services run without authentication, so
+reaching the device is the same as controlling it. Pairing accepts any
+peer without a confirmation step, uses a fixed or guessable PIN, or
+leaves a pairing window open indefinitely, so an attacker in range
+bonds with the device and inherits a trusted relationship. Once paired,
+a peer is trusted forever, with no way to review or revoke bonds.
+
+Sound practice minimises the exposed surface: only the services the
+product requires are reachable, debug and administrative interfaces are
+disabled in production, and every network-facing service authenticates
+its caller. Pairing requires an explicit, human-mediated confirmation —
+a button press, a code shown on the device — rather than silent
+acceptance, uses a per-device or sufficiently random secret, and is
+time-boxed so the window closes promptly. Bonded peers are enumerable
+and revocable, so a lost or compromised peer can be removed without
+re-provisioning the device. The default state is closed: a freshly
+booted device admits nothing until it is deliberately paired.
+",Pairing & Network Exposure
+07-hardware-platform-security,"# Hardware Platform Security
+
+This concern-area covers the physical and silicon-level security of the
+device, on the assumption that an attacker can hold the device in their
+hands. It maps to the hardware-platform chapter of the OWASP ISVS and
+spans debug and test interfaces, tamper resistance, secure elements and
+trusted execution environments, and resistance to side-channel and
+fault-injection attacks.
+
+The recurring weakness is leaving manufacturing and debug capabilities
+accessible on shipped units. Hardware debug ports — JTAG, SWD, UART
+consoles — remain enabled, giving anyone with physical access a direct
+path to halt the processor, dump memory, and extract firmware and keys.
+Test points and unlocked configuration fuses let an attacker re-flash
+or reconfigure the device. Secrets are stored in general-purpose flash
+rather than in a secure element, so a memory read-out recovers them.
+There is no tamper detection, so physical intrusion leaves no trace and
+triggers no protective response. Cryptographic code is written without
+regard for side channels, leaking key material through timing or power
+analysis, and is not hardened against fault injection, so a glitched
+operation can skip a verification step.
+
+Sound practice disables or locks debug and test interfaces on
+production units, or gates them behind strong authentication. Secrets
+and cryptographic keys are held in a secure element, trusted platform
+module, or trusted execution environment that resists extraction even
+with physical access. Tamper-evident or tamper-responsive measures
+detect intrusion and react — zeroising keys where the threat model
+warrants it. Cryptographic implementations are chosen and reviewed for
+constant-time behaviour and side-channel resistance, and security
+decisions are written so that a single glitched instruction cannot turn
+a failed check into a pass.
+",Hardware Platform Security

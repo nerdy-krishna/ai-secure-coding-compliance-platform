@@ -62,6 +62,26 @@ Opt-in; select it at scan time for systems / native codebases.
   deliberately when MITRE republishes the list.
 - **Typical use**: weakness-class audits of native / systems code.
 
+### OWASP ISVS (`isvs`)
+
+The OWASP IoT Security Verification Standard, organised into 7
+concern-areas — secure development & provisioning, the device
+application & data protection, firmware integrity & secure boot,
+software-platform hardening, communication transport & cryptography,
+pairing & network exposure, and the hardware platform. Covers
+firmware, hardware, and device-communication concerns that neither
+ASVS nor CWE Essentials address. Opt-in; select it at scan time for
+IoT / embedded / connected-device codebases.
+
+- **Ingestion mode**: CSV — the corpus is *bundled* with the platform
+  at `src/app/data/isvs_corpus.csv` (content grounded in the OWASP
+  ISVS standard). Upload it via **Admin → Frameworks → OWASP ISVS →
+  Ingest docs → CSV** with scan-ready enabled. See
+  [Updating Framework Knowledge](../development/updating-framework-knowledge.md)
+  for the step-by-step.
+- **Pinned edition**: OWASP ISVS 1.0.
+- **Typical use**: security audits of IoT / embedded device code.
+
 ## Adding a custom framework
 
 Admins navigate to **Admin → Frameworks → New framework**:
