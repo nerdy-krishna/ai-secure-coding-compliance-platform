@@ -20,14 +20,17 @@ _METADATA_FILTER_ALLOWLIST = {
     "language",
     "category",
     # `control_family` is used pervasively across the default seed
-    # (every agent's `domain_query.metadata_filter` references it),
-    # and `scan_ready` is accepted by the analysis path's
-    # `_ALLOWED_FILTER_KEYS` in generic_specialized_agent.py. Both
-    # were missing here, which made the seed crash mid-execution
-    # (the first time the test suite actually ran past the
-    # alembic-migration step in CI).
+    # (every ASVS agent's `domain_query.metadata_filter` references it),
+    # and `scan_ready` is accepted by the analysis path's RAG facet
+    # resolver. Both were missing here, which made the seed crash
+    # mid-execution (the first time the test suite actually ran past
+    # the alembic-migration step in CI).
     "control_family",
     "scan_ready",
+    # `concern_area` is the framework-agnostic facet (Framework
+    # Expansion #56) — CWE Essentials concern-area agents key RAG
+    # retrieval on it.
+    "concern_area",
 }
 
 

@@ -19,6 +19,7 @@ from app.core.services.default_seed_service import (
     PROMPT_TEMPLATES,
     _ASVS_AGENT_SPECS,
     _CS_AGENT_SPECS,
+    _CWE_AGENT_SPECS,
     _PC_AGENT_SPECS,
     seed_defaults,
     seed_if_empty,
@@ -83,6 +84,29 @@ async def test_appsec_agents_are_framework_prefixed():
     assert sum(n.startswith("Asvs") for n in names) == len(_ASVS_AGENT_SPECS)
     assert sum(n.startswith("ProactiveControls") for n in names) == len(_PC_AGENT_SPECS)
     assert sum(n.startswith("Cheatsheets") for n in names) == len(_CS_AGENT_SPECS)
+    assert sum(n.startswith("Cwe") for n in names) == len(_CWE_AGENT_SPECS)
+
+
+@pytest.mark.asyncio
+async def test_cwe_essentials_roster_is_gated_and_concern_scoped():
+    """CWE Essentials ships 14 concern-area agents; each declares a
+    valid `gating` value and scopes RAG retrieval to its concern-area."""
+    cwe_agents = [
+        a for a in AGENT_DEFINITIONS if a["applicable_frameworks"] == ["cwe_essentials"]
+    ]
+    assert len(cwe_agents) == 14
+    gating_counts = {"systems": 0, "web": 0, "all": 0}
+    for agent in cwe_agents:
+        dq = agent["domain_query"]
+        gating = dq.get("gating")
+        assert gating in gating_counts, agent["name"]
+        gating_counts[gating] += 1
+        # Each CWE agent scopes retrieval to its own concern-area.
+        assert "concern_area" in dq["metadata_filter"], agent["name"]
+        assert dq["metadata_filter"]["framework_name"] == ["cwe_essentials"]
+    # 3 systems-gated (spatial/temporal memory, concurrency), 1 web-gated
+    # (web injection), 10 ungated — matches the issue's concern-area table.
+    assert gating_counts == {"systems": 3, "web": 1, "all": 10}
 
 
 @pytest.mark.asyncio

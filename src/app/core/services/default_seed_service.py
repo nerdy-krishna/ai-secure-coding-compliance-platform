@@ -71,6 +71,20 @@ FRAMEWORKS_DATA: List[Dict[str, str]] = [
         "description": "OWASP Cheatsheets Series.",
     },
     {
+        "name": "cwe_essentials",
+        "description": (
+            "CWE Essentials — the MITRE CWE Top 25 Most Dangerous "
+            "Software Weaknesses (2025 edition) plus selected related "
+            "CWE-699 development-view entries, organised into 14 "
+            "concern-areas (memory safety, injection, authorization, "
+            "concurrency, and more). Covers non-web / systems code "
+            "(C, C++, Rust, Go, OS components, native programs) that "
+            "the web-centric ASVS does not. Bundled with the platform; "
+            "opt-in at scan time. Select this for systems / native "
+            "codebases or for CWE-grounded weakness coverage."
+        ),
+    },
+    {
         "name": "llm_top10",
         "description": (
             "OWASP Top 10 for Large Language Model Applications (2025). "
@@ -753,6 +767,330 @@ _CS_AGENT_SPECS: List[Dict[str, Any]] = [
 ]
 
 
+# CWE Essentials — MITRE CWE Top 25 (2025) + selected CWE-699 entries,
+# grouped into 14 concern-areas. RAG retrieval is scoped by the
+# framework-agnostic `concern_area` facet. Each agent carries a
+# `gating` value in its `domain_query` consumed by per-file routing:
+#   "systems" — runs only on C / C++ / Rust / Go files
+#   "web"     — runs only on non-systems (web / scripting) files
+#   "all"     — always runs
+# All 25 Top 25 CWEs stay citable regardless of gating; gating only
+# controls which agents execute against a given file set.
+_CWE_AGENT_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "SpatialMemorySafetyAgent",
+        "description": (
+            "Spatial memory safety — out-of-bounds reads and writes. "
+            "Covers CWE-787, CWE-125, CWE-119, CWE-122, CWE-121, "
+            "CWE-786, CWE-788, CWE-805."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-787 out-of-bounds write, CWE-125 out-of-bounds "
+                "read, CWE-119 improper restriction of operations "
+                "within the bounds of a memory buffer, CWE-122 "
+                "heap-based buffer overflow, CWE-121 stack-based "
+                "buffer overflow, CWE-786 access of memory location "
+                "before start of buffer, CWE-788 access of memory "
+                "location after end of buffer, CWE-805 buffer access "
+                "with incorrect length value, spatial memory safety, "
+                "buffer overflow, bounds checking"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Spatial Memory Safety"],
+            },
+            "gating": "systems",
+        },
+    },
+    {
+        "name": "TemporalMemorySafetyAgent",
+        "description": (
+            "Temporal memory safety — use-after-free, null dereference, "
+            "and lifetime errors. Covers CWE-416, CWE-476, CWE-415, "
+            "CWE-401, CWE-824, CWE-825."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-416 use after free, CWE-476 NULL pointer "
+                "dereference, CWE-415 double free, CWE-401 missing "
+                "release of memory after effective lifetime, CWE-824 "
+                "access of uninitialized pointer, CWE-825 expired "
+                "pointer dereference, temporal memory safety, dangling "
+                "pointer, memory leak, object lifetime"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Temporal Memory Safety"],
+            },
+            "gating": "systems",
+        },
+    },
+    {
+        "name": "NumericErrorsAgent",
+        "description": (
+            "Numeric, type, and conversion errors. Covers CWE-190, "
+            "CWE-191, CWE-369, CWE-681, CWE-194, CWE-195, CWE-704, "
+            "CWE-843."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-190 integer overflow or wraparound, CWE-191 "
+                "integer underflow, CWE-369 divide by zero, CWE-681 "
+                "incorrect conversion between numeric types, CWE-194 "
+                "unexpected sign extension, CWE-195 signed to unsigned "
+                "conversion error, CWE-704 incorrect type conversion "
+                "or cast, CWE-843 type confusion, numeric error, "
+                "integer truncation"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Numeric, Type & Conversion Errors"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "OsCommandInjectionAgent",
+        "description": ("OS and command injection. Covers CWE-78, CWE-77, CWE-88."),
+        "domain_query": {
+            "keywords": (
+                "CWE-78 improper neutralization of special elements "
+                "used in an OS command, CWE-77 command injection, "
+                "CWE-88 argument injection or modification, OS command "
+                "injection, shell injection, subprocess, exec, "
+                "untrusted command arguments"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["OS & Command Injection"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "CodeInjectionAgent",
+        "description": (
+            "Code injection and unsafe deserialization. Covers CWE-94, "
+            "CWE-502, CWE-95, CWE-1336."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-94 improper control of generation of code, code "
+                "injection, CWE-502 deserialization of untrusted data, "
+                "CWE-95 eval injection, CWE-1336 improper neutralization "
+                "of special elements used in a template engine, "
+                "server-side template injection, unsafe deserialization, "
+                "pickle, dynamic code execution"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Code Injection & Unsafe Deserialization"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "WebInjectionAgent",
+        "description": (
+            "Web injection — cross-site scripting and query injection. "
+            "Covers CWE-79, CWE-89, CWE-90, CWE-91, CWE-943."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-79 cross-site scripting, XSS, CWE-89 SQL "
+                "injection, CWE-90 LDAP injection, CWE-91 XML "
+                "injection, CWE-943 improper neutralization of special "
+                "elements in data query logic, NoSQL injection, "
+                "output encoding, query parameterization"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Web Injection"],
+            },
+            "gating": "web",
+        },
+    },
+    {
+        "name": "InputValidationAgent",
+        "description": (
+            "Improper input validation. Covers CWE-20, CWE-129, " "CWE-1284, CWE-1287."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-20 improper input validation, CWE-129 improper "
+                "validation of array index, CWE-1284 improper "
+                "validation of specified quantity in input, CWE-1287 "
+                "improper validation of specified type of input, "
+                "input validation, allowlist validation, untrusted "
+                "input"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Improper Input Validation"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "ExternalResourceAccessAgent",
+        "description": (
+            "External resource access — path traversal, unrestricted "
+            "upload, SSRF, link following. Covers CWE-22, CWE-434, "
+            "CWE-918, CWE-23, CWE-36, CWE-59, CWE-73."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-22 path traversal, CWE-434 unrestricted upload of "
+                "file with dangerous type, CWE-918 server-side request "
+                "forgery, SSRF, CWE-23 relative path traversal, CWE-36 "
+                "absolute path traversal, CWE-59 improper link "
+                "resolution before file access, CWE-73 external control "
+                "of file name or path, directory traversal"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["External Resource Access"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "AuthenticationAgent",
+        "description": (
+            "Authentication and credential management. Covers CWE-287, "
+            "CWE-306, CWE-798, CWE-259, CWE-522, CWE-521, CWE-384."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-287 improper authentication, CWE-306 missing "
+                "authentication for critical function, CWE-798 use of "
+                "hard-coded credentials, CWE-259 use of hard-coded "
+                "password, CWE-522 insufficiently protected "
+                "credentials, CWE-521 weak password requirements, "
+                "CWE-384 session fixation, credential management"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Authentication & Credential Management"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "AuthorizationAgent",
+        "description": (
+            "Authorization and access control. Covers CWE-862, "
+            "CWE-863, CWE-352, CWE-639, CWE-732, CWE-285."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-862 missing authorization, CWE-863 incorrect "
+                "authorization, CWE-352 cross-site request forgery, "
+                "CSRF, CWE-639 authorization bypass through "
+                "user-controlled key, insecure direct object "
+                "reference, CWE-732 incorrect permission assignment "
+                "for critical resource, CWE-285 improper authorization"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Authorization & Access Control"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "PrivilegeManagementAgent",
+        "description": (
+            "Privilege management. Covers CWE-269, CWE-250, CWE-271, "
+            "CWE-272, CWE-1390."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-269 improper privilege management, CWE-250 "
+                "execution with unnecessary privileges, CWE-271 "
+                "privilege dropping or lowering errors, CWE-272 least "
+                "privilege violation, CWE-1390 weak authentication, "
+                "privilege escalation, setuid, least privilege"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Privilege Management"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "ConcurrencyAgent",
+        "description": (
+            "Concurrency and race conditions. Covers CWE-362, CWE-367, "
+            "CWE-364, CWE-1265, CWE-366."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-362 concurrent execution using shared resource "
+                "with improper synchronization, race condition, "
+                "CWE-367 time-of-check time-of-use TOCTOU race "
+                "condition, CWE-364 signal handler race condition, "
+                "CWE-1265 unintended reentrant invocation, CWE-366 "
+                "race condition within a thread, deadlock, data race"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Concurrency & Race Conditions"],
+            },
+            "gating": "systems",
+        },
+    },
+    {
+        "name": "ResourceLifecycleAgent",
+        "description": (
+            "Resource lifecycle and exhaustion. Covers CWE-400, "
+            "CWE-770, CWE-404, CWE-772."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-400 uncontrolled resource consumption, CWE-770 "
+                "allocation of resources without limits or throttling, "
+                "CWE-404 improper resource shutdown or release, "
+                "CWE-772 missing release of resource after effective "
+                "lifetime, resource exhaustion, denial of service, "
+                "file descriptor leak"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Resource Lifecycle & Exhaustion"],
+            },
+            "gating": "all",
+        },
+    },
+    {
+        "name": "SensitiveInfoExposureAgent",
+        "description": (
+            "Sensitive information exposure. Covers CWE-200, CWE-209, "
+            "CWE-532, CWE-312, CWE-319, CWE-359."
+        ),
+        "domain_query": {
+            "keywords": (
+                "CWE-200 exposure of sensitive information to an "
+                "unauthorized actor, CWE-209 generation of error "
+                "message containing sensitive information, CWE-532 "
+                "insertion of sensitive information into log file, "
+                "CWE-312 cleartext storage of sensitive information, "
+                "CWE-319 cleartext transmission of sensitive "
+                "information, CWE-359 exposure of private personal "
+                "information, information leakage"
+            ),
+            "metadata_filter": {
+                "framework_name": ["cwe_essentials"],
+                "concern_area": ["Sensitive Information Exposure"],
+            },
+            "gating": "all",
+        },
+    },
+]
+
+
 # The LLM / Agentic agents are framework-native already — they are not
 # part of the AppSec pool, keep their own names, and declare explicit
 # single-framework mappings.
@@ -832,11 +1170,13 @@ def _framework_roster(
 
 
 # The full default agent roster — 17 ASVS + 10 Proactive Controls + 10
-# Cheatsheets dedicated agents, plus the two framework-native AI agents.
+# Cheatsheets + 14 CWE Essentials dedicated agents, plus the two
+# framework-native AI agents.
 AGENT_DEFINITIONS: List[Dict[str, Any]] = (
     _framework_roster(_ASVS_AGENT_SPECS, "asvs", "Asvs")
     + _framework_roster(_PC_AGENT_SPECS, "proactive_controls", "ProactiveControls")
     + _framework_roster(_CS_AGENT_SPECS, "cheatsheets", "Cheatsheets")
+    + _framework_roster(_CWE_AGENT_SPECS, "cwe_essentials", "Cwe")
     + _AI_AGENT_DEFINITIONS
 )
 
@@ -864,6 +1204,10 @@ _FRAMEWORK_TEMPLATES: Dict[str, Dict[str, str]] = {
     "cheatsheets": {
         "audit": _load_prompt("audit_cheatsheets.md"),
         "remediation": _load_prompt("remediation_cheatsheets.md"),
+    },
+    "cwe_essentials": {
+        "audit": _load_prompt("audit_cwe.md"),
+        "remediation": _load_prompt("remediation_cwe.md"),
     },
 }
 _GENERIC_TEMPLATES: Dict[str, str] = {
