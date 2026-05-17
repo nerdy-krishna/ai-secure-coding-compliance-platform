@@ -1,0 +1,274 @@
+# OWASP ISVS 1.0 — Concern-area: Hardware Platform Security
+# (ISVS chapter V5 — Hardware Platform)
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns. ISVS
+# targets IoT / embedded / connected-device code; many hardware-platform
+# requirements have no software code sink, so generic-only is expected and
+# correct for those.
+
+# ---------------------------------------------------------------------------
+# Debug and test interfaces
+# ---------------------------------------------------------------------------
+
+- id: ISVS-7.1
+  facet: Hardware Platform Security
+  section: Hardware Debug Ports Disabled on Production Units
+  security_rule: >-
+    Hardware debug interfaces such as JTAG, SWD, and UART consoles must be
+    disabled, permanently locked, or gated behind strong authentication on
+    shipped production units so physical access cannot halt the processor
+    or dump memory.
+  vulnerability_pattern: >-
+    A production build leaves the JTAG or SWD debug port enabled, or boots
+    an interactive UART shell, so anyone with the device in hand can attach
+    a debugger, stop the core, and read out firmware and keys.
+  secure_pattern: >-
+    The production firmware blows the debug-disable fuse or sets the
+    read-protection register early in boot, and the serial console is
+    compiled out or requires authentication, so debug access is closed on
+    shipped units.
+  code_patterns:
+    generic:
+      vulnerable: |
+        boot()                       # debug port left enabled in production
+      secure: |
+        if build == PRODUCTION: lock_debug_interface()
+        boot()
+    c:
+      vulnerable: |
+        /* JTAG/SWD left enabled; no read-protection set */
+        SystemInit();
+      secure: |
+        if (build_is_production())
+            FLASH_OBProgramInit(OB_RDP_LEVEL_2);  /* permanently lock debug */
+        SystemInit();
+    cpp:
+      vulnerable: |
+        Board::init();               // debug access port still open
+      secure: |
+        if (Build::isProduction())
+            DebugPort::disablePermanently();
+        Board::init();
+
+- id: ISVS-7.2
+  facet: Hardware Platform Security
+  section: Test Points and Configuration Fuses Locked
+  security_rule: >-
+    Manufacturing test points and device configuration fuses must be
+    locked on production units so an attacker with physical access cannot
+    re-flash firmware or reconfigure the device.
+  vulnerability_pattern: >-
+    Configuration fuses or option bytes that authorise re-flashing are
+    left in their unlocked factory state, so an attacker can reprogram the
+    device or downgrade it to vulnerable firmware over an exposed test
+    point.
+  secure_pattern: >-
+    The provisioning step burns the lock fuses and write-protects the
+    bootloader region, and the firmware verifies the locked state at boot,
+    so the device rejects unauthorised re-flashing after manufacture.
+  code_patterns:
+    generic:
+      vulnerable: |
+        provision_device()           # lock fuses left unburned
+      secure: |
+        provision_device()
+        burn_lock_fuses()            # flash + reconfigure disabled after this
+    c:
+      vulnerable: |
+        /* bootloader region writable; flash protection not applied */
+        finish_provisioning();
+      secure: |
+        finish_provisioning();
+        flash_write_protect(BOOTLOADER_SECTOR);
+        efuse_burn(EFUSE_DISABLE_REFLASH);
+    rust:
+      vulnerable: |
+        provision(&mut device);      // fuses untouched
+      secure: |
+        provision(&mut device);
+        device.efuses().burn(Efuse::FlashLock)?;  // re-flash now refused
+
+# ---------------------------------------------------------------------------
+# Secure storage of secrets
+# ---------------------------------------------------------------------------
+
+- id: ISVS-7.3
+  facet: Hardware Platform Security
+  section: Secrets Held in a Secure Element or Trusted Hardware
+  security_rule: >-
+    Cryptographic keys and other secrets must be stored in a secure
+    element, trusted platform module, or trusted execution environment
+    that resists extraction, not in general-purpose flash readable by a
+    memory dump.
+  vulnerability_pattern: >-
+    A device key or credential is written to ordinary on-chip or external
+    flash, so an attacker who reads the memory through a debug port or
+    flash chip recovers the secret in cleartext.
+  secure_pattern: >-
+    Keys are generated inside and never leave a secure element, TPM, or
+    TEE; the application asks that hardware to sign or decrypt and only
+    ever holds a handle, so a memory read-out yields no usable secret.
+  code_patterns:
+    generic:
+      vulnerable: |
+        flash_write(KEY_ADDR, device_private_key)
+      secure: |
+        handle = secure_element.generate_key()   # key never leaves the SE
+        signature = secure_element.sign(handle, message)
+    c:
+      vulnerable: |
+        memcpy(flash_region, device_key, KEY_LEN);  /* key in plain flash */
+      secure: |
+        atecc_genkey(SLOT_DEVICE_KEY);              /* key stays in the SE */
+        atecc_sign(SLOT_DEVICE_KEY, digest, signature);
+    python:
+      vulnerable: |
+        open("/data/device.key", "wb").write(private_key)
+      secure: |
+        # key handle lives in the TPM; private bytes never reach the host
+        key = tpm.create_primary(template=ECC_P256)
+        signature = tpm.sign(key.handle, digest)
+    rust:
+      vulnerable: |
+        fs::write("/data/device.key", &private_key)?;
+      secure: |
+        let handle = secure_element.generate_key(KeySlot::Device)?;
+        let sig = secure_element.sign(handle, &digest)?;  // private key sealed
+
+# ---------------------------------------------------------------------------
+# Tamper resistance
+# ---------------------------------------------------------------------------
+
+- id: ISVS-7.4
+  facet: Hardware Platform Security
+  section: Tamper Detection and Tamper Response
+  security_rule: >-
+    Devices whose threat model includes physical attack must provide
+    tamper-evident or tamper-responsive measures that detect intrusion and
+    react, zeroising keys where warranted, rather than failing silently.
+  vulnerability_pattern: >-
+    The device has no tamper sensors or no response wired to them, so
+    opening the enclosure, probing the board, or removing a shield leaves
+    no trace and triggers no protective action.
+  secure_pattern: >-
+    Tamper sensors raise an interrupt that the firmware services
+    immediately by erasing key material and recording the event, so a
+    physical intrusion is detected and the secrets it targeted are
+    destroyed before they can be read.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # enclosure switch wired but no handler — intrusion ignored
+        run_application()
+      secure: |
+        on_tamper_event(lambda: (zeroise_keys(), log_tamper(), halt()))
+        run_application()
+    c:
+      vulnerable: |
+        /* TAMPER pin floating; no IRQ handler registered */
+        app_main();
+      secure: |
+        void TAMPER_IRQHandler(void) {
+            secure_zeroise(key_store, sizeof(key_store));
+            backup_register_log(TAMPER_EVENT);
+        }
+    cpp:
+      vulnerable: |
+        device.start();              // tamper line never serviced
+      secure: |
+        tamper.onIntrusion([&] { keyStore.zeroise(); device.lockdown(); });
+        device.start();
+
+# ---------------------------------------------------------------------------
+# Side-channel and fault-injection resistance
+# ---------------------------------------------------------------------------
+
+- id: ISVS-7.5
+  facet: Hardware Platform Security
+  section: Constant-Time Side-Channel-Resistant Cryptography
+  security_rule: >-
+    Cryptographic implementations must be chosen and reviewed for
+    constant-time behaviour so that key material cannot be recovered
+    through timing or power side-channel analysis.
+  vulnerability_pattern: >-
+    A comparison, branch, or table lookup in cryptographic code depends on
+    secret data, so its execution time or power draw varies with the key
+    and leaks it to an observer measuring the device.
+  secure_pattern: >-
+    Secret-dependent comparisons use a constant-time routine that always
+    examines every byte, and branches and memory accesses do not depend on
+    key bits, so timing and power are independent of the secret.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if mac == expected: accept()      # early-exit compare leaks via timing
+      secure: |
+        if constant_time_equal(mac, expected): accept()
+    c:
+      vulnerable: |
+        if (memcmp(mac, expected, MAC_LEN) == 0) accept();  /* data-dependent */
+      secure: |
+        unsigned char d = 0;
+        for (size_t i = 0; i < MAC_LEN; i++) d |= mac[i] ^ expected[i];
+        if (d == 0) accept();
+    python:
+      vulnerable: |
+        if computed_tag == provided_tag:
+            grant_access()
+      secure: |
+        import hmac
+        if hmac.compare_digest(computed_tag, provided_tag):
+            grant_access()
+    rust:
+      vulnerable: |
+        if tag == expected { accept(); }   // == short-circuits on first diff
+      secure: |
+        use subtle::ConstantTimeEq;
+        if tag.ct_eq(&expected).into() { accept(); }
+
+- id: ISVS-7.6
+  facet: Hardware Platform Security
+  section: Fault-Injection Hardening of Security Decisions
+  security_rule: >-
+    Security-critical decisions must be written so that a single glitched
+    instruction cannot turn a failed check into a pass — use redundant
+    checks, non-trivial success values, and default-deny flow.
+  vulnerability_pattern: >-
+    A verification result is held in a single boolean tested once, so a
+    voltage or clock glitch that skips the compare or flips the flag lets
+    the device treat an unverified image or credential as valid.
+  secure_pattern: >-
+    The decision is confirmed by redundant checks separated in the code,
+    represented by a non-trivial sentinel value rather than a plain
+    boolean, and any deviation falls through to a deny-and-halt path.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if verify(image): boot(image)     # one check, one glitch defeats it
+      secure: |
+        if verify(image) == OK_MAGIC and verify(image) == OK_MAGIC:
+            boot(image)
+        else: halt()
+    c:
+      vulnerable: |
+        if (verify_signature(img) == 0)
+            jump_to_application();
+      secure: |
+        volatile uint32_t r1 = verify_signature(img);
+        volatile uint32_t r2 = verify_signature(img);
+        if (r1 == VERIFY_OK && r2 == VERIFY_OK) jump_to_application();
+        else secure_halt();
+    rust:
+      vulnerable: |
+        if verify(&image).is_ok() { boot(image); }
+      secure: |
+        let a = verify(&image);
+        let b = verify(&image);
+        match (a, b) {
+            (Ok(OK_MAGIC), Ok(OK_MAGIC)) => boot(image),
+            _ => secure_halt(),
+        }

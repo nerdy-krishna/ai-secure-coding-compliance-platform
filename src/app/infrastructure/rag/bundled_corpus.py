@@ -1,13 +1,13 @@
-"""Ingest the bundled CWE Essentials / ISVS RAG corpora into the vector store.
+"""Ingest the bundled ASVS / CWE Essentials / ISVS RAG corpora.
 
-Framework Expansion #60 / #62 ship a RAG corpus for CWE Essentials and
-ISVS inside the repository (`app/data/<framework>_corpus.csv`, generated
-from the concern-area markdown by `scripts/build_corpus.py`). Unlike the
-admin CSV-upload flow, this path is *raw* — it skips the paid LLM
+Three frameworks ship a RAG corpus inside the repository
+(`app/data/<framework>_corpus.csv`, rendered from hand-authored
+per-domain enriched YAML by `scripts/build_enriched_corpus.py`). Unlike
+the admin CSV-upload flow, this path is *raw* — it skips the paid LLM
 enrichment pass — because the bundled corpus is already authored in the
-`**Vulnerability Pattern**` / `**Secure Pattern**` layout the scan
-agents parse. That makes it free and fast enough to run unattended on
-app startup.
+enriched `**Vulnerability Pattern**` / `**Secure Pattern**` /
+`[[LANG PATTERNS]]` layout the scan agents parse. That makes it free
+and fast enough to run unattended on app startup.
 """
 
 from __future__ import annotations

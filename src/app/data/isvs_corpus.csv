@@ -1,245 +1,2755 @@
-id,document,concern_area
-01-secure-development-provisioning,"# Secure Development & Provisioning
+id,document,embed_text,concern_area
+ISVS-1.1,"**Security Rule:** Every device must be given a unique identity established at manufacture, so a single compromised unit cannot be impersonated by or used to compromise the rest of the fleet.
 
-This concern-area covers the ecosystem-level practices that decide
-whether a connected device starts life in a defensible state. It maps
-to the IoT ecosystem chapter of the OWASP ISVS and spans the secure
-development lifecycle, threat modeling, device identity, provisioning
-and onboarding, and supply-chain integrity.
+**Vulnerability Pattern (Description):** Every unit in a product line ships with the same identifier or credential, so cloning or extracting it from one device yields an identity that is accepted for the whole fleet.
 
-**Vulnerability Pattern (Secure Development & Provisioning):**
+**Secure Pattern (Description):** Each unit is assigned a distinct identifier and credential at manufacture, so identities never overlap and a compromise is contained to a single device.
 
-The recurring weakness is treating a fleet of devices as if each were a
-one-off product. A device ships with a shared default credential or a
-key common to every unit, so compromising one unit compromises all of
-them. A device has no unique, attestable identity, so the back end
-cannot tell a genuine unit from an impostor. Onboarding accepts a
-device onto the network before its identity is verified, or transfers
-provisioning secrets over an unauthenticated channel. The bill of
-materials for firmware and hardware is unknown, so a vulnerable
-component cannot be located when an advisory lands. Decommissioning
-leaves credentials and keys live on a device that has left the
-operator's control.
+[[C PATTERNS]]
+Vulnerable:
+```
+#define DEVICE_ID ""FLEET-DEVICE-0001""   /* baked into shared firmware */
+```
+Secure:
+```
+char device_id[33];
+provisioning_read_device_id(device_id, sizeof(device_id));
+```
 
-**Secure Pattern (Secure Development & Provisioning):**
+[[C++ PATTERNS]]
+Vulnerable:
+```
+const std::string deviceId = ""FLEET-DEVICE-0001"";
+```
+Secure:
+```
+const std::string deviceId = Provisioning::readUniqueDeviceId();
+```
 
-Sound practice gives every device a unique identity established at
-manufacture and bound to hardware where possible, and provisions
-per-device secrets rather than shared ones. Threat modeling is
-performed for the device, its companion app, and its cloud services
-together, since the trust boundaries that matter span all three.
-Onboarding authenticates the device before granting it network access
-and protects provisioning data in transit. A maintained software and
-hardware bill of materials makes component risk auditable. A defined
-decommissioning path revokes identity and wipes secrets when a device
-is retired, returned, or resold.
-",Secure Development & Provisioning
-02-device-application-data-protection,"# Device Application & Data Protection
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+device_id = ""FLEET-DEVICE-0001""     # same constant flashed to every unit
+```
+Secure:
+```
+device_id = read_unique_id_from_provisioning()   # distinct per unit
+```
 
-This concern-area covers the security of the application software that
-runs in the device's user space — the code closest to sensors,
-actuators, and the user — together with the data that application
-holds. It maps to the user-space application chapter of the OWASP ISVS.
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+DEVICE_ID = ""FLEET-DEVICE-0001""
+```
+Secure:
+```
+DEVICE_ID = provisioning.read_unique_id()   # written per unit at factory
+```
 
-**Vulnerability Pattern (Device Application & Data Protection):**
+[[RUST PATTERNS]]
+Vulnerable:
+```
+const DEVICE_ID: &str = ""FLEET-DEVICE-0001"";
+```
+Secure:
+```
+let device_id = provisioning::read_unique_id()?;
+```","Every device must be given a unique identity established at manufacture, so a single compromised unit cannot be impersonated by or used to compromise the rest of the fleet.
+Every unit in a product line ships with the same identifier or credential, so cloning or extracting it from one device yields an identity that is accepted for the whole fleet.
+Each unit is assigned a distinct identifier and credential at manufacture, so identities never overlap and a compromise is contained to a single device.",Secure Development & Provisioning
+ISVS-1.2,"**Security Rule:** Cryptographic keys and credentials must be provisioned uniquely per device, never shared across a product line, so extracting a secret from one unit does not expose the whole fleet.
 
-The recurring weakness is treating the device as a trusted, private
-environment when it is in fact physically accessible to an attacker. A
-device application stores credentials, API tokens, or session keys in
-plaintext on the filesystem or in shared preferences, so anyone who can
-read the storage medium recovers them. Sensitive data — personal
-information, telemetry, captured media — is written to disk
-unencrypted or copied into world-readable logs. Local inter-process
-communication channels (sockets, named pipes, intents, shared memory)
-are exposed without authentication, so a co-resident process can drive
-privileged functionality. Application-level access control is enforced
-only in the companion phone app or cloud, leaving the on-device
-operation itself unguarded.
+**Vulnerability Pattern (Description):** A single hardcoded key or password is embedded in the firmware image that every unit runs, so recovering it once decrypts traffic or grants access for every device.
 
-**Secure Pattern (Device Application & Data Protection):**
+**Secure Pattern (Description):** A distinct key is generated for each device, either on-device or by a provisioning service, and the shared firmware image contains no secret material at all.
 
-Sound practice treats on-device storage as hostile. Credentials and
-keys are kept in a hardware-backed keystore or secure element rather
-than in application files, and sensitive data at rest is encrypted with
-keys the application cannot trivially export. Logs are scrubbed of
-secrets and personal data. Local IPC endpoints authenticate their peer
-and expose the narrowest possible surface. Every privileged on-device
-operation enforces its own authorization check rather than trusting a
-remote caller, so a compromise of the companion app or a spoofed cloud
-message cannot bypass it.
-",Device Application & Data Protection
-03-firmware-integrity-secure-boot,"# Firmware Integrity & Secure Boot
+[[C PATTERNS]]
+Vulnerable:
+```
+static const uint8_t AES_KEY[16] = { 0x00, 0x11, 0x22 /* ...shared */ };
+```
+Secure:
+```
+uint8_t aes_key[16];
+secure_element_get_device_key(aes_key);   /* unique, hardware-held */
+```
 
-This concern-area covers the chain of trust that decides whether a
-device will only run firmware its manufacturer authorised. It maps to
-the software-platform chapter of the OWASP ISVS and spans secure and
-verified boot, the bootloader, firmware image signing, anti-rollback,
-and the authenticity and integrity of over-the-air updates.
+[[C++ PATTERNS]]
+Vulnerable:
+```
+const std::array<uint8_t, 16> kAesKey = { 0x00, 0x11, 0x22 /* shared */ };
+```
+Secure:
+```
+auto aesKey = SecureElement::deriveDeviceKey();   // unique per unit
+```
 
-**Vulnerability Pattern (Firmware Integrity & Secure Boot):**
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+device_key = ""S3cret-shared-by-all-units""   # same in every image
+```
+Secure:
+```
+device_key = provisioning.fetch_per_device_key(device_id)
+```
 
-The recurring weakness is a boot or update path that accepts firmware
-without proving where it came from. Secure boot is absent, so modified
-firmware runs unchallenged. A boot stage verifies the next stage with a
-weak or hard-coded check, or the verification can be skipped through a
-debug or recovery path. Firmware images are unsigned, or the signature
-is checked with a key an attacker can substitute. The update mechanism
-fetches an image over an unauthenticated channel, or applies it without
-verifying a signature, so a network attacker can install their own
-build. There is no anti-rollback protection, so an attacker downgrades
-the device to an older, vulnerable version that is still validly
-signed.
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+API_KEY = ""S3cret-shared-by-all-units""
+```
+Secure:
+```
+API_KEY = provisioning.fetch_per_device_key(DEVICE_ID)
+```
 
-**Secure Pattern (Firmware Integrity & Secure Boot):**
+[[RUST PATTERNS]]
+Vulnerable:
+```
+const API_KEY: &str = ""S3cret-shared-by-all-units"";
+```
+Secure:
+```
+let api_key = provisioning::fetch_per_device_key(&device_id)?;
+```","Cryptographic keys and credentials must be provisioned uniquely per device, never shared across a product line, so extracting a secret from one unit does not expose the whole fleet.
+A single hardcoded key or password is embedded in the firmware image that every unit runs, so recovering it once decrypts traffic or grants access for every device.
+A distinct key is generated for each device, either on-device or by a provisioning service, and the shared firmware image contains no secret material at all.",Secure Development & Provisioning
+ISVS-1.3,"**Security Rule:** Device identity should be bound to hardware, such as a secure element or trusted platform module, so the back end can attest a genuine unit and an impostor cannot present a copied identity.
 
-Sound practice establishes a hardware root of trust and verifies each
-boot stage's signature before transferring control to it, with no path
-that bypasses the check. Firmware images are signed with a key held in
-a protected store, and the verification key is immutable on the device.
-Updates are delivered over an authenticated, integrity-protected
-channel, and the device verifies the image signature and a monotonic
-version counter before installing, rejecting both tampered images and
-downgrades. The update process is atomic, with a verified fallback so a
-failed update cannot brick or weaken the device.
-",Firmware Integrity & Secure Boot
-04-software-platform-hardening,"# Software Platform Hardening
+**Vulnerability Pattern (Description):** The device identity key lives in plain flash or a writable file, so it can be read out and replayed from cloned hardware or a software emulator that the back end cannot distinguish from a real device.
 
-This concern-area covers the configuration and runtime posture of the
-operating system or RTOS the device runs on, once a trusted firmware
-image is booting. It maps to the software-platform chapter of the OWASP
-ISVS and spans OS and RTOS hardening, removal of unnecessary services,
-on-device cryptography and key storage, memory protections, and process
-isolation.
+**Secure Pattern (Description):** The identity key is generated inside and never leaves a secure element, and the device proves possession by signing a server challenge so the back end can attest the hardware.
 
-**Vulnerability Pattern (Software Platform Hardening):**
+[[C PATTERNS]]
+Vulnerable:
+```
+uint8_t key[32];
+read_flash(IDENTITY_ADDR, key, sizeof(key));   /* extractable */
+```
+Secure:
+```
+uint8_t sig[64];
+secure_element_sign(challenge, chal_len, sig);  /* key stays in SE */
+```
 
-The recurring weakness is shipping a development configuration as the
-production image. Debug shells, verbose logging, test accounts, and
-diagnostic services are left enabled, each one an entry point. The
-platform runs more services and listens on more interfaces than the
-product needs, widening the attack surface for no functional benefit.
-Cryptographic operations use keys held in ordinary application memory
-or files rather than in protected storage, so a single memory-disclosure
-bug exposes them. Memory protections that the hardware and OS could
-provide — non-executable data regions, address-space layout
-randomization, stack protection — are disabled or unavailable, so a
-memory-corruption bug becomes reliable code execution. Processes run
-with more privilege than they need and without isolation, so one
-compromised component owns the device.
+[[C++ PATTERNS]]
+Vulnerable:
+```
+auto key = Flash::read(kIdentityAddr, 32);
+```
+Secure:
+```
+auto sig = Tpm::sign(serverChallenge);   // private key non-exportable
+```
 
-**Secure Pattern (Software Platform Hardening):**
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+key = read_file(""/etc/device/identity.key"")   # copyable plaintext key
+send_login(key)
+```
+Secure:
+```
+signature = secure_element.sign(server_challenge)   # key never exported
+send_attestation(signature)
+```
 
-Sound practice ships a minimised production image: debug interfaces,
-test accounts, and unused services are removed or disabled, and only
-the interfaces the product requires are reachable. Cryptographic keys
-live in a hardware-backed keystore, secure element, or trusted
-execution environment, and are used through APIs that never expose the
-raw key. Available memory-protection features are enabled. Each
-component runs under the least privilege it needs and is isolated —
-through separate accounts, namespaces, or sandboxes — so a compromise
-is contained rather than total.
-",Software Platform Hardening
-05-communication-transport-cryptography,"# Communication Transport & Cryptography
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+key = open(""/etc/device/identity.key"", ""rb"").read()
+```
+Secure:
+```
+sig = tpm2.sign(challenge, key_handle=ATTESTATION_KEY)
+```
 
-This concern-area covers how a device protects data while it moves
-between the device, its companion applications, and its cloud
-services. It maps to the communication chapter of the OWASP ISVS and
-spans transport encryption, mutual authentication, certificate
-validation, and the cryptography that secures device communications.
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let key = std::fs::read(""/etc/device/identity.key"")?;
+```
+Secure:
+```
+let sig = secure_element.sign(&server_challenge)?;  // key never leaves SE
+```","Device identity should be bound to hardware, such as a secure element or trusted platform module, so the back end can attest a genuine unit and an impostor cannot present a copied identity.
+The device identity key lives in plain flash or a writable file, so it can be read out and replayed from cloned hardware or a software emulator that the back end cannot distinguish from a real device.
+The identity key is generated inside and never leaves a secure element, and the device proves possession by signing a server challenge so the back end can attest the hardware.",Secure Development & Provisioning
+ISVS-1.4,"**Security Rule:** Threat modeling must cover the device, its companion application, and its cloud services together, since the trust boundaries that matter span all three parts of the ecosystem.
 
-**Vulnerability Pattern (Communication Transport & Cryptography):**
+**Vulnerability Pattern (Description):** Threat modeling is done for the device firmware alone, so trust boundaries between the device, the mobile app, and the cloud are never analysed and cross-component attack paths go unnoticed.
 
-The recurring weakness is communication that is encrypted weakly, or
-not at all, or encrypted without confirming who is on the other end.
-Telemetry and commands travel over plaintext protocols, so anyone on
-the network path can read or alter them. A device uses TLS or DTLS but
-disables or ignores certificate validation — a common shortcut to make
-self-signed development certificates work — so an attacker who can
-intercept traffic presents any certificate and the device accepts it.
-Only the server is authenticated, leaving the device itself
-unverified, so a cloned or rogue device is indistinguishable from a
-genuine one. Outdated protocol versions and weak cipher suites remain
-enabled, so the session can be downgraded. Long-lived symmetric keys
-are shared across a whole product line, so recovering one key from one
-device decrypts the fleet.
+**Secure Pattern (Description):** A single threat model enumerates the device, companion app, and cloud services as one system, identifying every trust boundary and data flow that crosses between them.
 
-**Secure Pattern (Communication Transport & Cryptography):**
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+# threat-model.md scope: firmware only
+components: [device_firmware]
+```
+Secure:
+```
+# threat-model.md scope: full ecosystem
+components: [device_firmware, companion_app, cloud_services]
+trust_boundaries: [device<->app, app<->cloud, device<->cloud]
+```","Threat modeling must cover the device, its companion application, and its cloud services together, since the trust boundaries that matter span all three parts of the ecosystem.
+Threat modeling is done for the device firmware alone, so trust boundaries between the device, the mobile app, and the cloud are never analysed and cross-component attack paths go unnoticed.
+A single threat model enumerates the device, companion app, and cloud services as one system, identifying every trust boundary and data flow that crosses between them.",Secure Development & Provisioning
+ISVS-1.5,"**Security Rule:** Onboarding must verify a device's identity before granting it network access or accepting it into the fleet, so an unverified or rogue device is never admitted.
 
-Sound practice encrypts every channel that carries device data or
-control with a current protocol version and strong cipher suites, and
-validates the peer's certificate or public key on every connection —
-no exceptions for convenience. Where the product's trust model
-requires it, both ends authenticate, so the cloud can be sure it is
-talking to a genuine device and vice versa. Keys are per-device and
-rotatable, session keys are ephemeral, and the device rejects
-downgrade attempts to obsolete protocols or ciphers.
-",Communication Transport & Cryptography
-06-pairing-network-exposure,"# Pairing & Network Exposure
+**Vulnerability Pattern (Description):** The onboarding flow adds a device to the network or registers it with the back end first and verifies its identity later, or not at all, so a rogue device is admitted before any check runs.
 
-This concern-area covers the device's network-facing attack surface —
-the services it exposes, and the pairing and bonding flows by which new
-peers are admitted. It maps to the communication chapter of the OWASP
-ISVS, alongside transport security.
+**Secure Pattern (Description):** The device's identity certificate or attestation is verified up front, and network access is granted only after that check succeeds.
 
-**Vulnerability Pattern (Pairing & Network Exposure):**
+[[C PATTERNS]]
+Vulnerable:
+```
+join_network(dev);
+if (!verify_cert(dev)) log_warn(""unverified"");   /* already joined */
+```
+Secure:
+```
+if (verify_cert(dev) == OK) {
+    join_network(dev);
+}
+```
 
-The recurring weakness is exposing more than the product needs, and
-admitting peers too readily. A device listens on debug, diagnostic, or
-administrative ports that were useful in development and were never
-closed for production. Network services run without authentication, so
-reaching the device is the same as controlling it. Pairing accepts any
-peer without a confirmation step, uses a fixed or guessable PIN, or
-leaves a pairing window open indefinitely, so an attacker in range
-bonds with the device and inherits a trusted relationship. Once paired,
-a peer is trusted forever, with no way to review or revoke bonds.
+[[C++ PATTERNS]]
+Vulnerable:
+```
+mesh.admit(device);
+device.verifyIdentity();
+```
+Secure:
+```
+if (device.verifyIdentity()) {
+    mesh.admit(device);
+}
+```
 
-**Secure Pattern (Pairing & Network Exposure):**
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+network.admit(device)
+verify_identity(device)        # check runs after access is granted
+```
+Secure:
+```
+if verify_identity(device):    # verify first
+    network.admit(device)
+```
 
-Sound practice minimises the exposed surface: only the services the
-product requires are reachable, debug and administrative interfaces are
-disabled in production, and every network-facing service authenticates
-its caller. Pairing requires an explicit, human-mediated confirmation —
-a button press, a code shown on the device — rather than silent
-acceptance, uses a per-device or sufficiently random secret, and is
-time-boxed so the window closes promptly. Bonded peers are enumerable
-and revocable, so a lost or compromised peer can be removed without
-re-provisioning the device. The default state is closed: a freshly
-booted device admits nothing until it is deliberately paired.
-",Pairing & Network Exposure
-07-hardware-platform-security,"# Hardware Platform Security
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+fleet.register(device)
+if not verify_attestation(device):
+    log.warning(""rogue device"")
+```
+Secure:
+```
+if verify_attestation(device):
+    fleet.register(device)
+```
 
-This concern-area covers the physical and silicon-level security of the
-device, on the assumption that an attacker can hold the device in their
-hands. It maps to the hardware-platform chapter of the OWASP ISVS and
-spans debug and test interfaces, tamper resistance, secure elements and
-trusted execution environments, and resistance to side-channel and
-fault-injection attacks.
+[[RUST PATTERNS]]
+Vulnerable:
+```
+network.admit(&device);
+let _ = verify_identity(&device);
+```
+Secure:
+```
+if verify_identity(&device)? {
+    network.admit(&device);
+}
+```","Onboarding must verify a device's identity before granting it network access or accepting it into the fleet, so an unverified or rogue device is never admitted.
+The onboarding flow adds a device to the network or registers it with the back end first and verifies its identity later, or not at all, so a rogue device is admitted before any check runs.
+The device's identity certificate or attestation is verified up front, and network access is granted only after that check succeeds.",Secure Development & Provisioning
+ISVS-1.6,"**Security Rule:** Provisioning secrets and onboarding data must be transferred only over an authenticated, encrypted channel, so they cannot be observed or tampered with while a device is being commissioned.
 
-**Vulnerability Pattern (Hardware Platform Security):**
+**Vulnerability Pattern (Description):** Provisioning keys or credentials are sent to a device over an unauthenticated or cleartext channel, so anyone on the local network can capture the secret or inject their own provisioning payload.
 
-The recurring weakness is leaving manufacturing and debug capabilities
-accessible on shipped units. Hardware debug ports — JTAG, SWD, UART
-consoles — remain enabled, giving anyone with physical access a direct
-path to halt the processor, dump memory, and extract firmware and keys.
-Test points and unlocked configuration fuses let an attacker re-flash
-or reconfigure the device. Secrets are stored in general-purpose flash
-rather than in a secure element, so a memory read-out recovers them.
-There is no tamper detection, so physical intrusion leaves no trace and
-triggers no protective response. Cryptographic code is written without
-regard for side channels, leaking key material through timing or power
-analysis, and is not hardened against fault injection, so a glitched
-operation can skip a verification step.
+**Secure Pattern (Description):** Provisioning data travels over a mutually authenticated TLS session, so the secret stays confidential and the device confirms it is talking to the genuine provisioning service.
 
-**Secure Pattern (Hardware Platform Security):**
+[[C PATTERNS]]
+Vulnerable:
+```
+send(sock, secret, secret_len, 0);   /* raw TCP, no TLS */
+```
+Secure:
+```
+mbedtls_ssl_write(&tls, secret, secret_len);  /* authenticated TLS */
+```
 
-Sound practice disables or locks debug and test interfaces on
-production units, or gates them behind strong authentication. Secrets
-and cryptographic keys are held in a secure element, trusted platform
-module, or trusted execution environment that resists extraction even
-with physical access. Tamper-evident or tamper-responsive measures
-detect intrusion and react — zeroising keys where the threat model
-warrants it. Cryptographic implementations are chosen and reviewed for
-constant-time behaviour and side-channel resistance, and security
-decisions are written so that a single glitched instruction cannot turn
-a failed check into a pass.
-",Hardware Platform Security
+[[C++ PATTERNS]]
+Vulnerable:
+```
+httpClient.post(""http://prov.local/enroll"", deviceSecret);
+```
+Secure:
+```
+tlsClient.post(""https://prov.example.com/enroll"", deviceSecret);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+send_plaintext(provisioning_url_over_http, device_secret)
+```
+Secure:
+```
+send_over_mutual_tls(provisioning_endpoint, device_secret)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+requests.post(""http://prov.local/enroll"", data=device_secret)
+```
+Secure:
+```
+requests.post(""https://prov.example.com/enroll"", data=device_secret,
+              cert=(""device.crt"", ""device.key""), verify=""ca.pem"")
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+TcpStream::connect(""prov.local:80"")?.write_all(&device_secret)?;
+```
+Secure:
+```
+let mut tls = tls_connector.connect(""prov.example.com"", stream)?;
+tls.write_all(&device_secret)?;
+```","Provisioning secrets and onboarding data must be transferred only over an authenticated, encrypted channel, so they cannot be observed or tampered with while a device is being commissioned.
+Provisioning keys or credentials are sent to a device over an unauthenticated or cleartext channel, so anyone on the local network can capture the secret or inject their own provisioning payload.
+Provisioning data travels over a mutually authenticated TLS session, so the secret stays confidential and the device confirms it is talking to the genuine provisioning service.",Secure Development & Provisioning
+ISVS-1.7,"**Security Rule:** A maintained software and hardware bill of materials must enumerate every firmware component and hardware part with its version, so a vulnerable component can be located across the fleet when an advisory lands.
+
+**Vulnerability Pattern (Description):** No inventory of firmware libraries or hardware parts is kept, so when a vulnerability advisory is published the operator cannot tell which devices contain the affected component.
+
+**Secure Pattern (Description):** A versioned bill of materials is generated as part of the build and kept current, listing every component so advisories can be matched to affected devices.
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+# release artifact: firmware.bin only — no component inventory
+```
+Secure:
+```
+# release artifact: firmware.bin + sbom.cdx.json (CycloneDX, versioned)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+# build step ends after compiling the image
+build_firmware()
+```
+Secure:
+```
+build_firmware()
+generate_sbom(output=""sbom.cdx.json"", format=""cyclonedx"")
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+# CI: cargo build --release
+```
+Secure:
+```
+# CI: cargo build --release && cargo cyclonedx --format json
+```","A maintained software and hardware bill of materials must enumerate every firmware component and hardware part with its version, so a vulnerable component can be located across the fleet when an advisory lands.
+No inventory of firmware libraries or hardware parts is kept, so when a vulnerability advisory is published the operator cannot tell which devices contain the affected component.
+A versioned bill of materials is generated as part of the build and kept current, listing every component so advisories can be matched to affected devices.",Secure Development & Provisioning
+ISVS-1.8,"**Security Rule:** A defined decommissioning path must revoke a device's identity and wipe its credentials and keys when it is retired, returned, or resold, so a device that leaves the operator's control retains no live secrets.
+
+**Vulnerability Pattern (Description):** A retired or returned device keeps its keys and credentials and its identity stays valid on the back end, so whoever obtains the hardware can still authenticate to the fleet.
+
+**Secure Pattern (Description):** Decommissioning revokes the device's identity at the back end and securely erases all on-device keys and credentials, leaving the unit with no usable secret material.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+set_status(dev, STATUS_RETIRED);   /* secrets remain in flash */
+```
+Secure:
+```
+backend_revoke_cert(dev->id);
+secure_element_zeroize();          /* keys destroyed */
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+device.setState(State::Retired);
+```
+Secure:
+```
+Backend::revokeIdentity(device.id());
+SecureElement::zeroizeKeys();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+mark_device_inactive(device_id)        # keys left on device, cert still valid
+```
+Secure:
+```
+backend.revoke_identity(device_id)
+secure_wipe(device_keystore)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+db.update(device_id, status=""retired"")
+```
+Secure:
+```
+backend.revoke_identity(device_id)
+keystore.secure_erase()
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+device.set_status(Status::Retired);
+```
+Secure:
+```
+backend::revoke_identity(&device_id)?;
+secure_element::zeroize_keys()?;
+```","A defined decommissioning path must revoke a device's identity and wipe its credentials and keys when it is retired, returned, or resold, so a device that leaves the operator's control retains no live secrets.
+A retired or returned device keeps its keys and credentials and its identity stays valid on the back end, so whoever obtains the hardware can still authenticate to the fleet.
+Decommissioning revokes the device's identity at the back end and securely erases all on-device keys and credentials, leaving the unit with no usable secret material.",Secure Development & Provisioning
+ISVS-2.1,"**Security Rule:** Credentials, API tokens, and session or signing keys must be held in a hardware-backed keystore or secure element, never in plaintext application files or shared preferences that an attacker with device access can read.
+
+**Vulnerability Pattern (Description):** The device application writes a credential or key into a plain file, a config entry, or a shared-preferences store, so anyone who can read the storage medium recovers the secret directly.
+
+**Secure Pattern (Description):** Secrets are stored in and used through a hardware-backed keystore or secure element, so the application references a key handle and the raw key material never lands in a readable file.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+FILE *f = fopen(""/data/creds.txt"", ""w"");
+fprintf(f, ""key=%s\n"", api_key);
+```
+Secure:
+```
+uint32_t slot = 2;
+atecc608_write_key(slot, api_key);   // secure element, no plaintext file
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+std::ofstream(""/data/creds.txt"") << ""key="" << apiKey;
+```
+Secure:
+```
+KeystoreHandle h = keystore.importKey(""api_key"", apiKey);
+keystore.useKey(h);      // key material confined to the keystore
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+writeFile(""/data/app/config"", ""api_token="" + token)
+```
+Secure:
+```
+handle = secureElement.storeKey(""api_token"", token)
+useKey(handle)            # raw token never written to the filesystem
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+open(""/data/app/token.cfg"", ""w"").write(api_token)
+```
+Secure:
+```
+keyring.set_password(""device-app"", ""api_token"", api_token)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+std::fs::write(""/data/app/token.cfg"", api_token)?;
+```
+Secure:
+```
+keyring::Entry::new(""device-app"", ""api_token"")?.set_password(&api_token)?;
+```","Credentials, API tokens, and session or signing keys must be held in a hardware-backed keystore or secure element, never in plaintext application files or shared preferences that an attacker with device access can read.
+The device application writes a credential or key into a plain file, a config entry, or a shared-preferences store, so anyone who can read the storage medium recovers the secret directly.
+Secrets are stored in and used through a hardware-backed keystore or secure element, so the application references a key handle and the raw key material never lands in a readable file.",Device Application & Data Protection
+ISVS-2.2,"**Security Rule:** Personal information, telemetry, and captured media stored on the device must be encrypted at rest with keys the application cannot trivially export, treating the local filesystem as hostile.
+
+**Vulnerability Pattern (Description):** Sensitive records or media are written to device storage as plaintext, so an attacker who reads the flash, SD card, or backup recovers the data in clear form.
+
+**Secure Pattern (Description):** Sensitive data is encrypted with an authenticated cipher before it is written to storage, using a key bound to a hardware keystore or secure element so the key cannot be lifted off the device.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+FILE *f = fopen(""/data/media.bin"", ""wb"");
+fwrite(payload, 1, len, f);
+```
+Secure:
+```
+uint8_t out[len + 16];
+crypto_aead_lock(out, mac, key, nonce, NULL, 0, payload, len);
+fwrite(out, 1, sizeof(out), f);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+std::ofstream(""/data/media.bin"", std::ios::binary).write(buf, len);
+```
+Secure:
+```
+auto ct = aead.Encrypt(keystore.Key(""data_at_rest""), nonce, buf, len);
+std::ofstream(""/data/media.bin"", std::ios::binary).write(ct.data(), ct.size());
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+writeFile(""/data/telemetry.db"", sensitiveRecord)
+```
+Secure:
+```
+key = keystore.getKey(""data_at_rest"")
+writeFile(""/data/telemetry.db"", aeadEncrypt(key, sensitiveRecord))
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+open(""/data/telemetry.db"", ""wb"").write(record)
+```
+Secure:
+```
+box = nacl.secret.SecretBox(keystore.get_key(""data_at_rest""))
+open(""/data/telemetry.db"", ""wb"").write(box.encrypt(record))
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+std::fs::write(""/data/telemetry.db"", &record)?;
+```
+Secure:
+```
+let ct = cipher.encrypt(&nonce, record.as_ref())?;   # AES-GCM
+std::fs::write(""/data/telemetry.db"", ct)?;
+```","Personal information, telemetry, and captured media stored on the device must be encrypted at rest with keys the application cannot trivially export, treating the local filesystem as hostile.
+Sensitive records or media are written to device storage as plaintext, so an attacker who reads the flash, SD card, or backup recovers the data in clear form.
+Sensitive data is encrypted with an authenticated cipher before it is written to storage, using a key bound to a hardware keystore or secure element so the key cannot be lifted off the device.",Device Application & Data Protection
+ISVS-2.3,"**Security Rule:** Application logs must be scrubbed of credentials, keys, and personal data, so diagnostic output written to disk or a shared log buffer never becomes a copy of sensitive material.
+
+**Vulnerability Pattern (Description):** A log statement prints a token, key, or personal record verbatim, so the secret is copied into a log file or system log buffer that other processes or anyone with device access can read.
+
+**Secure Pattern (Description):** Log statements record only non-sensitive context, and any sensitive value is redacted or replaced with a stable hash before it reaches the log sink.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+syslog(LOG_INFO, ""session key=%s"", session_key);
+```
+Secure:
+```
+syslog(LOG_INFO, ""session established for device %s"", device_id);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+spdlog::info(""login user={} password={}"", user, password);
+```
+Secure:
+```
+spdlog::info(""login user={}"", user);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+log(""auth ok, token="" + token)
+```
+Secure:
+```
+log(""auth ok, token="" + redact(token))   # only a masked tail logged
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+logger.info(""provisioning with api_token=%s"", api_token)
+```
+Secure:
+```
+logger.info(""provisioning device %s"", device_id)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+log::info!(""connecting with key {}"", api_key);
+```
+Secure:
+```
+log::info!(""connecting device {}"", device_id);
+```","Application logs must be scrubbed of credentials, keys, and personal data, so diagnostic output written to disk or a shared log buffer never becomes a copy of sensitive material.
+A log statement prints a token, key, or personal record verbatim, so the secret is copied into a log file or system log buffer that other processes or anyone with device access can read.
+Log statements record only non-sensitive context, and any sensitive value is redacted or replaced with a stable hash before it reaches the log sink.",Device Application & Data Protection
+ISVS-2.4,"**Security Rule:** Local inter-process communication endpoints such as sockets, named pipes, intents, or shared memory must authenticate their peer and expose the narrowest possible surface, so a co-resident process cannot drive privileged functionality.
+
+**Vulnerability Pattern (Description):** A local IPC endpoint accepts and acts on any request without checking who the peer is, so any process on the device can invoke privileged operations through it.
+
+**Secure Pattern (Description):** The endpoint verifies the peer identity — for example by peer credentials, a per-client token, or a restrictive socket permission — and rejects unauthenticated callers before handling a request.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+int fd = accept(srv, NULL, NULL);
+handle_request(fd);
+```
+Secure:
+```
+struct ucred cr; socklen_t n = sizeof(cr);
+getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cr, &n);
+if (cr.uid == TRUSTED_UID) handle_request(fd);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+auto conn = pipe.accept();
+conn.dispatch();
+```
+Secure:
+```
+auto conn = pipe.accept();
+if (conn.peerCredentials().uid() == kTrustedUid) conn.dispatch();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+msg = ipcEndpoint.receive()
+handlePrivileged(msg)
+```
+Secure:
+```
+msg = ipcEndpoint.receive()
+if isTrustedPeer(msg.peer): handlePrivileged(msg)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+conn, _ = sock.accept()
+handle(conn.recv(4096))
+```
+Secure:
+```
+conn, _ = sock.accept()
+creds = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
+if struct.unpack(""3i"", creds)[1] == TRUSTED_UID: handle(conn.recv(4096))
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let (stream, _) = listener.accept()?;
+handle(stream);
+```
+Secure:
+```
+let (stream, _) = listener.accept()?;
+if stream.peer_cred()?.uid == TRUSTED_UID { handle(stream); }
+```","Local inter-process communication endpoints such as sockets, named pipes, intents, or shared memory must authenticate their peer and expose the narrowest possible surface, so a co-resident process cannot drive privileged functionality.
+A local IPC endpoint accepts and acts on any request without checking who the peer is, so any process on the device can invoke privileged operations through it.
+The endpoint verifies the peer identity — for example by peer credentials, a per-client token, or a restrictive socket permission — and rejects unauthenticated callers before handling a request.",Device Application & Data Protection
+ISVS-2.5,"**Security Rule:** Every privileged on-device operation must enforce its own authorization check rather than trusting that the companion app or the cloud already validated the caller, so a compromised companion app or a spoofed cloud message cannot bypass it.
+
+**Vulnerability Pattern (Description):** A privileged actuator or configuration command runs as soon as it is received, because access control was assumed to have happened in the phone app or cloud, leaving the on-device operation itself unguarded.
+
+**Secure Pattern (Description):** The device application independently verifies the caller is authorized for the requested operation — checking a signed command, a capability, or a local role — before executing any privileged action.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+unlock_door();               // executed on any inbound message
+```
+Secure:
+```
+if (verify_command_signature(cmd, device_pubkey))
+    unlock_door();
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+executor.run(command);
+```
+Secure:
+```
+if (policy.permits(command.caller(), command.action()))
+    executor.run(command);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+cmd = receiveCommand()
+actuator.run(cmd)            # trusts that the cloud already authorized
+```
+Secure:
+```
+cmd = receiveCommand()
+if authorize(cmd.caller, cmd.action): actuator.run(cmd)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+def on_message(cmd):
+    apply_firmware_setting(cmd)
+```
+Secure:
+```
+def on_message(cmd):
+    if authz.allows(cmd.caller, cmd.action):
+        apply_firmware_setting(cmd)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+fn on_command(cmd: Command) { actuator.run(cmd); }
+```
+Secure:
+```
+fn on_command(cmd: Command) {
+    if policy.permits(&cmd.caller, cmd.action) { actuator.run(cmd); }
+}
+```","Every privileged on-device operation must enforce its own authorization check rather than trusting that the companion app or the cloud already validated the caller, so a compromised companion app or a spoofed cloud message cannot bypass it.
+A privileged actuator or configuration command runs as soon as it is received, because access control was assumed to have happened in the phone app or cloud, leaving the on-device operation itself unguarded.
+The device application independently verifies the caller is authorized for the requested operation — checking a signed command, a capability, or a local role — before executing any privileged action.",Device Application & Data Protection
+ISVS-3.1,"**Security Rule:** Every boot stage must verify the cryptographic signature of the next stage against a hardware root of trust and transfer control to it only after that verification succeeds.
+
+**Vulnerability Pattern (Description):** A boot stage loads and jumps to the next stage without checking its signature, so modified firmware runs unchallenged because there is no secure boot at all.
+
+**Secure Pattern (Description):** Each stage anchors its trust in an immutable hardware root, verifies the signature of the next image before use, and halts the boot when verification fails rather than continuing.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+load_image(STAGE2, &img);
+boot(img.entry);                  /* control transferred unverified */
+```
+Secure:
+```
+load_image(STAGE2, &img);
+if (verify_signature(&img, rot_pubkey) != 0) { panic(); }
+boot(img.entry);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+next_stage = load(NEXT_STAGE_ADDR)
+jump(next_stage)                  # no signature check before transfer
+```
+Secure:
+```
+next_stage = load(NEXT_STAGE_ADDR)
+if not verify_signature(next_stage, root_of_trust_key): halt()
+jump(next_stage)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let stage2 = load_image(STAGE2_ADDR);
+boot(stage2.entry);
+```
+Secure:
+```
+let stage2 = load_image(STAGE2_ADDR);
+verify_signature(&stage2, &ROT_PUBKEY).expect(""stage2 signature invalid"");
+boot(stage2.entry);
+```","Every boot stage must verify the cryptographic signature of the next stage against a hardware root of trust and transfer control to it only after that verification succeeds.
+A boot stage loads and jumps to the next stage without checking its signature, so modified firmware runs unchallenged because there is no secure boot at all.
+Each stage anchors its trust in an immutable hardware root, verifies the signature of the next image before use, and halts the boot when verification fails rather than continuing.",Firmware Integrity & Secure Boot
+ISVS-3.2,"**Security Rule:** The boot path must offer no debug, recovery, or test branch that skips firmware signature verification; every route to executing code must pass through the same verification.
+
+**Vulnerability Pattern (Description):** A debug jumper, recovery mode, or test build flag lets the boot code skip the signature check, so an attacker who triggers that path runs unsigned firmware.
+
+**Secure Pattern (Description):** Verification is unconditional on production hardware, with debug and recovery branches fused off or themselves gated on the same signature check, so no route reaches code execution without it.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+if (gpio_read(DEBUG_PIN)) { boot(img.entry); }   /* bypass */
+else if (verify_signature(&img, key) == 0) { boot(img.entry); }
+```
+Secure:
+```
+if (verify_signature(&img, key) != 0) { panic(); }
+boot(img.entry);                  /* DEBUG_PIN fused off in production */
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if debug_jumper_set() or recovery_mode():
+    jump(image)                   # signature check skipped
+else:
+    verify_then_jump(image)
+```
+Secure:
+```
+verify_then_jump(image)           # one verified path, debug fuse blown
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+if cfg!(feature = ""skip_verify"") { boot(img.entry); }
+else { verify(&img)?; boot(img.entry); }
+```
+Secure:
+```
+verify(&img)?;                    // no skip_verify feature in release
+boot(img.entry);
+```","The boot path must offer no debug, recovery, or test branch that skips firmware signature verification; every route to executing code must pass through the same verification.
+A debug jumper, recovery mode, or test build flag lets the boot code skip the signature check, so an attacker who triggers that path runs unsigned firmware.
+Verification is unconditional on production hardware, with debug and recovery branches fused off or themselves gated on the same signature check, so no route reaches code execution without it.",Firmware Integrity & Secure Boot
+ISVS-3.3,"**Security Rule:** Every firmware image must be cryptographically signed by the manufacturer using a strong asymmetric algorithm, and the device must reject any image that is unsigned or carries an invalid signature.
+
+**Vulnerability Pattern (Description):** Firmware images ship unsigned or carry only a checksum, so the device has no way to prove the image came from the manufacturer and accepts any build with a matching checksum.
+
+**Secure Pattern (Description):** Images are signed with a strong asymmetric scheme and the device verifies that signature with the manufacturer public key, treating a checksum only as a transport-error check and never as authenticity.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+if (crc32(buf, len) == hdr.crc) { flash_write(buf, len); }
+```
+Secure:
+```
+if (ed25519_verify(hdr.sig, buf, len, mfr_pubkey) == 1) {
+    flash_write(buf, len);
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if crc32(image) == image.crc: install(image)   # integrity, not authenticity
+```
+Secure:
+```
+if verify_signature(image, manufacturer_pubkey): install(image)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+if hashlib.sha256(image).hexdigest() == manifest[""sha256""]:
+    apply_update(image)
+```
+Secure:
+```
+public_key.verify(manifest[""signature""], image)   # raises on failure
+apply_update(image)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+if sha256(&image) == manifest.sha256 { apply_update(&image); }
+```
+Secure:
+```
+mfr_pubkey.verify_strict(&image, &manifest.signature)?;
+apply_update(&image);
+```","Every firmware image must be cryptographically signed by the manufacturer using a strong asymmetric algorithm, and the device must reject any image that is unsigned or carries an invalid signature.
+Firmware images ship unsigned or carry only a checksum, so the device has no way to prove the image came from the manufacturer and accepts any build with a matching checksum.
+Images are signed with a strong asymmetric scheme and the device verifies that signature with the manufacturer public key, treating a checksum only as a transport-error check and never as authenticity.",Firmware Integrity & Secure Boot
+ISVS-3.4,"**Security Rule:** The public key used to verify firmware must be immutable on the device — held in one-time-programmable fuses or ROM — and the signing private key must live only in a protected hardware-backed store.
+
+**Vulnerability Pattern (Description):** The verification key sits in rewritable flash or a normal file, so an attacker can replace it with their own key and then sign hostile firmware that the device accepts.
+
+**Secure Pattern (Description):** The verification key, or a hash of it, is burned into one-time programmable memory so it cannot be altered, and the private signing key never leaves a hardware security module.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+load_key(&key, ""/etc/fw/pubkey.bin"");          /* mutable filesystem */
+verify_signature(&img, &key);
+```
+Secure:
+```
+read_otp(OTP_PUBKEY_BANK, &key, sizeof(key));  /* fused, read-only */
+verify_signature(&img, &key);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+pubkey = read_file(""/data/verify_key.pem"")     # attacker can overwrite
+verify(image, pubkey)
+```
+Secure:
+```
+pubkey = read_otp_fuses(VERIFY_KEY_REGION)     # one-time programmable
+verify(image, pubkey)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let key = fs::read(""/data/pubkey.bin"")?;       // rewritable store
+verify(&img, &key)?;
+```
+Secure:
+```
+let key = otp::read_region(OtpRegion::VerifyKey)?;  // immutable fuses
+verify(&img, &key)?;
+```","The public key used to verify firmware must be immutable on the device — held in one-time-programmable fuses or ROM — and the signing private key must live only in a protected hardware-backed store.
+The verification key sits in rewritable flash or a normal file, so an attacker can replace it with their own key and then sign hostile firmware that the device accepts.
+The verification key, or a hash of it, is burned into one-time programmable memory so it cannot be altered, and the private signing key never leaves a hardware security module.",Firmware Integrity & Secure Boot
+ISVS-3.5,"**Security Rule:** Over-the-air firmware updates must be fetched over a channel that authenticates the update server and protects the image in transit, so a network attacker cannot supply or tamper with the image.
+
+**Vulnerability Pattern (Description):** The device downloads firmware over plain HTTP or an unauthenticated channel, so a network attacker can serve their own build or alter the image as it transfers.
+
+**Secure Pattern (Description):** The device retrieves updates over TLS with full certificate validation, or pinned to the manufacturer certificate, so the server is authenticated and the image cannot be modified in transit.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+curl_easy_setopt(curl, CURLOPT_URL, ""http://ota.example.com/fw.bin"");
+```
+Secure:
+```
+curl_easy_setopt(curl, CURLOPT_URL, ""https://ota.example.com/fw.bin"");
+curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, mfr_pin);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+image = http_get(""http://updates.example.com/fw.bin"")
+```
+Secure:
+```
+image = https_get(""https://updates.example.com/fw.bin"",
+                   verify=True, pinned_cert=MFR_CERT)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+image = requests.get(""http://ota.example.com/fw.bin"").content
+```
+Secure:
+```
+image = requests.get(""https://ota.example.com/fw.bin"",
+                      verify=""/etc/ssl/mfr_ca.pem"").content
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let image = reqwest::blocking::get(""http://ota.example.com/fw.bin"")?;
+```
+Secure:
+```
+let client = reqwest::blocking::Client::builder()
+    .add_root_certificate(mfr_ca).build()?;
+let image = client.get(""https://ota.example.com/fw.bin"").send()?;
+```","Over-the-air firmware updates must be fetched over a channel that authenticates the update server and protects the image in transit, so a network attacker cannot supply or tamper with the image.
+The device downloads firmware over plain HTTP or an unauthenticated channel, so a network attacker can serve their own build or alter the image as it transfers.
+The device retrieves updates over TLS with full certificate validation, or pinned to the manufacturer certificate, so the server is authenticated and the image cannot be modified in transit.",Firmware Integrity & Secure Boot
+ISVS-3.6,"**Security Rule:** The device must verify the signature of a downloaded firmware image before writing it to flash, and must discard any image whose signature does not validate against the immutable verification key.
+
+**Vulnerability Pattern (Description):** A downloaded image is written to flash as soon as the transfer completes, with signature verification deferred or absent, so a tampered or hostile image is installed.
+
+**Secure Pattern (Description):** The full image is verified against the manufacturer public key while still in a staging area, and only an image that passes is committed to the boot flash.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+ota_download(&staging);
+flash_commit(&staging);           /* committed unverified */
+```
+Secure:
+```
+ota_download(&staging);
+if (verify_signature(&staging, verify_key) != 0) { ota_abort(&staging); }
+else { flash_commit(&staging); }
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+download(image, staging)
+flash_write(staging)              # installed before any verification
+```
+Secure:
+```
+download(image, staging)
+if verify_signature(staging, verify_key): flash_write(staging)
+else: discard(staging)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+blob = download_update()
+write_to_partition(""boot"", blob)
+```
+Secure:
+```
+blob = download_update()
+verify_key.verify(manifest.signature, blob)   # raises if invalid
+write_to_partition(""boot"", blob)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let blob = download_update()?;
+flash::write(Partition::Boot, &blob)?;
+```
+Secure:
+```
+let blob = download_update()?;
+verify_key.verify_strict(&blob, &manifest.signature)?;
+flash::write(Partition::Boot, &blob)?;
+```","The device must verify the signature of a downloaded firmware image before writing it to flash, and must discard any image whose signature does not validate against the immutable verification key.
+A downloaded image is written to flash as soon as the transfer completes, with signature verification deferred or absent, so a tampered or hostile image is installed.
+The full image is verified against the manufacturer public key while still in a staging area, and only an image that passes is committed to the boot flash.",Firmware Integrity & Secure Boot
+ISVS-3.7,"**Security Rule:** The device must enforce anti-rollback by checking a monotonic version counter against the incoming image and rejecting any firmware older than the version currently installed, even when validly signed.
+
+**Vulnerability Pattern (Description):** The update path accepts any image with a valid signature regardless of version, so an attacker installs an older, validly signed build that still carries known vulnerabilities.
+
+**Secure Pattern (Description):** A monotonic version counter held in tamper-resistant storage is compared against the image version, and the counter is advanced on a successful update so a downgrade is rejected.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+if (verify_signature(&img, key) == 0) { flash_write(&img); }
+```
+Secure:
+```
+uint32_t cur = otp_counter_read();
+if (verify_signature(&img, key) == 0 && img.version >= cur) {
+    flash_write(&img); otp_counter_bump(img.version);
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if verify_signature(image, key): install(image)   # version ignored
+```
+Secure:
+```
+if verify_signature(image, key) and image.version >= secure_counter_get():
+    install(image); secure_counter_set(image.version)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+public_key.verify(manifest.signature, image)
+apply_update(image)
+```
+Secure:
+```
+public_key.verify(manifest.signature, image)
+if manifest.version < rollback_counter.read():
+    raise DowngradeRejected()
+apply_update(image); rollback_counter.write(manifest.version)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+verify(&img, &key)?;
+flash::write(&img)?;
+```
+Secure:
+```
+verify(&img, &key)?;
+if img.version < antirollback::counter()? { return Err(Error::Downgrade); }
+flash::write(&img)?;
+antirollback::advance(img.version)?;
+```","The device must enforce anti-rollback by checking a monotonic version counter against the incoming image and rejecting any firmware older than the version currently installed, even when validly signed.
+The update path accepts any image with a valid signature regardless of version, so an attacker installs an older, validly signed build that still carries known vulnerabilities.
+A monotonic version counter held in tamper-resistant storage is compared against the image version, and the counter is advanced on a successful update so a downgrade is rejected.",Firmware Integrity & Secure Boot
+ISVS-3.8,"**Security Rule:** Firmware updates must be applied atomically with a verified fallback image, so an interrupted or failed update can never brick the device or leave it running unverified code.
+
+**Vulnerability Pattern (Description):** The update overwrites the single active firmware partition in place, so a power loss or failed write mid-update leaves a corrupt or partially written image that bricks or weakens the device.
+
+**Secure Pattern (Description):** The new image is written to an inactive slot, verified there, and the boot pointer is switched only after success; the previous verified image stays intact as a fallback if the new one fails to boot.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+flash_erase(ACTIVE_SLOT);
+flash_write(ACTIVE_SLOT, new_img, len);  /* in-place, no fallback */
+```
+Secure:
+```
+flash_write(INACTIVE_SLOT, new_img, len);
+if (verify_signature_at(INACTIVE_SLOT, key) == 0) {
+    set_boot_slot(INACTIVE_SLOT);        /* prior slot kept as fallback */
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+erase(boot_partition)
+flash_write(boot_partition, new_image)   # power loss bricks the device
+```
+Secure:
+```
+flash_write(inactive_slot, new_image)
+if verify(inactive_slot): set_active(inactive_slot)  # atomic switch
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+write_partition(""boot"", new_image)         # single slot overwritten
+```
+Secure:
+```
+write_partition(""boot_b"", new_image)
+if verify_partition(""boot_b"", verify_key):
+    set_boot_slot(""boot_b"")                # boot_a remains as fallback
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+flash::erase(Slot::Active)?;
+flash::write(Slot::Active, &new_image)?;
+```
+Secure:
+```
+flash::write(Slot::Inactive, &new_image)?;
+verify_slot(Slot::Inactive, &key)?;
+bootloader::set_active(Slot::Inactive)?;   // confirmed-or-revert
+```","Firmware updates must be applied atomically with a verified fallback image, so an interrupted or failed update can never brick the device or leave it running unverified code.
+The update overwrites the single active firmware partition in place, so a power loss or failed write mid-update leaves a corrupt or partially written image that bricks or weakens the device.
+The new image is written to an inactive slot, verified there, and the boot pointer is switched only after success; the previous verified image stays intact as a fallback if the new one fails to boot.",Firmware Integrity & Secure Boot
+ISVS-4.1,"**Security Rule:** The production firmware image must be built from a hardened configuration, not the development configuration, so debug builds, verbose logging, and developer conveniences never reach shipped devices.
+
+**Vulnerability Pattern (Description):** The development build configuration is shipped as the production image, so debug logging, assertions, and developer tooling stay active on customer devices and leak internal state to anyone with access.
+
+**Secure Pattern (Description):** The release image is produced by a dedicated production build profile that strips debug symbols, disables verbose logging, and compiles out developer-only code paths before signing.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+/* compiled without NDEBUG: every assert and debug print stays in */
+gcc -O0 -g firmware.c -o firmware.elf
+```
+Secure:
+```
+gcc -O2 -DNDEBUG -s firmware.c -o firmware.elf   /* asserts + symbols stripped */
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+cmake -DCMAKE_BUILD_TYPE=Debug -B build
+```
+Secure:
+```
+cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUG_SHELL=OFF -B build
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+BUILD_PROFILE = ""debug""        # shipped to production unchanged
+log_level     = ""verbose""
+```
+Secure:
+```
+BUILD_PROFILE = ""release""      # debug paths compiled out
+log_level     = ""error""
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+cargo build            # debug profile: overflow checks aside, debug_assert active
+```
+Secure:
+```
+cargo build --release  # release profile, debug-only code gated by cfg(debug_assertions)
+```","The production firmware image must be built from a hardened configuration, not the development configuration, so debug builds, verbose logging, and developer conveniences never reach shipped devices.
+The development build configuration is shipped as the production image, so debug logging, assertions, and developer tooling stay active on customer devices and leak internal state to anyone with access.
+The release image is produced by a dedicated production build profile that strips debug symbols, disables verbose logging, and compiles out developer-only code paths before signing.",Software Platform Hardening
+ISVS-4.2,"**Security Rule:** Debug shells, diagnostic consoles, and developer back doors must be removed or disabled in the production image so they cannot be used as an entry point on a shipped device.
+
+**Vulnerability Pattern (Description):** A debug shell or serial console is left enabled on the production image, so anyone with physical or network access drops into an interactive shell with full device control.
+
+**Secure Pattern (Description):** The debug shell and diagnostic console are compiled out of the release build, or gated behind a fuse or authenticated unlock, so no interactive shell is reachable on a shipped unit.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+void boot(void) { spawn_uart_shell(); start_app(); }
+```
+Secure:
+```
+void boot(void) {
+#ifndef NDEBUG
+    spawn_uart_shell();
+#endif
+    start_app();
+}
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+DebugConsole::attach(serialPort);   // linked into every build
+```
+Secure:
+```
+#if defined(ENABLE_DEBUG_CONSOLE)
+    DebugConsole::attach(serialPort);
+#endif
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+start_debug_shell(uart0)       # always launched at boot
+```
+Secure:
+```
+if BUILD_PROFILE == ""debug"":   # release builds never reach this
+    start_debug_shell(uart0)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+debug_console::attach(&serial);
+```
+Secure:
+```
+#[cfg(feature = ""debug-console"")]
+debug_console::attach(&serial);
+```","Debug shells, diagnostic consoles, and developer back doors must be removed or disabled in the production image so they cannot be used as an entry point on a shipped device.
+A debug shell or serial console is left enabled on the production image, so anyone with physical or network access drops into an interactive shell with full device control.
+The debug shell and diagnostic console are compiled out of the release build, or gated behind a fuse or authenticated unlock, so no interactive shell is reachable on a shipped unit.",Software Platform Hardening
+ISVS-4.3,"**Security Rule:** Test accounts, factory default credentials, and hardcoded maintenance logins must be removed from the production image so a device cannot be accessed with known credentials.
+
+**Vulnerability Pattern (Description):** A test account or a hardcoded default password is baked into the firmware, so the device can be logged into with credentials that are identical across every shipped unit.
+
+**Secure Pattern (Description):** No credentials are embedded in firmware; accounts are provisioned per device at first boot, and any factory account is disabled or forced to rotate before the device leaves setup.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+static const char *DEFAULT_PW = ""factory123"";
+if (strcmp(input, DEFAULT_PW) == 0) grant_root();
+```
+Secure:
+```
+if (verify_provisioned_credential(user, input)) grant_session();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+accounts = {""admin"": ""admin"", ""test"": ""test1234""}
+```
+Secure:
+```
+accounts = load_provisioned_accounts()   # per-device, set at first boot
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+if user == ""service"" and pw == ""service"":
+    authorize()
+```
+Secure:
+```
+if credential_store.verify(user, pw):   # provisioned, no built-in account
+    authorize()
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+const BACKDOOR_PW: &str = ""letmein"";
+if input == BACKDOOR_PW { grant_admin(); }
+```
+Secure:
+```
+if cred_store.verify(user, input)? { grant_session(); }
+```","Test accounts, factory default credentials, and hardcoded maintenance logins must be removed from the production image so a device cannot be accessed with known credentials.
+A test account or a hardcoded default password is baked into the firmware, so the device can be logged into with credentials that are identical across every shipped unit.
+No credentials are embedded in firmware; accounts are provisioned per device at first boot, and any factory account is disabled or forced to rotate before the device leaves setup.",Software Platform Hardening
+ISVS-4.4,"**Security Rule:** Only the services and network listeners the product actually requires may run; unused daemons, diagnostic services, and open ports must be removed or disabled to minimise the attack surface.
+
+**Vulnerability Pattern (Description):** The platform runs more daemons and listens on more ports than the product needs, so each unused service is an extra entry point with no functional benefit to the device.
+
+**Secure Pattern (Description):** The image enables only the services the product requires, binds listeners to the narrowest interface and address, and removes or masks every unused daemon during the build.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+addr.sin_addr.s_addr = htonl(INADDR_ANY);   /* listens on all NICs */
+```
+Secure:
+```
+addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+start_services([""app"", ""telnetd"", ""ftpd"", ""debug_api""])
+```
+Secure:
+```
+start_services([""app""])        # only what the product needs
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+server.bind((""0.0.0.0"", 8080))      # exposed on every interface
+```
+Secure:
+```
+server.bind((""127.0.0.1"", 8080))    # loopback only, not externally reachable
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let l = TcpListener::bind(""0.0.0.0:8080"")?;
+```
+Secure:
+```
+let l = TcpListener::bind(""127.0.0.1:8080"")?;
+```","Only the services and network listeners the product actually requires may run; unused daemons, diagnostic services, and open ports must be removed or disabled to minimise the attack surface.
+The platform runs more daemons and listens on more ports than the product needs, so each unused service is an extra entry point with no functional benefit to the device.
+The image enables only the services the product requires, binds listeners to the narrowest interface and address, and removes or masks every unused daemon during the build.",Software Platform Hardening
+ISVS-4.5,"**Security Rule:** Cryptographic keys must be stored in a hardware-backed keystore, secure element, or trusted execution environment, not in ordinary application memory or plaintext files.
+
+**Vulnerability Pattern (Description):** A cryptographic key is loaded into ordinary process memory or read from a plaintext file, so a single memory-disclosure bug or filesystem read exposes the raw key material.
+
+**Secure Pattern (Description):** Keys are generated and stored inside a secure element, TPM, or trusted execution environment, and the application holds only an opaque handle to them, never the raw bytes.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+unsigned char key[32];
+fread(key, 1, 32, fopen(""/data/aes.key"", ""rb""));
+```
+Secure:
+```
+psa_key_id_t key_id;
+psa_open_key(DEVICE_KEY_ID, &key_id);   /* key never leaves the secure store */
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+key = read_file(""/etc/device.key"")     # raw key in process memory
+```
+Secure:
+```
+key_handle = secure_element.open_key(""device-signing"")
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+key = open(""signing.key"", ""rb"").read()
+```
+Secure:
+```
+key_handle = tpm.load_key(""signing"")    # opaque handle, raw key stays in TPM
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let key: [u8; 32] = std::fs::read(""device.key"")?.try_into().unwrap();
+```
+Secure:
+```
+let key = secure_element.open_key(KeyId::DeviceSigning)?;  // handle only
+```","Cryptographic keys must be stored in a hardware-backed keystore, secure element, or trusted execution environment, not in ordinary application memory or plaintext files.
+A cryptographic key is loaded into ordinary process memory or read from a plaintext file, so a single memory-disclosure bug or filesystem read exposes the raw key material.
+Keys are generated and stored inside a secure element, TPM, or trusted execution environment, and the application holds only an opaque handle to them, never the raw bytes.",Software Platform Hardening
+ISVS-4.6,"**Security Rule:** On-device cryptographic operations must be performed through APIs that act on a protected key handle so the raw key never enters application-readable memory.
+
+**Vulnerability Pattern (Description):** The application extracts a key into a local buffer to sign or encrypt, so the raw key sits in readable memory for the duration of the operation and can be captured by a disclosure bug.
+
+**Secure Pattern (Description):** Signing and encryption are delegated to the keystore or secure element through a handle-based API, so the operation runs inside protected hardware and the key is never exported.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+unsigned char raw[32];
+psa_export_key(key_id, raw, sizeof(raw), &len);
+hmac_sw(raw, msg, out);
+```
+Secure:
+```
+psa_mac_compute(key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                msg, msg_len, out, sizeof(out), &out_len);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+raw = keystore.export(key_handle)
+sig = sign(raw, message)
+```
+Secure:
+```
+sig = keystore.sign(key_handle, message)   # key never leaves the store
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+priv = tpm.export_key(""signing"")
+sig = ecdsa_sign(priv, digest)
+```
+Secure:
+```
+sig = tpm.sign(""signing"", digest)          # signing happens inside the TPM
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let raw = secure_element.export(key)?;
+let sig = sign_sw(&raw, &msg);
+```
+Secure:
+```
+let sig = secure_element.sign(key, &msg)?;  // handle-based, no export
+```","On-device cryptographic operations must be performed through APIs that act on a protected key handle so the raw key never enters application-readable memory.
+The application extracts a key into a local buffer to sign or encrypt, so the raw key sits in readable memory for the duration of the operation and can be captured by a disclosure bug.
+Signing and encryption are delegated to the keystore or secure element through a handle-based API, so the operation runs inside protected hardware and the key is never exported.",Software Platform Hardening
+ISVS-4.7,"**Security Rule:** Available memory-protection features — non-executable data regions, address-space layout randomization, and stack protection — must be enabled so a memory-corruption bug does not become reliable code execution.
+
+**Vulnerability Pattern (Description):** The image is built and run without stack canaries, non-executable data regions, or address randomization, so a memory-corruption bug can be turned into a dependable code-execution exploit.
+
+**Secure Pattern (Description):** The build and runtime enable stack protection, mark data regions non-executable, and randomize the address space, so corruption bugs are far harder to exploit reliably.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+gcc -fno-stack-protector -z execstack app.c -o app
+```
+Secure:
+```
+gcc -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie \
+    -Wl,-z,noexecstack,-z,relro,-z,now app.c -o app
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+g++ -O2 -fno-stack-protector firmware.cpp -o firmware
+```
+Secure:
+```
+g++ -O2 -fstack-protector-strong -fPIE -pie \
+    -Wl,-z,noexecstack,-z,relro,-z,now firmware.cpp -o firmware
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+flags = [""-fno-stack-protector"", ""-z execstack""]
+```
+Secure:
+```
+flags = [""-fstack-protector-strong"", ""-z noexecstack"", ""-pie"", ""-D_FORTIFY_SOURCE=2""]
+```","Available memory-protection features — non-executable data regions, address-space layout randomization, and stack protection — must be enabled so a memory-corruption bug does not become reliable code execution.
+The image is built and run without stack canaries, non-executable data regions, or address randomization, so a memory-corruption bug can be turned into a dependable code-execution exploit.
+The build and runtime enable stack protection, mark data regions non-executable, and randomize the address space, so corruption bugs are far harder to exploit reliably.",Software Platform Hardening
+ISVS-4.8,"**Security Rule:** Each component must run under the least privilege it needs; processes must drop root and any unneeded capabilities once privileged setup is complete.
+
+**Vulnerability Pattern (Description):** A component runs as root or keeps full capabilities for its whole lifetime, so any flaw in it gives an attacker complete control of the device.
+
+**Secure Pattern (Description):** After privileged initialisation the process drops to an unprivileged account and discards every capability it no longer needs, so a later compromise is confined to a low-privilege context.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+bind_low_port();
+run_main_loop();               /* still euid 0 */
+```
+Secure:
+```
+bind_low_port();
+setgid(app_gid); setuid(app_uid);   /* drop before serving requests */
+run_main_loop();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+run_as(""root"")                 # never drops privilege
+```
+Secure:
+```
+bind_privileged_ports()
+drop_to_user(""app"")            # privilege released after setup
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+app.run(host=""0.0.0.0"", port=443)   # process stays root
+```
+Secure:
+```
+bind_socket(443)
+os.setgid(app_gid); os.setuid(app_uid)   # drop privilege, then serve
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+listen_on_443();
+serve();                       // running as root throughout
+```
+Secure:
+```
+let sock = listen_on_443()?;
+privdrop::set_group(""app"")?.set_user(""app"")?.apply()?;
+serve(sock);
+```","Each component must run under the least privilege it needs; processes must drop root and any unneeded capabilities once privileged setup is complete.
+A component runs as root or keeps full capabilities for its whole lifetime, so any flaw in it gives an attacker complete control of the device.
+After privileged initialisation the process drops to an unprivileged account and discards every capability it no longer needs, so a later compromise is confined to a low-privilege context.",Software Platform Hardening
+ISVS-4.9,"**Security Rule:** Components must be isolated from one another through separate accounts, namespaces, sandboxes, or trusted-execution boundaries so that the compromise of one component is contained rather than total.
+
+**Vulnerability Pattern (Description):** All components share one account and one address space with no sandbox, so compromising any single component grants an attacker every other component and the whole device.
+
+**Secure Pattern (Description):** Each component runs in its own sandbox — a separate account, a namespace, a seccomp-restricted process, or a TEE — so a breach is contained to that component's limited privileges and resources.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+handle_untrusted_input();      /* in the main privileged process */
+```
+Secure:
+```
+if (fork() == 0) {
+    enter_namespace(); apply_seccomp_filter();   /* isolated child */
+    handle_untrusted_input();
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+run_in_same_process([parser, network, ui])
+```
+Secure:
+```
+run_sandboxed(parser)          # each component isolated
+run_sandboxed(network)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+parsed = parse_untrusted(blob)         # in-process, full privileges
+```
+Secure:
+```
+parsed = run_in_sandbox(parse_untrusted, blob)   # seccomp-restricted subprocess
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let doc = parse_untrusted(&blob);      // same process as the rest of the app
+```
+Secure:
+```
+let doc = sandbox::run(|| parse_untrusted(&blob))?;  // seccomp + namespace isolated
+```","Components must be isolated from one another through separate accounts, namespaces, sandboxes, or trusted-execution boundaries so that the compromise of one component is contained rather than total.
+All components share one account and one address space with no sandbox, so compromising any single component grants an attacker every other component and the whole device.
+Each component runs in its own sandbox — a separate account, a namespace, a seccomp-restricted process, or a TEE — so a breach is contained to that component's limited privileges and resources.",Software Platform Hardening
+ISVS-5.1,"**Security Rule:** Every channel that carries device telemetry, control commands, or other device data must be encrypted in transit with a secure transport such as TLS or DTLS; no data or control traffic may travel over a plaintext protocol.
+
+**Vulnerability Pattern (Description):** The device exchanges telemetry or commands over a cleartext protocol such as plain HTTP, raw TCP, or unencrypted MQTT, so anyone on the network path can read or alter the traffic.
+
+**Secure Pattern (Description):** All device data and control traffic is carried over an encrypted transport such as TLS or DTLS, and plaintext endpoints are removed so no channel exposes data on the wire.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+int fd = connect_tcp(""api.example.com"", 80);
+send(fd, telemetry, len, 0);          // cleartext HTTP
+```
+Secure:
+```
+SSL *ssl = tls_connect(""api.example.com"", 443, ctx);
+SSL_write(ssl, telemetry, len);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+mqtt::client cli(""tcp://broker:1883"", id);   // plaintext
+cli.publish(""dev/telemetry"", payload);
+```
+Secure:
+```
+mqtt::client cli(""ssl://broker:8883"", id);   // TLS transport
+cli.publish(""dev/telemetry"", payload);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+socket = openTcp(broker, 1883)        # plaintext MQTT
+socket.publish(topic, telemetry)
+```
+Secure:
+```
+socket = openTls(broker, 8883)        # MQTT over TLS
+socket.publish(topic, telemetry)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+client.connect(""broker.example.com"", 1883)   # plaintext MQTT
+```
+Secure:
+```
+client.tls_set()                              # TLS context
+client.connect(""broker.example.com"", 8883)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let mut s = TcpStream::connect(""broker:1883"")?;
+s.write_all(&telemetry)?;
+```
+Secure:
+```
+let conn = connector.connect(""broker"", TcpStream::connect(""broker:8883"")?)?;
+conn.write_all(&telemetry)?;
+```","Every channel that carries device telemetry, control commands, or other device data must be encrypted in transit with a secure transport such as TLS or DTLS; no data or control traffic may travel over a plaintext protocol.
+The device exchanges telemetry or commands over a cleartext protocol such as plain HTTP, raw TCP, or unencrypted MQTT, so anyone on the network path can read or alter the traffic.
+All device data and control traffic is carried over an encrypted transport such as TLS or DTLS, and plaintext endpoints are removed so no channel exposes data on the wire.",Communication Transport & Cryptography
+ISVS-5.2,"**Security Rule:** The device must validate the peer's certificate or public key — chain of trust, hostname, and expiry — on every connection, and must never disable or ignore certificate verification, including as a shortcut for self-signed development certificates.
+
+**Vulnerability Pattern (Description):** TLS or DTLS is used but certificate verification is turned off or its result is ignored, so an attacker who can intercept traffic presents any certificate and the device accepts it.
+
+**Secure Pattern (Description):** Certificate verification is enabled with a trusted root store and hostname checking, the handshake fails closed when validation fails, and development certificates are handled by trusting a dev root rather than disabling checks.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+```
+Secure:
+```
+SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+SSL_CTX_load_verify_locations(ctx, ""/etc/ssl/roots.pem"", NULL);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+ctx.set_verify_mode(asio::ssl::verify_none);
+```
+Secure:
+```
+ctx.set_verify_mode(asio::ssl::verify_peer);
+ctx.set_verify_callback(asio::ssl::host_name_verification(host));
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+tls.setVerifyMode(NONE)            # accepts any certificate
+tls.connect(host)
+```
+Secure:
+```
+tls.setVerifyMode(REQUIRED)
+tls.setTrustStore(rootCa)
+tls.connect(host)                  # fails closed on bad cert
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+requests.get(url, verify=False)
+```
+Secure:
+```
+requests.get(url, verify=""/etc/ssl/roots.pem"")
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let tls = TlsConnector::builder()
+    .danger_accept_invalid_certs(true).build()?;
+```
+Secure:
+```
+let tls = TlsConnector::builder()
+    .add_root_certificate(root_ca).build()?;
+```","The device must validate the peer's certificate or public key — chain of trust, hostname, and expiry — on every connection, and must never disable or ignore certificate verification, including as a shortcut for self-signed development certificates.
+TLS or DTLS is used but certificate verification is turned off or its result is ignored, so an attacker who can intercept traffic presents any certificate and the device accepts it.
+Certificate verification is enabled with a trusted root store and hostname checking, the handshake fails closed when validation fails, and development certificates are handled by trusting a dev root rather than disabling checks.",Communication Transport & Cryptography
+ISVS-5.3,"**Security Rule:** Where the product's trust model requires it, both ends of a connection must authenticate — the device must present its own client certificate or key so the cloud can confirm it is a genuine device, not only the server proving itself to the device.
+
+**Vulnerability Pattern (Description):** Only the server is authenticated during the handshake, leaving the device itself unverified, so a cloned or rogue device is indistinguishable from a genuine one.
+
+**Secure Pattern (Description):** The device presents a unique client certificate or key during the handshake and the server requires and verifies it, so each endpoint proves its identity to the other before data flows.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+SSL_CTX_load_verify_locations(ctx, ""roots.pem"", NULL);
+```
+Secure:
+```
+SSL_CTX_load_verify_locations(ctx, ""roots.pem"", NULL);
+SSL_CTX_use_certificate_file(ctx, ""device.crt"", SSL_FILETYPE_PEM);
+SSL_CTX_use_PrivateKey_file(ctx, ""device.key"", SSL_FILETYPE_PEM);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+ctx.load_verify_file(""roots.pem"");           // no client identity
+```
+Secure:
+```
+ctx.load_verify_file(""roots.pem"");
+ctx.use_certificate_file(""device.crt"", asio::ssl::context::pem);
+ctx.use_private_key_file(""device.key"", asio::ssl::context::pem);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+tls.connect(host)                  # server-only authentication
+```
+Secure:
+```
+tls.setClientCert(deviceCert, deviceKey)
+tls.connect(host)                  # mutual TLS
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+ctx = ssl.create_default_context(cafile=""roots.pem"")
+```
+Secure:
+```
+ctx = ssl.create_default_context(cafile=""roots.pem"")
+ctx.load_cert_chain(""device.crt"", ""device.key"")  # client cert
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let cfg = ClientConfig::builder()
+    .with_root_certificates(roots).with_no_client_auth();
+```
+Secure:
+```
+let cfg = ClientConfig::builder()
+    .with_root_certificates(roots)
+    .with_client_auth_cert(device_chain, device_key)?;
+```","Where the product's trust model requires it, both ends of a connection must authenticate — the device must present its own client certificate or key so the cloud can confirm it is a genuine device, not only the server proving itself to the device.
+Only the server is authenticated during the handshake, leaving the device itself unverified, so a cloned or rogue device is indistinguishable from a genuine one.
+The device presents a unique client certificate or key during the handshake and the server requires and verifies it, so each endpoint proves its identity to the other before data flows.",Communication Transport & Cryptography
+ISVS-5.4,"**Security Rule:** The device must negotiate only current transport protocol versions and strong cipher suites; obsolete protocol versions and weak ciphers must be disabled so the session cannot be downgraded.
+
+**Vulnerability Pattern (Description):** Outdated protocol versions such as SSLv3 or TLS 1.0 and weak cipher suites such as RC4, DES, or export-grade algorithms remain enabled, so an attacker can downgrade the session to a breakable configuration.
+
+**Secure Pattern (Description):** A minimum protocol version of TLS 1.2 or higher is enforced, only strong AEAD cipher suites are offered, and obsolete versions and weak ciphers are explicitly disabled so no downgrade target exists.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+SSL_CTX_set_options(ctx, 0);       // SSLv3 / TLS 1.0 still allowed
+```
+Secure:
+```
+SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+SSL_CTX_set_cipher_list(ctx, ""ECDHE-RSA-AES256-GCM-SHA384"");
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+asio::ssl::context ctx(asio::ssl::context::sslv23);
+```
+Secure:
+```
+asio::ssl::context ctx(asio::ssl::context::tls_client);
+ctx.set_options(asio::ssl::context::no_tlsv1 |
+                asio::ssl::context::no_tlsv1_1);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+tls.setMinVersion(SSLv3)           # legacy versions allowed
+```
+Secure:
+```
+tls.setMinVersion(TLS1_2)
+tls.setCipherSuites(strongAeadOnly)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
+```
+Secure:
+```
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let cfg = ClientConfig::builder()
+    .with_protocol_versions(&ALL_VERSIONS)?;
+```
+Secure:
+```
+let cfg = ClientConfig::builder()
+    .with_protocol_versions(&[&rustls::version::TLS13])?;
+```","The device must negotiate only current transport protocol versions and strong cipher suites; obsolete protocol versions and weak ciphers must be disabled so the session cannot be downgraded.
+Outdated protocol versions such as SSLv3 or TLS 1.0 and weak cipher suites such as RC4, DES, or export-grade algorithms remain enabled, so an attacker can downgrade the session to a breakable configuration.
+A minimum protocol version of TLS 1.2 or higher is enforced, only strong AEAD cipher suites are offered, and obsolete versions and weak ciphers are explicitly disabled so no downgrade target exists.",Communication Transport & Cryptography
+ISVS-5.5,"**Security Rule:** Cryptographic keys that secure device communication must be unique per device and rotatable, so that recovering one key from one device never compromises the rest of the fleet.
+
+**Vulnerability Pattern (Description):** A single long-lived symmetric key or credential is hardcoded and shared across an entire product line, so extracting it from one device decrypts or impersonates every device.
+
+**Secure Pattern (Description):** Each device is provisioned with its own unique key, read from secure storage rather than baked into firmware, and the key can be rotated or revoked without affecting other devices.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+static const uint8_t aes_key[16] = { 0x00, 0x11, /* ... */ };
+```
+Secure:
+```
+uint8_t aes_key[16];
+secure_element_read_key(SLOT_DEVICE, aes_key);  // per-device key
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+const std::string kKey = ""shared-fleet-secret"";
+```
+Secure:
+```
+std::string key = key_store.load(""device"", current_key_id());
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+KEY = ""PRODUCT_LINE_SHARED_KEY""    # same on every device
+```
+Secure:
+```
+key = secureStorage.readDeviceKey()  # unique, provisioned, rotatable
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+DEVICE_KEY = b""shared-symmetric-key-for-all-units""
+```
+Secure:
+```
+device_key = keystore.get_active_key(device_id)  # rotatable per device
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+const DEVICE_KEY: &[u8] = b""hardcoded-fleet-wide-key"";
+```
+Secure:
+```
+let device_key = secure_element.read_key(KeySlot::Device)?;
+```","Cryptographic keys that secure device communication must be unique per device and rotatable, so that recovering one key from one device never compromises the rest of the fleet.
+A single long-lived symmetric key or credential is hardcoded and shared across an entire product line, so extracting it from one device decrypts or impersonates every device.
+Each device is provisioned with its own unique key, read from secure storage rather than baked into firmware, and the key can be rotated or revoked without affecting other devices.",Communication Transport & Cryptography
+ISVS-5.6,"**Security Rule:** Keys used to encrypt an individual communication session must be ephemeral — freshly derived per session and discarded afterwards — so that compromise of a long-term key does not expose past sessions.
+
+**Vulnerability Pattern (Description):** A static long-term key is used directly to encrypt session traffic, so there is no forward secrecy and recovering that key later decrypts every recorded session.
+
+**Secure Pattern (Description):** Each session derives a fresh ephemeral key through an ephemeral key-exchange such as ECDHE, uses it only for that session, and zeroes it when the session ends so earlier traffic stays protected.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+SSL_CTX_set_cipher_list(ctx, ""AES256-SHA"");   // static RSA key exchange
+```
+Secure:
+```
+SSL_CTX_set_cipher_list(ctx, ""ECDHE-RSA-AES256-GCM-SHA384"");
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+ctx.set_cipher_list(""AES128-SHA"");            // no forward secrecy
+```
+Secure:
+```
+ctx.set_cipher_list(""ECDHE-ECDSA-AES128-GCM-SHA256"");
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+sessionKey = longTermKey            # reused for every session
+```
+Secure:
+```
+sessionKey = ecdhe(longTermKey, freshEphemeralKeyPair())
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+ctx.set_ciphers(""AES256-SHA"")                 # static key exchange
+```
+Secure:
+```
+ctx.set_ciphers(""ECDHE-RSA-AES256-GCM-SHA384"")
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let shared = static_key.clone();              // reused across sessions
+```
+Secure:
+```
+let ephemeral = EphemeralSecret::random_from_rng(&mut rng);
+let shared = ephemeral.diffie_hellman(&peer_public);
+```","Keys used to encrypt an individual communication session must be ephemeral — freshly derived per session and discarded afterwards — so that compromise of a long-term key does not expose past sessions.
+A static long-term key is used directly to encrypt session traffic, so there is no forward secrecy and recovering that key later decrypts every recorded session.
+Each session derives a fresh ephemeral key through an ephemeral key-exchange such as ECDHE, uses it only for that session, and zeroes it when the session ends so earlier traffic stays protected.",Communication Transport & Cryptography
+ISVS-6.1,"**Security Rule:** A device must expose only the network services the product actually requires; every listening port that is not needed in production must be removed or disabled.
+
+**Vulnerability Pattern (Description):** A service binds and listens on a port that the product does not need, so the device presents extra attack surface that an attacker can reach and probe.
+
+**Secure Pattern (Description):** Only the services the product requires are started, and each one is bound deliberately, so the reachable surface is the minimum the feature set demands.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+listen(telnet_fd, 5); listen(http_fd, 5);   /* telnet not required */
+```
+Secure:
+```
+listen(http_fd, 5);          /* only the required service */
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+DebugServer dbg{2323}; HttpServer http{80}; dbg.start(); http.start();
+```
+Secure:
+```
+HttpServer http{80}; http.start();   // debug server not built for prod
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+start_service(http); start_service(telnet); start_service(ftp)
+```
+Secure:
+```
+start_service(http)          # only the service the product needs
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+http_srv.serve_forever(); telnet_srv.serve_forever()
+```
+Secure:
+```
+http_srv.serve_forever()     # telnet service removed
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+TcpListener::bind(""0.0.0.0:80"")?; TcpListener::bind(""0.0.0.0:23"")?;
+```
+Secure:
+```
+TcpListener::bind(""0.0.0.0:80"")?;   // only the required listener
+```","A device must expose only the network services the product actually requires; every listening port that is not needed in production must be removed or disabled.
+A service binds and listens on a port that the product does not need, so the device presents extra attack surface that an attacker can reach and probe.
+Only the services the product requires are started, and each one is bound deliberately, so the reachable surface is the minimum the feature set demands.",Pairing & Network Exposure
+ISVS-6.2,"**Security Rule:** Debug, diagnostic, and administrative interfaces that are useful in development must be disabled or removed in production firmware so they cannot be reached on a shipped device.
+
+**Vulnerability Pattern (Description):** A debug or diagnostic interface left enabled from development still listens on a production device, giving an attacker a privileged entry point that was never meant to ship.
+
+**Secure Pattern (Description):** Debug and administrative interfaces are compiled out or hard-disabled for production builds, so a release device exposes none of the development tooling.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+start_debug_uart_shell();    /* shipped in release firmware */
+```
+Secure:
+```
+#ifdef DEBUG_BUILD
+start_debug_uart_shell();
+#endif
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+diagnostics.exposeOverNetwork(true);
+```
+Secure:
+```
+diagnostics.exposeOverNetwork(BuildConfig::isDebug);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+enable_debug_console()       # always on, including production
+```
+Secure:
+```
+if build_is_development(): enable_debug_console()
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+app.run(host=""0.0.0.0"", debug=True)
+```
+Secure:
+```
+app.run(host=""127.0.0.1"", debug=False)   # debug off in production
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+spawn_debug_endpoint();      // unconditional
+```
+Secure:
+```
+#[cfg(debug_assertions)]
+spawn_debug_endpoint();
+```","Debug, diagnostic, and administrative interfaces that are useful in development must be disabled or removed in production firmware so they cannot be reached on a shipped device.
+A debug or diagnostic interface left enabled from development still listens on a production device, giving an attacker a privileged entry point that was never meant to ship.
+Debug and administrative interfaces are compiled out or hard-disabled for production builds, so a release device exposes none of the development tooling.",Pairing & Network Exposure
+ISVS-6.3,"**Security Rule:** Every network-facing service must authenticate its caller before acting on a request, so reaching the device is not the same as controlling it.
+
+**Vulnerability Pattern (Description):** A network service accepts and acts on commands from any peer that can connect, so anyone who reaches the device on the network controls it.
+
+**Secure Pattern (Description):** Each service verifies the caller's credential or token before handling a request, and rejects unauthenticated callers.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+recv(fd, cmd, len, 0); run_command(cmd);
+```
+Secure:
+```
+recv(fd, cmd, len, 0);
+if (verify_token(cmd->token)) run_command(cmd);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+void handle(Request& r) { dispatch(r); }
+```
+Secure:
+```
+void handle(Request& r) { if (auth_.verify(r.token())) dispatch(r); }
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+on_request(req): execute(req.command)
+```
+Secure:
+```
+on_request(req): if authenticate(req.token): execute(req.command)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+def handle(req): return actuate(req[""cmd""])
+```
+Secure:
+```
+def handle(req):
+    if not verify_token(req.get(""token"")): return deny()
+    return actuate(req[""cmd""])
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+fn handle(req: Request) { dispatch(req.cmd); }
+```
+Secure:
+```
+fn handle(req: Request) {
+    if verify_token(&req.token) { dispatch(req.cmd); }
+}
+```","Every network-facing service must authenticate its caller before acting on a request, so reaching the device is not the same as controlling it.
+A network service accepts and acts on commands from any peer that can connect, so anyone who reaches the device on the network controls it.
+Each service verifies the caller's credential or token before handling a request, and rejects unauthenticated callers.",Pairing & Network Exposure
+ISVS-6.4,"**Security Rule:** Pairing a new peer must require an explicit human-mediated confirmation such as a physical button press or a code shown on the device, never silent automatic acceptance.
+
+**Vulnerability Pattern (Description):** The device bonds with any peer that requests pairing without a confirmation step, so an attacker in range silently pairs and inherits a trusted relationship.
+
+**Secure Pattern (Description):** A pairing request is held pending until a person confirms it on the device — a button press or an on-device code — and is rejected if no confirmation arrives.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+if (pair_request_received()) add_bond(peer);
+```
+Secure:
+```
+if (pair_request_received() && pairing_button_pressed())
+    add_bond(peer);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+void onPairRequest(Peer p) { bonds_.add(p); }
+```
+Secure:
+```
+void onPairRequest(Peer p) {
+    if (ui_.confirmPairing()) bonds_.add(p);
+}
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+on_pair_request(peer): bond(peer)
+```
+Secure:
+```
+on_pair_request(peer): if await_user_confirmation(): bond(peer)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+def on_pair_request(peer): bonds.add(peer)
+```
+Secure:
+```
+def on_pair_request(peer):
+    if wait_for_confirm_button(timeout=30): bonds.add(peer)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+fn on_pair_request(peer: Peer) { bonds.add(peer); }
+```
+Secure:
+```
+fn on_pair_request(peer: Peer) {
+    if user_confirmed_pairing() { bonds.add(peer); }
+}
+```","Pairing a new peer must require an explicit human-mediated confirmation such as a physical button press or a code shown on the device, never silent automatic acceptance.
+The device bonds with any peer that requests pairing without a confirmation step, so an attacker in range silently pairs and inherits a trusted relationship.
+A pairing request is held pending until a person confirms it on the device — a button press or an on-device code — and is rejected if no confirmation arrives.",Pairing & Network Exposure
+ISVS-6.5,"**Security Rule:** Pairing must use a per-device or sufficiently random secret, never a fixed or guessable PIN shared across every unit of the product.
+
+**Vulnerability Pattern (Description):** The pairing PIN is a hardcoded constant or a short predictable value that is identical on every device, so an attacker who learns it once can pair with any unit.
+
+**Secure Pattern (Description):** The pairing secret is generated per device from a cryptographically secure random source with enough entropy that it cannot be guessed or brute forced.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+const char *pin = ""1234"";
+```
+Secure:
+```
+uint8_t pin[16];
+getrandom(pin, sizeof(pin), 0);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+std::string pin = ""000000"";
+```
+Secure:
+```
+std::random_device rd;
+auto pin = make_pairing_secret(rd, 128 / 8);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+pairing_pin = ""0000""
+```
+Secure:
+```
+pairing_pin = secure_random_digits(8)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+pairing_pin = ""0000""
+```
+Secure:
+```
+import secrets
+pairing_pin = """".join(secrets.choice(""0123456789"") for _ in range(8))
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+let pin = ""1234"";
+```
+Secure:
+```
+let mut pin = [0u8; 16];
+rand::rngs::OsRng.fill_bytes(&mut pin);
+```","Pairing must use a per-device or sufficiently random secret, never a fixed or guessable PIN shared across every unit of the product.
+The pairing PIN is a hardcoded constant or a short predictable value that is identical on every device, so an attacker who learns it once can pair with any unit.
+The pairing secret is generated per device from a cryptographically secure random source with enough entropy that it cannot be guessed or brute forced.",Pairing & Network Exposure
+ISVS-6.6,"**Security Rule:** The pairing window must be time-boxed so it closes promptly after it is opened, rather than leaving the device pairable indefinitely.
+
+**Vulnerability Pattern (Description):** Pairing mode stays open with no expiry once enabled, so the device remains pairable indefinitely and an attacker has an unbounded window to bond with it.
+
+**Secure Pattern (Description):** Opening pairing mode starts a short timer, and the pairing window is closed automatically when that timer expires.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+pairing_open = true;
+```
+Secure:
+```
+pairing_open = true;
+timer_start(&pairing_timer, 120, close_pairing_window);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+pairing_.open();
+```
+Secure:
+```
+pairing_.open();
+timer_.after(std::chrono::seconds(120), [&]{ pairing_.close(); });
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+enable_pairing_mode()        # stays open until reboot
+```
+Secure:
+```
+enable_pairing_mode(); schedule(disable_pairing_mode, after=120s)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+self.pairing_open = True
+```
+Secure:
+```
+self.pairing_open = True
+threading.Timer(120, self.close_pairing).start()
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+self.pairing_open = true;
+```
+Secure:
+```
+self.pairing_open = true;
+spawn_after(Duration::from_secs(120), || self.close_pairing());
+```","The pairing window must be time-boxed so it closes promptly after it is opened, rather than leaving the device pairable indefinitely.
+Pairing mode stays open with no expiry once enabled, so the device remains pairable indefinitely and an attacker has an unbounded window to bond with it.
+Opening pairing mode starts a short timer, and the pairing window is closed automatically when that timer expires.",Pairing & Network Exposure
+ISVS-6.7,"**Security Rule:** Bonded peers must be enumerable and individually revocable, so a lost or compromised peer can be removed without re-provisioning the whole device.
+
+**Vulnerability Pattern (Description):** Once a peer is paired it is trusted forever with no way to list or remove bonds, so a lost or compromised peer keeps its trusted access until the device is fully re-provisioned.
+
+**Secure Pattern (Description):** The device keeps an enumerable list of bonded peers and exposes an operation to revoke any single bond, leaving the other bonds and the device provisioning intact.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+store_bond(peer);            /* no enumerate, no delete */
+```
+Secure:
+```
+store_bond(peer);
+size_t list_bonds(bond_t *out, size_t n);
+int revoke_bond(uint32_t peer_id);
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+class Bonds { void add(Peer p); };
+```
+Secure:
+```
+class Bonds {
+  void add(Peer p); std::vector<Peer> list(); void revoke(PeerId id);
+};
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+bonds.add(peer)              # no list, no remove
+```
+Secure:
+```
+bonds.add(peer); bonds.list(); bonds.revoke(peer_id)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+bonds.add(peer)
+```
+Secure:
+```
+bonds.add(peer)
+def list_bonds(): return list(bonds)
+def revoke_bond(peer_id): bonds.discard(peer_id)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+bonds.insert(peer);
+```
+Secure:
+```
+bonds.insert(peer);
+fn list_bonds(&self) -> Vec<PeerId>;
+fn revoke_bond(&mut self, id: PeerId);
+```","Bonded peers must be enumerable and individually revocable, so a lost or compromised peer can be removed without re-provisioning the whole device.
+Once a peer is paired it is trusted forever with no way to list or remove bonds, so a lost or compromised peer keeps its trusted access until the device is fully re-provisioned.
+The device keeps an enumerable list of bonded peers and exposes an operation to revoke any single bond, leaving the other bonds and the device provisioning intact.",Pairing & Network Exposure
+ISVS-6.8,"**Security Rule:** A freshly booted device must default to a closed state, admitting no peers and accepting no commands until it is deliberately placed into pairing mode.
+
+**Vulnerability Pattern (Description):** The device boots straight into a pairable or open state, so a unit that is powered on but not yet configured will admit peers without any deliberate operator action.
+
+**Secure Pattern (Description):** Pairing mode is off after boot and the device admits nothing until an operator explicitly opens the pairing window, so the default state is closed.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+bool pairing_open = true;    /* open from power-on */
+```
+Secure:
+```
+bool pairing_open = false;   /* closed until enable_pairing() */
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+Pairing() : open_(true) {}
+```
+Secure:
+```
+Pairing() : open_(false) {}   // closed by default
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+pairing_enabled_at_boot = true
+```
+Secure:
+```
+pairing_enabled_at_boot = false   # opened only on explicit action
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+def __init__(self): self.pairing_open = True
+```
+Secure:
+```
+def __init__(self): self.pairing_open = False
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+impl Default for Pairing { fn default() -> Self { Self { open: true } } }
+```
+Secure:
+```
+impl Default for Pairing { fn default() -> Self { Self { open: false } } }
+```","A freshly booted device must default to a closed state, admitting no peers and accepting no commands until it is deliberately placed into pairing mode.
+The device boots straight into a pairable or open state, so a unit that is powered on but not yet configured will admit peers without any deliberate operator action.
+Pairing mode is off after boot and the device admits nothing until an operator explicitly opens the pairing window, so the default state is closed.",Pairing & Network Exposure
+ISVS-7.1,"**Security Rule:** Hardware debug interfaces such as JTAG, SWD, and UART consoles must be disabled, permanently locked, or gated behind strong authentication on shipped production units so physical access cannot halt the processor or dump memory.
+
+**Vulnerability Pattern (Description):** A production build leaves the JTAG or SWD debug port enabled, or boots an interactive UART shell, so anyone with the device in hand can attach a debugger, stop the core, and read out firmware and keys.
+
+**Secure Pattern (Description):** The production firmware blows the debug-disable fuse or sets the read-protection register early in boot, and the serial console is compiled out or requires authentication, so debug access is closed on shipped units.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+/* JTAG/SWD left enabled; no read-protection set */
+SystemInit();
+```
+Secure:
+```
+if (build_is_production())
+    FLASH_OBProgramInit(OB_RDP_LEVEL_2);  /* permanently lock debug */
+SystemInit();
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+Board::init();               // debug access port still open
+```
+Secure:
+```
+if (Build::isProduction())
+    DebugPort::disablePermanently();
+Board::init();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+boot()                       # debug port left enabled in production
+```
+Secure:
+```
+if build == PRODUCTION: lock_debug_interface()
+boot()
+```","Hardware debug interfaces such as JTAG, SWD, and UART consoles must be disabled, permanently locked, or gated behind strong authentication on shipped production units so physical access cannot halt the processor or dump memory.
+A production build leaves the JTAG or SWD debug port enabled, or boots an interactive UART shell, so anyone with the device in hand can attach a debugger, stop the core, and read out firmware and keys.
+The production firmware blows the debug-disable fuse or sets the read-protection register early in boot, and the serial console is compiled out or requires authentication, so debug access is closed on shipped units.",Hardware Platform Security
+ISVS-7.2,"**Security Rule:** Manufacturing test points and device configuration fuses must be locked on production units so an attacker with physical access cannot re-flash firmware or reconfigure the device.
+
+**Vulnerability Pattern (Description):** Configuration fuses or option bytes that authorise re-flashing are left in their unlocked factory state, so an attacker can reprogram the device or downgrade it to vulnerable firmware over an exposed test point.
+
+**Secure Pattern (Description):** The provisioning step burns the lock fuses and write-protects the bootloader region, and the firmware verifies the locked state at boot, so the device rejects unauthorised re-flashing after manufacture.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+/* bootloader region writable; flash protection not applied */
+finish_provisioning();
+```
+Secure:
+```
+finish_provisioning();
+flash_write_protect(BOOTLOADER_SECTOR);
+efuse_burn(EFUSE_DISABLE_REFLASH);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+provision_device()           # lock fuses left unburned
+```
+Secure:
+```
+provision_device()
+burn_lock_fuses()            # flash + reconfigure disabled after this
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+provision(&mut device);      // fuses untouched
+```
+Secure:
+```
+provision(&mut device);
+device.efuses().burn(Efuse::FlashLock)?;  // re-flash now refused
+```","Manufacturing test points and device configuration fuses must be locked on production units so an attacker with physical access cannot re-flash firmware or reconfigure the device.
+Configuration fuses or option bytes that authorise re-flashing are left in their unlocked factory state, so an attacker can reprogram the device or downgrade it to vulnerable firmware over an exposed test point.
+The provisioning step burns the lock fuses and write-protects the bootloader region, and the firmware verifies the locked state at boot, so the device rejects unauthorised re-flashing after manufacture.",Hardware Platform Security
+ISVS-7.3,"**Security Rule:** Cryptographic keys and other secrets must be stored in a secure element, trusted platform module, or trusted execution environment that resists extraction, not in general-purpose flash readable by a memory dump.
+
+**Vulnerability Pattern (Description):** A device key or credential is written to ordinary on-chip or external flash, so an attacker who reads the memory through a debug port or flash chip recovers the secret in cleartext.
+
+**Secure Pattern (Description):** Keys are generated inside and never leave a secure element, TPM, or TEE; the application asks that hardware to sign or decrypt and only ever holds a handle, so a memory read-out yields no usable secret.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+memcpy(flash_region, device_key, KEY_LEN);  /* key in plain flash */
+```
+Secure:
+```
+atecc_genkey(SLOT_DEVICE_KEY);              /* key stays in the SE */
+atecc_sign(SLOT_DEVICE_KEY, digest, signature);
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+flash_write(KEY_ADDR, device_private_key)
+```
+Secure:
+```
+handle = secure_element.generate_key()   # key never leaves the SE
+signature = secure_element.sign(handle, message)
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+open(""/data/device.key"", ""wb"").write(private_key)
+```
+Secure:
+```
+# key handle lives in the TPM; private bytes never reach the host
+key = tpm.create_primary(template=ECC_P256)
+signature = tpm.sign(key.handle, digest)
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+fs::write(""/data/device.key"", &private_key)?;
+```
+Secure:
+```
+let handle = secure_element.generate_key(KeySlot::Device)?;
+let sig = secure_element.sign(handle, &digest)?;  // private key sealed
+```","Cryptographic keys and other secrets must be stored in a secure element, trusted platform module, or trusted execution environment that resists extraction, not in general-purpose flash readable by a memory dump.
+A device key or credential is written to ordinary on-chip or external flash, so an attacker who reads the memory through a debug port or flash chip recovers the secret in cleartext.
+Keys are generated inside and never leave a secure element, TPM, or TEE; the application asks that hardware to sign or decrypt and only ever holds a handle, so a memory read-out yields no usable secret.",Hardware Platform Security
+ISVS-7.4,"**Security Rule:** Devices whose threat model includes physical attack must provide tamper-evident or tamper-responsive measures that detect intrusion and react, zeroising keys where warranted, rather than failing silently.
+
+**Vulnerability Pattern (Description):** The device has no tamper sensors or no response wired to them, so opening the enclosure, probing the board, or removing a shield leaves no trace and triggers no protective action.
+
+**Secure Pattern (Description):** Tamper sensors raise an interrupt that the firmware services immediately by erasing key material and recording the event, so a physical intrusion is detected and the secrets it targeted are destroyed before they can be read.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+/* TAMPER pin floating; no IRQ handler registered */
+app_main();
+```
+Secure:
+```
+void TAMPER_IRQHandler(void) {
+    secure_zeroise(key_store, sizeof(key_store));
+    backup_register_log(TAMPER_EVENT);
+}
+```
+
+[[C++ PATTERNS]]
+Vulnerable:
+```
+device.start();              // tamper line never serviced
+```
+Secure:
+```
+tamper.onIntrusion([&] { keyStore.zeroise(); device.lockdown(); });
+device.start();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+# enclosure switch wired but no handler — intrusion ignored
+run_application()
+```
+Secure:
+```
+on_tamper_event(lambda: (zeroise_keys(), log_tamper(), halt()))
+run_application()
+```","Devices whose threat model includes physical attack must provide tamper-evident or tamper-responsive measures that detect intrusion and react, zeroising keys where warranted, rather than failing silently.
+The device has no tamper sensors or no response wired to them, so opening the enclosure, probing the board, or removing a shield leaves no trace and triggers no protective action.
+Tamper sensors raise an interrupt that the firmware services immediately by erasing key material and recording the event, so a physical intrusion is detected and the secrets it targeted are destroyed before they can be read.",Hardware Platform Security
+ISVS-7.5,"**Security Rule:** Cryptographic implementations must be chosen and reviewed for constant-time behaviour so that key material cannot be recovered through timing or power side-channel analysis.
+
+**Vulnerability Pattern (Description):** A comparison, branch, or table lookup in cryptographic code depends on secret data, so its execution time or power draw varies with the key and leaks it to an observer measuring the device.
+
+**Secure Pattern (Description):** Secret-dependent comparisons use a constant-time routine that always examines every byte, and branches and memory accesses do not depend on key bits, so timing and power are independent of the secret.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+if (memcmp(mac, expected, MAC_LEN) == 0) accept();  /* data-dependent */
+```
+Secure:
+```
+unsigned char d = 0;
+for (size_t i = 0; i < MAC_LEN; i++) d |= mac[i] ^ expected[i];
+if (d == 0) accept();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if mac == expected: accept()      # early-exit compare leaks via timing
+```
+Secure:
+```
+if constant_time_equal(mac, expected): accept()
+```
+
+[[PYTHON PATTERNS]]
+Vulnerable:
+```
+if computed_tag == provided_tag:
+    grant_access()
+```
+Secure:
+```
+import hmac
+if hmac.compare_digest(computed_tag, provided_tag):
+    grant_access()
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+if tag == expected { accept(); }   // == short-circuits on first diff
+```
+Secure:
+```
+use subtle::ConstantTimeEq;
+if tag.ct_eq(&expected).into() { accept(); }
+```","Cryptographic implementations must be chosen and reviewed for constant-time behaviour so that key material cannot be recovered through timing or power side-channel analysis.
+A comparison, branch, or table lookup in cryptographic code depends on secret data, so its execution time or power draw varies with the key and leaks it to an observer measuring the device.
+Secret-dependent comparisons use a constant-time routine that always examines every byte, and branches and memory accesses do not depend on key bits, so timing and power are independent of the secret.",Hardware Platform Security
+ISVS-7.6,"**Security Rule:** Security-critical decisions must be written so that a single glitched instruction cannot turn a failed check into a pass — use redundant checks, non-trivial success values, and default-deny flow.
+
+**Vulnerability Pattern (Description):** A verification result is held in a single boolean tested once, so a voltage or clock glitch that skips the compare or flips the flag lets the device treat an unverified image or credential as valid.
+
+**Secure Pattern (Description):** The decision is confirmed by redundant checks separated in the code, represented by a non-trivial sentinel value rather than a plain boolean, and any deviation falls through to a deny-and-halt path.
+
+[[C PATTERNS]]
+Vulnerable:
+```
+if (verify_signature(img) == 0)
+    jump_to_application();
+```
+Secure:
+```
+volatile uint32_t r1 = verify_signature(img);
+volatile uint32_t r2 = verify_signature(img);
+if (r1 == VERIFY_OK && r2 == VERIFY_OK) jump_to_application();
+else secure_halt();
+```
+
+[[GENERIC PATTERNS]]
+Vulnerable:
+```
+if verify(image): boot(image)     # one check, one glitch defeats it
+```
+Secure:
+```
+if verify(image) == OK_MAGIC and verify(image) == OK_MAGIC:
+    boot(image)
+else: halt()
+```
+
+[[RUST PATTERNS]]
+Vulnerable:
+```
+if verify(&image).is_ok() { boot(image); }
+```
+Secure:
+```
+let a = verify(&image);
+let b = verify(&image);
+match (a, b) {
+    (Ok(OK_MAGIC), Ok(OK_MAGIC)) => boot(image),
+    _ => secure_halt(),
+}
+```","Security-critical decisions must be written so that a single glitched instruction cannot turn a failed check into a pass — use redundant checks, non-trivial success values, and default-deny flow.
+A verification result is held in a single boolean tested once, so a voltage or clock glitch that skips the compare or flips the flag lets the device treat an unverified image or credential as valid.
+The decision is confirmed by redundant checks separated in the code, represented by a non-trivial sentinel value rather than a plain boolean, and any deviation falls through to a deny-and-halt path.",Hardware Platform Security

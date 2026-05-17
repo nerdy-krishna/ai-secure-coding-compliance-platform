@@ -1,0 +1,294 @@
+# CWE Essentials — Concern Area: Privilege Management
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the systems/native set: C / C++ / Rust / Go).
+#
+# CWEs: CWE-269, CWE-250, CWE-271, CWE-272, CWE-1390.
+
+# ---------------------------------------------------------------------------
+# CWE-269 — Improper Privilege Management
+# ---------------------------------------------------------------------------
+
+- id: CWE-269
+  facet: Privilege Management
+  section: Improper Privilege Management
+  security_rule: >-
+    Privilege must be treated as a budget — acquire an elevated capability
+    only for the specific operation that needs it and release it
+    immediately afterwards, never holding rights longer than the task
+    requires.
+  vulnerability_pattern: >-
+    A component raises its privilege level for a single operation and then
+    keeps the elevated rights, or assigns a capability without releasing
+    it, so a later defect runs with far more authority than it needs.
+  secure_pattern: >-
+    The elevated capability is acquired just before the privileged
+    operation and dropped again immediately afterwards, so the window in
+    which the component holds extra authority is as short as possible.
+  code_patterns:
+    generic:
+      vulnerable: |
+        raisePrivilege()
+        doPrivilegedOp()
+        continueAsPrivileged()        # rights never released
+      secure: |
+        raisePrivilege()
+        doPrivilegedOp()
+        dropPrivilege()               # released right after the op
+    c:
+      vulnerable: |
+        seteuid(0);
+        write_protected_file();       /* stays effective-root afterwards */
+      secure: |
+        seteuid(0);
+        write_protected_file();
+        seteuid(real_uid);            /* drop back immediately */
+    cpp:
+      vulnerable: |
+        priv.raise();                 // RAII guard not used
+        do_privileged_op();
+      secure: |
+        { PrivilegeGuard g; do_privileged_op(); }   // dropped at scope exit
+    rust:
+      vulnerable: |
+        caps::raise(None, CapSet::Effective, Capability::CAP_NET_ADMIN).unwrap();
+        configure_interface();        // capability left in the effective set
+      secure: |
+        caps::raise(None, CapSet::Effective, Capability::CAP_NET_ADMIN).unwrap();
+        configure_interface();
+        caps::clear(None, CapSet::Effective).unwrap();
+    go:
+      vulnerable: |
+        syscall.Seteuid(0)
+        writeProtectedFile()          // effective uid stays 0
+      secure: |
+        syscall.Seteuid(0)
+        writeProtectedFile()
+        syscall.Seteuid(realUID)
+
+# ---------------------------------------------------------------------------
+# CWE-250 — Execution with Unnecessary Privileges
+# ---------------------------------------------------------------------------
+
+- id: CWE-250
+  facet: Privilege Management
+  section: Execution with Unnecessary Privileges
+  security_rule: >-
+    A process must run under the least-privileged identity that lets it
+    do its job — drop from a privileged account to a dedicated
+    unprivileged one as soon as any startup-only privileged work is done.
+  vulnerability_pattern: >-
+    A service keeps running as root or administrator for its whole
+    lifetime because it once needed a privileged operation at startup,
+    so every later defect becomes a full-system compromise.
+  secure_pattern: >-
+    The process performs its privileged startup work, then permanently
+    drops to a dedicated unprivileged account and serves all subsequent
+    requests with the minimum rights required.
+  code_patterns:
+    generic:
+      vulnerable: |
+        bindLowPort()
+        serveRequests()               # whole lifetime runs as root
+      secure: |
+        bindLowPort()
+        dropToUnprivilegedUser()
+        serveRequests()
+    c:
+      vulnerable: |
+        bind(sock, &addr, len);       /* port 80 needs root */
+        serve_loop();                 /* still root forever */
+      secure: |
+        bind(sock, &addr, len);
+        setgid(svc_gid); setuid(svc_uid);   /* drop after privileged bind */
+        serve_loop();
+    cpp:
+      vulnerable: |
+        listener.bind(80);
+        run_server();                 // never lowers privilege
+      secure: |
+        listener.bind(80);
+        drop_privileges(svc_uid, svc_gid);
+        run_server();
+    rust:
+      vulnerable: |
+        let l = TcpListener::bind("0.0.0.0:80")?;
+        serve(l);                     // process keeps root
+      secure: |
+        let l = TcpListener::bind("0.0.0.0:80")?;
+        privdrop::PrivDrop::default().user("svc").apply()?;
+        serve(l);
+    go:
+      vulnerable: |
+        ln, _ := net.Listen("tcp", ":80")
+        serve(ln)                     // runs as root
+      secure: |
+        ln, _ := net.Listen("tcp", ":80")
+        syscall.Setgid(svcGID); syscall.Setuid(svcUID)
+        serve(ln)
+
+# ---------------------------------------------------------------------------
+# CWE-271 — Privilege Dropping / Lowering Errors
+# ---------------------------------------------------------------------------
+
+- id: CWE-271
+  facet: Privilege Management
+  section: Privilege Dropping / Lowering Errors
+  security_rule: >-
+    When dropping privileges, perform the steps in the correct order,
+    treat any failure of the drop as fatal, and verify the new state
+    before continuing.
+  vulnerability_pattern: >-
+    A program tries to drop to an unprivileged identity but does the
+    steps in the wrong order or ignores the return value of the drop, so
+    it keeps running with privileges it believed it had relinquished.
+  secure_pattern: >-
+    Group identity is dropped before user identity, every drop call has
+    its return value checked, and the effective identity is read back and
+    confirmed before any further work proceeds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dropUser()                    # ignores failure, group still set
+        continue()
+      secure: |
+        if not dropGroup(): abort()
+        if not dropUser():  abort()
+        if currentUser() == "root": abort()
+    c:
+      vulnerable: |
+        setuid(uid);                  /* return value ignored; gid still root */
+      secure: |
+        if (setgid(gid) != 0) abort();
+        if (setuid(uid) != 0) abort();
+        if (getuid() == 0)    abort();   /* verify drop succeeded */
+    cpp:
+      vulnerable: |
+        ::setuid(uid);                // unchecked, and setgid omitted
+      secure: |
+        if (::setgid(gid) != 0 || ::setuid(uid) != 0)
+            throw std::runtime_error("privilege drop failed");
+    rust:
+      vulnerable: |
+        unsafe { libc::setuid(uid); } // result discarded, gid not dropped
+      secure: |
+        unsafe {
+            assert_eq!(libc::setgid(gid), 0);
+            assert_eq!(libc::setuid(uid), 0);
+        }
+    go:
+      vulnerable: |
+        syscall.Setuid(uid)           // error not checked; gid still root
+      secure: |
+        if err := syscall.Setgid(gid); err != nil { log.Fatal(err) }
+        if err := syscall.Setuid(uid); err != nil { log.Fatal(err) }
+
+# ---------------------------------------------------------------------------
+# CWE-272 — Least Privilege Violation
+# ---------------------------------------------------------------------------
+
+- id: CWE-272
+  facet: Privilege Management
+  section: Least Privilege Violation
+  security_rule: >-
+    A privilege drop must shed every form of elevated authority — the
+    primary identity, supplementary groups, and held capabilities — not
+    just the user id, so no leftover right survives the transition.
+  vulnerability_pattern: >-
+    A process lowers its primary user identity but leaves a supplementary
+    group, a saved-set id, or a Linux capability behind, so it still
+    holds an elevated right after the drop it believed was complete.
+  secure_pattern: >-
+    Supplementary groups are cleared and capabilities are released along
+    with the primary identity, so the process retains only the minimum
+    rights its task requires.
+  code_patterns:
+    generic:
+      vulnerable: |
+        dropUser()                    # supplementary groups left intact
+      secure: |
+        clearSupplementaryGroups()
+        dropCapabilities()
+        dropUser()
+    c:
+      vulnerable: |
+        setgid(gid); setuid(uid);     /* supplementary groups still attached */
+      secure: |
+        setgroups(0, NULL);           /* clear supplementary groups first */
+        setgid(gid); setuid(uid);
+    cpp:
+      vulnerable: |
+        drop_to_user(uid, gid);       // keeps inherited capabilities
+      secure: |
+        ::setgroups(0, nullptr);
+        cap_clear_all();              // shed capabilities too
+        drop_to_user(uid, gid);
+    rust:
+      vulnerable: |
+        unsafe { libc::setuid(uid); } // CAP_* and groups untouched
+      secure: |
+        unsafe { libc::setgroups(0, std::ptr::null()); }
+        caps::clear(None, CapSet::Permitted).unwrap();
+        unsafe { libc::setuid(uid); }
+    go:
+      vulnerable: |
+        syscall.Setuid(uid)           // supplementary groups not cleared
+      secure: |
+        syscall.Setgroups([]int{})
+        syscall.Setgid(gid)
+        syscall.Setuid(uid)
+
+# ---------------------------------------------------------------------------
+# CWE-1390 — Weak Authentication
+# ---------------------------------------------------------------------------
+
+- id: CWE-1390
+  facet: Privilege Management
+  section: Weak Authentication
+  security_rule: >-
+    Every boundary between privilege levels must be guarded by strong
+    authentication — never by a check that can be guessed, replayed, or
+    trivially crossed.
+  vulnerability_pattern: >-
+    A transition to a higher privilege level is protected by a weak
+    authentication step such as a hardcoded credential, a guessable
+    token, or an unverified client claim, so the boundary is easy to
+    cross.
+  secure_pattern: >-
+    The privilege boundary is protected by a verified secret compared in
+    constant time, or by a vetted authentication library, so an attacker
+    cannot guess or replay their way across it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if token == "admin": grantAdmin()      # hardcoded, guessable
+      secure: |
+        if verifySecret(token, storedHash): grantAdmin()
+    c:
+      vulnerable: |
+        if (strcmp(input, "letmein") == 0) become_admin();
+      secure: |
+        if (verify_password(input, stored_hash)) become_admin();
+    cpp:
+      vulnerable: |
+        if (provided == kAdminPassword) elevate();   // plaintext compare
+      secure: |
+        if (argon2_verify(stored_hash, provided)) elevate();
+    rust:
+      vulnerable: |
+        if token == "ROOT-TOKEN" { grant_admin(); }
+      secure: |
+        if argon2.verify_password(token.as_bytes(), &stored_hash).is_ok() {
+            grant_admin();
+        }
+    go:
+      vulnerable: |
+        if password == "admin123" { elevate() }
+      secure: |
+        if bcrypt.CompareHashAndPassword(storedHash, []byte(password)) == nil {
+            elevate()
+        }

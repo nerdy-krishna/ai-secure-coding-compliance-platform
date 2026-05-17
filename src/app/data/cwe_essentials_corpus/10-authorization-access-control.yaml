@@ -1,0 +1,303 @@
+# CWE Essentials — Concern Area: Authorization & Access Control
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language. CWE Essentials targets systems / native code, so code blocks
+# use the C / C++ / Rust / Go set rather than web languages.
+#
+# CWEs: CWE-862, CWE-863, CWE-352, CWE-639, CWE-732, CWE-285.
+
+# ---------------------------------------------------------------------------
+# CWE-862 — Missing Authorization
+# ---------------------------------------------------------------------------
+
+- id: CWE-862
+  facet: Authorization & Access Control
+  section: Missing Authorization
+  security_rule: >-
+    Every request that touches a protected resource must pass an explicit
+    server-side authorization check before the operation runs; an
+    authenticated identity alone is not permission to act.
+  vulnerability_pattern: >-
+    A handler performs a sensitive action or returns protected data after
+    confirming only that the caller is authenticated, with no check that
+    this caller is allowed to perform this specific action.
+  secure_pattern: >-
+    The handler invokes an authorization decision for the subject, the
+    target object, and the action, and rejects the request when the
+    decision denies it, before any side effect or data return.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if isAuthenticated(req): deleteRecord(req.recordId)
+      secure: |
+        if isAuthenticated(req) and may(req.user, "delete", req.recordId):
+            deleteRecord(req.recordId)
+    c:
+      vulnerable: |
+        if (session->logged_in) remove_account(target_id);
+      secure: |
+        if (session->logged_in && can_modify(session->uid, target_id))
+            remove_account(target_id);
+    cpp:
+      vulnerable: |
+        if (user.authenticated()) repo.erase(recordId);
+      secure: |
+        if (user.authenticated() && authz.allows(user, Action::Erase, recordId))
+            repo.erase(recordId);
+    rust:
+      vulnerable: |
+        if session.is_authenticated() { delete_record(record_id)?; }
+      secure: |
+        if session.is_authenticated() && policy.may(&session.user, Action::Delete, record_id) {
+            delete_record(record_id)?;
+        }
+    go:
+      vulnerable: |
+        if auth.LoggedIn(ctx) { store.Delete(recordID) }
+      secure: |
+        if auth.LoggedIn(ctx) && authz.Allow(ctx, "delete", recordID) {
+            store.Delete(recordID)
+        }
+
+# ---------------------------------------------------------------------------
+# CWE-863 — Incorrect Authorization
+# ---------------------------------------------------------------------------
+
+- id: CWE-863
+  facet: Authorization & Access Control
+  section: Incorrect Authorization
+  security_rule: >-
+    Authorization checks must be logically correct and evaluate the
+    authenticated subject against trusted server-side state; a check that
+    is present but flawed grants access it should deny.
+  vulnerability_pattern: >-
+    An authorization check exists but is wrong — it trusts a role or
+    identity value taken from the request, uses the wrong comparison, or
+    fails open on error — so the wrong callers are admitted.
+  secure_pattern: >-
+    The check reads the subject's role and ownership from server-side
+    session or database state, compares them correctly, and treats any
+    lookup failure or error as a denial.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if req.body.role == "admin": grant()      # role comes from the client
+      secure: |
+        if lookupRole(session.userId) == "admin": grant()
+    c:
+      vulnerable: |
+        if (atoi(getenv("IS_ADMIN"))) allow();      // attacker-influenced env
+      secure: |
+        if (db_role(session->uid) == ROLE_ADMIN) allow();
+    cpp:
+      vulnerable: |
+        if (request.header("X-Role") == "admin") allow();
+      secure: |
+        if (userStore.roleOf(session.userId) == Role::Admin) allow();
+    rust:
+      vulnerable: |
+        if claims.role == "admin" { allow(); }      // role decoded from request
+      secure: |
+        if user_store.role_of(session.user_id)? == Role::Admin { allow(); }
+    go:
+      vulnerable: |
+        if r.Header.Get("X-Role") == "admin" { allow() }
+      secure: |
+        role, err := userStore.RoleOf(session.UserID)
+        if err == nil && role == RoleAdmin { allow() }
+
+# ---------------------------------------------------------------------------
+# CWE-352 — Cross-Site Request Forgery (CSRF)
+# ---------------------------------------------------------------------------
+
+- id: CWE-352
+  facet: Authorization & Access Control
+  section: Cross-Site Request Forgery
+  security_rule: >-
+    State-changing requests must prove they were intentionally issued by
+    the authenticated user, using an anti-forgery token or an equivalent
+    same-site request validation, not ambient credentials alone.
+  vulnerability_pattern: >-
+    A state-changing endpoint acts on any request that carries a valid
+    session cookie, so a page on another site can silently trigger the
+    action in the victim's authenticated context.
+  secure_pattern: >-
+    The endpoint requires an unpredictable anti-forgery token bound to
+    the session, or verifies the request origin, and rejects state
+    changes that arrive without proof of intent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if hasSessionCookie(req): transferFunds(req)
+      secure: |
+        if hasSessionCookie(req) and csrfTokenValid(req, session):
+            transferFunds(req)
+    go:
+      vulnerable: |
+        mux.HandleFunc("/transfer", transferHandler)   # no token check
+      secure: |
+        mux.Handle("/transfer", csrf.Protect(csrfKey)(http.HandlerFunc(transferHandler)))
+    rust:
+      vulnerable: |
+        if session.valid() { do_transfer(&form); }
+      secure: |
+        if session.valid() && csrf::verify(&form.csrf_token, &session.csrf) {
+            do_transfer(&form);
+        }
+    cpp:
+      vulnerable: |
+        if (session.valid()) applyStateChange(req);
+      secure: |
+        if (session.valid() && constantTimeEquals(req.csrfToken, session.csrfToken))
+            applyStateChange(req);
+
+# ---------------------------------------------------------------------------
+# CWE-639 — Authorization Bypass Through User-Controlled Key
+# ---------------------------------------------------------------------------
+
+- id: CWE-639
+  facet: Authorization & Access Control
+  section: Authorization Bypass Through User-Controlled Key
+  security_rule: >-
+    When a resource is selected by an identifier taken from the request,
+    the server must verify the authenticated caller owns or may reach
+    that specific identifier before returning or modifying the resource.
+  vulnerability_pattern: >-
+    An object is fetched directly by an identifier from the request with
+    no ownership test, so changing the identifier to another value lets a
+    caller reach records that belong to someone else.
+  secure_pattern: >-
+    The lookup is scoped to the authenticated subject, or an explicit
+    ownership check follows the fetch, so a request can only ever resolve
+    to resources the caller is entitled to.
+  code_patterns:
+    generic:
+      vulnerable: |
+        record = db.get(req.params.id)             # any id is accepted
+      secure: |
+        record = db.get(req.params.id)
+        if record.ownerId != session.userId: deny()
+    c:
+      vulnerable: |
+        invoice = load_invoice(request_id);
+      secure: |
+        invoice = load_invoice(request_id);
+        if (invoice->owner_uid != session->uid) return ERR_FORBIDDEN;
+    cpp:
+      vulnerable: |
+        auto doc = store.fetch(req.docId);
+      secure: |
+        auto doc = store.fetch(req.docId);
+        if (doc.ownerId != session.userId) throw Forbidden{};
+    rust:
+      vulnerable: |
+        let order = orders.get(req.order_id)?;
+      secure: |
+        let order = orders.get_for_owner(req.order_id, session.user_id)?
+            .ok_or(Error::Forbidden)?;
+    go:
+      vulnerable: |
+        rec, _ := store.Get(r.URL.Query().Get("id"))
+      secure: |
+        rec, err := store.GetForOwner(r.URL.Query().Get("id"), session.UserID)
+        if err != nil { http.Error(w, "forbidden", 403); return }
+
+# ---------------------------------------------------------------------------
+# CWE-732 — Incorrect Permission Assignment for Critical Resource
+# ---------------------------------------------------------------------------
+
+- id: CWE-732
+  facet: Authorization & Access Control
+  section: Incorrect Permission Assignment for Critical Resource
+  security_rule: >-
+    Files, directories, and objects that hold sensitive data or control
+    behaviour must be created with the minimum permissions needed, never
+    world-readable or world-writable.
+  vulnerability_pattern: >-
+    A critical resource such as a credential file or a config object is
+    created with permissive access that lets unprivileged local users or
+    other tenants read or modify it.
+  secure_pattern: >-
+    The resource is created with a restrictive mode that grants access
+    only to the owning identity, set atomically at creation rather than
+    relaxed afterwards.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeFile("secrets.key", data, mode=0o666)
+      secure: |
+        writeFile("secrets.key", data, mode=0o600)
+    c:
+      vulnerable: |
+        int fd = open("secret.key", O_WRONLY | O_CREAT, 0666);
+      secure: |
+        int fd = open("secret.key", O_WRONLY | O_CREAT | O_EXCL, 0600);
+    cpp:
+      vulnerable: |
+        std::filesystem::permissions(p, std::filesystem::perms::all);
+      secure: |
+        std::filesystem::permissions(p, std::filesystem::perms::owner_read |
+                                        std::filesystem::perms::owner_write);
+    rust:
+      vulnerable: |
+        fs::write("token.dat", data)?;              // inherits a lax umask
+      secure: |
+        let mut o = OpenOptions::new();
+        o.write(true).create_new(true).mode(0o600).open("token.dat")?;
+    go:
+      vulnerable: |
+        os.WriteFile("token.dat", data, 0666)
+      secure: |
+        os.WriteFile("token.dat", data, 0600)
+
+# ---------------------------------------------------------------------------
+# CWE-285 — Improper Authorization
+# ---------------------------------------------------------------------------
+
+- id: CWE-285
+  facet: Authorization & Access Control
+  section: Improper Authorization
+  security_rule: >-
+    Access control must be enforced on the server through a single
+    consistent chokepoint that defaults to deny, so no protected
+    operation is reachable without an authorization decision.
+  vulnerability_pattern: >-
+    Authorization is enforced only in the user interface, or only on some
+    of the endpoints exposing an operation, so a direct request to an
+    unguarded path performs the action with no check.
+  secure_pattern: >-
+    Protected operations route through a shared authorization layer that
+    is applied uniformly to every entry point and denies by default when
+    no rule explicitly permits the request.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if uiButtonVisible(user): exportAllUsers()    # only the UI gates it
+      secure: |
+        requireAuthorized(user, "export", "users")
+        exportAllUsers()
+    cpp:
+      vulnerable: |
+        void handle(Request& r) { runAdminOp(r); }   # endpoint has no guard
+      secure: |
+        void handle(Request& r) {
+            if (!authz.allows(r.user, r.op, r.target)) throw Forbidden{};
+            runAdminOp(r);
+        }
+    rust:
+      vulnerable: |
+        async fn admin_op(req: Request) -> Response { perform(req).await }
+      secure: |
+        async fn admin_op(req: Request) -> Response {
+            authz.require(&req.user, Action::Admin)?;
+            perform(req).await
+        }
+    go:
+      vulnerable: |
+        mux.HandleFunc("/admin/op", adminOpHandler)   # registered without middleware
+      secure: |
+        mux.Handle("/admin/op", RequireRole(RoleAdmin)(http.HandlerFunc(adminOpHandler)))

@@ -1,0 +1,303 @@
+# CWE Essentials — Concern Area 14: Sensitive Information Exposure
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the systems / native set: C, C++, Rust, Go).
+#
+# CWEs: CWE-200, CWE-209, CWE-532, CWE-312, CWE-319, CWE-359.
+
+# ---------------------------------------------------------------------------
+# CWE-200 — Exposure of Sensitive Information to an Unauthorized Actor
+# ---------------------------------------------------------------------------
+
+- id: CWE-200
+  facet: Sensitive Information Exposure
+  section: Exposure of Sensitive Information to an Unauthorized Actor
+  security_rule: >-
+    Responses and outputs must expose only the fields the caller is
+    authorized to see; shape a deliberate view rather than serialising an
+    entire internal object or struct.
+  vulnerability_pattern: >-
+    A whole internal record is returned or serialised to a caller, so
+    fields that were never meant to leave the trust boundary, such as
+    password hashes, tokens, or internal identifiers, travel with it.
+  secure_pattern: >-
+    An explicit response type is built containing only the fields the
+    caller is entitled to, and sensitive members are omitted from
+    serialisation rather than relying on the consumer to ignore them.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return serialize(userRecord)        # includes hash, token, internal flags
+      secure: |
+        return serialize(publicView(userRecord))   # name + email only
+    c:
+      vulnerable: |
+        write(fd, &user, sizeof(struct user));   // ships secret_key, role bits
+      secure: |
+        struct user_public pub = { .name = user.name, .email = user.email };
+        write(fd, &pub, sizeof(pub));
+    cpp:
+      vulnerable: |
+        json j = user;                      // to_json dumps every member
+      secure: |
+        json j{ {"name", user.name}, {"email", user.email} };
+    rust:
+      vulnerable: |
+        serde_json::to_string(&user)        // password_hash field included
+      secure: |
+        serde_json::to_string(&PublicUser { name: user.name, email: user.email })
+    go:
+      vulnerable: |
+        json.Marshal(user)                  // PasswordHash field marshalled
+      secure: |
+        json.Marshal(PublicUser{Name: user.Name, Email: user.Email})
+
+# ---------------------------------------------------------------------------
+# CWE-209 — Generation of Error Message Containing Sensitive Information
+# ---------------------------------------------------------------------------
+
+- id: CWE-209
+  facet: Sensitive Information Exposure
+  section: Generation of Error Message Containing Sensitive Information
+  security_rule: >-
+    Return a generic error message to the caller and keep stack traces,
+    query fragments, file paths, and other diagnostic detail server-side
+    in protected logs.
+  vulnerability_pattern: >-
+    An exception message, stack trace, or low-level system error is
+    placed directly into the response to the client, revealing internal
+    structure, file paths, or query text that aids a further attack.
+  secure_pattern: >-
+    The detailed error is logged server-side under a correlation id and
+    the caller receives only a generic failure message with that id, so
+    diagnostics never cross the trust boundary.
+  code_patterns:
+    generic:
+      vulnerable: |
+        respond(500, exception.message + stackTrace())
+      secure: |
+        logError(exception); respond(500, "Internal error. Ref: " + refId)
+    c:
+      vulnerable: |
+        snprintf(resp, n, "db error: %s", sqlite3_errmsg(db));
+      secure: |
+        log_err("db error: %s", sqlite3_errmsg(db));
+        snprintf(resp, n, "request failed");
+    cpp:
+      vulnerable: |
+        res.send(500, std::string("error: ") + e.what());
+      secure: |
+        spdlog::error("handler failed: {}", e.what());
+        res.send(500, "internal error");
+    rust:
+      vulnerable: |
+        HttpResponse::InternalServerError().body(format!("{:?}", err))
+      secure: |
+        tracing::error!(?err, "request failed");
+        HttpResponse::InternalServerError().body("internal error")
+    go:
+      vulnerable: |
+        http.Error(w, err.Error(), 500)
+      secure: |
+        log.Printf("request failed: %v", err)
+        http.Error(w, "internal error", 500)
+
+# ---------------------------------------------------------------------------
+# CWE-532 — Insertion of Sensitive Information into Log File
+# ---------------------------------------------------------------------------
+
+- id: CWE-532
+  facet: Sensitive Information Exposure
+  section: Insertion of Sensitive Information into Log File
+  security_rule: >-
+    Redact or omit secrets, credentials, tokens, and personal data before
+    logging, and treat log destinations as a protected store with the
+    same access controls as the data they record.
+  vulnerability_pattern: >-
+    A request body, credential, token, or personal record is written to a
+    log line in the clear, then flows to log aggregation systems with
+    broader access than the original data warranted.
+  secure_pattern: >-
+    Sensitive fields are masked, hashed, or dropped before the log call,
+    so only non-identifying diagnostic context is recorded and log
+    pipelines never carry plaintext secrets.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("login attempt: user=" + user + " password=" + password)
+      secure: |
+        log("login attempt: user=" + user)        # never log the secret
+    c:
+      vulnerable: |
+        syslog(LOG_INFO, "auth token=%s", token);
+      secure: |
+        syslog(LOG_INFO, "auth ok for uid=%d", uid);
+    cpp:
+      vulnerable: |
+        spdlog::info("api key {} accepted", apiKey);
+      secure: |
+        spdlog::info("api key accepted (fp={})", fingerprint(apiKey));
+    rust:
+      vulnerable: |
+        tracing::info!("received card {}", card_number);
+      secure: |
+        tracing::info!("received card ending {}", &card_number[card_number.len()-4..]);
+    go:
+      vulnerable: |
+        log.Printf("request body: %s", body)
+      secure: |
+        log.Printf("request received: %d bytes", len(body))
+
+# ---------------------------------------------------------------------------
+# CWE-312 — Cleartext Storage of Sensitive Information
+# ---------------------------------------------------------------------------
+
+- id: CWE-312
+  facet: Sensitive Information Exposure
+  section: Cleartext Storage of Sensitive Information
+  security_rule: >-
+    Encrypt sensitive data before it is written to disk, caches, backups,
+    or temporary files; never persist credentials, keys, or personal data
+    as readable plaintext.
+  vulnerability_pattern: >-
+    Sensitive data is written to a file, cache, or temporary location as
+    plaintext, so anyone who can read that storage, including a backup or
+    a stolen disk, obtains the data directly.
+  secure_pattern: >-
+    The data is encrypted with an authenticated cipher under a key from a
+    secrets manager or key store before it is written, so the storage
+    medium only ever holds ciphertext.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeFile("creds.txt", apiKey)
+      secure: |
+        writeFile("creds.enc", encrypt(apiKey, keyFromVault()))
+    c:
+      vulnerable: |
+        fputs(password, fopen("config.dat", "w"));
+      secure: |
+        unsigned char ct[LEN];
+        aes_gcm_encrypt(ct, password, key);
+        fwrite(ct, 1, LEN, fopen("config.dat", "wb"));
+    cpp:
+      vulnerable: |
+        std::ofstream("token.cache") << sessionToken;
+      secure: |
+        std::ofstream("token.cache") << aead.encrypt(sessionToken, key);
+    rust:
+      vulnerable: |
+        std::fs::write("secret.json", api_key)?;
+      secure: |
+        let ct = cipher.encrypt(&nonce, api_key.as_bytes())?;
+        std::fs::write("secret.json", ct)?;
+    go:
+      vulnerable: |
+        os.WriteFile("secret.txt", []byte(apiKey), 0644)
+      secure: |
+        ct := gcm.Seal(nonce, nonce, []byte(apiKey), nil)
+        os.WriteFile("secret.bin", ct, 0600)
+
+# ---------------------------------------------------------------------------
+# CWE-319 — Cleartext Transmission of Sensitive Information
+# ---------------------------------------------------------------------------
+
+- id: CWE-319
+  facet: Sensitive Information Exposure
+  section: Cleartext Transmission of Sensitive Information
+  security_rule: >-
+    Sensitive data in transit must travel over authenticated, encrypted
+    transport such as TLS; never send credentials or personal data over
+    an unencrypted connection.
+  vulnerability_pattern: >-
+    Sensitive data is sent over a plaintext channel such as HTTP or a raw
+    TCP socket, so anyone on the network path can read it or tamper with
+    it in flight.
+  secure_pattern: >-
+    The connection uses TLS with certificate verification enabled, so the
+    transport is both encrypted and authenticated before any sensitive
+    data is sent.
+  code_patterns:
+    generic:
+      vulnerable: |
+        connect("http://api.internal/login")
+      secure: |
+        connect("https://api.internal/login")     # TLS, cert verified
+    c:
+      vulnerable: |
+        int s = socket(AF_INET, SOCK_STREAM, 0);
+        send(s, password, len, 0);                 // plaintext socket
+      secure: |
+        SSL *ssl = SSL_new(ctx);
+        SSL_connect(ssl);
+        SSL_write(ssl, password, len);
+    cpp:
+      vulnerable: |
+        cpr::Get(cpr::Url{"http://host/account"});
+      secure: |
+        cpr::Get(cpr::Url{"https://host/account"}, cpr::VerifySsl{true});
+    rust:
+      vulnerable: |
+        reqwest::get("http://api/login").await?
+      secure: |
+        reqwest::Client::builder().https_only(true).build()?
+            .get("https://api/login").send().await?
+    go:
+      vulnerable: |
+        http.Get("http://api.example.com/token")
+      secure: |
+        http.Get("https://api.example.com/token")
+
+# ---------------------------------------------------------------------------
+# CWE-359 — Exposure of Private Personal Information to an Unauthorized Actor
+# ---------------------------------------------------------------------------
+
+- id: CWE-359
+  facet: Sensitive Information Exposure
+  section: Exposure of Private Personal Information to an Unauthorized Actor
+  security_rule: >-
+    Classify personal data and gate access to it by the caller's
+    authorization and consent; return or display only the personal fields
+    the requester is entitled to see.
+  vulnerability_pattern: >-
+    Personal information such as full name, address, phone number, or
+    health data is returned or displayed without checking that the
+    requester is authorized or that the subject consented to share it.
+  secure_pattern: >-
+    Access to personal fields is checked against the caller's
+    authorization and the subject's consent, and unentitled fields are
+    masked or omitted before the data leaves the service.
+  code_patterns:
+    generic:
+      vulnerable: |
+        return profile.fullAddress + profile.phone
+      secure: |
+        if caller.mayViewPII(profile): return profile.fullAddress + profile.phone
+    c:
+      vulnerable: |
+        printf("SSN: %s\n", patient.ssn);
+      secure: |
+        if (caller_has_pii_access(caller))
+            printf("SSN: %s\n", patient.ssn);
+    cpp:
+      vulnerable: |
+        res.json({ {"ssn", patient.ssn}, {"dob", patient.dob} });
+      secure: |
+        if (caller.canViewPII()) res.json({ {"ssn", patient.ssn} });
+        else res.json({ {"ssn", "REDACTED"} });
+    rust:
+      vulnerable: |
+        Json(Profile { phone: p.phone, address: p.address })
+      secure: |
+        if !caller.may_view_pii() { return Err(Forbidden); }
+        Json(Profile { phone: p.phone, address: p.address })
+    go:
+      vulnerable: |
+        json.NewEncoder(w).Encode(patient)         // SSN, DOB exposed
+      secure: |
+        if !caller.MayViewPII() { http.Error(w, "forbidden", 403); return }
+        json.NewEncoder(w).Encode(patient)

@@ -1,0 +1,252 @@
+# CWE Essentials — Concern Area 07: Improper Input Validation
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language. CWE Essentials targets systems / native code, so code blocks
+# use the C / C++ / Rust / Go set rather than web languages.
+#
+# CWEs: CWE-20, CWE-129, CWE-1284, CWE-1287.
+
+# ---------------------------------------------------------------------------
+# CWE-20 — Improper Input Validation
+# ---------------------------------------------------------------------------
+
+- id: CWE-20
+  facet: Improper Input Validation
+  section: Improper Input Validation
+  security_rule: >-
+    Validate every input at the trust boundary before it is used, against
+    a positive specification of type, length, range, format, and permitted
+    set, and reject anything that does not match.
+  vulnerability_pattern: >-
+    Data arriving at the edge of the system is treated as already
+    well-formed, so it is consumed without confirming the properties the
+    downstream code assumes, or it is only checked against a list of
+    known-bad values that misses every unanticipated input.
+  secure_pattern: >-
+    A single centralised check at the entry point confirms each field
+    against a known-good specification, the failure case fails closed,
+    and no alternate code path can reach the sink unvalidated.
+  code_patterns:
+    generic:
+      vulnerable: |
+        record = parse(input)
+        process(record.amount)            # amount never checked
+      secure: |
+        record = parse(input)
+        if not isValid(record): reject()  # validate before use
+        process(record.amount)
+    c:
+      vulnerable: |
+        int n = atoi(argv[1]);
+        char *buf = malloc(n);            // n may be 0 or negative
+      secure: |
+        long n = strtol(argv[1], &end, 10);
+        if (*end || n <= 0 || n > MAX_LEN) return -1;
+        char *buf = malloc((size_t)n);
+    cpp:
+      vulnerable: |
+        int age = std::stoi(field);
+        registerUser(name, age);          // range never confirmed
+      secure: |
+        int age = std::stoi(field);
+        if (age < 0 || age > 150) throw std::invalid_argument("age");
+        registerUser(name, age);
+    rust:
+      vulnerable: |
+        let qty: i32 = input.parse().unwrap();
+        ship(qty);
+      secure: |
+        let qty: i32 = input.parse().map_err(|_| Error::BadInput)?;
+        if !(1..=MAX_QTY).contains(&qty) { return Err(Error::BadInput); }
+        ship(qty);
+    go:
+      vulnerable: |
+        port, _ := strconv.Atoi(r.FormValue("port"))
+        dial(host, port)
+      secure: |
+        port, err := strconv.Atoi(r.FormValue("port"))
+        if err != nil || port < 1 || port > 65535 { return errBadInput }
+        dial(host, port)
+
+# ---------------------------------------------------------------------------
+# CWE-129 — Improper Validation of Array Index
+# ---------------------------------------------------------------------------
+
+- id: CWE-129
+  facet: Improper Input Validation
+  section: Improper Validation of Array Index
+  security_rule: >-
+    Before an untrusted value is used to index into an array or buffer,
+    confirm it is non-negative and strictly less than the actual element
+    count of that structure.
+  vulnerability_pattern: >-
+    A value drawn from input is used directly as an array subscript with
+    no bounds check, or with only an upper-bound check that misses
+    negative values, so the access reads or writes outside the structure.
+  secure_pattern: >-
+    The index is checked against both ends of the valid range — at or
+    above zero and below the structure size — immediately before the
+    element access, and an out-of-range index is rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        value = table[userIndex]               # userIndex unchecked
+      secure: |
+        if userIndex < 0 or userIndex >= len(table): reject()
+        value = table[userIndex]
+    c:
+      vulnerable: |
+        int idx = read_int();
+        return slots[idx];                      // no bounds check
+      secure: |
+        int idx = read_int();
+        if (idx < 0 || idx >= SLOT_COUNT) return -1;
+        return slots[idx];
+    cpp:
+      vulnerable: |
+        int i = std::stoi(field);
+        return items[i];                        // operator[] does not check
+      secure: |
+        int i = std::stoi(field);
+        return items.at(static_cast<size_t>(i));  // throws on out-of-range
+    rust:
+      vulnerable: |
+        let i: usize = field.parse().unwrap();
+        let v = data[i];                        // panics or aliases on bad i
+      secure: |
+        let i: usize = field.parse().map_err(|_| Error::BadInput)?;
+        let v = *data.get(i).ok_or(Error::OutOfRange)?;
+    go:
+      vulnerable: |
+        i, _ := strconv.Atoi(req.Index)
+        return rows[i]                          // panics on out-of-range
+      secure: |
+        i, err := strconv.Atoi(req.Index)
+        if err != nil || i < 0 || i >= len(rows) { return nil, errOutOfRange }
+        return rows[i], nil
+
+# ---------------------------------------------------------------------------
+# CWE-1284 — Improper Validation of Specified Quantity in Input
+# ---------------------------------------------------------------------------
+
+- id: CWE-1284
+  facet: Improper Input Validation
+  section: Improper Validation of Specified Quantity in Input
+  security_rule: >-
+    When input specifies a count, size, or length, validate that quantity
+    against the limits the code can actually handle before using it to
+    allocate memory, drive a loop, or size a copy.
+  vulnerability_pattern: >-
+    A quantity taken from input — a length prefix, element count, or
+    repeat factor — is trusted directly, so an oversized value drives a
+    huge allocation or loop and a negative or zero value breaks an
+    invariant downstream.
+  secure_pattern: >-
+    The declared quantity is range-checked against a sane minimum and a
+    hard maximum, and is confirmed consistent with the actual amount of
+    data present, before it is used to allocate or iterate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        count = readQuantity(input)
+        buf = allocate(count)              # attacker sets count huge
+      secure: |
+        count = readQuantity(input)
+        if count < 1 or count > MAX_COUNT: reject()
+        buf = allocate(count)
+    c:
+      vulnerable: |
+        uint32_t len = read_be32(sock);
+        char *buf = malloc(len);           // len attacker-controlled
+        recv(sock, buf, len, 0);
+      secure: |
+        uint32_t len = read_be32(sock);
+        if (len == 0 || len > MAX_MSG_LEN) return -1;
+        char *buf = malloc(len);
+        recv(sock, buf, len, 0);
+    cpp:
+      vulnerable: |
+        size_t n = header.count;
+        std::vector<Item> items(n);        // unbounded reservation
+      secure: |
+        size_t n = header.count;
+        if (n > MAX_ITEMS) throw std::length_error("count");
+        std::vector<Item> items(n);
+    rust:
+      vulnerable: |
+        let n: usize = header.len as usize;
+        let mut buf = Vec::with_capacity(n); // n from the wire
+      secure: |
+        let n: usize = header.len as usize;
+        if n > MAX_LEN { return Err(Error::TooLarge); }
+        let mut buf = Vec::with_capacity(n);
+    go:
+      vulnerable: |
+        n := int(binary.BigEndian.Uint32(hdr))
+        buf := make([]byte, n)              // n unchecked
+      secure: |
+        n := int(binary.BigEndian.Uint32(hdr))
+        if n <= 0 || n > maxMsgLen { return errBadLength }
+        buf := make([]byte, n)
+
+# ---------------------------------------------------------------------------
+# CWE-1287 — Improper Validation of Specified Type of Input
+# ---------------------------------------------------------------------------
+
+- id: CWE-1287
+  facet: Improper Input Validation
+  section: Improper Validation of Specified Type of Input
+  security_rule: >-
+    Convert input to its intended type explicitly, confirm the conversion
+    succeeded, and reject input whose type or tag does not match what the
+    handling code expects.
+  vulnerability_pattern: >-
+    Input is assumed to already be of the expected type, or a type
+    conversion is performed without checking that it succeeded, so a
+    value of the wrong type reaches code that cannot handle it and
+    misbehaves or crashes.
+  secure_pattern: >-
+    Each value is parsed or coerced into the expected type through a
+    checked conversion, the failure result is handled, and a discriminant
+    or type tag is verified against the set of types the code supports.
+  code_patterns:
+    generic:
+      vulnerable: |
+        amount = field                      # assumed numeric, used as number
+        total = total + amount
+      secure: |
+        amount = parseNumber(field)
+        if amount is None: reject()         # wrong type rejected
+        total = total + amount
+    c:
+      vulnerable: |
+        int qty = atoi(field);              // "abc" silently becomes 0
+        order(qty);
+      secure: |
+        char *end;
+        long qty = strtol(field, &end, 10);
+        if (end == field || *end != '\0') return -1;  // not an integer
+        order((int)qty);
+    cpp:
+      vulnerable: |
+        double price = std::atof(field);    // no way to detect bad input
+        charge(price);
+      secure: |
+        try { charge(std::stod(field)); }
+        catch (const std::exception &) { return Error::NotANumber; }
+    rust:
+      vulnerable: |
+        let value = json["count"].as_i64().unwrap_or(0);  // type mismatch hidden
+      secure: |
+        let value = json["count"].as_i64()
+            .ok_or(Error::WrongType)?;       // reject if not an integer
+    go:
+      vulnerable: |
+        id := payload["id"].(int)            // panics if not an int
+      secure: |
+        id, ok := payload["id"].(int)
+        if !ok { return errWrongType }

@@ -1,0 +1,409 @@
+# CWE Essentials — Concern-area: Numeric, Type & Conversion Errors
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + C/C++/Rust/Go for systems / native code).
+#
+# CWEs: CWE-190, CWE-191, CWE-369, CWE-681, CWE-194, CWE-195, CWE-704, CWE-843
+
+# ---------------------------------------------------------------------------
+# CWE-190 — Integer Overflow or Wraparound
+# ---------------------------------------------------------------------------
+
+- id: CWE-190
+  facet: Numeric, Type & Conversion Errors
+  section: Integer Overflow or Wraparound
+  security_rule: >-
+    Arithmetic on untrusted integers must be range-checked or performed
+    with checked-arithmetic helpers, especially when the result drives a
+    size, count, index, or allocation.
+  vulnerability_pattern: >-
+    A size or count is computed by multiplying or adding attacker-influenced
+    integers without a range check, so the result wraps past the type
+    maximum to a small value and a subsequent allocation is undersized.
+  secure_pattern: >-
+    Operands are validated against an explicit range before the operation,
+    or the computation uses a checked-arithmetic routine that signals
+    overflow instead of silently wrapping.
+  code_patterns:
+    generic:
+      vulnerable: |
+        size = count * itemSize       # wraps, then a short buffer is allocated
+        buf = allocate(size)
+      secure: |
+        if count > MAX_SIZE / itemSize: reject()
+        buf = allocate(count * itemSize)
+    c:
+      vulnerable: |
+        size_t total = count * sizeof(record);  /* wraps on large count */
+        void *buf = malloc(total);
+      secure: |
+        if (count > SIZE_MAX / sizeof(record)) return NULL;
+        void *buf = malloc(count * sizeof(record));
+    cpp:
+      vulnerable: |
+        std::size_t total = n * width;           // silent wraparound
+        auto buf = std::make_unique<char[]>(total);
+      secure: |
+        if (n > std::numeric_limits<std::size_t>::max() / width) throw std::overflow_error("size");
+        auto buf = std::make_unique<char[]>(n * width);
+    rust:
+      vulnerable: |
+        let total = count * item_size;           // wraps in release builds
+      secure: |
+        let total = count.checked_mul(item_size).ok_or("overflow")?;
+    go:
+      vulnerable: |
+        total := count * itemSize                // wraps silently
+        buf := make([]byte, total)
+      secure: |
+        if count > math.MaxInt/itemSize { return errors.New("overflow") }
+        buf := make([]byte, count*itemSize)
+
+# ---------------------------------------------------------------------------
+# CWE-191 — Integer Underflow (Wrap or Wraparound)
+# ---------------------------------------------------------------------------
+
+- id: CWE-191
+  facet: Numeric, Type & Conversion Errors
+  section: Integer Underflow (Wrap or Wraparound)
+  security_rule: >-
+    Subtraction on integers must guarantee the result stays in range,
+    so a value that drops below the type minimum cannot wrap to a large
+    positive number used as a size or index.
+  vulnerability_pattern: >-
+    A length or counter is decremented or subtracted without checking that
+    the minuend is large enough, so the result underflows below zero and,
+    on an unsigned type, wraps to a huge value.
+  secure_pattern: >-
+    The subtraction is guarded by a check that the left operand is at
+    least as large as the right, or a checked-subtraction helper is used
+    so underflow is detected before the result is consumed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        remaining = length - consumed       # underflows when consumed > length
+        copy(dst, src, remaining)
+      secure: |
+        if consumed > length: reject()
+        remaining = length - consumed
+    c:
+      vulnerable: |
+        size_t remaining = buf_len - header_len;  /* wraps if header > buf */
+        memcpy(dst, src, remaining);
+      secure: |
+        if (header_len > buf_len) return -1;
+        size_t remaining = buf_len - header_len;
+    cpp:
+      vulnerable: |
+        std::size_t left = total - taken;         // wraps when taken > total
+      secure: |
+        if (taken > total) throw std::underflow_error("count");
+        std::size_t left = total - taken;
+    rust:
+      vulnerable: |
+        let remaining = length - consumed;         // panics or wraps
+      secure: |
+        let remaining = length.checked_sub(consumed).ok_or("underflow")?;
+    go:
+      vulnerable: |
+        remaining := length - consumed             // wraps when negative on uint
+      secure: |
+        if consumed > length { return errors.New("underflow") }
+        remaining := length - consumed
+
+# ---------------------------------------------------------------------------
+# CWE-369 — Divide By Zero
+# ---------------------------------------------------------------------------
+
+- id: CWE-369
+  facet: Numeric, Type & Conversion Errors
+  section: Divide By Zero
+  security_rule: >-
+    Any divisor or modulus operand that can be influenced by input must
+    be checked to be non-zero before the division is performed.
+  vulnerability_pattern: >-
+    A division or remainder operation uses a divisor that can be zero
+    because it derives from input or an empty collection, causing a crash
+    or an undefined result.
+  secure_pattern: >-
+    The divisor is validated to be non-zero before the operation, and the
+    zero case is handled explicitly with a safe default or an error.
+  code_patterns:
+    generic:
+      vulnerable: |
+        average = total / count        # crashes when count is zero
+      secure: |
+        if count == 0: return 0
+        average = total / count
+    c:
+      vulnerable: |
+        int rate = total / divisor;     /* undefined behaviour if divisor == 0 */
+      secure: |
+        if (divisor == 0) return -1;
+        int rate = total / divisor;
+    cpp:
+      vulnerable: |
+        double avg = sum / values.size();   // size() may be zero
+      secure: |
+        if (values.empty()) return 0.0;
+        double avg = sum / values.size();
+    rust:
+      vulnerable: |
+        let avg = total / count;            // panics when count is 0
+      secure: |
+        let avg = count.checked_div(count).map(|_| total / count).unwrap_or(0);
+    go:
+      vulnerable: |
+        avg := total / count               // panics: integer divide by zero
+      secure: |
+        if count == 0 { return 0 }
+        avg := total / count
+
+# ---------------------------------------------------------------------------
+# CWE-681 — Incorrect Conversion between Numeric Types
+# ---------------------------------------------------------------------------
+
+- id: CWE-681
+  facet: Numeric, Type & Conversion Errors
+  section: Incorrect Conversion between Numeric Types
+  security_rule: >-
+    A value must only be converted to a narrower or differently-signed
+    numeric type after confirming it fits the destination range, so no
+    truncation or misinterpretation occurs.
+  vulnerability_pattern: >-
+    A wide or signed numeric value is assigned into a narrower or
+    unsigned type without a range check, so high-order bits are dropped
+    or the sign flips and the value silently changes meaning.
+  secure_pattern: >-
+    The source value is validated against the destination type's minimum
+    and maximum before the conversion, or a checked conversion that fails
+    on loss of information is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        small = narrow(wideValue)        # high bits truncated silently
+      secure: |
+        if wideValue < MIN or wideValue > MAX: reject()
+        small = narrow(wideValue)
+    c:
+      vulnerable: |
+        short len = (short) message_length;   /* truncates a large int */
+      secure: |
+        if (message_length < 0 || message_length > SHRT_MAX) return -1;
+        short len = (short) message_length;
+    cpp:
+      vulnerable: |
+        uint8_t b = static_cast<uint8_t>(count);  // loses bits above 255
+      secure: |
+        if (count > std::numeric_limits<uint8_t>::max()) throw std::range_error("count");
+        auto b = static_cast<uint8_t>(count);
+    rust:
+      vulnerable: |
+        let n = wide_value as u16;            // `as` silently truncates
+      secure: |
+        let n = u16::try_from(wide_value).map_err(|_| "out of range")?;
+    go:
+      vulnerable: |
+        n := int32(wideValue)                // truncates a larger int64
+      secure: |
+        if wideValue < math.MinInt32 || wideValue > math.MaxInt32 { return errors.New("range") }
+        n := int32(wideValue)
+
+# ---------------------------------------------------------------------------
+# CWE-194 — Unexpected Sign Extension
+# ---------------------------------------------------------------------------
+
+- id: CWE-194
+  facet: Numeric, Type & Conversion Errors
+  section: Unexpected Sign Extension
+  security_rule: >-
+    When a narrow value is widened, its signedness must match the
+    intended interpretation, so a value meant to be unsigned is not
+    sign-extended into a large negative number.
+  vulnerability_pattern: >-
+    A narrow signed value, often a byte with the high bit set, is widened
+    to a larger type and sign-extended, turning what was meant as a small
+    unsigned quantity into a large negative number.
+  secure_pattern: >-
+    The narrow value is stored in or masked to an unsigned type before
+    widening, so the widened result carries only zero high bits and the
+    intended magnitude.
+  code_patterns:
+    generic:
+      vulnerable: |
+        wide = widen(signedByte)         # high bit sign-extends to negative
+      secure: |
+        wide = widen(signedByte and 0xFF)
+    c:
+      vulnerable: |
+        int len = packet[0];             /* signed char sign-extends to negative */
+      secure: |
+        int len = (unsigned char) packet[0];
+    cpp:
+      vulnerable: |
+        int value = static_cast<int>(rawByte);   // char may be signed
+      secure: |
+        int value = static_cast<unsigned char>(rawByte);
+    rust:
+      vulnerable: |
+        let len = byte as i8 as usize;    // i8 sign-extends before widening
+      secure: |
+        let len = (byte as u8) as usize;
+    go:
+      vulnerable: |
+        n := int(int8(data[0]))           // sign-extends a high-bit byte
+      secure: |
+        n := int(data[0])                 // data[0] is byte (uint8), zero-extends
+
+# ---------------------------------------------------------------------------
+# CWE-195 — Signed to Unsigned Conversion Error
+# ---------------------------------------------------------------------------
+
+- id: CWE-195
+  facet: Numeric, Type & Conversion Errors
+  section: Signed to Unsigned Conversion Error
+  security_rule: >-
+    A signed value must be confirmed non-negative before it is converted
+    to or compared against an unsigned type, so a negative value cannot
+    become a huge positive one.
+  vulnerability_pattern: >-
+    A negative signed value is assigned to or compared with an unsigned
+    type, so it wraps to a very large positive number that defeats a size
+    or bounds check and is then used as a length or index.
+  secure_pattern: >-
+    The signed value is checked to be non-negative before any conversion
+    to an unsigned type, and length or size parameters are kept signed
+    while being validated against an upper bound.
+  code_patterns:
+    generic:
+      vulnerable: |
+        copy(dst, src, signedLength)     # negative length becomes huge unsigned
+      secure: |
+        if signedLength < 0 or signedLength > capacity: reject()
+        copy(dst, src, signedLength)
+    c:
+      vulnerable: |
+        memcpy(dst, src, (size_t) len);  /* negative len wraps to huge size */
+      secure: |
+        if (len < 0 || (size_t) len > dst_cap) return -1;
+        memcpy(dst, src, (size_t) len);
+    cpp:
+      vulnerable: |
+        std::vector<char> v(static_cast<std::size_t>(count));  // negative count
+      secure: |
+        if (count < 0) throw std::invalid_argument("count");
+        std::vector<char> v(static_cast<std::size_t>(count));
+    rust:
+      vulnerable: |
+        let n = signed_len as usize;      // negative becomes enormous
+      secure: |
+        let n = usize::try_from(signed_len).map_err(|_| "negative length")?;
+    go:
+      vulnerable: |
+        n := uint(signedLen)              // negative wraps to a huge uint
+      secure: |
+        if signedLen < 0 { return errors.New("negative length") }
+        n := uint(signedLen)
+
+# ---------------------------------------------------------------------------
+# CWE-704 — Incorrect Type Conversion or Cast
+# ---------------------------------------------------------------------------
+
+- id: CWE-704
+  facet: Numeric, Type & Conversion Errors
+  section: Incorrect Type Conversion or Cast
+  security_rule: >-
+    A value must only be cast to a type whose representation it is known
+    to satisfy, and a down-cast must be guarded by a runtime type check
+    so an incompatible object is never treated as the target type.
+  vulnerability_pattern: >-
+    A value is cast to a type it does not actually hold, so later code
+    interprets the underlying memory or bits incorrectly and reads wrong
+    fields, wrong sizes, or invalid pointers.
+  secure_pattern: >-
+    The runtime type is verified before the cast, using a checked
+    down-cast or a tagged discriminant, so the conversion only proceeds
+    when the value genuinely matches the destination type.
+  code_patterns:
+    generic:
+      vulnerable: |
+        derived = castTo(Derived, baseRef)   # no check that it is a Derived
+        use(derived.extraField)
+      secure: |
+        if isInstanceOf(baseRef, Derived):
+            derived = castTo(Derived, baseRef)
+    c:
+      vulnerable: |
+        struct Cat *c = (struct Cat *) animal;  /* animal may be a Dog */
+      secure: |
+        if (animal->kind != KIND_CAT) return -1;
+        struct Cat *c = (struct Cat *) animal;
+    cpp:
+      vulnerable: |
+        Derived *d = static_cast<Derived*>(basePtr);  // unchecked down-cast
+      secure: |
+        Derived *d = dynamic_cast<Derived*>(basePtr);
+        if (!d) return;
+    rust:
+      vulnerable: |
+        let cat = unsafe { &*(animal as *const Animal as *const Cat) };
+      secure: |
+        let cat = match animal { Animal::Cat(c) => c, _ => return };
+    go:
+      vulnerable: |
+        cat := animal.(Cat)                  // panics if animal is not a Cat
+      secure: |
+        cat, ok := animal.(Cat)
+        if !ok { return errors.New("not a Cat") }
+
+# ---------------------------------------------------------------------------
+# CWE-843 — Access of Resource Using Incompatible Type (Type Confusion)
+# ---------------------------------------------------------------------------
+
+- id: CWE-843
+  facet: Numeric, Type & Conversion Errors
+  section: Access of Resource Using Incompatible Type (Type Confusion)
+  security_rule: >-
+    A resource or memory region must always be accessed through the type
+    it was actually created as, so a tagged union or polymorphic object
+    is never read through a mismatched type view.
+  vulnerability_pattern: >-
+    Memory created or tagged as one type is accessed as a different,
+    incompatible type, so fields, pointers, or sizes are misread and an
+    attacker can corrupt memory or hijack control flow.
+  secure_pattern: >-
+    Each access checks the discriminant or tag that records the resource's
+    real type and selects the matching view, so the type used to read the
+    memory always equals the type it was written as.
+  code_patterns:
+    generic:
+      vulnerable: |
+        value = readAsType(union, FLOAT)   # union currently holds an INT
+      secure: |
+        if union.tag == FLOAT: value = readAsType(union, FLOAT)
+    c:
+      vulnerable: |
+        double d = u->as_double;            /* union tag says INT, not DOUBLE */
+      secure: |
+        if (u->tag != TAG_DOUBLE) return -1;
+        double d = u->as_double;
+    cpp:
+      vulnerable: |
+        auto &s = std::get<std::string>(v);  // throws if v holds another type
+      secure: |
+        if (auto *s = std::get_if<std::string>(&v)) use(*s);
+    rust:
+      vulnerable: |
+        let n: i64 = unsafe { std::mem::transmute(float_bits) };  // reinterpret
+      secure: |
+        let n: i64 = match value { Value::Int(i) => i, _ => return };
+    go:
+      vulnerable: |
+        n := *(*int64)(unsafe.Pointer(&f))   // reinterprets a float64 as int64
+      secure: |
+        n, ok := boxed.(int64)
+        if !ok { return errors.New("type mismatch") }

@@ -114,19 +114,23 @@ docker compose exec app python scripts/ingest_bundled_corpora.py
 This is idempotent — it replaces a framework's documents rather than
 duplicating them.
 
-The corpus CSVs are **generated**, never hand-edited:
+The corpus CSVs are **generated**, never hand-edited. All three are
+rendered from hand-authored enriched YAML by the same harness,
+`scripts/build_enriched_corpus.py`:
 
-- `cwe_essentials_corpus.csv` / `isvs_corpus.csv` come from the
-  per-concern-area markdown under `src/app/data/<framework>_corpus/` —
-  edit the markdown, then regenerate with
-  `python scripts/build_corpus.py --framework <name> --write`.
-- `asvs_corpus.csv` is rendered from the hand-authored enriched chapter
-  YAML under `src/app/data/asvs_corpus/` (one file per ASVS chapter,
-  each requirement carrying a security rule, vulnerability/secure
-  pattern descriptions, and per-language code samples) — edit the
-  chapter YAML, then regenerate with
-  `python scripts/build_enriched_corpus.py --framework asvs --write`.
-  The authoring format is locked by `asvs_corpus/_ENRICHMENT_SPEC.md`.
+- `asvs_corpus.csv` — from per-chapter YAML under
+  `src/app/data/asvs_corpus/` (one file per ASVS chapter).
+- `cwe_essentials_corpus.csv` — from per-concern-area YAML under
+  `src/app/data/cwe_essentials_corpus/` (one file per concern-area,
+  one entry per CWE).
+- `isvs_corpus.csv` — from per-concern-area YAML under
+  `src/app/data/isvs_corpus/`.
+
+Each entry carries a security rule, vulnerability/secure pattern
+descriptions, and per-language code samples. Edit the YAML, then
+regenerate with
+`python scripts/build_enriched_corpus.py --framework <name> --write`.
+The authoring format is locked by `asvs_corpus/_ENRICHMENT_SPEC.md`.
 
 Until a corpus is ingested, a scan against the framework still
 completes — its agents simply produce findings without RAG citations.
@@ -134,12 +138,10 @@ After ingestion the findings carry concern-area-grounded references.
 
 **Edition + refresh path.** Each corpus is pinned to an edition: ASVS
 to **5.0.0**, CWE Essentials to the **CWE Top 25 (2025)**, ISVS to
-**OWASP ISVS 1.0** (the concern-area corpora record it in every
-markdown file's `edition` frontmatter).
-Adopting a newer edition is a deliberate action — update the
-concern-area markdown, bump the `edition` frontmatter, run
-`build_corpus.py --framework <name> --write`, and re-ingest with the
-command above.
+**OWASP ISVS 1.0**. Adopting a newer edition is a deliberate action —
+update the per-domain YAML, run
+`build_enriched_corpus.py --framework <name> --write`, and re-ingest
+with the command above.
 
 ## Sanity-checking
 

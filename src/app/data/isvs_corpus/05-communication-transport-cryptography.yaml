@@ -1,0 +1,325 @@
+# OWASP ISVS 1.0 — Concern Area: Communication Transport & Cryptography
+# Maps to ISVS V4 — Communication.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language. ISVS targets IoT / embedded / connected-device code, so the
+# language blocks favour generic + C / C++ / Python / Rust where the
+# requirement has a real code sink.
+
+# ---------------------------------------------------------------------------
+# ISVS-5.1 — Encrypt every communication channel
+# ---------------------------------------------------------------------------
+
+- id: ISVS-5.1
+  facet: Communication Transport & Cryptography
+  section: Transport Encryption for All Channels
+  security_rule: >-
+    Every channel that carries device telemetry, control commands, or
+    other device data must be encrypted in transit with a secure
+    transport such as TLS or DTLS; no data or control traffic may travel
+    over a plaintext protocol.
+  vulnerability_pattern: >-
+    The device exchanges telemetry or commands over a cleartext protocol
+    such as plain HTTP, raw TCP, or unencrypted MQTT, so anyone on the
+    network path can read or alter the traffic.
+  secure_pattern: >-
+    All device data and control traffic is carried over an encrypted
+    transport such as TLS or DTLS, and plaintext endpoints are removed so
+    no channel exposes data on the wire.
+  code_patterns:
+    generic:
+      vulnerable: |
+        socket = openTcp(broker, 1883)        # plaintext MQTT
+        socket.publish(topic, telemetry)
+      secure: |
+        socket = openTls(broker, 8883)        # MQTT over TLS
+        socket.publish(topic, telemetry)
+    c:
+      vulnerable: |
+        int fd = connect_tcp("api.example.com", 80);
+        send(fd, telemetry, len, 0);          // cleartext HTTP
+      secure: |
+        SSL *ssl = tls_connect("api.example.com", 443, ctx);
+        SSL_write(ssl, telemetry, len);
+    cpp:
+      vulnerable: |
+        mqtt::client cli("tcp://broker:1883", id);   // plaintext
+        cli.publish("dev/telemetry", payload);
+      secure: |
+        mqtt::client cli("ssl://broker:8883", id);   // TLS transport
+        cli.publish("dev/telemetry", payload);
+    python:
+      vulnerable: |
+        client.connect("broker.example.com", 1883)   # plaintext MQTT
+      secure: |
+        client.tls_set()                              # TLS context
+        client.connect("broker.example.com", 8883)
+    rust:
+      vulnerable: |
+        let mut s = TcpStream::connect("broker:1883")?;
+        s.write_all(&telemetry)?;
+      secure: |
+        let conn = connector.connect("broker", TcpStream::connect("broker:8883")?)?;
+        conn.write_all(&telemetry)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-5.2 — Validate the peer certificate on every connection
+# ---------------------------------------------------------------------------
+
+- id: ISVS-5.2
+  facet: Communication Transport & Cryptography
+  section: Peer Certificate Validation
+  security_rule: >-
+    The device must validate the peer's certificate or public key — chain
+    of trust, hostname, and expiry — on every connection, and must never
+    disable or ignore certificate verification, including as a shortcut
+    for self-signed development certificates.
+  vulnerability_pattern: >-
+    TLS or DTLS is used but certificate verification is turned off or its
+    result is ignored, so an attacker who can intercept traffic presents
+    any certificate and the device accepts it.
+  secure_pattern: >-
+    Certificate verification is enabled with a trusted root store and
+    hostname checking, the handshake fails closed when validation fails,
+    and development certificates are handled by trusting a dev root rather
+    than disabling checks.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.setVerifyMode(NONE)            # accepts any certificate
+        tls.connect(host)
+      secure: |
+        tls.setVerifyMode(REQUIRED)
+        tls.setTrustStore(rootCa)
+        tls.connect(host)                  # fails closed on bad cert
+    c:
+      vulnerable: |
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+      secure: |
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+        SSL_CTX_load_verify_locations(ctx, "/etc/ssl/roots.pem", NULL);
+    cpp:
+      vulnerable: |
+        ctx.set_verify_mode(asio::ssl::verify_none);
+      secure: |
+        ctx.set_verify_mode(asio::ssl::verify_peer);
+        ctx.set_verify_callback(asio::ssl::host_name_verification(host));
+    python:
+      vulnerable: |
+        requests.get(url, verify=False)
+      secure: |
+        requests.get(url, verify="/etc/ssl/roots.pem")
+    rust:
+      vulnerable: |
+        let tls = TlsConnector::builder()
+            .danger_accept_invalid_certs(true).build()?;
+      secure: |
+        let tls = TlsConnector::builder()
+            .add_root_certificate(root_ca).build()?;
+
+# ---------------------------------------------------------------------------
+# ISVS-5.3 — Mutual authentication of device and cloud
+# ---------------------------------------------------------------------------
+
+- id: ISVS-5.3
+  facet: Communication Transport & Cryptography
+  section: Mutual Authentication
+  security_rule: >-
+    Where the product's trust model requires it, both ends of a
+    connection must authenticate — the device must present its own
+    client certificate or key so the cloud can confirm it is a genuine
+    device, not only the server proving itself to the device.
+  vulnerability_pattern: >-
+    Only the server is authenticated during the handshake, leaving the
+    device itself unverified, so a cloned or rogue device is
+    indistinguishable from a genuine one.
+  secure_pattern: >-
+    The device presents a unique client certificate or key during the
+    handshake and the server requires and verifies it, so each endpoint
+    proves its identity to the other before data flows.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.connect(host)                  # server-only authentication
+      secure: |
+        tls.setClientCert(deviceCert, deviceKey)
+        tls.connect(host)                  # mutual TLS
+    c:
+      vulnerable: |
+        SSL_CTX_load_verify_locations(ctx, "roots.pem", NULL);
+      secure: |
+        SSL_CTX_load_verify_locations(ctx, "roots.pem", NULL);
+        SSL_CTX_use_certificate_file(ctx, "device.crt", SSL_FILETYPE_PEM);
+        SSL_CTX_use_PrivateKey_file(ctx, "device.key", SSL_FILETYPE_PEM);
+    cpp:
+      vulnerable: |
+        ctx.load_verify_file("roots.pem");           // no client identity
+      secure: |
+        ctx.load_verify_file("roots.pem");
+        ctx.use_certificate_file("device.crt", asio::ssl::context::pem);
+        ctx.use_private_key_file("device.key", asio::ssl::context::pem);
+    python:
+      vulnerable: |
+        ctx = ssl.create_default_context(cafile="roots.pem")
+      secure: |
+        ctx = ssl.create_default_context(cafile="roots.pem")
+        ctx.load_cert_chain("device.crt", "device.key")  # client cert
+    rust:
+      vulnerable: |
+        let cfg = ClientConfig::builder()
+            .with_root_certificates(roots).with_no_client_auth();
+      secure: |
+        let cfg = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_client_auth_cert(device_chain, device_key)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-5.4 — Current protocol versions and strong cipher suites
+# ---------------------------------------------------------------------------
+
+- id: ISVS-5.4
+  facet: Communication Transport & Cryptography
+  section: Protocol Version and Cipher Suite Strength
+  security_rule: >-
+    The device must negotiate only current transport protocol versions
+    and strong cipher suites; obsolete protocol versions and weak ciphers
+    must be disabled so the session cannot be downgraded.
+  vulnerability_pattern: >-
+    Outdated protocol versions such as SSLv3 or TLS 1.0 and weak cipher
+    suites such as RC4, DES, or export-grade algorithms remain enabled,
+    so an attacker can downgrade the session to a breakable configuration.
+  secure_pattern: >-
+    A minimum protocol version of TLS 1.2 or higher is enforced, only
+    strong AEAD cipher suites are offered, and obsolete versions and weak
+    ciphers are explicitly disabled so no downgrade target exists.
+  code_patterns:
+    generic:
+      vulnerable: |
+        tls.setMinVersion(SSLv3)           # legacy versions allowed
+      secure: |
+        tls.setMinVersion(TLS1_2)
+        tls.setCipherSuites(strongAeadOnly)
+    c:
+      vulnerable: |
+        SSL_CTX_set_options(ctx, 0);       // SSLv3 / TLS 1.0 still allowed
+      secure: |
+        SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+        SSL_CTX_set_cipher_list(ctx, "ECDHE-RSA-AES256-GCM-SHA384");
+    cpp:
+      vulnerable: |
+        asio::ssl::context ctx(asio::ssl::context::sslv23);
+      secure: |
+        asio::ssl::context ctx(asio::ssl::context::tls_client);
+        ctx.set_options(asio::ssl::context::no_tlsv1 |
+                        asio::ssl::context::no_tlsv1_1);
+    python:
+      vulnerable: |
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
+      secure: |
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    rust:
+      vulnerable: |
+        let cfg = ClientConfig::builder()
+            .with_protocol_versions(&ALL_VERSIONS)?;
+      secure: |
+        let cfg = ClientConfig::builder()
+            .with_protocol_versions(&[&rustls::version::TLS13])?;
+
+# ---------------------------------------------------------------------------
+# ISVS-5.5 — Per-device, rotatable keys
+# ---------------------------------------------------------------------------
+
+- id: ISVS-5.5
+  facet: Communication Transport & Cryptography
+  section: Per-Device Rotatable Keys
+  security_rule: >-
+    Cryptographic keys that secure device communication must be unique
+    per device and rotatable, so that recovering one key from one device
+    never compromises the rest of the fleet.
+  vulnerability_pattern: >-
+    A single long-lived symmetric key or credential is hardcoded and
+    shared across an entire product line, so extracting it from one
+    device decrypts or impersonates every device.
+  secure_pattern: >-
+    Each device is provisioned with its own unique key, read from secure
+    storage rather than baked into firmware, and the key can be rotated
+    or revoked without affecting other devices.
+  code_patterns:
+    generic:
+      vulnerable: |
+        KEY = "PRODUCT_LINE_SHARED_KEY"    # same on every device
+      secure: |
+        key = secureStorage.readDeviceKey()  # unique, provisioned, rotatable
+    c:
+      vulnerable: |
+        static const uint8_t aes_key[16] = { 0x00, 0x11, /* ... */ };
+      secure: |
+        uint8_t aes_key[16];
+        secure_element_read_key(SLOT_DEVICE, aes_key);  // per-device key
+    cpp:
+      vulnerable: |
+        const std::string kKey = "shared-fleet-secret";
+      secure: |
+        std::string key = key_store.load("device", current_key_id());
+    python:
+      vulnerable: |
+        DEVICE_KEY = b"shared-symmetric-key-for-all-units"
+      secure: |
+        device_key = keystore.get_active_key(device_id)  # rotatable per device
+    rust:
+      vulnerable: |
+        const DEVICE_KEY: &[u8] = b"hardcoded-fleet-wide-key";
+      secure: |
+        let device_key = secure_element.read_key(KeySlot::Device)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-5.6 — Ephemeral session keys
+# ---------------------------------------------------------------------------
+
+- id: ISVS-5.6
+  facet: Communication Transport & Cryptography
+  section: Ephemeral Session Keys
+  security_rule: >-
+    Keys used to encrypt an individual communication session must be
+    ephemeral — freshly derived per session and discarded afterwards — so
+    that compromise of a long-term key does not expose past sessions.
+  vulnerability_pattern: >-
+    A static long-term key is used directly to encrypt session traffic,
+    so there is no forward secrecy and recovering that key later decrypts
+    every recorded session.
+  secure_pattern: >-
+    Each session derives a fresh ephemeral key through an ephemeral
+    key-exchange such as ECDHE, uses it only for that session, and zeroes
+    it when the session ends so earlier traffic stays protected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        sessionKey = longTermKey            # reused for every session
+      secure: |
+        sessionKey = ecdhe(longTermKey, freshEphemeralKeyPair())
+    c:
+      vulnerable: |
+        SSL_CTX_set_cipher_list(ctx, "AES256-SHA");   // static RSA key exchange
+      secure: |
+        SSL_CTX_set_cipher_list(ctx, "ECDHE-RSA-AES256-GCM-SHA384");
+    cpp:
+      vulnerable: |
+        ctx.set_cipher_list("AES128-SHA");            // no forward secrecy
+      secure: |
+        ctx.set_cipher_list("ECDHE-ECDSA-AES128-GCM-SHA256");
+    python:
+      vulnerable: |
+        ctx.set_ciphers("AES256-SHA")                 # static key exchange
+      secure: |
+        ctx.set_ciphers("ECDHE-RSA-AES256-GCM-SHA384")
+    rust:
+      vulnerable: |
+        let shared = static_key.clone();              // reused across sessions
+      secure: |
+        let ephemeral = EphemeralSecret::random_from_rng(&mut rng);
+        let shared = ephemeral.diffie_hellman(&peer_public);

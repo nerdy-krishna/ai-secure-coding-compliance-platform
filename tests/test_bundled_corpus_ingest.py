@@ -47,11 +47,11 @@ def test_ingest_bundled_corpus_loads_and_tags_cwe_essentials():
     store = _FakeStore()
     count = ingest_bundled_corpus(store, "cwe_essentials")
 
-    assert count == 14
+    assert count == 78  # one entry per CWE across the 14 concern-areas
     # delete-then-add → re-running replaces, never duplicates.
     assert store.deleted == ["cwe_essentials"]
     call = store.added[0]
-    assert len(call["documents"]) == 14
+    assert len(call["documents"]) == 78
     for meta in call["metadatas"]:
         assert meta["framework_name"] == "cwe_essentials"
         assert meta["scan_ready"] is True  # required by the RAG facet resolver
@@ -108,7 +108,7 @@ def test_only_if_empty_skips_already_populated_frameworks():
     result = ingest_all_bundled_corpora(store, only_if_empty=True)
 
     assert result["cwe_essentials"] == 14  # reported, not re-ingested
-    assert result["isvs"] == 7  # the empty framework was ingested
+    assert result["isvs"] == 50  # the empty framework was ingested
     # Only the empty framework was (re)ingested.
     assert store.deleted == ["isvs"]
 

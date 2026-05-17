@@ -1,0 +1,275 @@
+# OWASP ISVS 1.0 — Concern-Area 02: Device Application & Data Protection
+# Maps to ISVS V2 — User Space Application.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + a subset of C/C++/Python/Rust for ISVS embedded /
+# connected-device code).
+
+# ---------------------------------------------------------------------------
+# ISVS-2.1 — Credentials and keys in a hardware-backed keystore
+# ---------------------------------------------------------------------------
+
+- id: ISVS-2.1
+  facet: Device Application & Data Protection
+  section: Credential and Key Storage
+  security_rule: >-
+    Credentials, API tokens, and session or signing keys must be held in a
+    hardware-backed keystore or secure element, never in plaintext
+    application files or shared preferences that an attacker with device
+    access can read.
+  vulnerability_pattern: >-
+    The device application writes a credential or key into a plain file,
+    a config entry, or a shared-preferences store, so anyone who can read
+    the storage medium recovers the secret directly.
+  secure_pattern: >-
+    Secrets are stored in and used through a hardware-backed keystore or
+    secure element, so the application references a key handle and the
+    raw key material never lands in a readable file.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeFile("/data/app/config", "api_token=" + token)
+      secure: |
+        handle = secureElement.storeKey("api_token", token)
+        useKey(handle)            # raw token never written to the filesystem
+    c:
+      vulnerable: |
+        FILE *f = fopen("/data/creds.txt", "w");
+        fprintf(f, "key=%s\n", api_key);
+      secure: |
+        uint32_t slot = 2;
+        atecc608_write_key(slot, api_key);   // secure element, no plaintext file
+    cpp:
+      vulnerable: |
+        std::ofstream("/data/creds.txt") << "key=" << apiKey;
+      secure: |
+        KeystoreHandle h = keystore.importKey("api_key", apiKey);
+        keystore.useKey(h);      // key material confined to the keystore
+    python:
+      vulnerable: |
+        open("/data/app/token.cfg", "w").write(api_token)
+      secure: |
+        keyring.set_password("device-app", "api_token", api_token)
+    rust:
+      vulnerable: |
+        std::fs::write("/data/app/token.cfg", api_token)?;
+      secure: |
+        keyring::Entry::new("device-app", "api_token")?.set_password(&api_token)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-2.2 — Encrypt sensitive data at rest
+# ---------------------------------------------------------------------------
+
+- id: ISVS-2.2
+  facet: Device Application & Data Protection
+  section: Data-at-Rest Encryption
+  security_rule: >-
+    Personal information, telemetry, and captured media stored on the
+    device must be encrypted at rest with keys the application cannot
+    trivially export, treating the local filesystem as hostile.
+  vulnerability_pattern: >-
+    Sensitive records or media are written to device storage as plaintext,
+    so an attacker who reads the flash, SD card, or backup recovers the
+    data in clear form.
+  secure_pattern: >-
+    Sensitive data is encrypted with an authenticated cipher before it is
+    written to storage, using a key bound to a hardware keystore or secure
+    element so the key cannot be lifted off the device.
+  code_patterns:
+    generic:
+      vulnerable: |
+        writeFile("/data/telemetry.db", sensitiveRecord)
+      secure: |
+        key = keystore.getKey("data_at_rest")
+        writeFile("/data/telemetry.db", aeadEncrypt(key, sensitiveRecord))
+    c:
+      vulnerable: |
+        FILE *f = fopen("/data/media.bin", "wb");
+        fwrite(payload, 1, len, f);
+      secure: |
+        uint8_t out[len + 16];
+        crypto_aead_lock(out, mac, key, nonce, NULL, 0, payload, len);
+        fwrite(out, 1, sizeof(out), f);
+    cpp:
+      vulnerable: |
+        std::ofstream("/data/media.bin", std::ios::binary).write(buf, len);
+      secure: |
+        auto ct = aead.Encrypt(keystore.Key("data_at_rest"), nonce, buf, len);
+        std::ofstream("/data/media.bin", std::ios::binary).write(ct.data(), ct.size());
+    python:
+      vulnerable: |
+        open("/data/telemetry.db", "wb").write(record)
+      secure: |
+        box = nacl.secret.SecretBox(keystore.get_key("data_at_rest"))
+        open("/data/telemetry.db", "wb").write(box.encrypt(record))
+    rust:
+      vulnerable: |
+        std::fs::write("/data/telemetry.db", &record)?;
+      secure: |
+        let ct = cipher.encrypt(&nonce, record.as_ref())?;   # AES-GCM
+        std::fs::write("/data/telemetry.db", ct)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-2.3 — Keep secrets and personal data out of logs
+# ---------------------------------------------------------------------------
+
+- id: ISVS-2.3
+  facet: Device Application & Data Protection
+  section: Log Scrubbing
+  security_rule: >-
+    Application logs must be scrubbed of credentials, keys, and personal
+    data, so diagnostic output written to disk or a shared log buffer
+    never becomes a copy of sensitive material.
+  vulnerability_pattern: >-
+    A log statement prints a token, key, or personal record verbatim, so
+    the secret is copied into a log file or system log buffer that other
+    processes or anyone with device access can read.
+  secure_pattern: >-
+    Log statements record only non-sensitive context, and any sensitive
+    value is redacted or replaced with a stable hash before it reaches the
+    log sink.
+  code_patterns:
+    generic:
+      vulnerable: |
+        log("auth ok, token=" + token)
+      secure: |
+        log("auth ok, token=" + redact(token))   # only a masked tail logged
+    c:
+      vulnerable: |
+        syslog(LOG_INFO, "session key=%s", session_key);
+      secure: |
+        syslog(LOG_INFO, "session established for device %s", device_id);
+    cpp:
+      vulnerable: |
+        spdlog::info("login user={} password={}", user, password);
+      secure: |
+        spdlog::info("login user={}", user);
+    python:
+      vulnerable: |
+        logger.info("provisioning with api_token=%s", api_token)
+      secure: |
+        logger.info("provisioning device %s", device_id)
+    rust:
+      vulnerable: |
+        log::info!("connecting with key {}", api_key);
+      secure: |
+        log::info!("connecting device {}", device_id);
+
+# ---------------------------------------------------------------------------
+# ISVS-2.4 — Authenticate local IPC endpoints
+# ---------------------------------------------------------------------------
+
+- id: ISVS-2.4
+  facet: Device Application & Data Protection
+  section: Local IPC Authentication
+  security_rule: >-
+    Local inter-process communication endpoints such as sockets, named
+    pipes, intents, or shared memory must authenticate their peer and
+    expose the narrowest possible surface, so a co-resident process cannot
+    drive privileged functionality.
+  vulnerability_pattern: >-
+    A local IPC endpoint accepts and acts on any request without checking
+    who the peer is, so any process on the device can invoke privileged
+    operations through it.
+  secure_pattern: >-
+    The endpoint verifies the peer identity — for example by peer
+    credentials, a per-client token, or a restrictive socket permission —
+    and rejects unauthenticated callers before handling a request.
+  code_patterns:
+    generic:
+      vulnerable: |
+        msg = ipcEndpoint.receive()
+        handlePrivileged(msg)
+      secure: |
+        msg = ipcEndpoint.receive()
+        if isTrustedPeer(msg.peer): handlePrivileged(msg)
+    c:
+      vulnerable: |
+        int fd = accept(srv, NULL, NULL);
+        handle_request(fd);
+      secure: |
+        struct ucred cr; socklen_t n = sizeof(cr);
+        getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cr, &n);
+        if (cr.uid == TRUSTED_UID) handle_request(fd);
+    cpp:
+      vulnerable: |
+        auto conn = pipe.accept();
+        conn.dispatch();
+      secure: |
+        auto conn = pipe.accept();
+        if (conn.peerCredentials().uid() == kTrustedUid) conn.dispatch();
+    python:
+      vulnerable: |
+        conn, _ = sock.accept()
+        handle(conn.recv(4096))
+      secure: |
+        conn, _ = sock.accept()
+        creds = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12)
+        if struct.unpack("3i", creds)[1] == TRUSTED_UID: handle(conn.recv(4096))
+    rust:
+      vulnerable: |
+        let (stream, _) = listener.accept()?;
+        handle(stream);
+      secure: |
+        let (stream, _) = listener.accept()?;
+        if stream.peer_cred()?.uid == TRUSTED_UID { handle(stream); }
+
+# ---------------------------------------------------------------------------
+# ISVS-2.5 — Enforce authorization for on-device privileged operations
+# ---------------------------------------------------------------------------
+
+- id: ISVS-2.5
+  facet: Device Application & Data Protection
+  section: On-Device Authorization Enforcement
+  security_rule: >-
+    Every privileged on-device operation must enforce its own
+    authorization check rather than trusting that the companion app or the
+    cloud already validated the caller, so a compromised companion app or a
+    spoofed cloud message cannot bypass it.
+  vulnerability_pattern: >-
+    A privileged actuator or configuration command runs as soon as it is
+    received, because access control was assumed to have happened in the
+    phone app or cloud, leaving the on-device operation itself unguarded.
+  secure_pattern: >-
+    The device application independently verifies the caller is authorized
+    for the requested operation — checking a signed command, a capability,
+    or a local role — before executing any privileged action.
+  code_patterns:
+    generic:
+      vulnerable: |
+        cmd = receiveCommand()
+        actuator.run(cmd)            # trusts that the cloud already authorized
+      secure: |
+        cmd = receiveCommand()
+        if authorize(cmd.caller, cmd.action): actuator.run(cmd)
+    c:
+      vulnerable: |
+        unlock_door();               // executed on any inbound message
+      secure: |
+        if (verify_command_signature(cmd, device_pubkey))
+            unlock_door();
+    cpp:
+      vulnerable: |
+        executor.run(command);
+      secure: |
+        if (policy.permits(command.caller(), command.action()))
+            executor.run(command);
+    python:
+      vulnerable: |
+        def on_message(cmd):
+            apply_firmware_setting(cmd)
+      secure: |
+        def on_message(cmd):
+            if authz.allows(cmd.caller, cmd.action):
+                apply_firmware_setting(cmd)
+    rust:
+      vulnerable: |
+        fn on_command(cmd: Command) { actuator.run(cmd); }
+      secure: |
+        fn on_command(cmd: Command) {
+            if policy.permits(&cmd.caller, cmd.action) { actuator.run(cmd); }
+        }

@@ -1,0 +1,405 @@
+# OWASP ISVS 1.0 — Concern-area 06: Pairing & Network Exposure
+# Maps to ISVS V4 — Communication.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the ISVS-relevant embedded/IoT languages:
+# C / C++ / Python / Rust). Fill only languages where the requirement is
+# meaningfully expressible as code; generic-only is correct for hardware
+# or process requirements with no code sink.
+
+# ---------------------------------------------------------------------------
+# ISVS-6.1 — Minimal Exposed Network Surface
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.1
+  facet: Pairing & Network Exposure
+  section: Minimal Exposed Network Surface
+  security_rule: >-
+    A device must expose only the network services the product actually
+    requires; every listening port that is not needed in production must
+    be removed or disabled.
+  vulnerability_pattern: >-
+    A service binds and listens on a port that the product does not need,
+    so the device presents extra attack surface that an attacker can
+    reach and probe.
+  secure_pattern: >-
+    Only the services the product requires are started, and each one is
+    bound deliberately, so the reachable surface is the minimum the
+    feature set demands.
+  code_patterns:
+    generic:
+      vulnerable: |
+        start_service(http); start_service(telnet); start_service(ftp)
+      secure: |
+        start_service(http)          # only the service the product needs
+    c:
+      vulnerable: |
+        listen(telnet_fd, 5); listen(http_fd, 5);   /* telnet not required */
+      secure: |
+        listen(http_fd, 5);          /* only the required service */
+    cpp:
+      vulnerable: |
+        DebugServer dbg{2323}; HttpServer http{80}; dbg.start(); http.start();
+      secure: |
+        HttpServer http{80}; http.start();   // debug server not built for prod
+    python:
+      vulnerable: |
+        http_srv.serve_forever(); telnet_srv.serve_forever()
+      secure: |
+        http_srv.serve_forever()     # telnet service removed
+    rust:
+      vulnerable: |
+        TcpListener::bind("0.0.0.0:80")?; TcpListener::bind("0.0.0.0:23")?;
+      secure: |
+        TcpListener::bind("0.0.0.0:80")?;   // only the required listener
+
+# ---------------------------------------------------------------------------
+# ISVS-6.2 — Debug and Administrative Interfaces Disabled in Production
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.2
+  facet: Pairing & Network Exposure
+  section: Debug and Administrative Interfaces Disabled in Production
+  security_rule: >-
+    Debug, diagnostic, and administrative interfaces that are useful in
+    development must be disabled or removed in production firmware so they
+    cannot be reached on a shipped device.
+  vulnerability_pattern: >-
+    A debug or diagnostic interface left enabled from development still
+    listens on a production device, giving an attacker a privileged entry
+    point that was never meant to ship.
+  secure_pattern: >-
+    Debug and administrative interfaces are compiled out or hard-disabled
+    for production builds, so a release device exposes none of the
+    development tooling.
+  code_patterns:
+    generic:
+      vulnerable: |
+        enable_debug_console()       # always on, including production
+      secure: |
+        if build_is_development(): enable_debug_console()
+    c:
+      vulnerable: |
+        start_debug_uart_shell();    /* shipped in release firmware */
+      secure: |
+        #ifdef DEBUG_BUILD
+        start_debug_uart_shell();
+        #endif
+    cpp:
+      vulnerable: |
+        diagnostics.exposeOverNetwork(true);
+      secure: |
+        diagnostics.exposeOverNetwork(BuildConfig::isDebug);
+    python:
+      vulnerable: |
+        app.run(host="0.0.0.0", debug=True)
+      secure: |
+        app.run(host="127.0.0.1", debug=False)   # debug off in production
+    rust:
+      vulnerable: |
+        spawn_debug_endpoint();      // unconditional
+      secure: |
+        #[cfg(debug_assertions)]
+        spawn_debug_endpoint();
+
+# ---------------------------------------------------------------------------
+# ISVS-6.3 — Authentication on Every Network-Facing Service
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.3
+  facet: Pairing & Network Exposure
+  section: Authentication on Every Network-Facing Service
+  security_rule: >-
+    Every network-facing service must authenticate its caller before
+    acting on a request, so reaching the device is not the same as
+    controlling it.
+  vulnerability_pattern: >-
+    A network service accepts and acts on commands from any peer that can
+    connect, so anyone who reaches the device on the network controls it.
+  secure_pattern: >-
+    Each service verifies the caller's credential or token before
+    handling a request, and rejects unauthenticated callers.
+  code_patterns:
+    generic:
+      vulnerable: |
+        on_request(req): execute(req.command)
+      secure: |
+        on_request(req): if authenticate(req.token): execute(req.command)
+    c:
+      vulnerable: |
+        recv(fd, cmd, len, 0); run_command(cmd);
+      secure: |
+        recv(fd, cmd, len, 0);
+        if (verify_token(cmd->token)) run_command(cmd);
+    cpp:
+      vulnerable: |
+        void handle(Request& r) { dispatch(r); }
+      secure: |
+        void handle(Request& r) { if (auth_.verify(r.token())) dispatch(r); }
+    python:
+      vulnerable: |
+        def handle(req): return actuate(req["cmd"])
+      secure: |
+        def handle(req):
+            if not verify_token(req.get("token")): return deny()
+            return actuate(req["cmd"])
+    rust:
+      vulnerable: |
+        fn handle(req: Request) { dispatch(req.cmd); }
+      secure: |
+        fn handle(req: Request) {
+            if verify_token(&req.token) { dispatch(req.cmd); }
+        }
+
+# ---------------------------------------------------------------------------
+# ISVS-6.4 — Explicit Human-Mediated Pairing Confirmation
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.4
+  facet: Pairing & Network Exposure
+  section: Explicit Human-Mediated Pairing Confirmation
+  security_rule: >-
+    Pairing a new peer must require an explicit human-mediated
+    confirmation such as a physical button press or a code shown on the
+    device, never silent automatic acceptance.
+  vulnerability_pattern: >-
+    The device bonds with any peer that requests pairing without a
+    confirmation step, so an attacker in range silently pairs and
+    inherits a trusted relationship.
+  secure_pattern: >-
+    A pairing request is held pending until a person confirms it on the
+    device — a button press or an on-device code — and is rejected if no
+    confirmation arrives.
+  code_patterns:
+    generic:
+      vulnerable: |
+        on_pair_request(peer): bond(peer)
+      secure: |
+        on_pair_request(peer): if await_user_confirmation(): bond(peer)
+    c:
+      vulnerable: |
+        if (pair_request_received()) add_bond(peer);
+      secure: |
+        if (pair_request_received() && pairing_button_pressed())
+            add_bond(peer);
+    cpp:
+      vulnerable: |
+        void onPairRequest(Peer p) { bonds_.add(p); }
+      secure: |
+        void onPairRequest(Peer p) {
+            if (ui_.confirmPairing()) bonds_.add(p);
+        }
+    python:
+      vulnerable: |
+        def on_pair_request(peer): bonds.add(peer)
+      secure: |
+        def on_pair_request(peer):
+            if wait_for_confirm_button(timeout=30): bonds.add(peer)
+    rust:
+      vulnerable: |
+        fn on_pair_request(peer: Peer) { bonds.add(peer); }
+      secure: |
+        fn on_pair_request(peer: Peer) {
+            if user_confirmed_pairing() { bonds.add(peer); }
+        }
+
+# ---------------------------------------------------------------------------
+# ISVS-6.5 — Per-Device or Sufficiently Random Pairing Secret
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.5
+  facet: Pairing & Network Exposure
+  section: Per-Device or Sufficiently Random Pairing Secret
+  security_rule: >-
+    Pairing must use a per-device or sufficiently random secret, never a
+    fixed or guessable PIN shared across every unit of the product.
+  vulnerability_pattern: >-
+    The pairing PIN is a hardcoded constant or a short predictable value
+    that is identical on every device, so an attacker who learns it once
+    can pair with any unit.
+  secure_pattern: >-
+    The pairing secret is generated per device from a cryptographically
+    secure random source with enough entropy that it cannot be guessed
+    or brute forced.
+  code_patterns:
+    generic:
+      vulnerable: |
+        pairing_pin = "0000"
+      secure: |
+        pairing_pin = secure_random_digits(8)
+    c:
+      vulnerable: |
+        const char *pin = "1234";
+      secure: |
+        uint8_t pin[16];
+        getrandom(pin, sizeof(pin), 0);
+    cpp:
+      vulnerable: |
+        std::string pin = "000000";
+      secure: |
+        std::random_device rd;
+        auto pin = make_pairing_secret(rd, 128 / 8);
+    python:
+      vulnerable: |
+        pairing_pin = "0000"
+      secure: |
+        import secrets
+        pairing_pin = "".join(secrets.choice("0123456789") for _ in range(8))
+    rust:
+      vulnerable: |
+        let pin = "1234";
+      secure: |
+        let mut pin = [0u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut pin);
+
+# ---------------------------------------------------------------------------
+# ISVS-6.6 — Time-Boxed Pairing Window
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.6
+  facet: Pairing & Network Exposure
+  section: Time-Boxed Pairing Window
+  security_rule: >-
+    The pairing window must be time-boxed so it closes promptly after it
+    is opened, rather than leaving the device pairable indefinitely.
+  vulnerability_pattern: >-
+    Pairing mode stays open with no expiry once enabled, so the device
+    remains pairable indefinitely and an attacker has an unbounded window
+    to bond with it.
+  secure_pattern: >-
+    Opening pairing mode starts a short timer, and the pairing window is
+    closed automatically when that timer expires.
+  code_patterns:
+    generic:
+      vulnerable: |
+        enable_pairing_mode()        # stays open until reboot
+      secure: |
+        enable_pairing_mode(); schedule(disable_pairing_mode, after=120s)
+    c:
+      vulnerable: |
+        pairing_open = true;
+      secure: |
+        pairing_open = true;
+        timer_start(&pairing_timer, 120, close_pairing_window);
+    cpp:
+      vulnerable: |
+        pairing_.open();
+      secure: |
+        pairing_.open();
+        timer_.after(std::chrono::seconds(120), [&]{ pairing_.close(); });
+    python:
+      vulnerable: |
+        self.pairing_open = True
+      secure: |
+        self.pairing_open = True
+        threading.Timer(120, self.close_pairing).start()
+    rust:
+      vulnerable: |
+        self.pairing_open = true;
+      secure: |
+        self.pairing_open = true;
+        spawn_after(Duration::from_secs(120), || self.close_pairing());
+
+# ---------------------------------------------------------------------------
+# ISVS-6.7 — Enumerable and Revocable Bonds
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.7
+  facet: Pairing & Network Exposure
+  section: Enumerable and Revocable Bonds
+  security_rule: >-
+    Bonded peers must be enumerable and individually revocable, so a lost
+    or compromised peer can be removed without re-provisioning the whole
+    device.
+  vulnerability_pattern: >-
+    Once a peer is paired it is trusted forever with no way to list or
+    remove bonds, so a lost or compromised peer keeps its trusted access
+    until the device is fully re-provisioned.
+  secure_pattern: >-
+    The device keeps an enumerable list of bonded peers and exposes an
+    operation to revoke any single bond, leaving the other bonds and the
+    device provisioning intact.
+  code_patterns:
+    generic:
+      vulnerable: |
+        bonds.add(peer)              # no list, no remove
+      secure: |
+        bonds.add(peer); bonds.list(); bonds.revoke(peer_id)
+    c:
+      vulnerable: |
+        store_bond(peer);            /* no enumerate, no delete */
+      secure: |
+        store_bond(peer);
+        size_t list_bonds(bond_t *out, size_t n);
+        int revoke_bond(uint32_t peer_id);
+    cpp:
+      vulnerable: |
+        class Bonds { void add(Peer p); };
+      secure: |
+        class Bonds {
+          void add(Peer p); std::vector<Peer> list(); void revoke(PeerId id);
+        };
+    python:
+      vulnerable: |
+        bonds.add(peer)
+      secure: |
+        bonds.add(peer)
+        def list_bonds(): return list(bonds)
+        def revoke_bond(peer_id): bonds.discard(peer_id)
+    rust:
+      vulnerable: |
+        bonds.insert(peer);
+      secure: |
+        bonds.insert(peer);
+        fn list_bonds(&self) -> Vec<PeerId>;
+        fn revoke_bond(&mut self, id: PeerId);
+
+# ---------------------------------------------------------------------------
+# ISVS-6.8 — Closed-by-Default Network State
+# ---------------------------------------------------------------------------
+
+- id: ISVS-6.8
+  facet: Pairing & Network Exposure
+  section: Closed-by-Default Network State
+  security_rule: >-
+    A freshly booted device must default to a closed state, admitting no
+    peers and accepting no commands until it is deliberately placed into
+    pairing mode.
+  vulnerability_pattern: >-
+    The device boots straight into a pairable or open state, so a unit
+    that is powered on but not yet configured will admit peers without
+    any deliberate operator action.
+  secure_pattern: >-
+    Pairing mode is off after boot and the device admits nothing until an
+    operator explicitly opens the pairing window, so the default state is
+    closed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        pairing_enabled_at_boot = true
+      secure: |
+        pairing_enabled_at_boot = false   # opened only on explicit action
+    c:
+      vulnerable: |
+        bool pairing_open = true;    /* open from power-on */
+      secure: |
+        bool pairing_open = false;   /* closed until enable_pairing() */
+    cpp:
+      vulnerable: |
+        Pairing() : open_(true) {}
+      secure: |
+        Pairing() : open_(false) {}   // closed by default
+    python:
+      vulnerable: |
+        def __init__(self): self.pairing_open = True
+      secure: |
+        def __init__(self): self.pairing_open = False
+    rust:
+      vulnerable: |
+        impl Default for Pairing { fn default() -> Self { Self { open: true } } }
+      secure: |
+        impl Default for Pairing { fn default() -> Self { Self { open: false } } }

@@ -1,0 +1,361 @@
+# CWE Essentials — Concern Area: Temporal Memory Safety
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language. CWE Essentials targets systems / native code, so the language
+# blocks are drawn from C / C++ / Rust / Go, never web languages.
+#
+# CWEs: CWE-416, CWE-476, CWE-415, CWE-401, CWE-824, CWE-825
+
+# ---------------------------------------------------------------------------
+# CWE-416 — Use After Free
+# ---------------------------------------------------------------------------
+
+- id: CWE-416
+  facet: Temporal Memory Safety
+  section: Use After Free
+  security_rule: >-
+    Memory must not be accessed after it has been freed; every pointer to
+    a released allocation must be cleared or dropped immediately so a
+    later read or write cannot touch reallocated memory.
+  vulnerability_pattern: >-
+    Memory is freed but a pointer to it is retained and dereferenced
+    again, so the program reads or writes through a dangling pointer into
+    a region that may already have been reallocated under attacker control.
+  secure_pattern: >-
+    Each allocation has one explicit owner whose lifetime governs the
+    free, the pointer is set to null right after the release, and no
+    other path keeps a usable reference to the freed region.
+  code_patterns:
+    generic:
+      vulnerable: |
+        free(record)
+        send(record.name)            # use-after-free on a dangling pointer
+      secure: |
+        send(record.name)            # use the value while it is still owned
+        free(record)
+    c:
+      vulnerable: |
+        free(conn);
+        conn->state = CLOSED;        // write through a freed pointer
+      secure: |
+        conn->state = CLOSED;
+        free(conn);
+        conn = NULL;                 // later use fails fast
+    cpp:
+      vulnerable: |
+        Buffer* b = new Buffer();
+        delete b;
+        b->flush();                  // dangling pointer dereference
+      secure: |
+        auto b = std::make_unique<Buffer>();
+        b->flush();                  // unique_ptr frees at end of scope
+    rust:
+      vulnerable: |
+        let r = data.as_ptr();
+        drop(data);
+        unsafe { let _ = *r; }       // raw pointer outlives its owner
+      secure: |
+        let value = data[0];         // borrow before data is dropped
+        drop(data);
+    go:
+      vulnerable: |
+        buf := pool.Get()
+        pool.Put(buf)
+        buf[0] = 1                   // mutating a buffer returned to the pool
+      secure: |
+        buf := pool.Get()
+        buf[0] = 1
+        pool.Put(buf)                // return only after the last use
+
+# ---------------------------------------------------------------------------
+# CWE-476 — NULL Pointer Dereference
+# ---------------------------------------------------------------------------
+
+- id: CWE-476
+  facet: Temporal Memory Safety
+  section: NULL Pointer Dereference
+  security_rule: >-
+    Every pointer that may be null — especially the result of an
+    allocation, lookup, or external call — must be checked for null before
+    it is dereferenced.
+  vulnerability_pattern: >-
+    A pointer that can legitimately be null, such as a failed allocation
+    or a missing map entry, is dereferenced without a check, so the
+    program crashes or behaves unpredictably when the value is absent.
+  secure_pattern: >-
+    The pointer is tested against null immediately after it is obtained
+    and the absent case is handled explicitly before any field access or
+    call through the pointer.
+  code_patterns:
+    generic:
+      vulnerable: |
+        node = lookup(key)
+        return node.value            # node may be null
+      secure: |
+        node = lookup(key)
+        if node is null: return default
+        return node.value
+    c:
+      vulnerable: |
+        char *p = malloc(len);
+        memcpy(p, src, len);         // malloc may return NULL
+      secure: |
+        char *p = malloc(len);
+        if (p == NULL) return -1;
+        memcpy(p, src, len);
+    cpp:
+      vulnerable: |
+        Widget* w = registry.find(id);
+        w->render();                 // find() can return nullptr
+      secure: |
+        if (Widget* w = registry.find(id); w != nullptr)
+            w->render();
+    rust:
+      vulnerable: |
+        let user = cache.get(&id).unwrap();   // panics when key is absent
+      secure: |
+        let Some(user) = cache.get(&id) else { return Err(NotFound) };
+    go:
+      vulnerable: |
+        cfg, _ := loadConfig(path)
+        return cfg.Timeout           // cfg is nil when loadConfig errored
+      secure: |
+        cfg, err := loadConfig(path)
+        if err != nil || cfg == nil { return defaultTimeout }
+        return cfg.Timeout
+
+# ---------------------------------------------------------------------------
+# CWE-415 — Double Free
+# ---------------------------------------------------------------------------
+
+- id: CWE-415
+  facet: Temporal Memory Safety
+  section: Double Free
+  security_rule: >-
+    Each allocation must be released exactly once; ownership must be clear
+    enough that no two code paths free the same memory.
+  vulnerability_pattern: >-
+    The same allocation is freed more than once, often because an error
+    path and a success path both release it, corrupting the allocator
+    metadata and opening the door to memory corruption.
+  secure_pattern: >-
+    A single owner frees the allocation on exactly one path, the pointer
+    is set to null after the free so a repeat free is a no-op, and
+    ownership transfers are explicit.
+  code_patterns:
+    generic:
+      vulnerable: |
+        free(p)
+        if error: free(p)            # second free of the same block
+      secure: |
+        free(p)
+        p = null                     # repeat free becomes a safe no-op
+    c:
+      vulnerable: |
+        free(buf);
+        cleanup(buf);                // cleanup() also calls free(buf)
+      secure: |
+        free(buf);
+        buf = NULL;                  // cleanup() sees NULL and skips the free
+    cpp:
+      vulnerable: |
+        Item* i = new Item();
+        delete i;
+        delete i;                    // double delete corrupts the heap
+      secure: |
+        auto i = std::make_shared<Item>();
+        // shared_ptr releases once when the last owner is destroyed
+    rust:
+      vulnerable: |
+        let v = vec![1, 2, 3];
+        let alias = unsafe { std::ptr::read(&v) };
+        drop(v); drop(alias);        // both owners free the same buffer
+      secure: |
+        let v = vec![1, 2, 3];
+        let moved = v;               // ownership moves; v is no longer usable
+    go:
+      vulnerable: |
+        f.Close()
+        defer f.Close()              // file handle closed twice
+      secure: |
+        defer f.Close()              // exactly one close, at scope exit
+
+# ---------------------------------------------------------------------------
+# CWE-401 — Missing Release of Memory after Effective Lifetime
+# ---------------------------------------------------------------------------
+
+- id: CWE-401
+  facet: Temporal Memory Safety
+  section: Missing Release of Memory after Effective Lifetime
+  security_rule: >-
+    Memory and resources allocated for an operation must be released once
+    they are no longer needed, including on every error and early-return
+    path, so long-running processes do not exhaust available memory.
+  vulnerability_pattern: >-
+    An allocation is made but never freed on some path — frequently an
+    early return or error branch — so each call leaks memory and a
+    long-running or attacker-driven loop drives the process toward
+    exhaustion.
+  secure_pattern: >-
+    Release is tied to scope through RAII, defer, or smart pointers, or a
+    single cleanup path that every exit funnels through frees the
+    allocation regardless of how the function returns.
+  code_patterns:
+    generic:
+      vulnerable: |
+        buf = allocate(size)
+        if invalid(buf): return      # early return leaks buf
+        process(buf); free(buf)
+      secure: |
+        buf = allocate(size)
+        try: process(buf)
+        finally: free(buf)           # freed on every exit path
+    c:
+      vulnerable: |
+        char *p = malloc(n);
+        if (parse(p) < 0) return -1; // error path never frees p
+      secure: |
+        char *p = malloc(n);
+        int rc = parse(p);
+        free(p);                     // single release before return
+        return rc;
+    cpp:
+      vulnerable: |
+        Resource* r = new Resource();
+        if (!r->open()) return;      // r leaks on the failure path
+      secure: |
+        auto r = std::make_unique<Resource>();
+        if (!r->open()) return;      // destructor frees r on every path
+    rust:
+      vulnerable: |
+        let raw = Box::into_raw(Box::new(State::new()));
+        // raw is never reclaimed with Box::from_raw — leaked
+      secure: |
+        let state = Box::new(State::new());
+        // Box frees automatically when it goes out of scope
+    go:
+      vulnerable: |
+        resp, _ := http.Get(url)
+        return parse(resp.Body)      // resp.Body is never closed
+      secure: |
+        resp, err := http.Get(url)
+        if err != nil { return err }
+        defer resp.Body.Close()      // released at scope exit
+
+# ---------------------------------------------------------------------------
+# CWE-824 — Access of Uninitialized Pointer
+# ---------------------------------------------------------------------------
+
+- id: CWE-824
+  facet: Temporal Memory Safety
+  section: Access of Uninitialized Pointer
+  security_rule: >-
+    A pointer must be assigned a valid target, or a null sentinel, before
+    it is dereferenced; it must never be read while it still holds an
+    indeterminate value.
+  vulnerability_pattern: >-
+    A pointer is declared but used before being assigned, so it holds
+    whatever garbage was on the stack or heap and dereferencing it reads
+    or writes an unpredictable, attacker-influenceable address.
+  secure_pattern: >-
+    Every pointer is initialized at the point of declaration — to a valid
+    object or to null — and conditional assignment paths are written so no
+    branch can leave it unset before use.
+  code_patterns:
+    generic:
+      vulnerable: |
+        declare ptr                  # never assigned
+        write(ptr, value)            # dereference of indeterminate pointer
+      secure: |
+        ptr = null
+        if ready: ptr = target
+        if ptr is not null: write(ptr, value)
+    c:
+      vulnerable: |
+        char *p;
+        *p = 'x';                    // p was never initialized
+      secure: |
+        char *p = NULL;
+        p = buffer;
+        *p = 'x';
+    cpp:
+      vulnerable: |
+        Node* n;
+        if (cond) n = head;
+        n->visit();                  // n is uninitialized when cond is false
+      secure: |
+        Node* n = nullptr;
+        if (cond) n = head;
+        if (n != nullptr) n->visit();
+    rust:
+      vulnerable: |
+        let p: *const i32;
+        // reading p before assignment is rejected at compile time
+      secure: |
+        let value: i32 = 0;
+        let p: *const i32 = &value;  // bound to a real target before use
+    go:
+      vulnerable: |
+        var cfg *Config
+        cfg.Apply()                  // cfg is a nil pointer, never set
+      secure: |
+        cfg := &Config{}
+        cfg.Apply()                  // initialized at declaration
+
+# ---------------------------------------------------------------------------
+# CWE-825 — Expired Pointer Dereference
+# ---------------------------------------------------------------------------
+
+- id: CWE-825
+  facet: Temporal Memory Safety
+  section: Expired Pointer Dereference
+  security_rule: >-
+    A pointer or reference must not be used after the object it refers to
+    has gone out of scope or otherwise ended its lifetime; references must
+    never outlive what they point at.
+  vulnerability_pattern: >-
+    A pointer or reference to a local or temporary object is kept past
+    the end of that object's lifetime, so dereferencing the now-expired
+    pointer reads memory that has been reclaimed and reused.
+  secure_pattern: >-
+    Returned and stored references are backed by storage that outlives
+    every use — heap allocation with clear ownership, a caller-owned
+    buffer, or a value copy — so no reference ever points at a dead frame.
+  code_patterns:
+    generic:
+      vulnerable: |
+        ptr = addressOf(localVar)    # localVar dies when the function returns
+        return ptr
+      secure: |
+        return copyOf(localVar)      # return the value, not a stale address
+    c:
+      vulnerable: |
+        char *make() {
+            char tmp[32]; return tmp; // returns a pointer into a dead frame
+        }
+      secure: |
+        char *make() {
+            char *p = malloc(32); return p; // heap outlives the call
+        }
+    cpp:
+      vulnerable: |
+        const std::string& name() {
+            std::string s = build(); return s; // reference to a destroyed local
+        }
+      secure: |
+        std::string name() { return build(); } // return by value
+    rust:
+      vulnerable: |
+        fn first(v: Vec<i32>) -> &i32 { &v[0] } // borrow outlives the owner v
+      secure: |
+        fn first(v: &[i32]) -> &i32 { &v[0] }   // tied to the caller's lifetime
+    go:
+      vulnerable: |
+        s := buildSlice()
+        cache.ref = s[:0]            // retains the backing array past its scope
+      secure: |
+        cache.ref = append([]byte(nil), s...)   // copy detaches from the source

@@ -1,0 +1,205 @@
+# CWE Essentials — Concern Area 05: Code Injection & Unsafe Deserialization
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + C/C++/Rust/Go for the CWE Essentials systems set).
+#
+# CWEs: CWE-94, CWE-502, CWE-95, CWE-1336.
+
+# ---------------------------------------------------------------------------
+# CWE-94 — Improper Control of Generation of Code (Code Injection)
+# ---------------------------------------------------------------------------
+
+- id: CWE-94
+  facet: Code Injection & Unsafe Deserialization
+  section: Improper Control of Generation of Code
+  security_rule: >-
+    Untrusted input must never be incorporated into source text, bytecode,
+    or any other artifact that the program later compiles, loads, or
+    executes as code. Drive behaviour from data, not from attacker-shaped code.
+  vulnerability_pattern: >-
+    Attacker-influenced data is concatenated into code that the program
+    subsequently compiles or runs, so the attacker decides what logic the
+    process executes rather than the developer.
+  secure_pattern: >-
+    Behaviour is selected from fixed, trusted code through a lookup table
+    or dispatch map keyed by validated input, so untrusted data is only
+    ever consumed as inert values and never becomes executable code.
+  code_patterns:
+    generic:
+      vulnerable: |
+        program = "handler_" + userInput + "()"
+        compileAndRun(program)
+      secure: |
+        handler = DISPATCH.get(userInput)      # fixed map of trusted handlers
+        if handler: handler()
+    c:
+      vulnerable: |
+        sprintf(src, "int f(){return %s;}", userInput);
+        compile_and_load(src);                 /* input becomes code */
+      secure: |
+        int (*fn)(void) = lookup_handler(userInput);  /* allowlisted table */
+        if (fn) fn();
+    go:
+      vulnerable: |
+        src := "package main\nfunc F() { " + userInput + " }"
+        plugin := buildAndLoad(src)            // attacker-supplied body
+      secure: |
+        fn, ok := handlers[userInput]          // map of vetted funcs
+        if ok { fn() }
+    rust:
+      vulnerable: |
+        let src = format!("fn run() {{ {} }}", user_input);
+        compile_and_dlopen(&src);              // input compiled as code
+      secure: |
+        if let Some(handler) = HANDLERS.get(user_input.as_str()) {
+            handler();                         // dispatch over trusted fns
+        }
+
+# ---------------------------------------------------------------------------
+# CWE-502 — Deserialization of Untrusted Data
+# ---------------------------------------------------------------------------
+
+- id: CWE-502
+  facet: Code Injection & Unsafe Deserialization
+  section: Deserialization of Untrusted Data
+  security_rule: >-
+    Untrusted bytes must be parsed with a data-only format into known,
+    explicitly typed structures. Native serializers that can reconstruct
+    arbitrary types must not be fed untrusted input without an allowlist
+    and integrity protection.
+  vulnerability_pattern: >-
+    Attacker-controlled bytes are handed to a deserializer that can
+    instantiate arbitrary object types and run constructors or callbacks
+    during the rebuild, so a crafted payload reaches a gadget chain that
+    executes code.
+  secure_pattern: >-
+    Untrusted input is parsed with a pure data format such as JSON, into a
+    fixed schema or struct, or the native serializer is restricted to an
+    allowlist of permitted classes and the payload is integrity protected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        obj = nativeDeserialize(untrustedBytes)   # reconstructs any type
+      secure: |
+        obj = jsonParse(untrustedBytes, intoType=KnownDto)
+    c:
+      vulnerable: |
+        struct Msg m;
+        memcpy(&m, untrusted_buf, untrusted_len); /* raw bytes, includes ptrs */
+      secure: |
+        struct Msg m;
+        if (parse_fixed_schema(untrusted_buf, untrusted_len, &m) != OK)
+            reject();                             /* validated field-by-field */
+    go:
+      vulnerable: |
+        var v interface{}
+        gob.NewDecoder(r).Decode(&v)              // decodes arbitrary types
+      secure: |
+        var dto KnownDto
+        json.NewDecoder(r).Decode(&dto)           // fixed target struct
+    rust:
+      vulnerable: |
+        let v: serde_value::Value = bincode::deserialize(&bytes)?;
+      secure: |
+        let dto: KnownDto = serde_json::from_slice(&bytes)?;  // typed schema
+
+# ---------------------------------------------------------------------------
+# CWE-95 — Improper Neutralization of Directives in Dynamically Evaluated
+#          Code (Eval Injection)
+# ---------------------------------------------------------------------------
+
+- id: CWE-95
+  facet: Code Injection & Unsafe Deserialization
+  section: Eval Injection
+  security_rule: >-
+    Untrusted input must not be passed to a dynamic-evaluation primitive
+    such as eval, exec, or runtime expression evaluation. Replace dynamic
+    evaluation with a parser for a constrained grammar or a data-driven
+    design.
+  vulnerability_pattern: >-
+    Attacker-controlled text is passed directly to a dynamic-evaluation
+    function, so directives embedded in the input run as code with the
+    full privileges of the process.
+  secure_pattern: >-
+    The dynamic-evaluation call is removed in favour of a restricted
+    parser, a literal evaluator, or a lookup of validated input against a
+    fixed set of allowed operations.
+  code_patterns:
+    generic:
+      vulnerable: |
+        result = eval(userInput)
+      secure: |
+        result = ALLOWED_OPS.get(userInput, default)   # no code path
+    c:
+      vulnerable: |
+        char cmd[256];
+        sprintf(cmd, "%s", userInput);
+        run_embedded_script(interp, cmd);   /* input run by interpreter */
+      secure: |
+        long n;
+        if (parse_long(userInput, &n) == OK) use(n);  /* parsed as data */
+    go:
+      vulnerable: |
+        out, _ := exprEval(userInput)        // dynamic expression eval
+      secure: |
+        n, err := strconv.Atoi(userInput)    // constrained parse, not eval
+        if err == nil { use(n) }
+    rust:
+      vulnerable: |
+        let v = rhai_engine.eval::<i64>(&user_input)?;  // evaluates script
+      secure: |
+        let v: i64 = user_input.trim().parse()?;        // parse, never eval
+
+# ---------------------------------------------------------------------------
+# CWE-1336 — Improper Neutralization of Special Elements Used in a Template
+#            Engine (Server-Side Template Injection)
+# ---------------------------------------------------------------------------
+
+- id: CWE-1336
+  facet: Code Injection & Unsafe Deserialization
+  section: Server-Side Template Injection
+  security_rule: >-
+    Template definitions must be fixed and trusted. Untrusted input is
+    supplied to a template engine only as a bound context variable, never
+    concatenated into the template source.
+  vulnerability_pattern: >-
+    Attacker-controlled data is concatenated into the template text that
+    the engine then compiles, so template-engine directives in the input
+    are interpreted and run as code on the server.
+  secure_pattern: >-
+    The template source is a fixed literal or a file outside attacker
+    control, and untrusted values are passed only as render-time context
+    data bound to named placeholders.
+  code_patterns:
+    generic:
+      vulnerable: |
+        render(compileTemplate("Hello " + userInput))
+      secure: |
+        render(compileTemplate("Hello {{ name }}"), name=userInput)
+    go:
+      vulnerable: |
+        t := template.Must(template.New("p").Parse("Hi " + userInput))
+        t.Execute(w, nil)
+      secure: |
+        t := template.Must(template.New("p").Parse("Hi {{.Name}}"))
+        t.Execute(w, struct{ Name string }{userInput})
+    rust:
+      vulnerable: |
+        tera.add_raw_template("p", &format!("Hi {}", user_input))?;
+        tera.render("p", &Context::new())?;
+      secure: |
+        let mut ctx = Context::new();
+        ctx.insert("name", &user_input);          // bound variable
+        tera.render("greeting", &ctx)?;            // fixed template
+    c:
+      vulnerable: |
+        char tpl[512];
+        sprintf(tpl, "Hi %s", userInput);
+        mustache_render(parse_template(tpl), NULL);  /* input in template */
+      secure: |
+        mustache_template_t *t = parse_template("Hi {{name}}");
+        mustache_render(t, ctx_with("name", userInput));  /* bound value */

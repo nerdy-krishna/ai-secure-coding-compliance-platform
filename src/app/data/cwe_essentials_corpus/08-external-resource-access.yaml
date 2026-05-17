@@ -1,0 +1,410 @@
+# CWE Essentials — Concern Area 08: External Resource Access
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + C/C++/Rust/Go for the systems-oriented CWE set).
+#
+# CWEs: CWE-22, CWE-434, CWE-918, CWE-23, CWE-36, CWE-59, CWE-73
+
+# ---------------------------------------------------------------------------
+# CWE-22 — Improper Limitation of a Pathname to a Restricted Directory
+# ---------------------------------------------------------------------------
+
+- id: CWE-22
+  facet: External Resource Access
+  section: Path Traversal
+  level:
+  security_rule: >-
+    A pathname built from untrusted input must be resolved to its
+    canonical absolute form and confirmed to stay inside the intended
+    base directory before the file is opened.
+  vulnerability_pattern: >-
+    Untrusted input is joined onto a base directory and used directly,
+    so a value containing parent-directory sequences walks out of the
+    base directory and reaches sensitive files elsewhere on the system.
+  secure_pattern: >-
+    The candidate path is canonicalised to remove parent-directory and
+    symlink components, then checked to confirm it still begins with the
+    permitted base directory, and is rejected otherwise.
+  code_patterns:
+    generic:
+      vulnerable: |
+        path = baseDir + "/" + userInput
+        open(path)                       # "../../etc/passwd" escapes baseDir
+      secure: |
+        resolved = canonicalize(baseDir + "/" + userInput)
+        if resolved.startsWith(canonicalize(baseDir)): open(resolved)
+    c:
+      vulnerable: |
+        char path[256];
+        snprintf(path, sizeof(path), "%s/%s", base_dir, user_input);
+        FILE *f = fopen(path, "r");
+      secure: |
+        char resolved[PATH_MAX];
+        if (realpath(path, resolved) && strncmp(resolved, base_real, base_len) == 0)
+            FILE *f = fopen(resolved, "r");
+    cpp:
+      vulnerable: |
+        std::ifstream in(base_dir + "/" + user_input);
+      secure: |
+        auto p = std::filesystem::weakly_canonical(base_dir / user_input);
+        if (p.string().rfind(base_real.string(), 0) == 0) std::ifstream in(p);
+    rust:
+      vulnerable: |
+        let path = base_dir.join(&user_input);
+        let data = std::fs::read(path)?;
+      secure: |
+        let path = base_dir.join(&user_input).canonicalize()?;
+        if path.starts_with(&base_dir) { std::fs::read(path)?; }
+    go:
+      vulnerable: |
+        path := filepath.Join(baseDir, userInput)
+        data, _ := os.ReadFile(path)
+      secure: |
+        path := filepath.Join(baseDir, filepath.Clean("/"+userInput))
+        if strings.HasPrefix(path, baseDir+string(os.PathSeparator)) { os.ReadFile(path) }
+
+# ---------------------------------------------------------------------------
+# CWE-434 — Unrestricted Upload of File with Dangerous Type
+# ---------------------------------------------------------------------------
+
+- id: CWE-434
+  facet: External Resource Access
+  section: Unrestricted File Upload
+  level:
+  security_rule: >-
+    Uploaded files must be validated by content rather than extension,
+    stored outside any served or executable location, and saved under a
+    server-generated name.
+  vulnerability_pattern: >-
+    An uploaded file is trusted by its client-supplied extension and
+    written into a directory the web server can serve or execute, so an
+    attacker uploads a script and runs it by requesting its URL.
+  secure_pattern: >-
+    The file type is verified from its actual content, the file is
+    written to a non-served storage area under a randomly generated
+    name, and execute permission is never granted.
+  code_patterns:
+    generic:
+      vulnerable: |
+        save(uploadedFile, webRoot + "/uploads/" + uploadedFile.name)
+      secure: |
+        if sniffType(uploadedFile.bytes) in ALLOWED_TYPES:
+            save(uploadedFile, storageDir + "/" + randomName())
+    c:
+      vulnerable: |
+        snprintf(dest, sizeof(dest), "/var/www/uploads/%s", upload_name);
+        write_file(dest, body, body_len);
+      secure: |
+        if (sniff_magic(body, body_len) == TYPE_PNG) {
+            snprintf(dest, sizeof(dest), "/srv/data/%s.bin", random_id());
+            write_file(dest, body, body_len);
+        }
+    cpp:
+      vulnerable: |
+        std::ofstream out("/var/www/uploads/" + upload.filename());
+        out << upload.body();
+      secure: |
+        if (sniff_type(upload.body()) == FileType::Png) {
+            std::ofstream out(storage_dir / (random_id() + ".bin"));
+            out << upload.body();
+        }
+    rust:
+      vulnerable: |
+        let dest = web_root.join("uploads").join(&upload.file_name);
+        std::fs::write(dest, &upload.bytes)?;
+      secure: |
+        if infer::get(&upload.bytes).map(|t| t.mime_type()) == Some("image/png") {
+            std::fs::write(storage_dir.join(uuid_name()), &upload.bytes)?;
+        }
+    go:
+      vulnerable: |
+        dst, _ := os.Create(filepath.Join("/var/www/uploads", header.Filename))
+        io.Copy(dst, file)
+      secure: |
+        if http.DetectContentType(head) == "image/png" {
+            dst, _ := os.Create(filepath.Join(storageDir, randomID()+".bin"))
+            io.Copy(dst, file)
+        }
+
+# ---------------------------------------------------------------------------
+# CWE-918 — Server-Side Request Forgery (SSRF)
+# ---------------------------------------------------------------------------
+
+- id: CWE-918
+  facet: External Resource Access
+  section: Server-Side Request Forgery
+  level:
+  security_rule: >-
+    A URL supplied by a user and fetched server-side must be validated
+    against an allowlist of permitted hosts, resolved and re-checked to
+    block private ranges, with automatic redirects disabled.
+  vulnerability_pattern: >-
+    A user-supplied URL or host is fetched by the server without
+    restriction, so an attacker points it at an internal service or the
+    cloud metadata endpoint and turns the server into a proxy.
+  secure_pattern: >-
+    The destination is parsed and its scheme and host are checked
+    against an allowlist, the resolved address is verified not to be in
+    a private or link-local range, and redirects are not followed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        response = httpGet(userUrl)
+      secure: |
+        if host(userUrl) in ALLOWED_HOSTS and not isPrivate(resolve(userUrl)):
+            response = httpGet(userUrl, followRedirects=false)
+    c:
+      vulnerable: |
+        curl_easy_setopt(curl, CURLOPT_URL, user_url);
+        curl_easy_perform(curl);
+      secure: |
+        if (host_allowed(user_url) && !addr_is_private(resolve(user_url))) {
+            curl_easy_setopt(curl, CURLOPT_URL, user_url);
+            curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
+            curl_easy_perform(curl);
+        }
+    cpp:
+      vulnerable: |
+        auto resp = http_client.get(user_url);
+      secure: |
+        Uri u(user_url);
+        if (allowed_hosts.count(u.host()) && !is_private(resolve(u.host())))
+            auto resp = http_client.get(u, NoRedirects{});
+    rust:
+      vulnerable: |
+        let body = reqwest::get(&user_url).await?.text().await?;
+      secure: |
+        let u = Url::parse(&user_url)?;
+        if ALLOWED_HOSTS.contains(u.host_str().unwrap_or("")) && !is_private(&u) {
+            let body = client_no_redirect.get(u).send().await?.text().await?;
+        }
+    go:
+      vulnerable: |
+        resp, _ := http.Get(userURL)
+      secure: |
+        u, _ := url.Parse(userURL)
+        if allowedHosts[u.Hostname()] && !isPrivate(resolveIP(u.Hostname())) {
+            resp, _ := noRedirectClient.Get(userURL)
+        }
+
+# ---------------------------------------------------------------------------
+# CWE-23 — Relative Path Traversal
+# ---------------------------------------------------------------------------
+
+- id: CWE-23
+  facet: External Resource Access
+  section: Relative Path Traversal
+  level:
+  security_rule: >-
+    Input used to build a file path must be rejected or neutralised when
+    it contains parent-directory sequences, so a relative path cannot
+    climb above the intended base directory.
+  vulnerability_pattern: >-
+    Untrusted input containing parent-directory sequences is appended to
+    a base directory, so the relative climb resolves to a file outside
+    the directory the application meant to confine access to.
+  secure_pattern: >-
+    The input is canonicalised so parent-directory sequences are
+    collapsed, and the resulting path is confirmed to remain a
+    descendant of the base directory before it is opened.
+  code_patterns:
+    generic:
+      vulnerable: |
+        open(baseDir + "/" + userInput)        # userInput = "../../secret"
+      secure: |
+        full = canonicalize(baseDir + "/" + userInput)
+        if isDescendantOf(full, baseDir): open(full)
+    c:
+      vulnerable: |
+        snprintf(path, sizeof(path), "%s/%s", base, name);  /* name has ../ */
+        fopen(path, "r");
+      secure: |
+        if (!strstr(name, "..") && name[0] != '/') {
+            snprintf(path, sizeof(path), "%s/%s", base, name);
+            fopen(path, "r");
+        }
+    cpp:
+      vulnerable: |
+        std::ifstream in(base_dir / rel_path);   // rel_path = "../../etc/shadow"
+      secure: |
+        auto full = std::filesystem::weakly_canonical(base_dir / rel_path);
+        auto root = std::filesystem::weakly_canonical(base_dir);
+        if (std::mismatch(root.begin(), root.end(), full.begin()).first == root.end())
+            std::ifstream in(full);
+    rust:
+      vulnerable: |
+        let f = std::fs::File::open(base_dir.join(&rel_path))?;
+      secure: |
+        let full = base_dir.join(&rel_path).canonicalize()?;
+        if full.starts_with(&base_dir) { std::fs::File::open(full)?; }
+    go:
+      vulnerable: |
+        os.Open(filepath.Join(baseDir, relPath))
+      secure: |
+        clean := filepath.Join(baseDir, filepath.Clean("/"+relPath))
+        if strings.HasPrefix(clean, filepath.Clean(baseDir)+string(os.PathSeparator)) {
+            os.Open(clean)
+        }
+
+# ---------------------------------------------------------------------------
+# CWE-36 — Absolute Path Traversal
+# ---------------------------------------------------------------------------
+
+- id: CWE-36
+  facet: External Resource Access
+  section: Absolute Path Traversal
+  level:
+  security_rule: >-
+    Input used to build a file path must be rejected when it is an
+    absolute path or a drive-qualified path, so it cannot override the
+    intended base directory entirely.
+  vulnerability_pattern: >-
+    Untrusted input that is itself an absolute path is passed to a
+    path-join routine that discards the base directory when the second
+    operand is absolute, so the access targets any file on the system.
+  secure_pattern: >-
+    The input is checked to confirm it is a plain relative segment with
+    no leading separator or drive prefix before it is joined to the base
+    directory, and absolute inputs are rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        open(join(baseDir, userInput))    # userInput = "/etc/passwd" wins
+      secure: |
+        if not isAbsolute(userInput): open(join(baseDir, userInput))
+    c:
+      vulnerable: |
+        snprintf(path, sizeof(path), "%s/%s", base, name);  /* name = "/etc/passwd" */
+      secure: |
+        if (name[0] != '/' && !strstr(name, ".."))
+            snprintf(path, sizeof(path), "%s/%s", base, name);
+    cpp:
+      vulnerable: |
+        std::ifstream in(base_dir / user_path);   // absolute user_path overrides
+      secure: |
+        if (user_path.is_relative())
+            std::ifstream in(base_dir / user_path);
+    rust:
+      vulnerable: |
+        let p = base_dir.join(&user_input);   // absolute user_input replaces base
+        std::fs::read(p)?;
+      secure: |
+        let candidate = Path::new(&user_input);
+        if candidate.is_relative() { std::fs::read(base_dir.join(candidate))?; }
+    go:
+      vulnerable: |
+        os.Open(filepath.Join(baseDir, userInput))
+      secure: |
+        if !filepath.IsAbs(userInput) {
+            os.Open(filepath.Join(baseDir, filepath.Clean("/"+userInput)))
+        }
+
+# ---------------------------------------------------------------------------
+# CWE-59 — Improper Link Resolution Before File Access (Link Following)
+# ---------------------------------------------------------------------------
+
+- id: CWE-59
+  facet: External Resource Access
+  section: Link Following
+  level:
+  security_rule: >-
+    Before opening a file at an attacker-influenced path, the program
+    must resolve or refuse symbolic links so an access cannot be
+    redirected to a sensitive target outside the intended location.
+  vulnerability_pattern: >-
+    A file is opened by name in a writable location without checking for
+    symbolic links, so an attacker plants a symlink and the program
+    follows it to read or overwrite a sensitive file elsewhere.
+  secure_pattern: >-
+    The path is opened with link following disabled, or the resolved
+    canonical target is verified to lie inside the intended directory
+    before the file handle is used.
+  code_patterns:
+    generic:
+      vulnerable: |
+        open(spoolDir + "/" + name)        # name may be a symlink to /etc/shadow
+      secure: |
+        open(spoolDir + "/" + name, flags=NO_FOLLOW_SYMLINKS)
+    c:
+      vulnerable: |
+        int fd = open(path, O_WRONLY);
+      secure: |
+        int fd = open(path, O_WRONLY | O_NOFOLLOW);
+    cpp:
+      vulnerable: |
+        std::ofstream out(spool_dir / name);
+      secure: |
+        if (!std::filesystem::is_symlink(spool_dir / name))
+            std::ofstream out(spool_dir / name);
+    rust:
+      vulnerable: |
+        let f = std::fs::File::open(&path)?;
+      secure: |
+        if !std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
+            let f = std::fs::File::open(&path)?;
+        }
+    go:
+      vulnerable: |
+        f, _ := os.OpenFile(path, os.O_WRONLY, 0)
+      secure: |
+        fi, _ := os.Lstat(path)
+        if fi != nil && fi.Mode()&os.ModeSymlink == 0 {
+            f, _ := os.OpenFile(path, os.O_WRONLY, 0)
+        }
+
+# ---------------------------------------------------------------------------
+# CWE-73 — External Control of File Name or Path
+# ---------------------------------------------------------------------------
+
+- id: CWE-73
+  facet: External Resource Access
+  section: External Control of File Name or Path
+  level:
+  security_rule: >-
+    Untrusted input must not directly determine a file name or path
+    used for a filesystem operation; map it through an indirection table
+    to known-safe paths or confine it strictly to a permitted directory.
+  vulnerability_pattern: >-
+    A user-controlled value is used as, or as part of, a file name or
+    path for a read, write, or delete, so the user steers a filesystem
+    operation onto a resource the application never intended to expose.
+  secure_pattern: >-
+    User input selects an entry from a server-side mapping of approved
+    identifiers to fixed paths, so the filesystem operation always
+    targets a known resource and never an attacker-named one.
+  code_patterns:
+    generic:
+      vulnerable: |
+        readFile(userSuppliedPath)
+      secure: |
+        if userKey in ALLOWED_FILES: readFile(ALLOWED_FILES[userKey])
+    c:
+      vulnerable: |
+        FILE *f = fopen(user_filename, "r");
+      secure: |
+        const char *path = lookup_allowed(user_key);   /* NULL if not approved */
+        FILE *f = path ? fopen(path, "r") : NULL;
+    cpp:
+      vulnerable: |
+        std::ifstream in(user_filename);
+      secure: |
+        auto it = allowed_files.find(user_key);
+        if (it != allowed_files.end()) std::ifstream in(it->second);
+    rust:
+      vulnerable: |
+        let data = std::fs::read(&user_filename)?;
+      secure: |
+        if let Some(path) = ALLOWED_FILES.get(user_key.as_str()) {
+            let data = std::fs::read(path)?;
+        }
+    go:
+      vulnerable: |
+        data, _ := os.ReadFile(userFilename)
+      secure: |
+        if path, ok := allowedFiles[userKey]; ok {
+            data, _ := os.ReadFile(path)
+        }

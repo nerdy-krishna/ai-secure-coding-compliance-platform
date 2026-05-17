@@ -1,0 +1,270 @@
+# CWE Essentials — Concern Area: Web Injection
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language. CWE Essentials targets systems / native code, so the language
+# set is C / C++ / Rust / Go; Go is the natural web language of that set.
+#
+# CWEs in this concern-area: CWE-79, CWE-89, CWE-90, CWE-91, CWE-943.
+
+# ---------------------------------------------------------------------------
+# CWE-79 — Improper Neutralization of Input During Web Page Generation (XSS)
+# ---------------------------------------------------------------------------
+
+- id: CWE-79
+  facet: Web Injection
+  section: Cross-site Scripting (XSS)
+  security_rule: >-
+    Untrusted input written into a web page must be encoded for the exact
+    sink it lands in — HTML body, attribute, JavaScript, or URL — at the
+    point of output, preferring a template engine that auto-escapes.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into HTML markup or inline script
+    without context-aware encoding, so the input introduces a script
+    element or an event handler that runs in the victim browser session.
+  secure_pattern: >-
+    Each value is encoded for its specific output context at the moment it
+    is written, ideally by an auto-escaping template engine, with a Content
+    Security Policy added as defence in depth.
+  code_patterns:
+    generic:
+      vulnerable: |
+        page = "<div>" + userInput + "</div>"
+      secure: |
+        page = "<div>" + htmlEncode(userInput) + "</div>"
+    go:
+      vulnerable: |
+        fmt.Fprintf(w, "<div>"+r.FormValue("name")+"</div>")
+      secure: |
+        t := template.Must(template.New("p").Parse("<div>{{.}}</div>"))
+        t.Execute(w, r.FormValue("name"))   // html/template auto-escapes
+    c:
+      vulnerable: |
+        snprintf(body, n, "<p>%s</p>", user_input);
+      secure: |
+        html_escape(escaped, sizeof(escaped), user_input);
+        snprintf(body, n, "<p>%s</p>", escaped);
+    cpp:
+      vulnerable: |
+        resp << "<p>" << req.param("name") << "</p>";
+      secure: |
+        resp << "<p>" << html_encode(req.param("name")) << "</p>";
+    rust:
+      vulnerable: |
+        let page = format!("<div>{}</div>", user_input);
+      secure: |
+        let page = format!("<div>{}</div>", askama_escape::escape(&user_input,
+            askama_escape::Html));
+
+# ---------------------------------------------------------------------------
+# CWE-89 — Improper Neutralization of Special Elements used in an SQL Command
+# ---------------------------------------------------------------------------
+
+- id: CWE-89
+  facet: Web Injection
+  section: SQL Injection
+  security_rule: >-
+    SQL statements must keep query text fixed and supply every untrusted
+    value as a bound parameter, or through an ORM or query builder, so
+    input is always treated as data and never as query structure.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated or interpolated into a SQL string, so
+    the input is parsed as query syntax and an attacker can add clauses,
+    change logic, or read or modify other data.
+  secure_pattern: >-
+    The query text is a fixed string with placeholders and untrusted
+    values are passed only as bound parameters, so the database driver
+    keeps code and data separate.
+  code_patterns:
+    generic:
+      vulnerable: |
+        query = "SELECT * FROM users WHERE name = '" + userInput + "'"
+      secure: |
+        query = "SELECT * FROM users WHERE name = ?"
+        execute(query, [userInput])
+    go:
+      vulnerable: |
+        db.Query("SELECT * FROM users WHERE id = " + id)
+      secure: |
+        db.Query("SELECT * FROM users WHERE id = $1", id)
+    c:
+      vulnerable: |
+        sprintf(sql, "SELECT * FROM users WHERE id = %s", user_id);
+        sqlite3_exec(db, sql, cb, 0, 0);
+      secure: |
+        sqlite3_prepare_v2(db, "SELECT * FROM users WHERE id = ?", -1, &stmt, 0);
+        sqlite3_bind_text(stmt, 1, user_id, -1, SQLITE_STATIC);
+    cpp:
+      vulnerable: |
+        auto sql = "SELECT * FROM users WHERE name = '" + name + "'";
+        stmt.execute(sql);
+      secure: |
+        auto ps = conn.prepareStatement("SELECT * FROM users WHERE name = ?");
+        ps->setString(1, name);
+    rust:
+      vulnerable: |
+        let sql = format!("SELECT * FROM users WHERE id = {}", id);
+        client.query(&sql, &[]);
+      secure: |
+        client.query("SELECT * FROM users WHERE id = $1", &[&id]);
+
+# ---------------------------------------------------------------------------
+# CWE-90 — Improper Neutralization of Special Elements used in an LDAP Query
+# ---------------------------------------------------------------------------
+
+- id: CWE-90
+  facet: Web Injection
+  section: LDAP Injection
+  security_rule: >-
+    Untrusted values placed into an LDAP search filter or distinguished
+    name must be escaped with the LDAP filter or DN encoder, or bound
+    through a templated search API, so they are treated as literal values.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into an LDAP filter or DN, so filter
+    metacharacters such as parentheses, asterisks, or backslashes let an
+    attacker broaden the query or bypass an authentication check.
+  secure_pattern: >-
+    Each untrusted value is passed through the LDAP filter or DN escape
+    routine, or supplied through a parameterized search API, so filter
+    metacharacters in the input cannot alter the query.
+  code_patterns:
+    generic:
+      vulnerable: |
+        filter = "(uid=" + username + ")"
+      secure: |
+        filter = "(uid=" + ldapFilterEncode(username) + ")"
+    go:
+      vulnerable: |
+        req := ldap.NewSearchRequest(base, ldap.ScopeWholeSubtree, 0, 0, 0,
+            false, "(uid="+username+")", nil, nil)
+      secure: |
+        filter := "(uid=" + ldap.EscapeFilter(username) + ")"
+        req := ldap.NewSearchRequest(base, ldap.ScopeWholeSubtree, 0, 0, 0,
+            false, filter, nil, nil)
+    c:
+      vulnerable: |
+        sprintf(filter, "(uid=%s)", username);
+        ldap_search_ext_s(ld, base, scope, filter, NULL, 0, NULL, NULL, NULL, 0, &res);
+      secure: |
+        ldap_filter_escape(escaped, sizeof(escaped), username);
+        sprintf(filter, "(uid=%s)", escaped);
+    cpp:
+      vulnerable: |
+        auto filter = "(uid=" + username + ")";
+        conn.search(base, ldap::Scope::Subtree, filter);
+      secure: |
+        auto filter = "(uid=" + ldap::escape_filter(username) + ")";
+        conn.search(base, ldap::Scope::Subtree, filter);
+    rust:
+      vulnerable: |
+        let filter = format!("(uid={})", username);
+        ldap.search(&base, Scope::Subtree, &filter, vec!["cn"]);
+      secure: |
+        let filter = format!("(uid={})", ldap3::ldap_escape(&username));
+        ldap.search(&base, Scope::Subtree, &filter, vec!["cn"]);
+
+# ---------------------------------------------------------------------------
+# CWE-91 — XML Injection (aka Blind XPath Injection)
+# ---------------------------------------------------------------------------
+
+- id: CWE-91
+  facet: Web Injection
+  section: XML Injection
+  security_rule: >-
+    Untrusted input placed into an XML document or an XPath query must be
+    inserted through a builder API or bound as a variable, and escaped for
+    its XML context, so it cannot add or alter document structure.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into XML markup or an XPath
+    expression, so angle brackets, quotes, or XPath operators in the input
+    create new elements or change the node selection.
+  secure_pattern: >-
+    XML is built with a serializer that escapes text and attribute values,
+    and XPath queries use variable bindings or precompiled expressions, so
+    untrusted input is always a value and never structure.
+  code_patterns:
+    generic:
+      vulnerable: |
+        xml = "<user><name>" + userInput + "</name></user>"
+      secure: |
+        xml = xmlBuilder.element("user").text(userInput).serialize()
+    go:
+      vulnerable: |
+        xml := "<user><name>" + name + "</name></user>"
+      secure: |
+        var buf bytes.Buffer
+        xml.EscapeText(&buf, []byte(name))   // encoding/xml escapes the value
+    c:
+      vulnerable: |
+        sprintf(doc, "<user><name>%s</name></user>", name);
+      secure: |
+        xmlChar *enc = xmlEncodeEntitiesReentrant(NULL, BAD_CAST name);
+        sprintf(doc, "<user><name>%s</name></user>", (char *)enc);
+    cpp:
+      vulnerable: |
+        node.append_child("name").text().set(name.c_str());
+        // node value built by raw concatenation elsewhere is unsafe
+      secure: |
+        auto child = node.append_child("name");
+        child.text().set(name.c_str());   // pugixml escapes text content
+    rust:
+      vulnerable: |
+        let xml = format!("<user><name>{}</name></user>", name);
+      secure: |
+        let mut w = Writer::new(Cursor::new(Vec::new()));
+        w.write_event(Event::Text(BytesText::new(&name)));   // quick-xml escapes
+
+# ---------------------------------------------------------------------------
+# CWE-943 — Improper Neutralization of Special Elements in Data Query Logic
+# ---------------------------------------------------------------------------
+
+- id: CWE-943
+  facet: Web Injection
+  section: Improper Neutralization in Data Query Logic
+  security_rule: >-
+    Any data query — SQL, NoSQL, or another query language — must be built
+    so untrusted input is bound as a typed parameter through the driver or
+    query builder, never concatenated or merged into the query structure.
+  vulnerability_pattern: >-
+    Untrusted input is merged into a query expression or query document,
+    so special elements or operator objects in the input change the query
+    logic and an attacker can read or modify unintended data.
+  secure_pattern: >-
+    The query shape is fixed by code and each untrusted value is supplied
+    as a typed parameter, with input coerced to its expected scalar type
+    so it cannot become a query operator or clause.
+  code_patterns:
+    generic:
+      vulnerable: |
+        query = buildQuery("status", userInput)   # input merged as structure
+      secure: |
+        query = buildQuery("status", asScalar(userInput))   # bound as a value
+    go:
+      vulnerable: |
+        coll.Find(ctx, bson.M{"name": bson.M{"$ne": nil}, "user": rawInput})
+      secure: |
+        coll.Find(ctx, bson.D{{Key: "user", Value: fmt.Sprint(userInput)}})
+    c:
+      vulnerable: |
+        sprintf(q, "{ \"user\": %s }", user_input);
+        mongoc_collection_find_with_opts(c, bson_new_from_json(q, -1, 0), 0, 0);
+      secure: |
+        bson_t *filter = bson_new();
+        BSON_APPEND_UTF8(filter, "user", user_input);
+    cpp:
+      vulnerable: |
+        auto filter = bsoncxx::from_json("{\"user\":" + userInput + "}");
+        coll.find_one(filter.view());
+      secure: |
+        auto filter = make_document(kvp("user", userInput));
+        coll.find_one(filter.view());
+    rust:
+      vulnerable: |
+        let filter: Document = serde_json::from_str(&user_json)?;
+        coll.find_one(filter, None);
+      secure: |
+        let filter = doc! { "user": user_input };   // typed value, not parsed
+        coll.find_one(filter, None);

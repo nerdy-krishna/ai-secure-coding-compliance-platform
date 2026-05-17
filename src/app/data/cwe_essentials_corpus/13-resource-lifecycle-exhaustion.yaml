@@ -1,0 +1,237 @@
+# CWE Essentials — Concern-area 13: Resource Lifecycle & Exhaustion
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the systems / native set C/C++/Rust/Go for CWE).
+#
+# CWEs: CWE-400, CWE-770, CWE-404, CWE-772.
+
+# ---------------------------------------------------------------------------
+# CWE-400 — Uncontrolled Resource Consumption
+# ---------------------------------------------------------------------------
+
+- id: CWE-400
+  facet: Resource Lifecycle & Exhaustion
+  section: Uncontrolled Resource Consumption
+  security_rule: >-
+    Bound the size, count, depth, and rate of work a single request can
+    cause, and apply timeouts to operations that could otherwise run
+    unbounded, so a small request cannot map to a large cost.
+  vulnerability_pattern: >-
+    A request handler allocates work proportional to attacker-supplied
+    input — a declared length, a nesting depth, a result-set size — with
+    no ceiling and no timeout, so a small request drives unbounded CPU,
+    memory, or time consumption and degrades or denies service.
+  secure_pattern: >-
+    The cost-driving input is checked against a hard ceiling before any
+    work is allocated, and long-running operations carry a deadline or
+    timeout, so overload produces controlled rejection instead of
+    collapse.
+  code_patterns:
+    generic:
+      vulnerable: |
+        n = request.declaredLength       # attacker-controlled, unbounded
+        buf = allocate(n)                # work scales with input, no cap
+      secure: |
+        if request.declaredLength > MAX_LENGTH: reject()
+        buf = allocate(request.declaredLength)
+    c:
+      vulnerable: |
+        size_t n = read_declared_length(sock);
+        char *buf = malloc(n);           /* attacker picks n, no limit */
+      secure: |
+        size_t n = read_declared_length(sock);
+        if (n > MAX_PAYLOAD) { reject(sock); return; }
+        char *buf = malloc(n);
+    cpp:
+      vulnerable: |
+        std::vector<char> buf(header.declared_size);  // unbounded reserve
+      secure: |
+        if (header.declared_size > kMaxPayload) throw TooLarge{};
+        std::vector<char> buf(header.declared_size);
+    rust:
+      vulnerable: |
+        let mut buf = vec![0u8; header.declared_len];   // no ceiling
+      secure: |
+        let len = header.declared_len.min(MAX_PAYLOAD);
+        let mut buf = vec![0u8; len];
+    go:
+      vulnerable: |
+        body, _ := io.ReadAll(r.Body)        // reads an unbounded request
+      secure: |
+        body, err := io.ReadAll(io.LimitReader(r.Body, maxBytes))
+        if err != nil { http.Error(w, "too large", 413); return }
+
+# ---------------------------------------------------------------------------
+# CWE-770 — Allocation of Resources Without Limits or Throttling
+# ---------------------------------------------------------------------------
+
+- id: CWE-770
+  facet: Resource Lifecycle & Exhaustion
+  section: Allocation of Resources Without Limits or Throttling
+  security_rule: >-
+    Allocate finite resources — connections, threads, file descriptors,
+    sessions — only through pools with hard ceilings, and throttle the
+    rate at which clients can request new allocations.
+  vulnerability_pattern: >-
+    Each request or client triggers a fresh resource allocation with no
+    pool ceiling and no throttling, so a burst of activity opens
+    unbounded connections, threads, or descriptors until the pool or the
+    operating system limit is exhausted.
+  secure_pattern: >-
+    Resources are drawn from a bounded pool with a fixed maximum, and a
+    rate limiter or semaphore caps how fast new allocations are granted,
+    so overload is rejected cleanly rather than exhausting the host.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for each request: spawn(handler)        # one thread per request, no cap
+      secure: |
+        if pool.activeCount() >= MAX_WORKERS: reject()
+        pool.submit(handler)
+    c:
+      vulnerable: |
+        while (1) { int fd = accept(srv, 0, 0); pthread_create(&t, 0, h, &fd); }
+      secure: |
+        while (sem_trywait(&conn_slots) == 0) {
+            int fd = accept(srv, 0, 0); pthread_create(&t, 0, h, &fd);
+        }
+    cpp:
+      vulnerable: |
+        std::thread(handle, conn).detach();      // unbounded thread creation
+      secure: |
+        thread_pool.enqueue(handle, conn);       // fixed-size worker pool
+    rust:
+      vulnerable: |
+        loop { let c = listener.accept()?; tokio::spawn(handle(c)); }
+      secure: |
+        let permit = semaphore.clone().acquire_owned().await?;
+        tokio::spawn(async move { handle(c).await; drop(permit); });
+    go:
+      vulnerable: |
+        for { conn, _ := ln.Accept(); go handle(conn) }   // unbounded goroutines
+      secure: |
+        for { conn, _ := ln.Accept(); sem <- struct{}{}
+              go func() { defer func() { <-sem }(); handle(conn) }() }
+
+# ---------------------------------------------------------------------------
+# CWE-404 — Improper Resource Shutdown or Release
+# ---------------------------------------------------------------------------
+
+- id: CWE-404
+  facet: Resource Lifecycle & Exhaustion
+  section: Improper Resource Shutdown or Release
+  security_rule: >-
+    Tie resource release to scope so it runs on every exit path,
+    including error paths, using RAII, defer, or try/finally rather than
+    a manual close that an exception or early return can skip.
+  vulnerability_pattern: >-
+    A resource is opened on the success path and closed by a manual call
+    at the end, but an error path, early return, or exception bypasses
+    that call, so the resource is shut down improperly or not at all.
+  secure_pattern: >-
+    Release is bound to the resource's scope through RAII, a defer
+    statement, or a try/finally block, so the resource is closed exactly
+    once on every path the code can take.
+  code_patterns:
+    generic:
+      vulnerable: |
+        f = open(path)
+        process(f)            # if process throws, close is never reached
+        close(f)
+      secure: |
+        f = open(path)
+        try: process(f)
+        finally: close(f)
+    c:
+      vulnerable: |
+        FILE *f = fopen(path, "r");
+        if (parse(f) < 0) return -1;     /* error path leaks the handle */
+        fclose(f);
+      secure: |
+        FILE *f = fopen(path, "r");
+        int rc = parse(f);
+        fclose(f);                       /* closed on every path */
+        return rc;
+    cpp:
+      vulnerable: |
+        FILE *f = fopen(path, "r");
+        process(f);                      // throws -> fclose skipped
+        fclose(f);
+      secure: |
+        std::ifstream f(path);           // RAII: closed when f leaves scope
+        process(f);
+    rust:
+      vulnerable: |
+        let f = File::open(path)?;
+        let raw = f.into_raw_fd();        // ownership dropped, fd leaks
+        do_work(raw);
+      secure: |
+        let f = File::open(path)?;
+        do_work(&f);                     // f closed automatically on scope exit
+    go:
+      vulnerable: |
+        f, _ := os.Open(path)
+        if err := process(f); err != nil { return err }   // leaks f
+        f.Close()
+      secure: |
+        f, _ := os.Open(path)
+        defer f.Close()                  // runs on every return path
+        return process(f)
+
+# ---------------------------------------------------------------------------
+# CWE-772 — Missing Release of Resource after Effective Lifetime
+# ---------------------------------------------------------------------------
+
+- id: CWE-772
+  facet: Resource Lifecycle & Exhaustion
+  section: Missing Release of Resource after Effective Lifetime
+  security_rule: >-
+    Release every resource as soon as it is no longer needed, especially
+    inside long-lived loops, so handles do not slowly accumulate and
+    exhaust the available pool.
+  vulnerability_pattern: >-
+    A resource is acquired but never released after its effective
+    lifetime ends — often a handle obtained each iteration of a
+    long-running loop — so the slow accumulation eventually exhausts
+    memory, descriptors, or connections.
+  secure_pattern: >-
+    Each acquired resource is released at the end of its useful life,
+    with the release tied to the same scope or loop iteration that
+    acquired it, so no handle outlives its purpose.
+  code_patterns:
+    generic:
+      vulnerable: |
+        loop: conn = pool.acquire(); use(conn)   # never returned to the pool
+      secure: |
+        loop:
+          conn = pool.acquire()
+          try: use(conn)
+          finally: pool.release(conn)
+    c:
+      vulnerable: |
+        for (int i = 0; i < n; i++) { int fd = open(paths[i], O_RDONLY); read(fd, b, 8); }
+      secure: |
+        for (int i = 0; i < n; i++) {
+            int fd = open(paths[i], O_RDONLY); read(fd, b, 8); close(fd);
+        }
+    cpp:
+      vulnerable: |
+        for (auto &p : paths) { auto *h = new Buffer(p); consume(h); }  // leaked
+      secure: |
+        for (auto &p : paths) { auto h = std::make_unique<Buffer>(p); consume(h.get()); }
+    rust:
+      vulnerable: |
+        for p in &paths { std::mem::forget(File::open(p)?); }   // fd never closed
+      secure: |
+        for p in &paths { let f = File::open(p)?; consume(&f); }  // closed each iter
+    go:
+      vulnerable: |
+        for _, u := range urls { resp, _ := http.Get(u); _ = resp }  // body leaks
+      secure: |
+        for _, u := range urls {
+            resp, _ := http.Get(u); io.Copy(io.Discard, resp.Body); resp.Body.Close()
+        }

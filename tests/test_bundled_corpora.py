@@ -1,12 +1,14 @@
-"""Framework Expansion #60 / #62 — bundled RAG corpora.
+"""Bundled RAG corpora — CWE Essentials and OWASP ISVS.
 
-Covers the two frameworks that ship a RAG corpus in the repository —
-CWE Essentials and OWASP ISVS. For each, guards that:
+Both frameworks ship an enriched RAG corpus in the repository, rendered
+from per-concern-area YAML by `scripts/build_enriched_corpus.py`. For
+each, this guards that:
 
-1. the corpus CSV stays in sync with its source markdown, and
+1. the corpus CSV stays in sync with its YAML source,
 2. every corpus `concern_area` exactly matches one of that framework's
-   agent retrieval facets — a mismatch would silently leave an agent
-   with no RAG content.
+   agent retrieval facets (a mismatch silently starves an agent), and
+3. the enriched documents carry the pattern blocks the scan agent's
+   extractor consumes, with concept-only `embed_text` (RAG lever 1).
 """
 
 from __future__ import annotations
@@ -18,11 +20,14 @@ import pathlib
 import pytest
 
 from app.core.services.default_seed_service import AGENT_DEFINITIONS
+from app.infrastructure.agents.generic_specialized_agent import (
+    _extract_patterns_from_doc,
+)
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-_BUILD_SCRIPT = _REPO_ROOT / "scripts" / "build_corpus.py"
+_BUILD_SCRIPT = _REPO_ROOT / "scripts" / "build_enriched_corpus.py"
 
-# framework → (corpus CSV path, expected concern-area count).
+# framework → (corpus CSV filename, expected distinct concern-area count).
 _CORPORA = {
     "cwe_essentials": ("cwe_essentials_corpus.csv", 14),
     "isvs": ("isvs_corpus.csv", 7),
@@ -30,7 +35,7 @@ _CORPORA = {
 
 
 def _load_build_script():
-    spec = importlib.util.spec_from_file_location("build_corpus", _BUILD_SCRIPT)
+    spec = importlib.util.spec_from_file_location("build_enriched", _BUILD_SCRIPT)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -53,10 +58,10 @@ def _agent_concern_areas(framework: str) -> set[str]:
 
 
 @pytest.mark.parametrize("framework", sorted(_CORPORA))
-def test_corpus_covers_expected_concern_areas(framework: str):
+def test_corpus_has_enriched_columns(framework: str):
     rows = _csv_rows(framework)
-    assert len(rows) == _CORPORA[framework][1]
-    assert {"id", "document", "concern_area"} == set(rows[0].keys())
+    assert len(rows) > _CORPORA[framework][1]  # many entries per concern-area
+    assert {"id", "document", "embed_text", "concern_area"} == set(rows[0].keys())
 
 
 @pytest.mark.parametrize("framework", sorted(_CORPORA))
@@ -64,28 +69,39 @@ def test_corpus_concern_areas_match_agent_facets(framework: str):
     """Each corpus document's `concern_area` must equal an agent's
     retrieval facet — otherwise the agent retrieves nothing."""
     corpus_areas = {r["concern_area"] for r in _csv_rows(framework)}
+    assert len(corpus_areas) == _CORPORA[framework][1]
     assert corpus_areas == _agent_concern_areas(framework)
 
 
 @pytest.mark.parametrize("framework", sorted(_CORPORA))
-def test_corpus_documents_are_non_empty_prose(framework: str):
-    for row in _csv_rows(framework):
-        assert len(row["document"].strip()) > 200, row["id"]
-
-
-@pytest.mark.parametrize("framework", sorted(_CORPORA))
 def test_corpus_documents_carry_pattern_blocks(framework: str):
-    """The build relabels each doc's weakness / mitigation paragraphs as
-    `**Vulnerability Pattern**` / `**Secure Pattern**` blocks — the only
-    shape the scan agent's `_extract_patterns_from_doc` consumes."""
+    """Every enriched doc carries the `**Vulnerability Pattern**` /
+    `**Secure Pattern**` blocks the scan agent's extractor consumes."""
     for row in _csv_rows(framework):
         assert "**Vulnerability Pattern (" in row["document"], row["id"]
         assert "**Secure Pattern (" in row["document"], row["id"]
 
 
 @pytest.mark.parametrize("framework", sorted(_CORPORA))
-def test_corpus_csv_is_in_sync_with_source_markdown(framework: str):
+def test_corpus_documents_extract_cleanly(framework: str):
+    """Every document yields non-empty vulnerability + secure patterns."""
+    for row in _csv_rows(framework):
+        vp, sp = _extract_patterns_from_doc(row["document"], "GENERIC")
+        assert vp, row["id"]
+        assert sp, row["id"]
+
+
+@pytest.mark.parametrize("framework", sorted(_CORPORA))
+def test_corpus_embed_text_is_concept_only(framework: str):
+    """The embed_text column (RAG lever 1) carries concept text only."""
+    for row in _csv_rows(framework):
+        assert "```" not in row["embed_text"], row["id"]
+        assert "[[" not in row["embed_text"], row["id"]
+
+
+@pytest.mark.parametrize("framework", sorted(_CORPORA))
+def test_corpus_csv_is_in_sync_with_yaml_source(framework: str):
     """The committed CSV must match what the build script produces from
-    the corpus markdown — guards against hand-edits and stale rebuilds."""
+    the per-concern-area YAML — guards against hand-edits and drift."""
     build = _load_build_script()
     assert build._check(framework) == 0

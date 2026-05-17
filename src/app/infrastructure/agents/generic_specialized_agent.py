@@ -301,6 +301,36 @@ def _file_query_hint(filename: str, target_lang: str) -> str:
     return f"Reviewing the source file {base}." if base else ""
 
 
+def _block_code(doc: str, marker: str) -> tuple[str, str]:
+    """Pull the (vulnerable, secure) code out of a `[[<marker> PATTERNS]]`
+    block, or ("", "") when the block is absent or malformed."""
+    try:
+        block_match = re.search(
+            re.escape(f"[[{marker} PATTERNS]]") + r"([^\[]{0,8000})(?=\[\[|\Z)",
+            doc,
+            re.DOTALL,
+        )
+    except re.error:
+        return "", ""
+    if not block_match:
+        return "", ""
+    block = block_match.group(1)
+    vp = sp = ""
+    try:
+        m = re.search(r"Vulnerable:\s*```([^`]{0,8000})```", block, re.DOTALL)
+        if m:
+            vp = m.group(1).strip()
+    except re.error:
+        pass
+    try:
+        m = re.search(r"Secure:\s*```([^`]{0,8000})```", block, re.DOTALL)
+        if m:
+            sp = m.group(1).strip()
+    except re.error:
+        pass
+    return vp, sp
+
+
 def _extract_patterns_from_doc(
     doc: str, target_lang: str
 ) -> tuple[Optional[str], Optional[str]]:
@@ -336,37 +366,15 @@ def _extract_patterns_from_doc(
     gen_vp = vp_match.group(1).strip() if vp_match else ""
     gen_sp = sp_match.group(1).strip() if sp_match else ""
 
-    lang_vp = ""
-    lang_sp = ""
+    lang_vp = lang_sp = ""
     if target_lang != "GENERIC":
-        lang_header = f"[[{target_lang} PATTERNS]]"
-        try:
-            lang_match = re.search(
-                re.escape(lang_header) + r"([^\[]{0,8000})(?=\[\[|\Z)", doc, re.DOTALL
-            )
-        except re.error:
-            lang_match = None
-        if lang_match:
-            lang_block = lang_match.group(1)
-            try:
-                lvp = re.search(
-                    r"Vulnerable:\s*```([^`]{0,8000})```", lang_block, re.DOTALL
-                )
-            except re.error:
-                lvp = None
-            try:
-                lsp = re.search(
-                    r"Secure:\s*```([^`]{0,8000})```", lang_block, re.DOTALL
-                )
-            except re.error:
-                lsp = None
-            if lvp:
-                lang_vp = lvp.group(1).strip()
-            if lsp:
-                lang_sp = lsp.group(1).strip()
+        lang_vp, lang_sp = _block_code(doc, target_lang)
+    # Fallback order: the file's own language block, then the generic
+    # code block, then the prose-only pattern descriptions.
+    generic_vp, generic_sp = _block_code(doc, "GENERIC")
 
-    final_vp = lang_vp if lang_vp else gen_vp
-    final_sp = lang_sp if lang_sp else gen_sp
+    final_vp = lang_vp or generic_vp or gen_vp
+    final_sp = lang_sp or generic_sp or gen_sp
     return (final_vp or None, final_sp or None)
 
 

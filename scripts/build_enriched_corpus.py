@@ -50,15 +50,33 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _DATA_DIR = REPO_ROOT / "src" / "app" / "data"
 
 # framework → (corpus source-dir stem, retrieval facet column name).
-# The entry `facet` (an ASVS chapter name) is written verbatim to the
-# CSV: every chapter has a dedicated agent that filters retrieval on it.
+# The entry `facet` is written verbatim to the CSV's facet column; every
+# domain (ASVS chapter, CWE / ISVS concern-area) has a dedicated agent
+# that filters retrieval on it.
 _FRAMEWORKS: Dict[str, Dict[str, str]] = {
     "asvs": {"dir": "asvs_corpus", "facet": "control_family"},
+    "cwe_essentials": {"dir": "cwe_essentials_corpus", "facet": "concern_area"},
+    "isvs": {"dir": "isvs_corpus", "facet": "concern_area"},
 }
 
 
 def _facet(framework: str) -> str:
     return _FRAMEWORKS[framework]["facet"]
+
+
+# YAML `code_patterns` key → the `[[<LANG> PATTERNS]]` marker the scan
+# agent's `_extract_patterns_from_doc` looks for. The agent keys on its
+# `_LANGUAGE_MAP` values (file-extension language tags), so a key whose
+# upper-case form differs from that tag must be mapped explicitly or the
+# agent silently falls back to the generic block.
+_LANG_MARKER = {
+    "csharp": "C#",
+    "cpp": "C++",
+}
+
+
+def _lang_marker(language: str) -> str:
+    return _LANG_MARKER.get(language, language.upper())
 
 
 def _render_document(entry: Dict) -> str:
@@ -78,7 +96,7 @@ def _render_document(entry: Dict) -> str:
     for language in sorted(entry.get("code_patterns") or {}):
         pair = entry["code_patterns"][language]
         blocks += (
-            f"\n\n[[{language.upper()} PATTERNS]]\n"
+            f"\n\n[[{_lang_marker(language)} PATTERNS]]\n"
             f"Vulnerable:\n```\n{pair['vulnerable'].strip()}\n```\n"
             f"Secure:\n```\n{pair['secure'].strip()}\n```"
         )

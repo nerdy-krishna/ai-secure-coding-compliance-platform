@@ -1,0 +1,383 @@
+# OWASP ISVS 1.0 — Concern-area 01: Secure Development & Provisioning
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + C/C++/Python/Rust for ISVS — IoT / embedded /
+# connected-device code). Many requirements here are process, hardware,
+# or provisioning concerns with no code sink and are generic-only.
+#
+# Source: 01-secure-development-provisioning.md (ISVS V1 — IoT Ecosystem).
+
+# ---------------------------------------------------------------------------
+# ISVS-1.1 — Unique Per-Device Identity
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.1
+  facet: Secure Development & Provisioning
+  section: Unique Per-Device Identity
+  security_rule: >-
+    Every device must be given a unique identity established at
+    manufacture, so a single compromised unit cannot be impersonated by
+    or used to compromise the rest of the fleet.
+  vulnerability_pattern: >-
+    Every unit in a product line ships with the same identifier or
+    credential, so cloning or extracting it from one device yields an
+    identity that is accepted for the whole fleet.
+  secure_pattern: >-
+    Each unit is assigned a distinct identifier and credential at
+    manufacture, so identities never overlap and a compromise is
+    contained to a single device.
+  code_patterns:
+    generic:
+      vulnerable: |
+        device_id = "FLEET-DEVICE-0001"     # same constant flashed to every unit
+      secure: |
+        device_id = read_unique_id_from_provisioning()   # distinct per unit
+    c:
+      vulnerable: |
+        #define DEVICE_ID "FLEET-DEVICE-0001"   /* baked into shared firmware */
+      secure: |
+        char device_id[33];
+        provisioning_read_device_id(device_id, sizeof(device_id));
+    cpp:
+      vulnerable: |
+        const std::string deviceId = "FLEET-DEVICE-0001";
+      secure: |
+        const std::string deviceId = Provisioning::readUniqueDeviceId();
+    python:
+      vulnerable: |
+        DEVICE_ID = "FLEET-DEVICE-0001"
+      secure: |
+        DEVICE_ID = provisioning.read_unique_id()   # written per unit at factory
+    rust:
+      vulnerable: |
+        const DEVICE_ID: &str = "FLEET-DEVICE-0001";
+      secure: |
+        let device_id = provisioning::read_unique_id()?;
+
+# ---------------------------------------------------------------------------
+# ISVS-1.2 — Per-Device Secret Provisioning
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.2
+  facet: Secure Development & Provisioning
+  section: Per-Device Secret Provisioning
+  security_rule: >-
+    Cryptographic keys and credentials must be provisioned uniquely per
+    device, never shared across a product line, so extracting a secret
+    from one unit does not expose the whole fleet.
+  vulnerability_pattern: >-
+    A single hardcoded key or password is embedded in the firmware image
+    that every unit runs, so recovering it once decrypts traffic or
+    grants access for every device.
+  secure_pattern: >-
+    A distinct key is generated for each device, either on-device or by a
+    provisioning service, and the shared firmware image contains no
+    secret material at all.
+  code_patterns:
+    generic:
+      vulnerable: |
+        device_key = "S3cret-shared-by-all-units"   # same in every image
+      secure: |
+        device_key = provisioning.fetch_per_device_key(device_id)
+    c:
+      vulnerable: |
+        static const uint8_t AES_KEY[16] = { 0x00, 0x11, 0x22 /* ...shared */ };
+      secure: |
+        uint8_t aes_key[16];
+        secure_element_get_device_key(aes_key);   /* unique, hardware-held */
+    cpp:
+      vulnerable: |
+        const std::array<uint8_t, 16> kAesKey = { 0x00, 0x11, 0x22 /* shared */ };
+      secure: |
+        auto aesKey = SecureElement::deriveDeviceKey();   // unique per unit
+    python:
+      vulnerable: |
+        API_KEY = "S3cret-shared-by-all-units"
+      secure: |
+        API_KEY = provisioning.fetch_per_device_key(DEVICE_ID)
+    rust:
+      vulnerable: |
+        const API_KEY: &str = "S3cret-shared-by-all-units";
+      secure: |
+        let api_key = provisioning::fetch_per_device_key(&device_id)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-1.3 — Hardware-Bound Attestable Identity
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.3
+  facet: Secure Development & Provisioning
+  section: Hardware-Bound Attestable Identity
+  security_rule: >-
+    Device identity should be bound to hardware, such as a secure element
+    or trusted platform module, so the back end can attest a genuine unit
+    and an impostor cannot present a copied identity.
+  vulnerability_pattern: >-
+    The device identity key lives in plain flash or a writable file, so
+    it can be read out and replayed from cloned hardware or a software
+    emulator that the back end cannot distinguish from a real device.
+  secure_pattern: >-
+    The identity key is generated inside and never leaves a secure
+    element, and the device proves possession by signing a server
+    challenge so the back end can attest the hardware.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = read_file("/etc/device/identity.key")   # copyable plaintext key
+        send_login(key)
+      secure: |
+        signature = secure_element.sign(server_challenge)   # key never exported
+        send_attestation(signature)
+    c:
+      vulnerable: |
+        uint8_t key[32];
+        read_flash(IDENTITY_ADDR, key, sizeof(key));   /* extractable */
+      secure: |
+        uint8_t sig[64];
+        secure_element_sign(challenge, chal_len, sig);  /* key stays in SE */
+    cpp:
+      vulnerable: |
+        auto key = Flash::read(kIdentityAddr, 32);
+      secure: |
+        auto sig = Tpm::sign(serverChallenge);   // private key non-exportable
+    python:
+      vulnerable: |
+        key = open("/etc/device/identity.key", "rb").read()
+      secure: |
+        sig = tpm2.sign(challenge, key_handle=ATTESTATION_KEY)
+    rust:
+      vulnerable: |
+        let key = std::fs::read("/etc/device/identity.key")?;
+      secure: |
+        let sig = secure_element.sign(&server_challenge)?;  // key never leaves SE
+
+# ---------------------------------------------------------------------------
+# ISVS-1.4 — Ecosystem Threat Modeling
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.4
+  facet: Secure Development & Provisioning
+  section: Ecosystem Threat Modeling
+  security_rule: >-
+    Threat modeling must cover the device, its companion application, and
+    its cloud services together, since the trust boundaries that matter
+    span all three parts of the ecosystem.
+  vulnerability_pattern: >-
+    Threat modeling is done for the device firmware alone, so trust
+    boundaries between the device, the mobile app, and the cloud are
+    never analysed and cross-component attack paths go unnoticed.
+  secure_pattern: >-
+    A single threat model enumerates the device, companion app, and cloud
+    services as one system, identifying every trust boundary and data
+    flow that crosses between them.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # threat-model.md scope: firmware only
+        components: [device_firmware]
+      secure: |
+        # threat-model.md scope: full ecosystem
+        components: [device_firmware, companion_app, cloud_services]
+        trust_boundaries: [device<->app, app<->cloud, device<->cloud]
+
+# ---------------------------------------------------------------------------
+# ISVS-1.5 — Authenticate Device Before Network Onboarding
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.5
+  facet: Secure Development & Provisioning
+  section: Authenticate Device Before Network Onboarding
+  security_rule: >-
+    Onboarding must verify a device's identity before granting it network
+    access or accepting it into the fleet, so an unverified or rogue
+    device is never admitted.
+  vulnerability_pattern: >-
+    The onboarding flow adds a device to the network or registers it with
+    the back end first and verifies its identity later, or not at all, so
+    a rogue device is admitted before any check runs.
+  secure_pattern: >-
+    The device's identity certificate or attestation is verified up
+    front, and network access is granted only after that check succeeds.
+  code_patterns:
+    generic:
+      vulnerable: |
+        network.admit(device)
+        verify_identity(device)        # check runs after access is granted
+      secure: |
+        if verify_identity(device):    # verify first
+            network.admit(device)
+    c:
+      vulnerable: |
+        join_network(dev);
+        if (!verify_cert(dev)) log_warn("unverified");   /* already joined */
+      secure: |
+        if (verify_cert(dev) == OK) {
+            join_network(dev);
+        }
+    cpp:
+      vulnerable: |
+        mesh.admit(device);
+        device.verifyIdentity();
+      secure: |
+        if (device.verifyIdentity()) {
+            mesh.admit(device);
+        }
+    python:
+      vulnerable: |
+        fleet.register(device)
+        if not verify_attestation(device):
+            log.warning("rogue device")
+      secure: |
+        if verify_attestation(device):
+            fleet.register(device)
+    rust:
+      vulnerable: |
+        network.admit(&device);
+        let _ = verify_identity(&device);
+      secure: |
+        if verify_identity(&device)? {
+            network.admit(&device);
+        }
+
+# ---------------------------------------------------------------------------
+# ISVS-1.6 — Protect Provisioning Data In Transit
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.6
+  facet: Secure Development & Provisioning
+  section: Protect Provisioning Data In Transit
+  security_rule: >-
+    Provisioning secrets and onboarding data must be transferred only
+    over an authenticated, encrypted channel, so they cannot be observed
+    or tampered with while a device is being commissioned.
+  vulnerability_pattern: >-
+    Provisioning keys or credentials are sent to a device over an
+    unauthenticated or cleartext channel, so anyone on the local network
+    can capture the secret or inject their own provisioning payload.
+  secure_pattern: >-
+    Provisioning data travels over a mutually authenticated TLS session,
+    so the secret stays confidential and the device confirms it is
+    talking to the genuine provisioning service.
+  code_patterns:
+    generic:
+      vulnerable: |
+        send_plaintext(provisioning_url_over_http, device_secret)
+      secure: |
+        send_over_mutual_tls(provisioning_endpoint, device_secret)
+    c:
+      vulnerable: |
+        send(sock, secret, secret_len, 0);   /* raw TCP, no TLS */
+      secure: |
+        mbedtls_ssl_write(&tls, secret, secret_len);  /* authenticated TLS */
+    cpp:
+      vulnerable: |
+        httpClient.post("http://prov.local/enroll", deviceSecret);
+      secure: |
+        tlsClient.post("https://prov.example.com/enroll", deviceSecret);
+    python:
+      vulnerable: |
+        requests.post("http://prov.local/enroll", data=device_secret)
+      secure: |
+        requests.post("https://prov.example.com/enroll", data=device_secret,
+                      cert=("device.crt", "device.key"), verify="ca.pem")
+    rust:
+      vulnerable: |
+        TcpStream::connect("prov.local:80")?.write_all(&device_secret)?;
+      secure: |
+        let mut tls = tls_connector.connect("prov.example.com", stream)?;
+        tls.write_all(&device_secret)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-1.7 — Software and Hardware Bill of Materials
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.7
+  facet: Secure Development & Provisioning
+  section: Software and Hardware Bill of Materials
+  security_rule: >-
+    A maintained software and hardware bill of materials must enumerate
+    every firmware component and hardware part with its version, so a
+    vulnerable component can be located across the fleet when an advisory
+    lands.
+  vulnerability_pattern: >-
+    No inventory of firmware libraries or hardware parts is kept, so when
+    a vulnerability advisory is published the operator cannot tell which
+    devices contain the affected component.
+  secure_pattern: >-
+    A versioned bill of materials is generated as part of the build and
+    kept current, listing every component so advisories can be matched to
+    affected devices.
+  code_patterns:
+    generic:
+      vulnerable: |
+        # release artifact: firmware.bin only — no component inventory
+      secure: |
+        # release artifact: firmware.bin + sbom.cdx.json (CycloneDX, versioned)
+    python:
+      vulnerable: |
+        # build step ends after compiling the image
+        build_firmware()
+      secure: |
+        build_firmware()
+        generate_sbom(output="sbom.cdx.json", format="cyclonedx")
+    rust:
+      vulnerable: |
+        # CI: cargo build --release
+      secure: |
+        # CI: cargo build --release && cargo cyclonedx --format json
+
+# ---------------------------------------------------------------------------
+# ISVS-1.8 — Decommissioning Revokes Identity and Wipes Secrets
+# ---------------------------------------------------------------------------
+
+- id: ISVS-1.8
+  facet: Secure Development & Provisioning
+  section: Decommissioning Revokes Identity and Wipes Secrets
+  security_rule: >-
+    A defined decommissioning path must revoke a device's identity and
+    wipe its credentials and keys when it is retired, returned, or resold,
+    so a device that leaves the operator's control retains no live
+    secrets.
+  vulnerability_pattern: >-
+    A retired or returned device keeps its keys and credentials and its
+    identity stays valid on the back end, so whoever obtains the hardware
+    can still authenticate to the fleet.
+  secure_pattern: >-
+    Decommissioning revokes the device's identity at the back end and
+    securely erases all on-device keys and credentials, leaving the unit
+    with no usable secret material.
+  code_patterns:
+    generic:
+      vulnerable: |
+        mark_device_inactive(device_id)        # keys left on device, cert still valid
+      secure: |
+        backend.revoke_identity(device_id)
+        secure_wipe(device_keystore)
+    c:
+      vulnerable: |
+        set_status(dev, STATUS_RETIRED);   /* secrets remain in flash */
+      secure: |
+        backend_revoke_cert(dev->id);
+        secure_element_zeroize();          /* keys destroyed */
+    cpp:
+      vulnerable: |
+        device.setState(State::Retired);
+      secure: |
+        Backend::revokeIdentity(device.id());
+        SecureElement::zeroizeKeys();
+    python:
+      vulnerable: |
+        db.update(device_id, status="retired")
+      secure: |
+        backend.revoke_identity(device_id)
+        keystore.secure_erase()
+    rust:
+      vulnerable: |
+        device.set_status(Status::Retired);
+      secure: |
+        backend::revoke_identity(&device_id)?;
+        secure_element::zeroize_keys()?;

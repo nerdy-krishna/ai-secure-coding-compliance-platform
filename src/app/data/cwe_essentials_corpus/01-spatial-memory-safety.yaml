@@ -1,0 +1,413 @@
+# CWE Essentials — Concern Area: Spatial Memory Safety
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + C/C++/Rust/Go for systems / native code).
+#
+# Source of truth for the prose: 01-spatial-memory-safety.md.
+# CWEs: CWE-787, CWE-125, CWE-119, CWE-122, CWE-121, CWE-786, CWE-788, CWE-805.
+
+# ---------------------------------------------------------------------------
+# CWE-787 — Out-of-bounds Write
+# ---------------------------------------------------------------------------
+
+- id: CWE-787
+  facet: Spatial Memory Safety
+  section: Out-of-bounds Write
+  security_rule: >-
+    Every write must target an offset that has been verified to fall
+    inside the destination buffer; never let an untrusted index, offset,
+    or length drive a store without first checking it against the real
+    allocation size.
+  vulnerability_pattern: >-
+    A value is written at an index or through a pointer whose offset was
+    derived from untrusted input or an arithmetic result, with no check
+    against the buffer capacity, so the store lands in adjacent memory.
+  secure_pattern: >-
+    The destination index is validated against the buffer length before
+    the write, or a bounded container or slice type performs the check,
+    so a store can never cross the end of the allocation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        buf[index] = value           # index from input, never bounds-checked
+      secure: |
+        if index < length(buf): buf[index] = value
+    c:
+      vulnerable: |
+        char buf[16];
+        buf[user_index] = c;         // user_index may exceed 15
+      secure: |
+        char buf[16];
+        if (user_index < sizeof(buf)) buf[user_index] = c;
+    cpp:
+      vulnerable: |
+        int data[8];
+        data[idx] = value;           // idx unchecked, writes past data[7]
+      secure: |
+        std::array<int, 8> data{};
+        data.at(idx) = value;        // .at() throws on out-of-range
+    rust:
+      vulnerable: |
+        unsafe { *buf.as_mut_ptr().add(idx) = value; }
+      secure: |
+        if let Some(slot) = buf.get_mut(idx) { *slot = value; }
+    go:
+      vulnerable: |
+        copy(dst, src)               // dst shorter than src silently OK,
+                                     // but dst[i]=v with unchecked i panics late
+      secure: |
+        if idx >= 0 && idx < len(dst) { dst[idx] = v }
+
+# ---------------------------------------------------------------------------
+# CWE-125 — Out-of-bounds Read
+# ---------------------------------------------------------------------------
+
+- id: CWE-125
+  facet: Spatial Memory Safety
+  section: Out-of-bounds Read
+  security_rule: >-
+    Every read must target an offset proven to be inside the buffer;
+    validate any index or length used to load data so the program cannot
+    return adjacent memory contents to a caller or attacker.
+  vulnerability_pattern: >-
+    Data is read from an index or through a pointer offset that was not
+    checked against the buffer size, so the load reaches memory beyond
+    the allocation and can leak unrelated data.
+  secure_pattern: >-
+    The read index is range-checked against the buffer length first, or
+    a bounds-checked accessor is used, so a load can never reach past the
+    end or before the start of the buffer.
+  code_patterns:
+    generic:
+      vulnerable: |
+        value = buf[index]           # index unchecked, may read past end
+      secure: |
+        if index < length(buf): value = buf[index]
+    c:
+      vulnerable: |
+        return buf[offset];          // offset from a packet header, untrusted
+      secure: |
+        if (offset >= buf_len) return -1;
+        return buf[offset];
+    cpp:
+      vulnerable: |
+        char first = msg[pos];       // pos may run past the message end
+      secure: |
+        char first = msg.at(pos);    // .at() bounds-checks the read
+    rust:
+      vulnerable: |
+        let byte = unsafe { *data.as_ptr().add(pos) };
+      secure: |
+        let byte = data.get(pos).copied().ok_or(Error::Truncated)?;
+    go:
+      vulnerable: |
+        b := payload[pos]            // pos unchecked, panics or reads wrong cell
+      secure: |
+        if pos < 0 || pos >= len(payload) { return 0, ErrTruncated }
+        b := payload[pos]
+
+# ---------------------------------------------------------------------------
+# CWE-119 — Improper Restriction of Operations within the Bounds of a Buffer
+# ---------------------------------------------------------------------------
+
+- id: CWE-119
+  facet: Spatial Memory Safety
+  section: Improper Restriction of Operations within the Bounds of a Buffer
+  security_rule: >-
+    Any operation that reads or writes a buffer must be confined to that
+    buffer's valid range; constrain copy lengths, loop counts, and
+    pointer arithmetic to the smaller of the source and destination
+    capacity.
+  vulnerability_pattern: >-
+    Code performs a copy, loop, or pointer walk over a buffer using a
+    length or count that is not tied to the real allocation size, so the
+    operation runs past the start or end of the buffer.
+  secure_pattern: >-
+    The operation is bounded by the authoritative buffer capacity, using
+    length-aware routines or memory-safe container and slice types so the
+    access stays inside the allocation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for i in 0..count: dst[i] = src[i]    # count not tied to dst size
+      secure: |
+        for i in 0..min(count, length(dst)): dst[i] = src[i]
+    c:
+      vulnerable: |
+        memcpy(dst, src, count);              // count exceeds sizeof(dst)
+      secure: |
+        memcpy(dst, src, count < sizeof(dst) ? count : sizeof(dst));
+    cpp:
+      vulnerable: |
+        std::memcpy(buf.data(), src, n);      // n unrelated to buf.size()
+      secure: |
+        std::copy_n(src, std::min(n, buf.size()), buf.begin());
+    rust:
+      vulnerable: |
+        unsafe { ptr::copy_nonoverlapping(src, dst, count); }
+      secure: |
+        dst[..count].copy_from_slice(&src[..count]);  // both slices length-checked
+    go:
+      vulnerable: |
+        for i := 0; i < count; i++ { dst[i] = src[i] }
+      secure: |
+        n := copy(dst, src[:count])           // copy bounds to len(dst)
+        _ = n
+
+# ---------------------------------------------------------------------------
+# CWE-122 — Heap-based Buffer Overflow
+# ---------------------------------------------------------------------------
+
+- id: CWE-122
+  facet: Spatial Memory Safety
+  section: Heap-based Buffer Overflow
+  security_rule: >-
+    Writes into heap-allocated memory must not exceed the size requested
+    at allocation; size the allocation to the data and bound every copy
+    into it so heap metadata and neighbouring objects stay intact.
+  vulnerability_pattern: >-
+    More bytes are written into a heap allocation than were requested for
+    it, often because the buffer was sized for one length and filled from
+    a longer input, corrupting heap metadata or adjacent allocations.
+  secure_pattern: >-
+    The allocation is sized from the actual input length and every write
+    into it is length-bounded, or a growable memory-safe container is
+    used so the heap region cannot be overrun.
+  code_patterns:
+    generic:
+      vulnerable: |
+        buf = heapAllocate(64)
+        copy(buf, input)             # input longer than 64 bytes
+      secure: |
+        buf = heapAllocate(length(input) + 1)
+        copy(buf, input)
+    c:
+      vulnerable: |
+        char *buf = malloc(64);
+        strcpy(buf, input);          // overruns the 64-byte heap block
+      secure: |
+        char *buf = malloc(strlen(input) + 1);
+        strcpy(buf, input);
+    cpp:
+      vulnerable: |
+        char *buf = new char[len];
+        std::memcpy(buf, src, src_len);   // src_len may exceed len
+      secure: |
+        std::vector<char> buf(src, src + src_len);  // sized to the data
+    rust:
+      vulnerable: |
+        let mut v = Vec::with_capacity(64);
+        unsafe { v.set_len(input.len()); }     // claims uninit heap beyond cap
+      secure: |
+        let v = input.to_vec();                // allocation sized to input
+    go:
+      vulnerable: |
+        buf := make([]byte, 64)
+        copy(buf, input)             // silently truncates; logic then overruns
+      secure: |
+        buf := make([]byte, len(input))
+        copy(buf, input)
+
+# ---------------------------------------------------------------------------
+# CWE-121 — Stack-based Buffer Overflow
+# ---------------------------------------------------------------------------
+
+- id: CWE-121
+  facet: Spatial Memory Safety
+  section: Stack-based Buffer Overflow
+  security_rule: >-
+    Fixed-size buffers on the stack must never be filled from
+    variable-length input without a bound; every copy into a local array
+    must respect its declared size so the return address and saved
+    registers stay intact.
+  vulnerability_pattern: >-
+    Variable-length input is copied into a fixed-size stack buffer using
+    a routine that does not take the destination size, so a long input
+    overwrites the saved return address and other stack frame data.
+  secure_pattern: >-
+    The copy into the stack buffer uses a length-bounded routine tied to
+    the buffer's declared size, or a memory-safe string or array type is
+    used so the stack frame cannot be overrun.
+  code_patterns:
+    generic:
+      vulnerable: |
+        char local[128]
+        copy(local, input)          # no bound — overflows the stack frame
+      secure: |
+        char local[128]
+        boundedCopy(local, input, sizeof(local))
+    c:
+      vulnerable: |
+        char buf[128];
+        gets(buf);                  // unbounded read into a stack buffer
+      secure: |
+        char buf[128];
+        fgets(buf, sizeof(buf), stdin);
+    cpp:
+      vulnerable: |
+        char buf[128];
+        std::strcpy(buf, input);    // input length unbounded
+      secure: |
+        std::string buf{input};     // heap-backed, grows as needed
+    rust:
+      vulnerable: |
+        let mut buf = [0u8; 128];
+        unsafe { ptr::copy(src, buf.as_mut_ptr(), n); }   // n unchecked
+      secure: |
+        let mut buf = [0u8; 128];
+        let n = src.len().min(buf.len());
+        buf[..n].copy_from_slice(&src[..n]);
+    go:
+      vulnerable: |
+        var buf [128]byte
+        for i, c := range input { buf[i] = c }   // panics or corrupts on long input
+      secure: |
+        var buf [128]byte
+        copy(buf[:], input)         // copy bounds to the array length
+
+# ---------------------------------------------------------------------------
+# CWE-786 — Access of Memory Location Before Start of Buffer
+# ---------------------------------------------------------------------------
+
+- id: CWE-786
+  facet: Spatial Memory Safety
+  section: Access of Memory Location Before Start of Buffer
+  security_rule: >-
+    A pointer or index must never be moved before the first element of
+    its buffer; reject negative offsets and underflowing arithmetic so an
+    access cannot land in memory ahead of the allocation.
+  vulnerability_pattern: >-
+    A negative index or a pointer decremented past the start of the
+    buffer is used to read or write, so the access touches memory located
+    before the allocation begins.
+  secure_pattern: >-
+    Index and offset values are checked to be non-negative and pointer
+    decrements are validated against the buffer start, so no access
+    occurs ahead of the first element.
+  code_patterns:
+    generic:
+      vulnerable: |
+        value = buf[index]          # index may be negative
+      secure: |
+        if index >= 0 and index < length(buf): value = buf[index]
+    c:
+      vulnerable: |
+        char *p = buf + offset;
+        char c = *p;                // offset negative — reads before buf
+      secure: |
+        if (offset >= 0 && offset < buf_len) c = buf[offset];
+    cpp:
+      vulnerable: |
+        char last = line[end - 1];  // end is 0, end - 1 underflows the index
+      secure: |
+        if (end > 0) char last = line.at(end - 1);
+    rust:
+      vulnerable: |
+        let prev = unsafe { *data.as_ptr().offset(-1) };
+      secure: |
+        let prev = pos.checked_sub(1).and_then(|i| data.get(i)).copied();
+    go:
+      vulnerable: |
+        b := buf[pos-1]             // pos is 0, pos-1 wraps or panics
+      secure: |
+        if pos > 0 && pos-1 < len(buf) { b := buf[pos-1]; _ = b }
+
+# ---------------------------------------------------------------------------
+# CWE-788 — Access of Memory Location After End of Buffer
+# ---------------------------------------------------------------------------
+
+- id: CWE-788
+  facet: Spatial Memory Safety
+  section: Access of Memory Location After End of Buffer
+  security_rule: >-
+    A pointer or index must never reach past the last element of its
+    buffer; guard loop conditions and offsets against off-by-one errors
+    so an access cannot land in memory after the allocation.
+  vulnerability_pattern: >-
+    An index equal to or greater than the buffer length, or a pointer
+    advanced past the final element, is used to read or write, so the
+    access touches memory just beyond the end of the allocation.
+  secure_pattern: >-
+    Loop bounds and offsets use a strict less-than comparison against the
+    buffer length, or a bounds-checked iterator is used, so no access
+    occurs after the last element.
+  code_patterns:
+    generic:
+      vulnerable: |
+        for i in 0..=length(buf): use(buf[i])   # inclusive bound reads one past end
+      secure: |
+        for i in 0..length(buf): use(buf[i])
+    c:
+      vulnerable: |
+        for (int i = 0; i <= n; i++) sum += buf[i];   // i == n is past the end
+      secure: |
+        for (int i = 0; i < n; i++) sum += buf[i];
+    cpp:
+      vulnerable: |
+        char term = name[name.size()];   // index size() is one past the last char
+      secure: |
+        for (char c : name) process(c);  // range-for never overruns
+    rust:
+      vulnerable: |
+        let x = unsafe { *buf.as_ptr().add(buf.len()) };
+      secure: |
+        for &x in buf.iter() { process(x); }   // iterator stops at the end
+    go:
+      vulnerable: |
+        for i := 0; i <= len(buf); i++ { total += buf[i] }   // i == len panics
+      secure: |
+        for i := 0; i < len(buf); i++ { total += buf[i] }
+
+# ---------------------------------------------------------------------------
+# CWE-805 — Buffer Access with Incorrect Length Value
+# ---------------------------------------------------------------------------
+
+- id: CWE-805
+  facet: Spatial Memory Safety
+  section: Buffer Access with Incorrect Length Value
+  security_rule: >-
+    The length passed to any buffer operation must equal the real size of
+    the smaller of source and destination; never trust a caller-supplied
+    count and never confuse an element count with a byte count.
+  vulnerability_pattern: >-
+    A copy or access uses a length that does not match the actual buffer
+    size — a caller-supplied count, a stale length, or an element count
+    used as a byte count — so the operation reads or writes too far.
+  secure_pattern: >-
+    The operation derives its length from the authoritative buffer size,
+    takes the minimum of source and destination capacity, and multiplies
+    element count by element size correctly when bytes are needed.
+  code_patterns:
+    generic:
+      vulnerable: |
+        copy(dst, src, callerCount)            # callerCount not validated
+      secure: |
+        copy(dst, src, min(callerCount, length(dst), length(src)))
+    c:
+      vulnerable: |
+        memcpy(dst, src, n * sizeof(int));     // dst sized for fewer ints
+      secure: |
+        size_t bytes = n * sizeof(int);
+        if (bytes <= dst_size) memcpy(dst, src, bytes);
+    cpp:
+      vulnerable: |
+        std::memcpy(dst.data(), src.data(), src.size());  // src bigger than dst
+      secure: |
+        std::memcpy(dst.data(), src.data(),
+                    std::min(dst.size(), src.size()));
+    rust:
+      vulnerable: |
+        unsafe { ptr::copy_nonoverlapping(src.as_ptr(), dst.as_mut_ptr(), claimed_len); }
+      secure: |
+        let n = claimed_len.min(src.len()).min(dst.len());
+        dst[..n].copy_from_slice(&src[..n]);
+    go:
+      vulnerable: |
+        binary.Read(r, binary.BigEndian, buf[:declaredLen])  // declaredLen unverified
+      secure: |
+        if declaredLen > len(buf) { return ErrBadLength }
+        binary.Read(r, binary.BigEndian, buf[:declaredLen])

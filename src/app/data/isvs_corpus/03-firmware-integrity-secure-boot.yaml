@@ -1,0 +1,392 @@
+# OWASP ISVS 1.0 — Concern-Area: Firmware Integrity & Secure Boot
+# ISVS chapter V3 — Software Platform.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns. ISVS
+# targets IoT / embedded / connected-device code, so languages are
+# generic + the applicable subset of c / cpp / python / rust. Pure
+# hardware, process, or boot-chain requirements stay generic-only.
+
+# ---------------------------------------------------------------------------
+# ISVS-3.1 — Verified Boot Chain of Trust
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.1
+  facet: Firmware Integrity & Secure Boot
+  section: Verified Boot Chain of Trust
+  security_rule: >-
+    Every boot stage must verify the cryptographic signature of the next
+    stage against a hardware root of trust and transfer control to it
+    only after that verification succeeds.
+  vulnerability_pattern: >-
+    A boot stage loads and jumps to the next stage without checking its
+    signature, so modified firmware runs unchallenged because there is no
+    secure boot at all.
+  secure_pattern: >-
+    Each stage anchors its trust in an immutable hardware root, verifies
+    the signature of the next image before use, and halts the boot when
+    verification fails rather than continuing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        next_stage = load(NEXT_STAGE_ADDR)
+        jump(next_stage)                  # no signature check before transfer
+      secure: |
+        next_stage = load(NEXT_STAGE_ADDR)
+        if not verify_signature(next_stage, root_of_trust_key): halt()
+        jump(next_stage)
+    c:
+      vulnerable: |
+        load_image(STAGE2, &img);
+        boot(img.entry);                  /* control transferred unverified */
+      secure: |
+        load_image(STAGE2, &img);
+        if (verify_signature(&img, rot_pubkey) != 0) { panic(); }
+        boot(img.entry);
+    rust:
+      vulnerable: |
+        let stage2 = load_image(STAGE2_ADDR);
+        boot(stage2.entry);
+      secure: |
+        let stage2 = load_image(STAGE2_ADDR);
+        verify_signature(&stage2, &ROT_PUBKEY).expect("stage2 signature invalid");
+        boot(stage2.entry);
+
+# ---------------------------------------------------------------------------
+# ISVS-3.2 — No Verification Bypass Path
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.2
+  facet: Firmware Integrity & Secure Boot
+  section: No Verification Bypass Path
+  security_rule: >-
+    The boot path must offer no debug, recovery, or test branch that
+    skips firmware signature verification; every route to executing code
+    must pass through the same verification.
+  vulnerability_pattern: >-
+    A debug jumper, recovery mode, or test build flag lets the boot code
+    skip the signature check, so an attacker who triggers that path runs
+    unsigned firmware.
+  secure_pattern: >-
+    Verification is unconditional on production hardware, with debug and
+    recovery branches fused off or themselves gated on the same signature
+    check, so no route reaches code execution without it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if debug_jumper_set() or recovery_mode():
+            jump(image)                   # signature check skipped
+        else:
+            verify_then_jump(image)
+      secure: |
+        verify_then_jump(image)           # one verified path, debug fuse blown
+    c:
+      vulnerable: |
+        if (gpio_read(DEBUG_PIN)) { boot(img.entry); }   /* bypass */
+        else if (verify_signature(&img, key) == 0) { boot(img.entry); }
+      secure: |
+        if (verify_signature(&img, key) != 0) { panic(); }
+        boot(img.entry);                  /* DEBUG_PIN fused off in production */
+    rust:
+      vulnerable: |
+        if cfg!(feature = "skip_verify") { boot(img.entry); }
+        else { verify(&img)?; boot(img.entry); }
+      secure: |
+        verify(&img)?;                    // no skip_verify feature in release
+        boot(img.entry);
+
+# ---------------------------------------------------------------------------
+# ISVS-3.3 — Firmware Image Signing
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.3
+  facet: Firmware Integrity & Secure Boot
+  section: Firmware Image Signing
+  security_rule: >-
+    Every firmware image must be cryptographically signed by the
+    manufacturer using a strong asymmetric algorithm, and the device must
+    reject any image that is unsigned or carries an invalid signature.
+  vulnerability_pattern: >-
+    Firmware images ship unsigned or carry only a checksum, so the device
+    has no way to prove the image came from the manufacturer and accepts
+    any build with a matching checksum.
+  secure_pattern: >-
+    Images are signed with a strong asymmetric scheme and the device
+    verifies that signature with the manufacturer public key, treating a
+    checksum only as a transport-error check and never as authenticity.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if crc32(image) == image.crc: install(image)   # integrity, not authenticity
+      secure: |
+        if verify_signature(image, manufacturer_pubkey): install(image)
+    c:
+      vulnerable: |
+        if (crc32(buf, len) == hdr.crc) { flash_write(buf, len); }
+      secure: |
+        if (ed25519_verify(hdr.sig, buf, len, mfr_pubkey) == 1) {
+            flash_write(buf, len);
+        }
+    python:
+      vulnerable: |
+        if hashlib.sha256(image).hexdigest() == manifest["sha256"]:
+            apply_update(image)
+      secure: |
+        public_key.verify(manifest["signature"], image)   # raises on failure
+        apply_update(image)
+    rust:
+      vulnerable: |
+        if sha256(&image) == manifest.sha256 { apply_update(&image); }
+      secure: |
+        mfr_pubkey.verify_strict(&image, &manifest.signature)?;
+        apply_update(&image);
+
+# ---------------------------------------------------------------------------
+# ISVS-3.4 — Immutable Verification Key in a Protected Store
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.4
+  facet: Firmware Integrity & Secure Boot
+  section: Immutable Verification Key in a Protected Store
+  security_rule: >-
+    The public key used to verify firmware must be immutable on the
+    device — held in one-time-programmable fuses or ROM — and the signing
+    private key must live only in a protected hardware-backed store.
+  vulnerability_pattern: >-
+    The verification key sits in rewritable flash or a normal file, so an
+    attacker can replace it with their own key and then sign hostile
+    firmware that the device accepts.
+  secure_pattern: >-
+    The verification key, or a hash of it, is burned into one-time
+    programmable memory so it cannot be altered, and the private signing
+    key never leaves a hardware security module.
+  code_patterns:
+    generic:
+      vulnerable: |
+        pubkey = read_file("/data/verify_key.pem")     # attacker can overwrite
+        verify(image, pubkey)
+      secure: |
+        pubkey = read_otp_fuses(VERIFY_KEY_REGION)     # one-time programmable
+        verify(image, pubkey)
+    c:
+      vulnerable: |
+        load_key(&key, "/etc/fw/pubkey.bin");          /* mutable filesystem */
+        verify_signature(&img, &key);
+      secure: |
+        read_otp(OTP_PUBKEY_BANK, &key, sizeof(key));  /* fused, read-only */
+        verify_signature(&img, &key);
+    rust:
+      vulnerable: |
+        let key = fs::read("/data/pubkey.bin")?;       // rewritable store
+        verify(&img, &key)?;
+      secure: |
+        let key = otp::read_region(OtpRegion::VerifyKey)?;  // immutable fuses
+        verify(&img, &key)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-3.5 — Authenticated, Integrity-Protected Update Channel
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.5
+  facet: Firmware Integrity & Secure Boot
+  section: Authenticated, Integrity-Protected Update Channel
+  security_rule: >-
+    Over-the-air firmware updates must be fetched over a channel that
+    authenticates the update server and protects the image in transit,
+    so a network attacker cannot supply or tamper with the image.
+  vulnerability_pattern: >-
+    The device downloads firmware over plain HTTP or an unauthenticated
+    channel, so a network attacker can serve their own build or alter the
+    image as it transfers.
+  secure_pattern: >-
+    The device retrieves updates over TLS with full certificate
+    validation, or pinned to the manufacturer certificate, so the server
+    is authenticated and the image cannot be modified in transit.
+  code_patterns:
+    generic:
+      vulnerable: |
+        image = http_get("http://updates.example.com/fw.bin")
+      secure: |
+        image = https_get("https://updates.example.com/fw.bin",
+                           verify=True, pinned_cert=MFR_CERT)
+    python:
+      vulnerable: |
+        image = requests.get("http://ota.example.com/fw.bin").content
+      secure: |
+        image = requests.get("https://ota.example.com/fw.bin",
+                              verify="/etc/ssl/mfr_ca.pem").content
+    c:
+      vulnerable: |
+        curl_easy_setopt(curl, CURLOPT_URL, "http://ota.example.com/fw.bin");
+      secure: |
+        curl_easy_setopt(curl, CURLOPT_URL, "https://ota.example.com/fw.bin");
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_PINNEDPUBLICKEY, mfr_pin);
+    rust:
+      vulnerable: |
+        let image = reqwest::blocking::get("http://ota.example.com/fw.bin")?;
+      secure: |
+        let client = reqwest::blocking::Client::builder()
+            .add_root_certificate(mfr_ca).build()?;
+        let image = client.get("https://ota.example.com/fw.bin").send()?;
+
+# ---------------------------------------------------------------------------
+# ISVS-3.6 — Update Signature Verification Before Install
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.6
+  facet: Firmware Integrity & Secure Boot
+  section: Update Signature Verification Before Install
+  security_rule: >-
+    The device must verify the signature of a downloaded firmware image
+    before writing it to flash, and must discard any image whose
+    signature does not validate against the immutable verification key.
+  vulnerability_pattern: >-
+    A downloaded image is written to flash as soon as the transfer
+    completes, with signature verification deferred or absent, so a
+    tampered or hostile image is installed.
+  secure_pattern: >-
+    The full image is verified against the manufacturer public key while
+    still in a staging area, and only an image that passes is committed
+    to the boot flash.
+  code_patterns:
+    generic:
+      vulnerable: |
+        download(image, staging)
+        flash_write(staging)              # installed before any verification
+      secure: |
+        download(image, staging)
+        if verify_signature(staging, verify_key): flash_write(staging)
+        else: discard(staging)
+    c:
+      vulnerable: |
+        ota_download(&staging);
+        flash_commit(&staging);           /* committed unverified */
+      secure: |
+        ota_download(&staging);
+        if (verify_signature(&staging, verify_key) != 0) { ota_abort(&staging); }
+        else { flash_commit(&staging); }
+    python:
+      vulnerable: |
+        blob = download_update()
+        write_to_partition("boot", blob)
+      secure: |
+        blob = download_update()
+        verify_key.verify(manifest.signature, blob)   # raises if invalid
+        write_to_partition("boot", blob)
+    rust:
+      vulnerable: |
+        let blob = download_update()?;
+        flash::write(Partition::Boot, &blob)?;
+      secure: |
+        let blob = download_update()?;
+        verify_key.verify_strict(&blob, &manifest.signature)?;
+        flash::write(Partition::Boot, &blob)?;
+
+# ---------------------------------------------------------------------------
+# ISVS-3.7 — Anti-Rollback Protection
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.7
+  facet: Firmware Integrity & Secure Boot
+  section: Anti-Rollback Protection
+  security_rule: >-
+    The device must enforce anti-rollback by checking a monotonic version
+    counter against the incoming image and rejecting any firmware older
+    than the version currently installed, even when validly signed.
+  vulnerability_pattern: >-
+    The update path accepts any image with a valid signature regardless
+    of version, so an attacker installs an older, validly signed build
+    that still carries known vulnerabilities.
+  secure_pattern: >-
+    A monotonic version counter held in tamper-resistant storage is
+    compared against the image version, and the counter is advanced on a
+    successful update so a downgrade is rejected.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if verify_signature(image, key): install(image)   # version ignored
+      secure: |
+        if verify_signature(image, key) and image.version >= secure_counter_get():
+            install(image); secure_counter_set(image.version)
+    c:
+      vulnerable: |
+        if (verify_signature(&img, key) == 0) { flash_write(&img); }
+      secure: |
+        uint32_t cur = otp_counter_read();
+        if (verify_signature(&img, key) == 0 && img.version >= cur) {
+            flash_write(&img); otp_counter_bump(img.version);
+        }
+    rust:
+      vulnerable: |
+        verify(&img, &key)?;
+        flash::write(&img)?;
+      secure: |
+        verify(&img, &key)?;
+        if img.version < antirollback::counter()? { return Err(Error::Downgrade); }
+        flash::write(&img)?;
+        antirollback::advance(img.version)?;
+    python:
+      vulnerable: |
+        public_key.verify(manifest.signature, image)
+        apply_update(image)
+      secure: |
+        public_key.verify(manifest.signature, image)
+        if manifest.version < rollback_counter.read():
+            raise DowngradeRejected()
+        apply_update(image); rollback_counter.write(manifest.version)
+
+# ---------------------------------------------------------------------------
+# ISVS-3.8 — Atomic Update With Verified Fallback
+# ---------------------------------------------------------------------------
+
+- id: ISVS-3.8
+  facet: Firmware Integrity & Secure Boot
+  section: Atomic Update With Verified Fallback
+  security_rule: >-
+    Firmware updates must be applied atomically with a verified fallback
+    image, so an interrupted or failed update can never brick the device
+    or leave it running unverified code.
+  vulnerability_pattern: >-
+    The update overwrites the single active firmware partition in place,
+    so a power loss or failed write mid-update leaves a corrupt or
+    partially written image that bricks or weakens the device.
+  secure_pattern: >-
+    The new image is written to an inactive slot, verified there, and the
+    boot pointer is switched only after success; the previous verified
+    image stays intact as a fallback if the new one fails to boot.
+  code_patterns:
+    generic:
+      vulnerable: |
+        erase(boot_partition)
+        flash_write(boot_partition, new_image)   # power loss bricks the device
+      secure: |
+        flash_write(inactive_slot, new_image)
+        if verify(inactive_slot): set_active(inactive_slot)  # atomic switch
+    c:
+      vulnerable: |
+        flash_erase(ACTIVE_SLOT);
+        flash_write(ACTIVE_SLOT, new_img, len);  /* in-place, no fallback */
+      secure: |
+        flash_write(INACTIVE_SLOT, new_img, len);
+        if (verify_signature_at(INACTIVE_SLOT, key) == 0) {
+            set_boot_slot(INACTIVE_SLOT);        /* prior slot kept as fallback */
+        }
+    rust:
+      vulnerable: |
+        flash::erase(Slot::Active)?;
+        flash::write(Slot::Active, &new_image)?;
+      secure: |
+        flash::write(Slot::Inactive, &new_image)?;
+        verify_slot(Slot::Inactive, &key)?;
+        bootloader::set_active(Slot::Inactive)?;   // confirmed-or-revert
+    python:
+      vulnerable: |
+        write_partition("boot", new_image)         # single slot overwritten
+      secure: |
+        write_partition("boot_b", new_image)
+        if verify_partition("boot_b", verify_key):
+            set_boot_slot("boot_b")                # boot_a remains as fallback

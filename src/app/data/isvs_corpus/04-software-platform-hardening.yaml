@@ -1,0 +1,404 @@
+# OWASP ISVS 1.0 — Concern Area: Software Platform Hardening
+# Source chapter: V3 — Software Platform.
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns. ISVS
+# targets IoT / embedded / connected-device code, so language blocks are
+# generic + the applicable subset of c / cpp / python / rust. Pure
+# configuration, hardware, or process requirements are generic-only.
+
+# ---------------------------------------------------------------------------
+# Production image hardening
+# ---------------------------------------------------------------------------
+
+- id: ISVS-4.1
+  facet: Software Platform Hardening
+  section: Production image excludes development configuration
+  security_rule: >-
+    The production firmware image must be built from a hardened
+    configuration, not the development configuration, so debug builds,
+    verbose logging, and developer conveniences never reach shipped
+    devices.
+  vulnerability_pattern: >-
+    The development build configuration is shipped as the production
+    image, so debug logging, assertions, and developer tooling stay
+    active on customer devices and leak internal state to anyone with
+    access.
+  secure_pattern: >-
+    The release image is produced by a dedicated production build
+    profile that strips debug symbols, disables verbose logging, and
+    compiles out developer-only code paths before signing.
+  code_patterns:
+    generic:
+      vulnerable: |
+        BUILD_PROFILE = "debug"        # shipped to production unchanged
+        log_level     = "verbose"
+      secure: |
+        BUILD_PROFILE = "release"      # debug paths compiled out
+        log_level     = "error"
+    c:
+      vulnerable: |
+        /* compiled without NDEBUG: every assert and debug print stays in */
+        gcc -O0 -g firmware.c -o firmware.elf
+      secure: |
+        gcc -O2 -DNDEBUG -s firmware.c -o firmware.elf   /* asserts + symbols stripped */
+    cpp:
+      vulnerable: |
+        cmake -DCMAKE_BUILD_TYPE=Debug -B build
+      secure: |
+        cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_DEBUG_SHELL=OFF -B build
+    rust:
+      vulnerable: |
+        cargo build            # debug profile: overflow checks aside, debug_assert active
+      secure: |
+        cargo build --release  # release profile, debug-only code gated by cfg(debug_assertions)
+
+# ---------------------------------------------------------------------------
+# Debug interface and test account removal
+# ---------------------------------------------------------------------------
+
+- id: ISVS-4.2
+  facet: Software Platform Hardening
+  section: Debug interfaces and shells disabled in production
+  security_rule: >-
+    Debug shells, diagnostic consoles, and developer back doors must be
+    removed or disabled in the production image so they cannot be used
+    as an entry point on a shipped device.
+  vulnerability_pattern: >-
+    A debug shell or serial console is left enabled on the production
+    image, so anyone with physical or network access drops into an
+    interactive shell with full device control.
+  secure_pattern: >-
+    The debug shell and diagnostic console are compiled out of the
+    release build, or gated behind a fuse or authenticated unlock, so
+    no interactive shell is reachable on a shipped unit.
+  code_patterns:
+    generic:
+      vulnerable: |
+        start_debug_shell(uart0)       # always launched at boot
+      secure: |
+        if BUILD_PROFILE == "debug":   # release builds never reach this
+            start_debug_shell(uart0)
+    c:
+      vulnerable: |
+        void boot(void) { spawn_uart_shell(); start_app(); }
+      secure: |
+        void boot(void) {
+        #ifndef NDEBUG
+            spawn_uart_shell();
+        #endif
+            start_app();
+        }
+    cpp:
+      vulnerable: |
+        DebugConsole::attach(serialPort);   // linked into every build
+      secure: |
+        #if defined(ENABLE_DEBUG_CONSOLE)
+            DebugConsole::attach(serialPort);
+        #endif
+    rust:
+      vulnerable: |
+        debug_console::attach(&serial);
+      secure: |
+        #[cfg(feature = "debug-console")]
+        debug_console::attach(&serial);
+
+- id: ISVS-4.3
+  facet: Software Platform Hardening
+  section: Test accounts and default credentials removed
+  security_rule: >-
+    Test accounts, factory default credentials, and hardcoded
+    maintenance logins must be removed from the production image so a
+    device cannot be accessed with known credentials.
+  vulnerability_pattern: >-
+    A test account or a hardcoded default password is baked into the
+    firmware, so the device can be logged into with credentials that
+    are identical across every shipped unit.
+  secure_pattern: >-
+    No credentials are embedded in firmware; accounts are provisioned
+    per device at first boot, and any factory account is disabled or
+    forced to rotate before the device leaves setup.
+  code_patterns:
+    generic:
+      vulnerable: |
+        accounts = {"admin": "admin", "test": "test1234"}
+      secure: |
+        accounts = load_provisioned_accounts()   # per-device, set at first boot
+    c:
+      vulnerable: |
+        static const char *DEFAULT_PW = "factory123";
+        if (strcmp(input, DEFAULT_PW) == 0) grant_root();
+      secure: |
+        if (verify_provisioned_credential(user, input)) grant_session();
+    python:
+      vulnerable: |
+        if user == "service" and pw == "service":
+            authorize()
+      secure: |
+        if credential_store.verify(user, pw):   # provisioned, no built-in account
+            authorize()
+    rust:
+      vulnerable: |
+        const BACKDOOR_PW: &str = "letmein";
+        if input == BACKDOOR_PW { grant_admin(); }
+      secure: |
+        if cred_store.verify(user, input)? { grant_session(); }
+
+# ---------------------------------------------------------------------------
+# Attack-surface reduction
+# ---------------------------------------------------------------------------
+
+- id: ISVS-4.4
+  facet: Software Platform Hardening
+  section: Unnecessary services and listening interfaces removed
+  security_rule: >-
+    Only the services and network listeners the product actually
+    requires may run; unused daemons, diagnostic services, and open
+    ports must be removed or disabled to minimise the attack surface.
+  vulnerability_pattern: >-
+    The platform runs more daemons and listens on more ports than the
+    product needs, so each unused service is an extra entry point with
+    no functional benefit to the device.
+  secure_pattern: >-
+    The image enables only the services the product requires, binds
+    listeners to the narrowest interface and address, and removes or
+    masks every unused daemon during the build.
+  code_patterns:
+    generic:
+      vulnerable: |
+        start_services(["app", "telnetd", "ftpd", "debug_api"])
+      secure: |
+        start_services(["app"])        # only what the product needs
+    python:
+      vulnerable: |
+        server.bind(("0.0.0.0", 8080))      # exposed on every interface
+      secure: |
+        server.bind(("127.0.0.1", 8080))    # loopback only, not externally reachable
+    c:
+      vulnerable: |
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);   /* listens on all NICs */
+      secure: |
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    rust:
+      vulnerable: |
+        let l = TcpListener::bind("0.0.0.0:8080")?;
+      secure: |
+        let l = TcpListener::bind("127.0.0.1:8080")?;
+
+# ---------------------------------------------------------------------------
+# On-device cryptography and key storage
+# ---------------------------------------------------------------------------
+
+- id: ISVS-4.5
+  facet: Software Platform Hardening
+  section: Cryptographic keys held in protected storage
+  security_rule: >-
+    Cryptographic keys must be stored in a hardware-backed keystore,
+    secure element, or trusted execution environment, not in ordinary
+    application memory or plaintext files.
+  vulnerability_pattern: >-
+    A cryptographic key is loaded into ordinary process memory or read
+    from a plaintext file, so a single memory-disclosure bug or
+    filesystem read exposes the raw key material.
+  secure_pattern: >-
+    Keys are generated and stored inside a secure element, TPM, or
+    trusted execution environment, and the application holds only an
+    opaque handle to them, never the raw bytes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        key = read_file("/etc/device.key")     # raw key in process memory
+      secure: |
+        key_handle = secure_element.open_key("device-signing")
+    c:
+      vulnerable: |
+        unsigned char key[32];
+        fread(key, 1, 32, fopen("/data/aes.key", "rb"));
+      secure: |
+        psa_key_id_t key_id;
+        psa_open_key(DEVICE_KEY_ID, &key_id);   /* key never leaves the secure store */
+    python:
+      vulnerable: |
+        key = open("signing.key", "rb").read()
+      secure: |
+        key_handle = tpm.load_key("signing")    # opaque handle, raw key stays in TPM
+    rust:
+      vulnerable: |
+        let key: [u8; 32] = std::fs::read("device.key")?.try_into().unwrap();
+      secure: |
+        let key = secure_element.open_key(KeyId::DeviceSigning)?;  // handle only
+
+- id: ISVS-4.6
+  facet: Software Platform Hardening
+  section: Cryptographic operations use non-exporting key APIs
+  security_rule: >-
+    On-device cryptographic operations must be performed through APIs
+    that act on a protected key handle so the raw key never enters
+    application-readable memory.
+  vulnerability_pattern: >-
+    The application extracts a key into a local buffer to sign or
+    encrypt, so the raw key sits in readable memory for the duration
+    of the operation and can be captured by a disclosure bug.
+  secure_pattern: >-
+    Signing and encryption are delegated to the keystore or secure
+    element through a handle-based API, so the operation runs inside
+    protected hardware and the key is never exported.
+  code_patterns:
+    generic:
+      vulnerable: |
+        raw = keystore.export(key_handle)
+        sig = sign(raw, message)
+      secure: |
+        sig = keystore.sign(key_handle, message)   # key never leaves the store
+    c:
+      vulnerable: |
+        unsigned char raw[32];
+        psa_export_key(key_id, raw, sizeof(raw), &len);
+        hmac_sw(raw, msg, out);
+      secure: |
+        psa_mac_compute(key_id, PSA_ALG_HMAC(PSA_ALG_SHA_256),
+                        msg, msg_len, out, sizeof(out), &out_len);
+    python:
+      vulnerable: |
+        priv = tpm.export_key("signing")
+        sig = ecdsa_sign(priv, digest)
+      secure: |
+        sig = tpm.sign("signing", digest)          # signing happens inside the TPM
+    rust:
+      vulnerable: |
+        let raw = secure_element.export(key)?;
+        let sig = sign_sw(&raw, &msg);
+      secure: |
+        let sig = secure_element.sign(key, &msg)?;  // handle-based, no export
+
+# ---------------------------------------------------------------------------
+# Memory-protection features
+# ---------------------------------------------------------------------------
+
+- id: ISVS-4.7
+  facet: Software Platform Hardening
+  section: Hardware and OS memory protections enabled
+  security_rule: >-
+    Available memory-protection features — non-executable data regions,
+    address-space layout randomization, and stack protection — must be
+    enabled so a memory-corruption bug does not become reliable code
+    execution.
+  vulnerability_pattern: >-
+    The image is built and run without stack canaries, non-executable
+    data regions, or address randomization, so a memory-corruption bug
+    can be turned into a dependable code-execution exploit.
+  secure_pattern: >-
+    The build and runtime enable stack protection, mark data regions
+    non-executable, and randomize the address space, so corruption
+    bugs are far harder to exploit reliably.
+  code_patterns:
+    generic:
+      vulnerable: |
+        flags = ["-fno-stack-protector", "-z execstack"]
+      secure: |
+        flags = ["-fstack-protector-strong", "-z noexecstack", "-pie", "-D_FORTIFY_SOURCE=2"]
+    c:
+      vulnerable: |
+        gcc -fno-stack-protector -z execstack app.c -o app
+      secure: |
+        gcc -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie \
+            -Wl,-z,noexecstack,-z,relro,-z,now app.c -o app
+    cpp:
+      vulnerable: |
+        g++ -O2 -fno-stack-protector firmware.cpp -o firmware
+      secure: |
+        g++ -O2 -fstack-protector-strong -fPIE -pie \
+            -Wl,-z,noexecstack,-z,relro,-z,now firmware.cpp -o firmware
+
+# ---------------------------------------------------------------------------
+# Least privilege and process isolation
+# ---------------------------------------------------------------------------
+
+- id: ISVS-4.8
+  facet: Software Platform Hardening
+  section: Components run with least privilege
+  security_rule: >-
+    Each component must run under the least privilege it needs;
+    processes must drop root and any unneeded capabilities once
+    privileged setup is complete.
+  vulnerability_pattern: >-
+    A component runs as root or keeps full capabilities for its whole
+    lifetime, so any flaw in it gives an attacker complete control of
+    the device.
+  secure_pattern: >-
+    After privileged initialisation the process drops to an unprivileged
+    account and discards every capability it no longer needs, so a
+    later compromise is confined to a low-privilege context.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run_as("root")                 # never drops privilege
+      secure: |
+        bind_privileged_ports()
+        drop_to_user("app")            # privilege released after setup
+    c:
+      vulnerable: |
+        bind_low_port();
+        run_main_loop();               /* still euid 0 */
+      secure: |
+        bind_low_port();
+        setgid(app_gid); setuid(app_uid);   /* drop before serving requests */
+        run_main_loop();
+    python:
+      vulnerable: |
+        app.run(host="0.0.0.0", port=443)   # process stays root
+      secure: |
+        bind_socket(443)
+        os.setgid(app_gid); os.setuid(app_uid)   # drop privilege, then serve
+    rust:
+      vulnerable: |
+        listen_on_443();
+        serve();                       // running as root throughout
+      secure: |
+        let sock = listen_on_443()?;
+        privdrop::set_group("app")?.set_user("app")?.apply()?;
+        serve(sock);
+
+- id: ISVS-4.9
+  facet: Software Platform Hardening
+  section: Components isolated from one another
+  security_rule: >-
+    Components must be isolated from one another through separate
+    accounts, namespaces, sandboxes, or trusted-execution boundaries so
+    that the compromise of one component is contained rather than total.
+  vulnerability_pattern: >-
+    All components share one account and one address space with no
+    sandbox, so compromising any single component grants an attacker
+    every other component and the whole device.
+  secure_pattern: >-
+    Each component runs in its own sandbox — a separate account, a
+    namespace, a seccomp-restricted process, or a TEE — so a breach is
+    contained to that component's limited privileges and resources.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run_in_same_process([parser, network, ui])
+      secure: |
+        run_sandboxed(parser)          # each component isolated
+        run_sandboxed(network)
+    c:
+      vulnerable: |
+        handle_untrusted_input();      /* in the main privileged process */
+      secure: |
+        if (fork() == 0) {
+            enter_namespace(); apply_seccomp_filter();   /* isolated child */
+            handle_untrusted_input();
+        }
+    python:
+      vulnerable: |
+        parsed = parse_untrusted(blob)         # in-process, full privileges
+      secure: |
+        parsed = run_in_sandbox(parse_untrusted, blob)   # seccomp-restricted subprocess
+    rust:
+      vulnerable: |
+        let doc = parse_untrusted(&blob);      // same process as the rest of the app
+      secure: |
+        let doc = sandbox::run(|| parse_untrusted(&blob))?;  // seccomp + namespace isolated

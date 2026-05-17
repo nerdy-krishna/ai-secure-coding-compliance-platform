@@ -5,7 +5,7 @@ V1.1.1,"**Security Rule:** Untrusted input must be decoded or unescaped into a c
 
 **Secure Pattern (Description):** Input is decoded a single time at the trust boundary, before validation and sanitization, and is never decoded again afterwards.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var v = Uri.UnescapeDataString(Uri.UnescapeDataString(input));
@@ -64,7 +64,7 @@ V1.1.2,"**Security Rule:** Output encoding and escaping must be applied as the f
 
 **Secure Pattern (Description):** Encoding is applied at the point of output, immediately before the value is handed to the interpreter, or the interpreter's own parameterized API performs the escaping.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var s = HttpUtility.HtmlEncode(value);
@@ -126,7 +126,7 @@ V1.2.1,"**Security Rule:** Output encoding for an HTTP response, HTML, or XML do
 
 **Secure Pattern (Description):** A context-aware encoder is selected for each sink — HTML body, attribute, JavaScript, CSS, or URL — and applied where the value is written, ideally by an auto-escaping template engine.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Write(""<p>"" + message + ""</p>"");
@@ -184,7 +184,7 @@ V1.2.2,"**Security Rule:** When URLs are built dynamically, untrusted data must 
 
 **Secure Pattern (Description):** Query and path values are URL encoded, and the final URL scheme is checked against an allowlist of safe protocols such as https and mailto before the URL is emitted or followed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var url = ""/view?id="" + id;
@@ -245,7 +245,7 @@ V1.2.3,"**Security Rule:** Output encoding or escaping must be used when JavaScr
 
 **Secure Pattern (Description):** Values are passed as data rather than concatenated into code — JSON is produced by a real serializer, and script needing server data reads it from a safely encoded data attribute or element.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var js = ""<script>init('"" + id + ""')</script>"";
@@ -302,7 +302,7 @@ V1.2.4,"**Security Rule:** Data selection and database queries (SQL, HQL, NoSQL,
 
 **Secure Pattern (Description):** The query text is fixed and untrusted values are supplied only as bound parameters, or an ORM or query builder binds them, so input is always treated as data and never as query structure.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 cmd.CommandText = ""SELECT * FROM users WHERE id = "" + id;
@@ -362,7 +362,7 @@ V1.2.5,"**Security Rule:** The application must protect against OS command injec
 
 **Secure Pattern (Description):** The program is invoked directly with its arguments passed as a list, so the operating system never re-parses them, and no shell is involved unless an argument allowlist is enforced.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Process.Start(""cmd.exe"", ""/c ping "" + host);
@@ -420,7 +420,7 @@ V1.2.6,"**Security Rule:** The application must protect against LDAP injection, 
 
 **Secure Pattern (Description):** Untrusted values are escaped with the LDAP filter or DN encoder, or bound through a templated search API, so they are always treated as literal values inside the filter.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var s = new DirectorySearcher(""(uid="" + username + "")"");
@@ -478,7 +478,7 @@ V1.2.7,"**Security Rule:** The application must protect against XPath injection 
 
 **Secure Pattern (Description):** The XPath expression is fixed and untrusted values are supplied through variable bindings or a precompiled expression with a variable resolver, never by string concatenation.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 nav.Select(""/users/user[name='"" + name + ""']"");
@@ -538,7 +538,7 @@ V1.2.8,"**Security Rule:** LaTeX processors must be configured securely — for 
 
 **Secure Pattern (Description):** The LaTeX engine runs without shell-escape, in a restricted or sandboxed mode, and untrusted input is confined to an allowlist of safe commands and escaped before inclusion.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Process.Start(""pdflatex"", ""--shell-escape "" + userTex);
@@ -586,7 +586,7 @@ V1.2.9,"**Security Rule:** The application must escape special characters before
 
 **Secure Pattern (Description):** Untrusted input destined for a regular expression is passed through a regex-quote or escape function so every character is treated as a literal.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Regex.IsMatch(text, userTerm);
@@ -643,7 +643,7 @@ V1.2.10,"**Security Rule:** The application must protect against CSV and formula
 
 **Secure Pattern (Description):** Each exported field is RFC 4180 quoted, and any value whose first character is a formula trigger is prefixed with a single quote so the spreadsheet treats it as inert text.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 sb.AppendLine(name + "","" + note);
@@ -704,7 +704,7 @@ V1.3.1,"**Security Rule:** Untrusted HTML from rich-text or WYSIWYG editors must
 
 **Secure Pattern (Description):** User HTML is passed through a dedicated sanitizer that strips scripts, event handlers, and unsafe attributes, keeping only an allowlist of formatting tags before storage or rendering.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 div.InnerHtml = userHtml;
@@ -762,7 +762,7 @@ V1.3.2,"**Security Rule:** The application must avoid dynamic code execution fea
 
 **Secure Pattern (Description):** Dynamic evaluation is replaced with a safe parser, a lookup table, or a literal evaluator, so untrusted input is interpreted as data and never as code.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var r = new DataTable().Compute(userInput, """");
@@ -819,7 +819,7 @@ V1.3.3,"**Security Rule:** Data bound for a potentially dangerous context must b
 
 **Secure Pattern (Description):** The value is reduced to an allowlist of context-safe characters and truncated to a maximum length before it is used.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var refId = Request.Query[""ref""].ToString();
@@ -878,7 +878,7 @@ V1.3.4,"**Security Rule:** User-supplied SVG content must be validated or saniti
 
 **Secure Pattern (Description):** The SVG is run through a sanitizer configured for the SVG profile that drops scripts, event handlers, and foreignObject, keeping only safe drawing tags and attributes.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Content(uploadedSvg, ""image/svg+xml"");
@@ -938,7 +938,7 @@ V1.3.5,"**Security Rule:** User-supplied scriptable or expression markup such as
 
 **Secure Pattern (Description):** The markup is rendered with scriptable features disabled and the resulting HTML is sanitized, so only inert formatting survives.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var html = Markdown.ToHtml(userText);
@@ -996,7 +996,7 @@ V1.3.6,"**Security Rule:** The application must protect against Server-side Requ
 
 **Secure Pattern (Description):** The target URL is parsed and its scheme, host, and port are checked against an allowlist, and internal address ranges are rejected, before any server-side request is made.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var data = await httpClient.GetStringAsync(userUrl);
@@ -1058,7 +1058,7 @@ V1.3.7,"**Security Rule:** The application must not build templates from untrust
 
 **Secure Pattern (Description):** The template text is fixed and trusted, and untrusted values are passed only as render-time data, never concatenated into the template source.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var result = Engine.Razor.RunCompile(""Hi "" + name, ""k"", null, null);
@@ -1144,7 +1144,7 @@ V1.3.9,"**Security Rule:** Content must be sanitized before it is sent to memcac
 
 **Secure Pattern (Description):** Keys and values are validated to reject whitespace and control characters, or are hashed or encoded, before the memcache call.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 cache.Store(StoreMode.Set, userKey, value);
@@ -1203,7 +1203,7 @@ V1.3.10,"**Security Rule:** Format strings that could resolve in an unexpected o
 
 **Secure Pattern (Description):** The format string is a fixed, trusted literal and untrusted values are passed only as arguments to it.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var s = string.Format(userFormat, value);
@@ -1250,7 +1250,7 @@ V1.3.11,"**Security Rule:** User input passed to mail systems must be sanitized 
 
 **Secure Pattern (Description):** Carriage return and line feed characters are stripped or rejected from any value that becomes part of an email header, ideally by using a mail library that validates headers.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 mail.Subject = Request.Form[""subject""];
@@ -1309,7 +1309,7 @@ V1.3.12,"**Security Rule:** Regular expressions must be free of constructs that 
 
 **Secure Pattern (Description):** The pattern is rewritten to a linear form, or matched with a non-backtracking engine, and input length is capped so worst-case matching time stays bounded.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Regex.IsMatch(userInput, ""(a+)+$"");
@@ -1387,7 +1387,7 @@ V1.4.2,"**Security Rule:** Sign, range, and input validation techniques must be 
 
 **Secure Pattern (Description):** Operands are range-checked before the operation, or a checked arithmetic routine that traps on overflow is used.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 int total = count * price;
@@ -1456,7 +1456,7 @@ V1.5.1,"**Security Rule:** XML parsers must use a restrictive configuration with
 
 **Secure Pattern (Description):** The parser is configured to disallow document type definitions and external entities, or a hardened XML library is used, before any untrusted XML is parsed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var doc = new XmlDocument();
@@ -1518,7 +1518,7 @@ V1.5.2,"**Security Rule:** Deserialization of untrusted data must enforce safe i
 
 **Secure Pattern (Description):** Untrusted data is parsed with a data-only format such as JSON into a known target type, or deserialization is restricted to an allowlist of expected classes.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var o = new BinaryFormatter().Deserialize(stream);
@@ -1629,7 +1629,7 @@ V10.1.1,"**Security Rule:** Access and refresh tokens must only be exposed to co
 
 **Secure Pattern (Description):** Tokens are held only by a confidential backend; the browser receives just an opaque session cookie marked HttpOnly and Secure, and the backend attaches the real token to upstream calls on the user's behalf.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Ok(new { access_token = token, refresh_token = refresh });
@@ -1690,7 +1690,7 @@ V10.1.2,"**Security Rule:** The client must accept authorization-server values s
 
 **Secure Pattern (Description):** The client generates a random per-transaction state, nonce, and PKCE verifier, stores them bound to the user-agent session, and on callback rejects the response unless the returned values match what was stored.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var token = await _client.ExchangeCodeAsync(Request.Query[""code""]);
@@ -1757,7 +1757,7 @@ V10.2.1,"**Security Rule:** A code-flow OAuth client must defend its token reque
 
 **Secure Pattern (Description):** The client stores a random state value (and a PKCE verifier) before redirecting, and the callback handler rejects the request unless the returned state matches and the verifier completes the PKCE exchange.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public IActionResult Callback(string code) => Ok(_client.Exchange(code));
@@ -1829,7 +1829,7 @@ V10.2.2,"**Security Rule:** An OAuth client that can talk to more than one autho
 
 **Secure Pattern (Description):** The client records which authorization server each transaction targets and verifies the iss value returned in the authorization response matches that server before redeeming the code at its token endpoint.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var token = await _client.Exchange(tokenEndpoint, code);
@@ -1895,7 +1895,7 @@ V10.2.3,"**Security Rule:** The OAuth client must request only the scopes and au
 
 **Secure Pattern (Description):** The authorization request lists only the minimal scopes required for the current operation, keeping the issued token's privileges as narrow as the feature allows.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 options.Scope.Add(""openid""); options.Scope.Add(""profile""); options.Scope.Add(""admin"");
@@ -1952,7 +1952,7 @@ V10.3.1,"**Security Rule:** The resource server must accept an access token only
 
 **Secure Pattern (Description):** After signature validation the resource server checks that the token's audience equals its own identifier, rejecting any token whose aud claim or introspection result names a different service.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var p = handler.ValidateToken(token, new TokenValidationParameters {
@@ -2015,7 +2015,7 @@ V10.3.2,"**Security Rule:** The resource server must base authorization decision
 
 **Secure Pattern (Description):** Each protected operation checks that the token carries the required scope or authorization_details entry, denying the request when the delegated authorization does not cover the requested action.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [Authorize] public IActionResult Delete(int id) { _repo.Delete(id); return Ok(); }
@@ -2080,7 +2080,7 @@ V10.3.3,"**Security Rule:** When an access-control decision needs a unique user,
 
 **Secure Pattern (Description):** The resource server derives the user key from the immutable iss plus sub pair, so the local account binding survives email changes and cannot be hijacked by reusing a freed username.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var user = _db.Users.SingleOrDefault(u => u.Email == claims[""email""]);
@@ -2140,7 +2140,7 @@ V10.3.4,"**Security Rule:** When a resource server requires a specific authentic
 
 **Secure Pattern (Description):** Before a sensitive operation the resource server checks the acr or amr claim meets the required assurance level and that auth_time is recent enough, prompting step-up authentication otherwise.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (User.Identity.IsAuthenticated) _bank.Transfer(amount);
@@ -2210,7 +2210,7 @@ V10.3.5,"**Security Rule:** The resource server must prevent use or replay of st
 
 **Secure Pattern (Description):** The resource server requires sender-constrained tokens and verifies the presenter holds the bound key — checking the mTLS client certificate thumbprint or a valid DPoP proof against the token's cnf claim.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var claims = handler.ValidateToken(token, parms, out _);
@@ -2276,7 +2276,7 @@ V10.4.1,"**Security Rule:** The authorization server must validate every redirec
 
 **Secure Pattern (Description):** The submitted redirect URI must be byte-for-byte equal to one of the URIs pre-registered for that client; any non-exact value is rejected before the authorization request proceeds.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (redirectUri.StartsWith(client.BaseUrl)) IssueCode();
@@ -2343,7 +2343,7 @@ V10.4.2,"**Security Rule:** An authorization code must be usable only once; on a
 
 **Secure Pattern (Description):** Code redemption is atomic and single-use: the first valid token request consumes the code, and any later use of the same code is rejected and triggers revocation of the tokens issued from it.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var code = _codes.Find(codeValue);
@@ -2415,7 +2415,7 @@ V10.4.3,"**Security Rule:** Authorization codes must be short-lived — at most 
 
 **Secure Pattern (Description):** Each code carries a short expiry stamped at issue time, and the token endpoint rejects the code as expired once that brief window — minutes, not hours — has passed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 code.ExpiresAt = DateTime.UtcNow.AddHours(24);
@@ -2478,7 +2478,7 @@ V10.4.4,"**Security Rule:** For each client, the authorization server must allow
 
 **Secure Pattern (Description):** Each client registration enumerates the minimal set of grant types it requires, and the authorization server rejects any grant request that is not on that per-client list; implicit and password are never enabled.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 client.AllowedGrantTypes = GrantTypes.ImplicitAndClientCredentials;
@@ -2542,7 +2542,7 @@ V10.4.5,"**Security Rule:** The authorization server must mitigate refresh-token
 
 **Secure Pattern (Description):** Refresh tokens are sender-constrained, or rotated so each use returns a new token and invalidates the old one; presenting a consumed token triggers revocation of every refresh token in that authorization chain.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (rt.IsValid) return IssueAccessToken();
@@ -2612,7 +2612,7 @@ V10.4.6,"**Security Rule:** For the code grant, the authorization server must re
 
 **Secure Pattern (Description):** The authorization endpoint rejects requests lacking a code_challenge or using method plain, and the token endpoint recomputes the S256 hash of the code_verifier and rejects any mismatch.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return IssueCode(clientId, redirectUri);
@@ -2678,7 +2678,7 @@ V10.4.7,"**Security Rule:** If unauthenticated dynamic client registration is su
 
 **Secure Pattern (Description):** Dynamically registered client metadata such as redirect URIs and logos is validated, the client is flagged as untrusted, and the consent screen explicitly warns the user before any authorization proceeds.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var client = _clients.Register(request.Metadata);
@@ -2745,7 +2745,7 @@ V10.4.8,"**Security Rule:** Refresh tokens must have an absolute expiration, eve
 
 **Secure Pattern (Description):** The refresh token records an absolute maximum lifetime fixed at issue time; sliding renewal extends the window only up to that hard cap, after which the token is rejected and re-authentication is required.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 rt.ExpiresAt = DateTime.UtcNow.AddDays(7);
@@ -2809,7 +2809,7 @@ V10.4.9,"**Security Rule:** An authorized user must be able to revoke refresh to
 
 **Secure Pattern (Description):** The authorization server exposes a session and token management view where the user lists active grants and revokes any refresh or reference access token, which immediately invalidates it server-side.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 // tokens remain valid until natural expiry
@@ -2886,7 +2886,7 @@ V10.4.10,"**Security Rule:** A confidential client must be authenticated on ever
 
 **Secure Pattern (Description):** Every backchannel endpoint authenticates the confidential client — via client secret, private_key_jwt, or mTLS — before processing the request, and rejects any unauthenticated or mismatched credential.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var client = _clients.Find(Request.Form[""client_id""]);
@@ -2957,7 +2957,7 @@ V10.4.11,"**Security Rule:** The authorization server configuration must assign 
 
 **Secure Pattern (Description):** Each client registration lists a narrow allowed-scopes set, and the authorization server clamps any scope request to that set, never issuing a token with a scope the client is not entitled to.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 client.AllowedScopes = Scopes.All;
@@ -3019,7 +3019,7 @@ V10.4.12,"**Security Rule:** For each client the authorization server must allow
 
 **Secure Pattern (Description):** Each client registration pins the permitted response_mode, and the authorization server rejects any request whose response_mode is not on that per-client list.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Respond(Request.Query[""response_mode""]);
@@ -3089,7 +3089,7 @@ V10.4.13,"**Security Rule:** When the code grant is used, it must always be comb
 
 **Secure Pattern (Description):** The client first pushes the authorization parameters to the PAR endpoint over an authenticated backchannel call and then sends the user to the authorization endpoint with only the opaque request_uri.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Redirect($""/authorize?client_id={cid}&scope={scope}"");
@@ -3151,7 +3151,7 @@ V10.4.14,"**Security Rule:** The authorization server must issue only sender-con
 
 **Secure Pattern (Description):** Every issued access token carries a cnf claim binding it to the presenter's mTLS certificate thumbprint or DPoP public key, so the token is useless without the matching private key.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var token = handler.CreateEncodedJwt(descriptor);
@@ -3213,7 +3213,7 @@ V10.4.15,"**Security Rule:** For a server-side client, the authorization server 
 
 **Secure Pattern (Description):** For server-side clients the authorization_details is supplied only through PAR or a signed JAR request object, so the value is fixed by the backend and cannot be altered between the client and the server.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var details = Request.Query[""authorization_details""].ToString();
@@ -3274,7 +3274,7 @@ V10.4.16,"**Security Rule:** The client must be confidential and the authorizati
 
 **Secure Pattern (Description):** The authorization server requires public-key client authentication — tls_client_auth, self_signed_tls_client_auth, or private_key_jwt — so no reusable shared secret exists to be stolen and replayed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 client.TokenEndpointAuthMethod = ""client_secret_post"";
@@ -3336,7 +3336,7 @@ V10.5.1,"**Security Rule:** The OIDC client acting as relying party must mitigat
 
 **Secure Pattern (Description):** The client generates a random nonce, stores it bound to the user-agent session, and rejects the ID Token unless the token's nonce claim equals the stored value.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var claims = handler.ValidateToken(idToken, parms, out _);
@@ -3402,7 +3402,7 @@ V10.5.2,"**Security Rule:** The OIDC client must uniquely identify the user from
 
 **Secure Pattern (Description):** The client keys the local account on the provider's immutable sub claim (scoped per issuer), so identity is stable across profile changes and freed usernames cannot be hijacked.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var user = _users.GetByEmail(claims[""email""]);
@@ -3459,7 +3459,7 @@ V10.5.3,"**Security Rule:** The OIDC client must reject authorization server met
 
 **Secure Pattern (Description):** After loading discovery metadata the client compares its issuer value against the pre-configured expected issuer using exact string comparison and rejects the metadata on any mismatch.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var metadata = await _discovery.GetAsync(discoveryUrl);
@@ -3524,7 +3524,7 @@ V10.5.4,"**Security Rule:** The OIDC client must confirm that an ID Token is int
 
 **Secure Pattern (Description):** After signature validation the client checks the aud claim equals its own client_id and rejects any ID Token whose audience names a different relying party.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var claims = handler.ValidateToken(idToken, new TokenValidationParameters {
@@ -3588,7 +3588,7 @@ V10.5.5,"**Security Rule:** For OIDC back-channel logout the relying party must 
 
 **Secure Pattern (Description):** The logout endpoint validates the token typ header is logout+jwt, requires the back-channel logout events member, and rejects any token that carries a nonce claim before honouring the logout.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var claims = handler.ValidateToken(logoutToken, parms, out _);
@@ -3668,7 +3668,7 @@ V10.6.1,"**Security Rule:** The OpenID Provider must allow only the response typ
 
 **Secure Pattern (Description):** The provider validates response_type against a fixed allowlist of code, ciba, id_token, and id_token code, and rejects any request that asks for the implicit token response.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Authorize(Request.Query[""response_type""]);
@@ -3738,7 +3738,7 @@ V10.6.2,"**Security Rule:** The OpenID Provider must mitigate forced-logout deni
 
 **Secure Pattern (Description):** The provider either prompts the user to confirm logout or validates the id_token_hint binds the request to the current session, so an unsolicited logout request cannot end the session unilaterally.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpGet(""logout"")] public IActionResult Logout() { EndSession(User); return Ok(); }
@@ -3816,7 +3816,7 @@ V10.7.1,"**Security Rule:** The authorization server must obtain user consent fo
 
 **Secure Pattern (Description):** The authorization server checks for a valid recorded consent covering the requested scopes and client, and always shows an explicit consent prompt when the client is untrusted or no matching consent exists.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return IssueCode(client, scopes);
@@ -3883,7 +3883,7 @@ V10.7.2,"**Security Rule:** When prompting for consent the authorization server 
 
 **Secure Pattern (Description):** The consent screen renders human-readable descriptions of each requested scope or authorization detail, the verified application identity, and the lifetime of the authorization being granted.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return View(""Consent"", scopes);
@@ -3954,7 +3954,7 @@ V10.7.3,"**Security Rule:** The user must be able to review, modify, and revoke 
 
 **Secure Pattern (Description):** The authorization server provides a consent management view where the user lists every granted authorization and can narrow its scopes or revoke it, with revocation invalidating the associated tokens.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 // consents cannot be reviewed or revoked by the user
@@ -4104,7 +4104,7 @@ V11.2.1,"**Security Rule:** Use industry-validated implementations — vetted li
 
 **Secure Pattern (Description):** All cryptographic operations are delegated to a maintained, widely reviewed library or a validated hardware module, and no custom cipher, hash, or padding code is written.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var ct = MyCrypto.RollYourOwn(plaintext, key);
@@ -4164,7 +4164,7 @@ V11.2.2,"**Security Rule:** Design the application with crypto agility so algori
 
 **Secure Pattern (Description):** Algorithm choices live in configuration behind an indirection layer, ciphertext is tagged with the scheme that produced it, and a re-encryption path exists so keys and data can be migrated cleanly.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var c = Aes.Create();   // mode and key size pinned at the call site
@@ -4213,7 +4213,7 @@ V11.2.3,"**Security Rule:** Ensure every cryptographic primitive provides at lea
 
 **Secure Pattern (Description):** Key sizes are chosen so each primitive meets or exceeds 128 bits of security — at least 3072-bit RSA, 256-bit ECC, or 256-bit AES — based on published equivalence tables.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 using var rsa = RSA.Create(1024);
@@ -4262,7 +4262,7 @@ V11.2.4,"**Security Rule:** Make all cryptographic operations constant-time, wit
 
 **Secure Pattern (Description):** Comparisons of secret material use a constant-time equality function that always examines every byte, so the operation duration is independent of the input and leaks nothing.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (userMac.SequenceEqual(expectedMac)) Accept();
@@ -4322,7 +4322,7 @@ V11.2.5,"**Security Rule:** Ensure cryptographic modules fail securely and handl
 
 **Secure Pattern (Description):** Decryption uses authenticated encryption or verifies a MAC before decrypting, and every failure path returns one indistinguishable error so no padding or structure detail is revealed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 catch (CryptographicException e) { return ""bad padding""; }
@@ -4378,7 +4378,7 @@ V11.3.1,"**Security Rule:** Do not use insecure block cipher modes such as ECB o
 
 **Secure Pattern (Description):** Encryption uses an authenticated mode such as GCM and, for RSA, OAEP padding, so identical plaintext blocks differ and padding cannot be exploited.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var aes = Aes.Create();
@@ -4428,7 +4428,7 @@ V11.3.2,"**Security Rule:** Use only approved ciphers and modes, such as AES in 
 
 **Secure Pattern (Description):** Symmetric encryption uses a current approved cipher and mode, AES with GCM being the standard choice, providing both confidentiality and integrity.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 using var des = TripleDES.Create();
@@ -4477,7 +4477,7 @@ V11.3.3,"**Security Rule:** Protect encrypted data against unauthorized modifica
 
 **Secure Pattern (Description):** Encryption uses an authenticated mode such as AES-GCM, or an approved cipher combined with an approved MAC, so any tampering with the ciphertext is detected before the plaintext is used.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 using var aes = Aes.Create();   // CBC, confidentiality only
@@ -4535,7 +4535,7 @@ V11.3.4,"**Security Rule:** Never reuse a nonce or initialization vector for mor
 
 **Secure Pattern (Description):** A fresh, unique nonce is generated for every encryption under a given key — random for GCM or a strictly monotonic counter — and it is never repeated for that key.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 byte[] nonce = new byte[12];   // never randomized
@@ -4597,7 +4597,7 @@ V11.3.5,"**Security Rule:** When an encryption algorithm is combined with a MAC,
 
 **Secure Pattern (Description):** The MAC is computed over the finished ciphertext and verified in constant time before any decryption occurs, so tampered messages are rejected without ever being processed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var blob = Encrypt(Concat(data, Hmac(macKey, data)), encKey);
@@ -4648,7 +4648,7 @@ V11.4.1,"**Security Rule:** Use only approved hash functions for cryptographic p
 
 **Secure Pattern (Description):** Cryptographic operations use a current approved hash such as SHA-256 or SHA-3, and legacy MD5 and SHA-1 are restricted to non-security uses only.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 using var md = MD5.Create();
@@ -4707,7 +4707,7 @@ V11.4.2,"**Security Rule:** Store passwords with an approved, computationally in
 
 **Secure Pattern (Description):** Passwords are run through a memory-hard, salted password hashing function such as Argon2id, bcrypt, or scrypt with tuned cost parameters, making offline brute-force attacks impractical.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var stored = Convert.ToHexString(SHA256.HashData(bytes));
@@ -4766,7 +4766,7 @@ V11.4.3,"**Security Rule:** Use collision-resistant hash functions with adequate
 
 **Secure Pattern (Description):** Signatures and integrity checks use a collision-resistant hash with at least a 256-bit output, such as SHA-256 or SHA-3-256, matching the resistance the use case demands.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 rsa.SignData(data, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
@@ -4814,7 +4814,7 @@ V11.4.4,"**Security Rule:** When deriving secret keys from passwords, use an app
 
 **Secure Pattern (Description):** Keys are derived with an approved key-stretching KDF such as PBKDF2, scrypt, or Argon2 using a unique salt and a high, current iteration or memory cost.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var key = SHA256.HashData(passwordBytes);
@@ -4874,7 +4874,7 @@ V11.5.1,"**Security Rule:** Generate every non-guessable random number or string
 
 **Secure Pattern (Description):** Non-guessable values come from a cryptographically secure PRNG with at least 128 bits of entropy, encoded for transport, and not derived from a general-purpose random generator or UUID.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var token = new Random().Next().ToString();
@@ -4934,7 +4934,7 @@ V11.5.2,"**Security Rule:** Ensure the random number generation mechanism is des
 
 **Secure Pattern (Description):** The CSPRNG is backed by a properly seeded, non-depleting source that sustains throughput under load, and high-rate generation is verified to never silently fall back to a weak source.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var rng = new Random();   // shared, not thread-safe under load
@@ -4982,7 +4982,7 @@ V11.6.1,"**Security Rule:** Use only approved algorithms and modes for key gener
 
 **Secure Pattern (Description):** Key generation and signing use a vetted library with approved algorithms, a strong random seed, and parameter checks, so generated keys are not susceptible to known attacks.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 using var rsa = RSA.Create(1024);
@@ -5032,7 +5032,7 @@ V11.6.2,"**Security Rule:** Use approved cryptographic algorithms for key exchan
 
 **Secure Pattern (Description):** Key exchange uses an approved algorithm with strong, validated parameters — a 2048-bit-or-larger DH group or an approved curve such as X25519 — and peer public keys are validated before use.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 using var dh = new ECDiffieHellmanCng(256) { HashAlgorithm = CngAlgorithm.MD5 };
@@ -5100,7 +5100,7 @@ V11.7.2,"**Security Rule:** Apply data minimization so the least amount of sensi
 
 **Secure Pattern (Description):** Only the minimal fields needed are decrypted, they are used promptly, and the plaintext is zeroized or re-encrypted immediately afterwards to shrink the exposure window.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 string secret = Decrypt(blob);   // immutable, lingers until GC
@@ -5156,7 +5156,7 @@ V12.1.1,"**Security Rule:** Only current recommended TLS protocol versions, TLS 
 
 **Secure Pattern (Description):** The server and client are configured with a minimum protocol version of TLS 1.2, legacy versions are explicitly disabled, and TLS 1.3 is offered and preferred where supported.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11;
@@ -5215,7 +5215,7 @@ V12.1.2,"**Security Rule:** Only recommended cipher suites may be enabled with t
 
 **Secure Pattern (Description):** The server advertises only strong AEAD cipher suites that use ephemeral key exchange for forward secrecy, orders them strongest first, and enforces its own preference order during negotiation.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var opts = new SslServerAuthenticationOptions();  // OS default, includes weak
@@ -5276,7 +5276,7 @@ V12.1.3,"**Security Rule:** When mutual TLS is used, the application must verify
 
 **Secure Pattern (Description):** The TLS layer is configured to require and verify the client certificate against a trusted CA bundle, and the application uses the certificate identity only after that verification has succeeded.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var opts = new SslServerAuthenticationOptions {
@@ -5340,7 +5340,7 @@ V12.1.4,"**Security Rule:** Certificate revocation checking, such as OCSP stapli
 
 **Secure Pattern (Description):** The server is configured to staple a fresh OCSP response in the handshake, and clients enforce revocation checks so a revoked certificate causes the connection to fail.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var opts = new SslClientAuthenticationOptions {
@@ -5408,7 +5408,7 @@ V12.2.1,"**Security Rule:** All connectivity between a client and external facin
 
 **Secure Pattern (Description):** Services are exposed only over HTTPS, plain-HTTP requests are redirected to HTTPS and protected with HSTS, and clients require an https scheme so no plaintext fallback is possible.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var resp = await client.GetAsync(""http://api.example.com/data"");
@@ -5493,7 +5493,7 @@ V12.3.1,"**Security Rule:** All inbound and outbound connections, including thos
 
 **Secure Pattern (Description):** Every service connection is configured to require TLS or an equivalent encrypted transport, and the client refuses to proceed if encryption cannot be negotiated.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var conn = ""Host=db;Database=app;SSL Mode=Disable"";
@@ -5551,7 +5551,7 @@ V12.3.2,"**Security Rule:** TLS clients must validate the certificate presented 
 
 **Secure Pattern (Description):** The client uses the default verifying TLS configuration that checks the certificate chain against trusted CAs and confirms the hostname matches, and never overrides that with a permissive callback.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
@@ -5608,7 +5608,7 @@ V12.3.3,"**Security Rule:** Connectivity between internal HTTP-based services wi
 
 **Secure Pattern (Description):** Internal service-to-service calls use HTTPS or mTLS, often enforced by a service mesh, and a plain-HTTP request between services is rejected rather than served.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await client.GetAsync(""http://payments.internal/status"");
@@ -5665,7 +5665,7 @@ V12.3.4,"**Security Rule:** TLS connections between internal services must use t
 
 **Secure Pattern (Description):** The internal client keeps verification enabled but narrows its trust to a dedicated internal CA bundle or a pinned certificate, so only the intended internal services are accepted.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 handler.ServerCertificateCustomValidationCallback = (m, c, ch, e) => true;
@@ -5724,7 +5724,7 @@ V12.3.5,"**Security Rule:** Services communicating internally must use strong mu
 
 **Secure Pattern (Description):** Each service presents and verifies a short-lived PKI-issued certificate via mutual TLS, often managed by a service mesh, so both endpoints prove identity and replayed handshakes are rejected.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 client.DefaultRequestHeaders.Add(""X-Service-Key"", SharedSecret);
@@ -5802,7 +5802,7 @@ V13.1.2,"**Security Rule:** For each service the application uses, the documenta
 
 **Secure Pattern (Description):** Each service has a documented connection pool limit and a defined, tested response to exhaustion, such as fast failure, a fallback path, or bounded queueing, so overload degrades predictably.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var conn = new SqlConnection(connectionString);
@@ -5854,7 +5854,7 @@ V13.1.3,"**Security Rule:** The documentation must define resource-management st
 
 **Secure Pattern (Description):** Each dependency has a documented strategy with short timeouts, bounded retries using exponential backoff, and explicit release of handles, so a failing dependency degrades quickly and in isolation.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var client = new HttpClient();
@@ -5931,7 +5931,7 @@ V13.2.1,"**Security Rule:** Communication between backend components that fall o
 
 **Secure Pattern (Description):** Each backend service holds its own identity and authenticates with a short-lived token or client certificate, so credentials expire quickly and every call is attributable to one service.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 client.DefaultRequestHeaders.Add(""X-API-Key"", SharedApiKey);
@@ -5982,7 +5982,7 @@ V13.2.2,"**Security Rule:** Communication between backend components — operati
 
 **Secure Pattern (Description):** Each component connects with a dedicated account scoped to exactly the operations and objects it needs, so a compromise is contained to that narrow set of privileges.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var cs = ""Server=db;User Id=sa;Password="" + pw;
@@ -6029,7 +6029,7 @@ V13.2.3,"**Security Rule:** When a credential must be used for service authentic
 
 **Secure Pattern (Description):** Default credentials are replaced with unique, strong, generated secrets as part of provisioning, and deployment checks fail if a known default is still in place.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var cs = ""Server=db;User Id=sa;Password=sa"";
@@ -6076,7 +6076,7 @@ V13.2.4,"**Security Rule:** An allowlist must define the external resources or s
 
 **Secure Pattern (Description):** Before any outbound connection, the resolved destination is checked against an allowlist of permitted hosts, and anything not on the list is rejected.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var resp = await client.GetAsync(targetUrl);
@@ -6158,7 +6158,7 @@ V13.2.6,"**Security Rule:** When the application connects to separate services, 
 
 **Secure Pattern (Description):** Each connection is constructed with the documented limits, timeouts, and retry strategy for that service, so runtime behavior matches the approved configuration.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var client = new HttpClient();
@@ -6211,7 +6211,7 @@ V13.3.1,"**Security Rule:** Backend secrets must be created, stored, accessed, a
 
 **Secure Pattern (Description):** Secrets are stored in a managed vault and fetched at runtime by the application using its own identity, so source and artifacts stay secret-free and access is centrally controlled and audited.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 const string ApiKey = ""sk_live_8f3a2c9e4b71d05a"";
@@ -6295,7 +6295,7 @@ V13.3.3,"**Security Rule:** All cryptographic operations must be performed insid
 
 **Secure Pattern (Description):** The application sends data to the security module and receives the signature or plaintext back; the key never leaves the module, so a process compromise cannot exfiltrate it.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var rsa = RSA.Create();
@@ -6349,7 +6349,7 @@ V13.3.4,"**Security Rule:** Secrets must be configured to expire and be rotated 
 
 **Secure Pattern (Description):** Each secret is created with a defined time-to-live and rotated on the documented interval, so stale or leaked credentials stop being accepted automatically.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await secretClient.SetSecretAsync(""db-password"", value);
@@ -6417,7 +6417,7 @@ V13.4.2,"**Security Rule:** Debug modes must be disabled for all components in p
 
 **Secure Pattern (Description):** Debug mode is driven by environment configuration and is forced off in production, so users see only generic error pages with no internal detail.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 app.UseDeveloperExceptionPage();
@@ -6477,7 +6477,7 @@ V13.4.3,"**Security Rule:** Web servers must not expose directory listings to cl
 
 **Secure Pattern (Description):** Directory listing is disabled at the server or framework level, so a request for a directory without an index returns a not-found or forbidden response instead of a file index.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 app.UseDirectoryBrowser();
@@ -6526,7 +6526,7 @@ V13.4.4,"**Security Rule:** The HTTP TRACE method must not be supported in produ
 
 **Secure Pattern (Description):** The server rejects TRACE requests with a method-not-allowed response, so the method is unavailable in production.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 # default IIS handler list permits TRACEVerbHandler
@@ -6565,7 +6565,7 @@ V13.4.5,"**Security Rule:** Documentation such as internal API docs and monitori
 
 **Secure Pattern (Description):** Documentation and monitoring endpoints are disabled in production or bound to an internal interface behind authentication, so untrusted clients cannot reach them.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 app.UseSwagger(); app.UseSwaggerUI();
@@ -6615,7 +6615,7 @@ V13.4.6,"**Security Rule:** The application must not expose detailed version inf
 
 **Secure Pattern (Description):** Version-revealing headers and banners are suppressed or made generic, so responses disclose no exploitable version detail.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var builder = WebApplication.CreateBuilder(args);
@@ -6665,7 +6665,7 @@ V13.4.7,"**Security Rule:** The web tier must be configured to serve only files 
 
 **Secure Pattern (Description):** The web tier serves an allowlist of known-safe extensions and denies everything else, so unintended file types are never delivered.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 app.UseStaticFiles();
@@ -6776,7 +6776,7 @@ V14.2.1,"**Security Rule:** Sensitive data must be sent to the server only in th
 
 **Secure Pattern (Description):** Sensitive values travel in the request body or in a header field such as Authorization, keeping them out of access logs, caches, and the Referer header.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await client.GetAsync($""https://api.example.com/data?apiKey={apiKey}"");
@@ -6836,7 +6836,7 @@ V14.2.2,"**Security Rule:** The application must prevent sensitive data from bei
 
 **Secure Pattern (Description):** Sensitive responses are excluded from shared caches, or cache entries are scoped per user and have a short time-to-live, and the cache is securely purged once the data is no longer needed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _cache.Set(""statement"", statement);
@@ -6887,7 +6887,7 @@ V14.2.3,"**Security Rule:** Sensitive data must not be sent to untrusted third p
 
 **Secure Pattern (Description):** Only non-sensitive, approved fields are sent to third-party services, and sensitive data is stripped, hashed, or withheld before any external call is made.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _analytics.Track(user.Email, new { CardNumber = user.CardNumber });
@@ -6944,7 +6944,7 @@ V14.2.4,"**Security Rule:** The encryption, integrity verification, retention, l
 
 **Secure Pattern (Description):** The protection level for a data element drives its handling, with encryption, retention, and logging behaviour read from the documented policy rather than hardcoded per call site.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _repository.Save(record);
@@ -7036,7 +7036,7 @@ V14.2.6,"**Security Rule:** The application must return only the minimum sensiti
 
 **Secure Pattern (Description):** Responses carry only the masked or truncated form of sensitive values, and the full value is returned solely on an explicit, authorised reveal action.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return new CardDto { Number = card.Number };
@@ -7093,7 +7093,7 @@ V14.2.7,"**Security Rule:** Sensitive information must be subject to retention c
 
 **Secure Pattern (Description):** Records carry a retention or expiry attribute and a scheduled job deletes or anonymises data once its retention period has elapsed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _db.AuditEntries.Add(new AuditEntry(payload));
@@ -7142,7 +7142,7 @@ V14.2.8,"**Security Rule:** Sensitive information must be stripped from the meta
 
 **Secure Pattern (Description):** File metadata is parsed and sensitive fields are removed before the file is stored or shared, unless the user has explicitly consented to retaining that metadata.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await upload.CopyToAsync(File.Create(dest));
@@ -7205,7 +7205,7 @@ V14.3.1,"**Security Rule:** Authenticated data must be cleared from client stora
 
 **Secure Pattern (Description):** Logout clears client storage explicitly on the client side and the server sends a Clear-Site-Data header so cached authenticated data is wiped even if one path fails.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Redirect(""/login"");
@@ -7270,7 +7270,7 @@ V14.3.2,"**Security Rule:** The application must set sufficient anti-caching HTT
 
 **Secure Pattern (Description):** Responses containing sensitive data carry Cache-Control set to no-store so neither the browser nor any intermediary retains a copy.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Ok(accountDetails);
@@ -7471,7 +7471,7 @@ V15.2.1,"**Security Rule:** The application must contain only components that ar
 
 **Secure Pattern (Description):** A dependency vulnerability scanner runs in continuous integration and fails the build when any component breaches its remediation window, so overdue components never reach production.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 // no audit of NuGet packages for known vulnerabilities
@@ -7534,7 +7534,7 @@ V15.2.2,"**Security Rule:** The application must implement defenses against loss
 
 **Secure Pattern (Description):** Heavy work is offloaded to a queue or background worker, per-user concurrency is capped, and each request has a bounded timeout so one consumer cannot exhaust shared capacity.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpPost(""export"")]
@@ -7602,7 +7602,7 @@ V15.2.3,"**Security Rule:** The production environment must include only functio
 
 **Secure Pattern (Description):** Development-only code is gated behind a build flag or environment check and is excluded from production artifacts, so the deployed application exposes only its intended functionality.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 app.UseDeveloperExceptionPage();   // unconditional
@@ -7662,7 +7662,7 @@ V15.2.4,"**Security Rule:** Third-party components and all transitive dependenci
 
 **Secure Pattern (Description):** Internal package names are reserved, a single scoped or pinned source is configured per dependency, and lockfiles with integrity hashes guarantee the exact artifact and origin.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 <!-- nuget.config: only nuget.org configured for internal packages -->
@@ -7765,7 +7765,7 @@ V15.3.1,"**Security Rule:** The application must return only the required subset
 
 **Secure Pattern (Description):** Responses are built from an explicit output model or projection that lists exactly the fields the caller may see, so new sensitive columns are never exposed by default.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Ok(_db.Users.Find(id));        // full entity in the response
@@ -7823,7 +7823,7 @@ V15.3.2,"**Security Rule:** When the backend makes calls to external URLs, it mu
 
 **Secure Pattern (Description):** The HTTP client is configured to disable redirect following, and any redirect that must be honored is re-validated against the destination allowlist before the next request is made.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var client = new HttpClient();        // AllowAutoRedirect is true
@@ -7882,7 +7882,7 @@ V15.3.3,"**Security Rule:** The application must counter mass assignment by limi
 
 **Secure Pattern (Description):** Each action binds only an explicit allowlist of fields, typically through a dedicated input model, so unexpected attributes in the request body are ignored.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public IActionResult Update(User user) { _db.Update(user); }
@@ -7942,7 +7942,7 @@ V15.3.4,"**Security Rule:** Proxy and middleware components must convey the user
 
 **Secure Pattern (Description):** Only headers set by trusted proxies are honored, the number of trusted proxy hops is configured explicitly, and the resulting client address is treated as a hint rather than absolute identity.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var ip = Request.Headers[""X-Forwarded-For""].ToString();
@@ -8004,7 +8004,7 @@ V15.3.5,"**Security Rule:** The application must explicitly ensure variables hol
 
 **Secure Pattern (Description):** Inputs are coerced or validated to a known type, and identity-aware strict comparison operators are used so values only match when both type and value agree.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (input.Equals(expected)) grant();     // input may be null -> throws
@@ -8147,7 +8147,7 @@ V15.4.1,"**Security Rule:** Shared objects accessed by multiple threads — cach
 
 **Secure Pattern (Description):** Mutable shared state is guarded by a lock for the whole read-modify-write sequence, or replaced with a thread-safe or immutable type, so updates are atomic and consistent.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _count++;                            // racy across threads
@@ -8208,7 +8208,7 @@ V15.4.2,"**Security Rule:** A check on a resource's state — existence, permiss
 
 **Secure Pattern (Description):** The check and the action are fused into one atomic call that fails if the precondition no longer holds, so there is no window for the resource to change between them.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (!File.Exists(p)) File.WriteAllText(p, data);
@@ -8266,7 +8266,7 @@ V15.4.3,"**Security Rule:** Locks must be used consistently to avoid deadlock an
 
 **Secure Pattern (Description):** Each resource owns and encapsulates its own lock, acquires multiple locks in a fixed global order, and always releases them in a finally block or scoped construct.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public readonly object SyncRoot = new();    # external code can lock it
@@ -8318,7 +8318,7 @@ V15.4.4,"**Security Rule:** Resource allocation policies must prevent thread sta
 
 **Secure Pattern (Description):** Work runs on a bounded thread pool or executor with a fair queue and backpressure, so capacity is capped and every request gets a turn within a predictable window.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 foreach (var t in tasks) new Thread(t).Start();
@@ -8386,7 +8386,7 @@ V16.2.1,"**Security Rule:** Every log entry must carry the metadata needed to re
 
 **Secure Pattern (Description):** Each entry is structured with explicit fields for timestamp, actor or user id, source address or component, and the action or outcome, so events can be correlated and sequenced.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 logger.LogInformation(""login failed"");
@@ -8443,7 +8443,7 @@ V16.2.2,"**Security Rule:** Synchronize the clocks of all logging components and
 
 **Secure Pattern (Description):** Hosts sync their clocks via NTP and the application records timestamps in UTC or with an explicit offset, giving a consistent global ordering across distributed components.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var ts = DateTime.Now.ToString();
@@ -8500,7 +8500,7 @@ V16.2.3,"**Security Rule:** The application must only write or broadcast logs to
 
 **Secure Pattern (Description):** Logging is routed only through the configured handlers that target the documented sinks, and stray prints or unapproved appenders are removed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Console.WriteLine($""audit: {event}"");
@@ -8559,7 +8559,7 @@ V16.2.4,"**Security Rule:** Logs must be emitted in a format the log processor c
 
 **Secure Pattern (Description):** Every component emits the same structured format, such as JSON lines with shared field names, so the processor can index, query, and correlate events automatically.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 logger.LogInformation(""user "" + name + "" did "" + action);
@@ -8616,7 +8616,7 @@ V16.2.5,"**Security Rule:** Logging of sensitive data must follow the data's pro
 
 **Secure Pattern (Description):** Sensitive fields are dropped or masked before logging, and tokens are logged only as a hash or partial value, so log access does not become a path to credential exposure.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 logger.LogInformation(""login {Body}"", requestBody);
@@ -8673,7 +8673,7 @@ V16.3.1,"**Security Rule:** All authentication operations must be logged, both s
 
 **Secure Pattern (Description):** Every authentication attempt emits a log entry with the outcome, the actor, the source, and the method or factors used, giving full visibility into login activity.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (!ok) logger.LogWarning(""auth failed"");
@@ -8731,7 +8731,7 @@ V16.3.2,"**Security Rule:** Failed authorization attempts must be logged, and at
 
 **Secure Pattern (Description):** Each authorization check emits an entry with the actor, the resource, and the allow-or-deny decision, recording references to sensitive data rather than the data itself.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (!allowed) return Forbid();
@@ -8789,7 +8789,7 @@ V16.3.3,"**Security Rule:** The application must log the security events defined
 
 **Secure Pattern (Description):** Whenever a control rejects a request — failed validation, a broken business invariant, or a rate-limit trip — a security event is logged with the actor and the reason.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (!ModelState.IsValid) return BadRequest();
@@ -8852,7 +8852,7 @@ V16.3.4,"**Security Rule:** The application must log unexpected errors and secur
 
 **Secure Pattern (Description):** Unexpected errors and control failures are caught and logged at an appropriate severity with enough context to investigate, and a TLS failure is recorded rather than ignored.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 try { await http.GetAsync(url); } catch { }
@@ -8915,7 +8915,7 @@ V16.4.1,"**Security Rule:** All logging components must encode or neutralize unt
 
 **Secure Pattern (Description):** Untrusted values are passed as structured parameters or have newline and control characters stripped or escaped before logging, so each event remains a single, faithful record.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 logger.LogInformation(""login for "" + username);
@@ -9027,7 +9027,7 @@ V16.5.1,"**Security Rule:** When an unexpected or security-sensitive error occur
 
 **Secure Pattern (Description):** The error is logged in full server-side and the consumer receives only a generic message and a correlation id, with debug detail and stack traces disabled in production responses.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return StatusCode(500, ex.ToString());
@@ -9088,7 +9088,7 @@ V16.5.2,"**Security Rule:** The application must keep operating securely when an
 
 **Secure Pattern (Description):** Calls to external resources are wrapped in a circuit breaker with timeouts and a defined fallback, so a dependency outage degrades one feature instead of taking the application down.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var data = await http.GetFromJsonAsync<Data>(url);
@@ -9146,7 +9146,7 @@ V16.5.3,"**Security Rule:** The application must fail gracefully and securely wh
 
 **Secure Pattern (Description):** When a security check raises an exception the request is denied — the default outcome on error is deny, and processing only continues after the check has explicitly succeeded.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 bool ok; try { ok = Authz.Check(u); } catch { ok = true; }
@@ -9211,7 +9211,7 @@ V16.5.4,"**Security Rule:** A last-resort error handler must catch every unhandl
 
 **Secure Pattern (Description):** A global last-resort handler wraps the application, logging the full exception and returning a generic response, so the process stays up and no error detail is lost.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 // no exception-handling middleware in the pipeline
@@ -9270,7 +9270,7 @@ V17.1.1,"**Security Rule:** The TURN relay must refuse to allocate or relay traf
 
 **Secure Pattern (Description):** Each requested relay destination is checked against a denylist of reserved and private address ranges for both IP families, and the allocation is rejected when the target is not a public address.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 turn.Allocate(IPAddress.Parse(peer));
@@ -9339,7 +9339,7 @@ V17.1.2,"**Security Rule:** The TURN service must bound the number of relay port
 
 **Secure Pattern (Description):** A per-user and per-IP allocation quota is enforced, idle allocations time out and are reclaimed, and requests beyond the quota are rejected with an error rather than served.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _ports[user].Add(OpenRelayPort());
@@ -9405,7 +9405,7 @@ V17.2.1,"**Security Rule:** The private key for the DTLS certificate must be gen
 
 **Secure Pattern (Description):** The DTLS key is generated and held in a secrets manager or hardware keystore with restricted permissions, loaded at runtime, and rotated on the schedule the key management policy defines.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var key = File.ReadAllText(""dtls_key.pem"");
@@ -9453,7 +9453,7 @@ V17.2.2,"**Security Rule:** The media server must negotiate only approved DTLS c
 
 **Secure Pattern (Description):** The DTLS context is pinned to a curated list of strong cipher suites and an authenticated SRTP protection profile, and handshakes offering only weaker options are aborted.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var dtls = new DtlsServerProtocol();
@@ -9518,7 +9518,7 @@ V17.2.3,"**Security Rule:** The media server must verify SRTP packet authenticat
 
 **Secure Pattern (Description):** Every RTP packet is unprotected through the SRTP context, which verifies the authentication tag, and packets that fail verification are dropped and counted rather than handed to the decoder.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 decoder.Decode(packet.Payload);
@@ -9582,7 +9582,7 @@ V17.2.4,"**Security Rule:** The media server must remain available when it recei
 
 **Secure Pattern (Description):** Packet parsing validates lengths and offsets before use, wraps per-packet processing in error handling, and discards any packet that fails validation while keeping the receive loop running.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 int ssrc = BinaryPrimitives.ReadInt32BigEndian(packet.Slice(8));
@@ -9645,7 +9645,7 @@ V17.2.5,"**Security Rule:** The media server must keep processing legitimate med
 
 **Secure Pattern (Description):** Each media flow is rate limited or paced, excess packets are dropped early before expensive decoding, and the server applies backpressure so no single flow can monopolize processing.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 HandleSrtp(packet);
@@ -9709,7 +9709,7 @@ V17.2.6,"**Security Rule:** The media server must not be vulnerable to the DTLS 
 
 **Secure Pattern (Description):** The DTLS implementation is a current patched version that uses a stateless HelloVerifyRequest cookie exchange before allocating handshake state, and the race condition test is run to confirm it.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var dtls = new DtlsServerProtocol();     // legacy, race-prone
@@ -9760,7 +9760,7 @@ V17.2.7,"**Security Rule:** Any audio or video recording component attached to t
 
 **Secure Pattern (Description):** The recorder ingests media through a bounded, backpressured queue with an asynchronous writer, so a flood is absorbed or shed gracefully while the recording continues.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _recordingStream.Write(packet);
@@ -9823,7 +9823,7 @@ V17.2.8,"**Security Rule:** The media server must compare the peer's DTLS certif
 
 **Secure Pattern (Description):** After the DTLS handshake the peer certificate is hashed with the algorithm named in the SDP fingerprint and compared to the signaled value, and the media stream is dropped on any mismatch.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 StartMedia(session);
@@ -9891,7 +9891,7 @@ V17.3.1,"**Security Rule:** The signaling server must rate limit incoming signal
 
 **Secure Pattern (Description):** Each signaling connection is rate limited with a token bucket or sliding window, and messages exceeding the limit are rejected or delayed so legitimate traffic continues to be served.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public Task OnMessage(WebSocket ws, string msg) => HandleSignal(msg);
@@ -9964,7 +9964,7 @@ V17.3.2,"**Security Rule:** The signaling server must validate incoming signalin
 
 **Secure Pattern (Description):** Every signaling message is parsed against a strict schema with bounds checks on numeric and length fields, and parse or validation failures return an error to the sender while the server keeps running.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var m = JsonSerializer.Deserialize<SignalMessage>(raw);
@@ -10131,7 +10131,7 @@ V2.2.1,"**Security Rule:** Input must be validated to enforce business and funct
 
 **Secure Pattern (Description):** Input is validated against an allowlist of permitted values, patterns, and numeric ranges, and anything that does not match the expected structure is rejected before processing.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var mode = Request.Query[""mode""];
@@ -10190,7 +10190,7 @@ V2.2.2,"**Security Rule:** Input validation must be enforced at a trusted server
 
 **Secure Pattern (Description):** Every request is revalidated on the server at a trusted service layer regardless of any client-side checks, so bypassing the UI cannot bypass validation.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public IActionResult Order(Order o) => Save(o);
@@ -10261,7 +10261,7 @@ V2.2.3,"**Security Rule:** The application must verify that combinations of rela
 
 **Secure Pattern (Description):** After per-field validation, predefined cross-field rules confirm that related data items are mutually consistent before the request is processed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var b = new Booking { Start = start, End = end };
@@ -10324,7 +10324,7 @@ V2.3.1,"**Security Rule:** A business logic flow must only be processed for a gi
 
 **Secure Pattern (Description):** Server-side state records which step the user has reached, and each step endpoint verifies the prerequisite steps are complete before proceeding.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public IActionResult Confirm() => PlaceOrder();
@@ -10399,7 +10399,7 @@ V2.3.2,"**Security Rule:** Business logic limits described in the application's 
 
 **Secure Pattern (Description):** Each documented business logic limit is enforced server-side on every relevant action, rejecting any request that would push the user or the system past the defined threshold.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _orders.Create(userId, items);
@@ -10465,7 +10465,7 @@ V2.3.3,"**Security Rule:** Business logic operations must be transactional so a 
 
 **Secure Pattern (Description):** All steps of a business logic operation execute inside a single transaction that commits only on full success and rolls back completely on any error.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _repo.Debit(from, amt); _repo.Credit(to, amt);
@@ -10534,7 +10534,7 @@ V2.3.4,"**Security Rule:** Business logic level locking must protect limited-qua
 
 **Secure Pattern (Description):** The check and the claim happen atomically under a lock or a conditional update, so only one of two concurrent requests can successfully reserve the limited resource.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var seat = _db.Seats.Find(id);
@@ -10602,7 +10602,7 @@ V2.3.5,"**Security Rule:** High-value business logic flows must require multi-us
 
 **Secure Pattern (Description):** High-value actions are recorded as pending and require approval from a separate, distinct user before they execute, enforcing separation of duties.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (amount > 100000m) _bank.Transfer(src, dst, amount);
@@ -10666,7 +10666,7 @@ V2.4.1,"**Security Rule:** Anti-automation controls must protect application fun
 
 **Secure Pattern (Description):** Costly or sensitive endpoints enforce per-client rate limits or quotas, rejecting or delaying requests once a defined threshold over a time window is exceeded.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public IActionResult Export() => Ok(DumpAll());
@@ -10732,7 +10732,7 @@ V2.4.2,"**Security Rule:** Business logic flows must require realistic human tim
 
 **Secure Pattern (Description):** The server records when a flow started and rejects a submission that arrives sooner than a realistic minimum completion time for a human.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public IActionResult Apply() => Submit();
@@ -10825,7 +10825,7 @@ V3.2.1,"**Security Rule:** Controls must stop the browser from rendering an HTTP
 
 **Secure Pattern (Description):** Responses that should never be rendered as documents are forced to download with a Content-Disposition attachment header, sandboxed via CSP, or gated on Sec-Fetch headers that confirm the expected request context.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return File(uploadBytes, detectedContentType);
@@ -10884,7 +10884,7 @@ V3.2.2,"**Security Rule:** Content meant to be shown as text rather than rendere
 
 **Secure Pattern (Description):** Text is placed into the DOM with textContent or createTextNode, which treat the value as literal characters and never parse it as HTML.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 literal.Text = userComment;            // Literal renders raw HTML
@@ -10960,7 +10960,7 @@ V3.3.1,"**Security Rule:** Cookies must carry the Secure attribute, and unless t
 
 **Secure Pattern (Description):** The cookie is set with the Secure attribute and a __Host- or __Secure- prefixed name, which browsers only accept when the cookie was set securely over HTTPS.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Cookies.Append(""session"", value);
@@ -11018,7 +11018,7 @@ V3.3.2,"**Security Rule:** Each cookie's SameSite attribute must be set to a val
 
 **Secure Pattern (Description):** The cookie is set with an explicit SameSite value — Strict or Lax for session cookies — so the browser withholds it from unsafe cross-site requests.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Cookies.Append(""session"", value,
@@ -11077,7 +11077,7 @@ V3.3.3,"**Security Rule:** Cookies must use the __Host- name prefix unless they 
 
 **Secure Pattern (Description):** The cookie name carries the __Host- prefix, set with Secure, path of slash, and no Domain attribute, so the browser scopes it strictly to the issuing host.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Cookies.Append(""session"", value,
@@ -11136,7 +11136,7 @@ V3.3.4,"**Security Rule:** Cookies whose value must not be reachable by client-s
 
 **Secure Pattern (Description):** The session cookie is set with HttpOnly so scripts cannot read it, and the token is only ever sent in the Set-Cookie header and never embedded in markup or an API response body.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Cookies.Append(""session"", token,
@@ -11195,7 +11195,7 @@ V3.3.5,"**Security Rule:** When the application writes a cookie, the combined le
 
 **Secure Pattern (Description):** The cookie carries only a short opaque identifier and large state is kept server-side, and the application checks that the cookie name and value together stay under 4096 bytes before setting it.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Cookies.Append(""state"", JsonSerializer.Serialize(largeObject));
@@ -11256,7 +11256,7 @@ V3.4.1,"**Security Rule:** Every response must include a Strict-Transport-Securi
 
 **Secure Pattern (Description):** Every response carries Strict-Transport-Security with a max-age of at least 31536000 seconds and includeSubDomains, so the browser refuses any non-HTTPS connection to the site and its subdomains.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await context.Response.WriteAsync(body);
@@ -11317,7 +11317,7 @@ V3.4.2,"**Security Rule:** The CORS Access-Control-Allow-Origin header must be a
 
 **Secure Pattern (Description):** The response Origin is checked against an allowlist of trusted origins and only an exact allowed value is echoed back, and wildcard responses never carry sensitive or credentialed data.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Headers[""Access-Control-Allow-Origin""] = Request.Headers[""Origin""];
@@ -11379,7 +11379,7 @@ V3.4.3,"**Security Rule:** HTTP responses must include a Content-Security-Policy
 
 **Secure Pattern (Description):** A Content-Security-Policy header is sent on every response with object-src none, base-uri none, and a script-src restricted to a per-response nonce or hash so only trusted scripts execute.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await context.Response.WriteAsync(html);
@@ -11441,7 +11441,7 @@ V3.4.4,"**Security Rule:** Every HTTP response must include the X-Content-Type-O
 
 **Secure Pattern (Description):** Every response carries X-Content-Type-Options set to nosniff, so the browser only treats a resource as the type its Content-Type header declares.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await context.Response.WriteAsync(body);
@@ -11498,7 +11498,7 @@ V3.4.5,"**Security Rule:** The application must set a referrer policy, via the R
 
 **Secure Pattern (Description):** A restrictive Referrer-Policy such as strict-origin-when-cross-origin or no-referrer is set so cross-origin requests reveal at most the origin and never the sensitive parts of the URL.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await context.Response.WriteAsync(html);
@@ -11555,7 +11555,7 @@ V3.4.6,"**Security Rule:** Every HTTP response must use the Content-Security-Pol
 
 **Secure Pattern (Description):** A Content-Security-Policy frame-ancestors directive is sent on every response, set to none by default and to a specific allowlist of origins only where embedding is genuinely required.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 context.Response.Headers[""X-Frame-Options""] = ""DENY"";
@@ -11612,7 +11612,7 @@ V3.4.7,"**Security Rule:** The Content-Security-Policy header must specify a rep
 
 **Secure Pattern (Description):** The Content-Security-Policy includes a report-to directive pointing at a configured reporting endpoint, so the application receives and can act on violation reports.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 context.Response.Headers[""Content-Security-Policy""] = ""default-src 'self'"";
@@ -11673,7 +11673,7 @@ V3.4.8,"**Security Rule:** Every response that renders a document, such as a tex
 
 **Secure Pattern (Description):** Every document response sends Cross-Origin-Opener-Policy with same-origin, isolating the page in its own browsing context group and severing the window opener relationship across origins.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 context.Response.ContentType = ""text/html"";
@@ -11734,7 +11734,7 @@ V3.5.1,"**Security Rule:** Sensitive state-changing functionality not protected 
 
 **Secure Pattern (Description):** The endpoint requires and validates an anti-forgery token, or a custom header that browsers cannot send cross-site without a preflight, so forged cross-site requests are rejected.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public IActionResult Transfer() => DoTransfer();
@@ -11797,7 +11797,7 @@ V3.5.2,"**Security Rule:** When the application relies on the CORS preflight to 
 
 **Secure Pattern (Description):** The endpoint requires conditions that force a preflight, such as a JSON content type and a custom header, and rejects any request that arrives without those, ensuring the preflight check is always exercised.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpPost(""/api/delete"")] public IActionResult Delete() => DoDelete();
@@ -11868,7 +11868,7 @@ V3.5.3,"**Security Rule:** Sensitive functionality must be reached only through 
 
 **Secure Pattern (Description):** State-changing actions are bound only to unsafe methods such as POST or DELETE, or the handler validates Sec-Fetch headers to confirm the request was not a cross-origin navigation or resource load.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpGet(""/account/delete"")] public IActionResult Delete() => DoDelete();
@@ -11977,7 +11977,7 @@ V3.5.6,"**Security Rule:** JSONP functionality must not be enabled anywhere in t
 
 **Secure Pattern (Description):** The application returns data only as JSON with an application/json content type through CORS-controlled endpoints, and exposes no callback-wrapping JSONP responses.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Content($""{Request.Query[""callback""]}({json})"", ""application/javascript"");
@@ -12035,7 +12035,7 @@ V3.5.7,"**Security Rule:** Data requiring authorization must not be embedded in 
 
 **Secure Pattern (Description):** Authorized data is delivered only through non-script endpoints, such as JSON APIs protected by CORS and an XSSI-safe response prefix, and never baked into static or generated script files.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Content($""var user={json}"", ""application/javascript"");
@@ -12094,7 +12094,7 @@ V3.5.8,"**Security Rule:** Authenticated resources such as images, videos, and s
 
 **Secure Pattern (Description):** Authenticated resource responses carry Cross-Origin-Resource-Policy set to same-origin, or the handler validates Sec-Fetch headers, so the browser blocks unintended cross-origin embedding.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return File(imageBytes, ""image/png"");
@@ -12211,7 +12211,7 @@ V3.7.2,"**Security Rule:** The application must automatically redirect a user to
 
 **Secure Pattern (Description):** The redirect target is checked against an allowlist of approved hosts or is restricted to relative same-site paths, so an unapproved external destination is rejected.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Redirect(Request.Query[""next""]);
@@ -12311,7 +12311,7 @@ V3.7.4,"**Security Rule:** The application's top-level domain must be submitted 
 
 **Secure Pattern (Description):** The Strict-Transport-Security header includes the preload directive with includeSubDomains and a long max-age, and the domain is registered on the public preload list so TLS is enforced from the first request.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 context.Response.Headers[""Strict-Transport-Security""] = ""max-age=31536000"";
@@ -12402,7 +12402,7 @@ V4.1.1,"**Security Rule:** Every HTTP response that carries a body must declare 
 
 **Secure Pattern (Description):** The handler sets a Content-Type that matches the actual body and includes an explicit charset for text and XML, so the client parses the response in exactly the intended format.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return Content(json);
@@ -12460,7 +12460,7 @@ V4.1.2,"**Security Rule:** Only browser-facing endpoints may auto-redirect HTTP 
 
 **Secure Pattern (Description):** Redirects are limited to user-facing pages, while API and service routes return an error or refuse the connection when reached over plain HTTP, making the misconfiguration visible.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 app.UseHttpsRedirection();          // redirects API calls too
@@ -12523,7 +12523,7 @@ V4.1.3,"**Security Rule:** Headers set by trusted intermediaries such as load ba
 
 **Secure Pattern (Description):** The trust boundary strips or overwrites intermediary headers on inbound requests, and the application only honors them when the immediate peer is a known, trusted proxy.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var ip = Request.Headers[""X-Forwarded-For""].ToString();
@@ -12586,7 +12586,7 @@ V4.1.4,"**Security Rule:** The application must accept only the HTTP methods it 
 
 **Secure Pattern (Description):** Each route declares the exact methods it serves, and unsupported methods return 405 Method Not Allowed, so the attack surface is the documented verb set and nothing more.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [Route(""users"")]
@@ -12651,7 +12651,7 @@ V4.1.5,"**Security Rule:** Highly sensitive requests or transactions, especially
 
 **Secure Pattern (Description):** The message itself is signed with the sender's key and the receiver verifies the signature, so tampering anywhere along the path is detected regardless of how many systems the message traverses.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await httpClient.PostAsJsonAsync(url, payment);
@@ -12733,7 +12733,7 @@ V4.2.2,"**Security Rule:** When the application generates HTTP messages, the Con
 
 **Secure Pattern (Description):** Content-Length is computed from the encoded body or delegated to the framework's writer, which keeps the declared length and the framed body length consistent for every response.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Headers.ContentLength = text.Length;
@@ -12842,7 +12842,7 @@ V4.2.4,"**Security Rule:** HTTP/2 and HTTP/3 requests must be accepted only when
 
 **Secure Pattern (Description):** Every inbound header name and value is scanned for CR and LF characters and the request is rejected if any are present, before the headers are stored or forwarded.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Headers[name] = value;
@@ -12907,7 +12907,7 @@ V4.2.5,"**Security Rule:** When the application builds outbound requests, it mus
 
 **Secure Pattern (Description):** Outbound URIs and request headers are length-checked or truncated against the receiver's known limits before the request is sent, so an oversized request is never emitted.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await http.GetAsync($""{base}/find?q={query}"");
@@ -12969,7 +12969,7 @@ V4.3.1,"**Security Rule:** GraphQL and similar expressive query layers must enfo
 
 **Secure Pattern (Description):** The server caps query depth and complexity, or accepts only persisted allowlisted queries, rejecting any request whose cost exceeds the configured budget before resolution begins.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 services.AddGraphQL(b => b.AddSchema<AppSchema>());
@@ -13036,7 +13036,7 @@ V4.3.2,"**Security Rule:** GraphQL introspection must be disabled in production 
 
 **Secure Pattern (Description):** Introspection is disabled in production environments by configuration or a validation rule, and enabled only for internal use or for APIs explicitly intended to be consumed by third parties.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 services.AddGraphQL(b => b.AddSchema<AppSchema>());
@@ -13098,7 +13098,7 @@ V4.4.1,"**Security Rule:** All WebSocket connections must use WebSocket over TLS
 
 **Secure Pattern (Description):** Connections are established exclusively with the wss scheme over TLS, and plain ws upgrade requests are refused by the server.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await ws.ConnectAsync(new Uri(""ws://api.example.com/feed""), token);
@@ -13155,7 +13155,7 @@ V4.4.2,"**Security Rule:** During the WebSocket handshake the server must check 
 
 **Secure Pattern (Description):** The handshake handler reads the Origin header, compares it against a configured allowlist of trusted origins, and aborts the upgrade when the origin does not match.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var socket = await context.WebSockets.AcceptWebSocketAsync();
@@ -13222,7 +13222,7 @@ V4.4.3,"**Security Rule:** When the application's standard session management ca
 
 **Secure Pattern (Description):** Dedicated WebSocket tokens are generated with strong entropy, scoped and time-limited, validated on every connection, and revocable, so they meet the same bar as the standard session mechanism.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var token = user.Id.ToString();
@@ -13284,7 +13284,7 @@ V4.4.4,"**Security Rule:** When an existing HTTPS session transitions to a WebSo
 
 **Secure Pattern (Description):** The WebSocket token is minted on an authenticated HTTPS endpoint and bound to that session, and the WebSocket handshake validates the token against the originating authenticated session before accepting.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpGet(""ws-token"")]
@@ -13361,7 +13361,7 @@ V5.2.1,"**Security Rule:** The application must only accept uploaded files of a 
 
 **Secure Pattern (Description):** A maximum upload size is enforced at the framework or server layer and the request is rejected as soon as the limit is exceeded, before the body is fully buffered.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var bytes = await new StreamReader(Request.Body).ReadToEndAsync();
@@ -13419,7 +13419,7 @@ V5.2.2,"**Security Rule:** When the application accepts a file, on its own or in
 
 **Secure Pattern (Description):** The extension is checked against an allowlist and the actual byte content is validated to match the declared type, by inspecting magic bytes or by parsing and re-encoding the file with a type-specific library.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (Path.GetExtension(file.FileName) == "".png"") Save(file);
@@ -13481,7 +13481,7 @@ V5.2.3,"**Security Rule:** Before decompressing a compressed file such as a zip,
 
 **Secure Pattern (Description):** Each archive entry's declared uncompressed size is summed and the entry count is tallied against fixed limits before extraction, and extraction is aborted as soon as either limit is exceeded.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 ZipFile.ExtractToDirectory(zipPath, destDir);
@@ -13548,7 +13548,7 @@ V5.2.4,"**Security Rule:** A per-user storage quota and a maximum number of file
 
 **Secure Pattern (Description):** The application tracks each user's current file count and total bytes, and rejects a new upload when accepting it would exceed the configured per-user file-count or storage-byte quota.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _db.Files.Add(new StoredFile(userId, bytes));
@@ -13600,7 +13600,7 @@ V5.2.5,"**Security Rule:** The application must not allow uploaded compressed fi
 
 **Secure Pattern (Description):** Each archive entry is inspected and symlink entries are rejected during extraction, or where symlinks are needed their targets are checked against an allowlist before the link is created.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 ZipFile.ExtractToDirectory(zipPath, destDir);
@@ -13656,7 +13656,7 @@ V5.2.6,"**Security Rule:** The application must reject uploaded images whose pix
 
 **Secure Pattern (Description):** The image header is read to obtain its width and height, the pixel count is compared against a maximum, and the image is rejected before it is fully decoded into a raster buffer.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 using var img = Image.Load(stream);
@@ -13719,7 +13719,7 @@ V5.3.1,"**Security Rule:** Files uploaded or generated from untrusted input and 
 
 **Secure Pattern (Description):** Uploads are stored outside the web root or in a location with script execution disabled, served only through a controller that streams bytes with a safe content type and never hands them to an interpreter.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 file.SaveAs(Server.MapPath(""~/uploads/"" + file.FileName));
@@ -13768,7 +13768,7 @@ V5.3.2,"**Security Rule:** File paths for file operations must be built from int
 
 **Secure Pattern (Description):** The application generates its own identifier for storage, or strips directory components and resolves the final path, confirming it stays within the intended base directory before any file operation.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var path = Path.Combine(baseDir, Request.Query[""name""]);
@@ -13831,7 +13831,7 @@ V5.3.3,"**Security Rule:** Server-side file processing such as archive decompres
 
 **Secure Pattern (Description):** Each entry's name is reduced to a safe basename or the resolved destination path is verified to remain inside the target directory before any byte is written during extraction.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 entry.ExtractToFile(Path.Combine(destDir, entry.FullName));
@@ -13896,7 +13896,7 @@ V5.4.1,"**Security Rule:** The application must validate or ignore user-submitte
 
 **Secure Pattern (Description):** The download is keyed by a trusted internal identifier, the served filename is validated against an allowlist or sanitized, and a Content-Disposition header sets an explicit attachment filename.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return PhysicalFile(Path.Combine(Dir, Request.Query[""file""]), ""application/octet-stream"");
@@ -13959,7 +13959,7 @@ V5.4.2,"**Security Rule:** Filenames served in HTTP response header fields or em
 
 **Secure Pattern (Description):** The filename is sanitized of control characters and encoded per RFC 6266, using the quoted ASCII fallback together with the filename star UTF-8 form, so it always parses as a single safe header value.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Headers[""Content-Disposition""] = ""attachment; filename="" + name;
@@ -14025,7 +14025,7 @@ V5.4.3,"**Security Rule:** Files obtained from untrusted sources must be scanned
 
 **Secure Pattern (Description):** Each untrusted file is submitted to an antivirus or malware scanner after upload, quarantined or rejected on a positive result, and only released for download once the scan reports it clean.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _storage.Save(file);
@@ -14136,7 +14136,7 @@ V6.2.1,"**Security Rule:** User-chosen passwords must be at least 8 characters l
 
 **Secure Pattern (Description):** A minimum length of at least 8 characters, ideally 15 or more, is enforced on registration and password change, measured in Unicode code points.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (password.Length < 4) throw new ArgumentException(""too short"");
@@ -14195,7 +14195,7 @@ V6.2.2,"**Security Rule:** Authenticated users must be able to change their own 
 
 **Secure Pattern (Description):** An authenticated password change endpoint is exposed so users can update their own credentials at any time.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpPost(""account/email"")] public IActionResult ChangeEmail() => Ok();
@@ -14254,7 +14254,7 @@ V6.2.3,"**Security Rule:** The password change function must require both the us
 
 **Secure Pattern (Description):** The current password is re-verified against the stored hash before the new password is accepted, proving the requester knows the existing credential.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 void ChangePassword(User u, string newPw) =>
@@ -14333,7 +14333,7 @@ V6.2.4,"**Security Rule:** Passwords submitted at registration or password chang
 
 **Secure Pattern (Description):** The proposed password is compared against a curated list of at least the 3000 most common policy-compliant passwords and rejected if it matches.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (pw.Length >= 8) user.SetPassword(pw);
@@ -14396,7 +14396,7 @@ V6.2.5,"**Security Rule:** Passwords of any character composition must be accept
 
 **Secure Pattern (Description):** Validation enforces length and denylist checks only, accepting any combination of characters so users can choose long memorable passphrases.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (!pw.Any(char.IsUpper) || !pw.Any(char.IsDigit))
@@ -14514,7 +14514,7 @@ V6.2.8,"**Security Rule:** The password must be verified exactly as received fro
 
 **Secure Pattern (Description):** The raw submitted password is passed unchanged to the hashing or verification function, preserving every character and its case.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 return _hasher.Verify(user.Hash, password.Trim().ToLowerInvariant());
@@ -14571,7 +14571,7 @@ V6.2.9,"**Security Rule:** The application must permit passwords of at least 64 
 
 **Secure Pattern (Description):** The maximum password length is set to at least 64 characters so long passphrases are accepted, with a reasonable upper bound only to bound hashing cost.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (pw.Length > 16) throw new ArgumentException(""too long"");
@@ -14632,7 +14632,7 @@ V6.2.10,"**Security Rule:** A password must remain valid until it is found to be
 
 **Secure Pattern (Description):** Passwords have no scheduled expiry; rotation is triggered only by a detected compromise or an explicit user request.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if ((DateTime.UtcNow - user.PasswordSetAt).TotalDays > 90)
@@ -14685,7 +14685,7 @@ V6.2.11,"**Security Rule:** The documented list of context-specific words must a
 
 **Secure Pattern (Description):** Password validation loads the documented context-word list and rejects any password that contains one of those words or a simple permutation.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 void Validate(string pw) {
@@ -14749,7 +14749,7 @@ V6.2.12,"**Security Rule:** Passwords submitted at registration or password chan
 
 **Secure Pattern (Description):** The proposed password is checked against a breached-password dataset, for example via a k-anonymity range API or a local breach corpus, and rejected on a match.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (pw.Length >= 8) user.SetPassword(pw);
@@ -14812,7 +14812,7 @@ V6.3.1,"**Security Rule:** Controls against credential stuffing and password bru
 
 **Secure Pattern (Description):** Login is protected by rate limiting and adaptive response keyed on IP and account, applying delays or challenges as configured in the security documentation.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpPost(""login"")]
@@ -14885,7 +14885,7 @@ V6.3.2,"**Security Rule:** Default user accounts such as root, admin, or sa must
 
 **Secure Pattern (Description):** No default credentials exist in production; initial admin access is created during setup with a unique, operator-supplied password, and any seeded accounts are disabled.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 db.Users.Add(new User(""admin"", _hasher.Hash(""admin"")));
@@ -14933,7 +14933,7 @@ V6.3.3,"**Security Rule:** Access to the application must require multi-factor a
 
 **Secure Pattern (Description):** Login requires a second factor in addition to the password, such as a TOTP or a FIDO hardware authenticator, before a session is issued.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (_hasher.Verify(user.Hash, password))
@@ -15002,7 +15002,7 @@ V6.3.4,"**Security Rule:** When multiple authentication pathways exist there mus
 
 **Secure Pattern (Description):** All authentication routes are inventoried and funnelled through a single policy layer so MFA, throttling, and lockout apply identically everywhere.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpPost(""legacy/login"")]      // not behind the MFA middleware
@@ -15058,7 +15058,7 @@ V6.3.5,"**Security Rule:** Users must be notified of suspicious authentication a
 
 **Secure Pattern (Description):** Authentication events are evaluated for risk signals, and the user is sent an out-of-band notification when a login looks suspicious.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 void OnLogin(User u, HttpRequest r) => _sessions.Create(u);
@@ -15131,7 +15131,7 @@ V6.3.6,"**Security Rule:** Email must not be used as a single-factor or multi-fa
 
 **Secure Pattern (Description):** Authentication factors are limited to passwords plus a real second factor such as TOTP or a hardware authenticator; email is used only for non-authentication notifications.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _mail.Send(user, $""Login code: {code}"");
@@ -15185,7 +15185,7 @@ V6.3.7,"**Security Rule:** Users must be notified after changes to their authent
 
 **Secure Pattern (Description):** Any change to a credential or to the username or email triggers an out-of-band notification, sent to the previous contact address when an email is being changed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 void ChangeEmail(User u, string email) => u.Email = email;
@@ -15246,7 +15246,7 @@ V6.3.8,"**Security Rule:** Valid usernames must not be inferable from failed aut
 
 **Secure Pattern (Description):** These flows return a single generic message and status regardless of whether the account exists, and run the same work so response timing does not leak existence.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (user == null) return NotFound(""user not found"");
@@ -15321,7 +15321,7 @@ V6.4.1,"**Security Rule:** System-generated initial passwords and activation cod
 
 **Secure Pattern (Description):** Initial secrets are generated with a CSPRNG, carry a short expiry, are single-use, and force the user to set a new password before normal access.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var code = ""ACT-"" + user.Id;
@@ -15375,7 +15375,7 @@ V6.4.2,"**Security Rule:** Password hints and knowledge-based authentication, su
 
 **Secure Pattern (Description):** There are no secret questions or password hints; recovery uses a secure token-based reset flow that does not depend on guessable personal facts.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (answer == user.SecretAnswer) ResetPassword(user);
@@ -15425,7 +15425,7 @@ V6.4.3,"**Security Rule:** A secure forgotten-password reset process must be imp
 
 **Secure Pattern (Description):** The reset flow uses a short-lived single-use token and still requires the user's enabled second factor before a new password takes effect.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (_resetTokens.Verify(token)) user.SetPassword(newPw);
@@ -15478,7 +15478,7 @@ V6.4.4,"**Security Rule:** When a multi-factor authentication factor is lost, id
 
 **Secure Pattern (Description):** Re-enrolling a replacement factor requires identity proofing equivalent to the original enrollment, rather than a lower-assurance shortcut.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 void ReplaceMfa(User u) => EnrollTotp(u);
@@ -15538,7 +15538,7 @@ V6.4.5,"**Security Rule:** Renewal instructions for authentication mechanisms th
 
 **Secure Pattern (Description):** Automated reminders are scheduled well before an authentication mechanism expires, giving users time to renew it through the normal process.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (cert.ExpiresAt < DateTime.UtcNow)
@@ -15592,7 +15592,7 @@ V6.4.6,"**Security Rule:** Administrators may start a password reset for a user,
 
 **Secure Pattern (Description):** Admin recovery only triggers a self-service reset flow, sending the user a one-time link so the user alone chooses the new password.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 void AdminReset(User u, string newPw) => u.SetPassword(newPw);
@@ -15650,7 +15650,7 @@ V6.5.1,"**Security Rule:** Lookup secrets, out-of-band codes, and time-based one
 
 **Secure Pattern (Description):** Each code is marked consumed atomically on first successful verification and rejected on every subsequent attempt within its lifetime.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (_totp.Verify(user.Secret, code)) Authenticate(user);
@@ -15705,7 +15705,7 @@ V6.5.2,"**Security Rule:** Lookup secrets stored in the backend with less than 1
 
 **Secure Pattern (Description):** Low-entropy secrets are stored using an approved slow password-hashing algorithm with a per-secret random salt; only high-entropy secrets may use a plain cryptographic hash.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 db.Save(recoveryCode);
@@ -15753,7 +15753,7 @@ V6.5.3,"**Security Rule:** Lookup secrets, out-of-band codes, and TOTP seeds mus
 
 **Secure Pattern (Description):** All authentication secrets are drawn from a CSPRNG so every value is unpredictable and independent of any observable state.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var code = new Random().Next(0, 1000000);
@@ -15812,7 +15812,7 @@ V6.5.4,"**Security Rule:** Lookup secrets and out-of-band authentication codes m
 
 **Secure Pattern (Description):** Codes are generated with at least 20 bits of entropy, such as 6 random digits, so the search space is large enough to resist guessing.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var code = RandomNumberGenerator.GetInt32(1000).ToString(""D3"");
@@ -15859,7 +15859,7 @@ V6.5.5,"**Security Rule:** Out-of-band requests, codes, and tokens must have a d
 
 **Secure Pattern (Description):** Each code is stamped with a short expiry — 10 minutes or less for out-of-band, 30 seconds for TOTP — and rejected once that window passes.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _otp.Save(new Otp(user.Id, code));
@@ -15908,7 +15908,7 @@ V6.5.6,"**Security Rule:** Any authentication factor, including physical devices
 
 **Secure Pattern (Description):** Each registered factor can be individually revoked, immediately invalidating it for future authentication.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 // no RevokeFactor action exists
@@ -15963,7 +15963,7 @@ V6.5.7,"**Security Rule:** Biometric authentication may be used only as a second
 
 **Secure Pattern (Description):** Biometric verification is paired with another factor, such as a password or a possession factor, so it never stands alone.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (_biometrics.Matches(scan, user.Template)) Authenticate(user);
@@ -16019,7 +16019,7 @@ V6.5.8,"**Security Rule:** TOTP codes must be validated against a time source fr
 
 **Secure Pattern (Description):** TOTP verification uses the server's own trusted, synchronized clock and ignores any client-supplied time value.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _totp.Verify(secret, code, long.Parse(Request.Query[""ts""]));
@@ -16066,7 +16066,7 @@ V6.6.1,"**Security Rule:** PSTN-delivered OTPs via phone or SMS may be offered o
 
 **Secure Pattern (Description):** SMS OTP is offered only to validated numbers, alongside a stronger TOTP or hardware option, with a clear risk notice, and is disabled entirely for L3.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 IEnumerable<string> MfaOptions(User u) => new[] { ""sms"" };
@@ -16128,7 +16128,7 @@ V6.6.2,"**Security Rule:** Out-of-band requests, codes, and tokens must be bound
 
 **Secure Pattern (Description):** Each code is tied to a unique authentication request identifier and verified only against the session that created it.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _cache.Set($""otp:{user.Id}"", code);
@@ -16181,7 +16181,7 @@ V6.6.3,"**Security Rule:** A code-based out-of-band authentication mechanism mus
 
 **Secure Pattern (Description):** Verification attempts are rate limited per code and per account, and the code is invalidated after a small number of failures.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 bool Verify(User u, string submitted) =>
@@ -16249,7 +16249,7 @@ V6.6.4,"**Security Rule:** Where push notifications are used for multi-factor au
 
 **Secure Pattern (Description):** Approval pushes are rate limited per account, and number matching requires the user to enter a code shown on the login screen, defeating blind approvals.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 void OnLogin(User u) => _push.Send(u, ""Approve login?"");
@@ -16307,7 +16307,7 @@ V6.7.1,"**Security Rule:** Certificates used to verify cryptographic authenticat
 
 **Secure Pattern (Description):** Verification certificates are held in an integrity-protected store such as a read-only trust store, a hardware security module, or a managed key vault with strict write controls.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var cert = new X509Certificate2(@""C:\temp\trusted.pem"");
@@ -16357,7 +16357,7 @@ V6.7.2,"**Security Rule:** The challenge nonce used in cryptographic authenticat
 
 **Secure Pattern (Description):** Each challenge is a fresh nonce of at least 64 bits drawn from a CSPRNG, making replay of a previously signed response infeasible.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var challenge = Encoding.UTF8.GetBytes(counter++.ToString());
@@ -16406,7 +16406,7 @@ V6.8.1,"**Security Rule:** When multiple identity providers are supported, a use
 
 **Secure Pattern (Description):** Accounts are keyed on the pair of IdP identifier and the subject claim from that IdP, so identifiers from different providers never collide.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var u = _users.SingleOrDefault(x => x.Email == claims.Email);
@@ -16466,7 +16466,7 @@ V6.8.2,"**Security Rule:** The presence and integrity of digital signatures on a
 
 **Secure Pattern (Description):** Every assertion is verified against the expected signing key and algorithm before any claim is trusted, and unsigned assertions are rejected.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var jwt = new JwtSecurityToken(token);   // no signature check
@@ -16526,7 +16526,7 @@ V6.8.3,"**Security Rule:** SAML assertions must be processed uniquely and used o
 
 **Secure Pattern (Description):** The assertion ID is recorded on first use and any later presentation of the same ID within the validity window is rejected as a replay.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (assertion.IsWithinValidity()) Login(assertion.Subject);
@@ -16581,7 +16581,7 @@ V6.8.4,"**Security Rule:** When an external IdP is used and specific authenticat
 
 **Secure Pattern (Description):** The application inspects the acr, amr, and auth_time claims to confirm the required strength, method, and recentness, and applies a documented minimum-strength assumption when the claims are absent.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (_idToken.Verify(token)) AllowAdminAction();
@@ -16721,7 +16721,7 @@ V7.2.1,"**Security Rule:** All session token verification must be performed by a
 
 **Secure Pattern (Description):** The backend looks up the presented session token in its own store or verifies its signature, and derives the user identity solely from that server-side verification.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var userId = Request.Headers[""X-User-Id""];
@@ -16783,7 +16783,7 @@ V7.2.2,"**Security Rule:** Sessions must be represented by dynamically generated
 
 **Secure Pattern (Description):** Each session gets a freshly generated reference or self-contained token at authentication time, distinct per session and revocable independently of any static credential.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var token = _config[""SharedSessionSecret""];
@@ -16842,7 +16842,7 @@ V7.2.3,"**Security Rule:** Reference tokens used to represent user sessions must
 
 **Secure Pattern (Description):** Session tokens come from a CSPRNG and carry at least 128 bits of entropy, making them unique and infeasible to guess or brute force.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var sid = new Random().Next().ToString();
@@ -16901,7 +16901,7 @@ V7.2.4,"**Security Rule:** On every authentication event, including re-authentic
 
 **Secure Pattern (Description):** The application discards the old session and generates a fresh session token immediately after successful authentication, so any attacker-fixed identifier becomes useless.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 HttpContext.Session.SetString(""user"", user.Id);
@@ -16964,7 +16964,7 @@ V7.3.1,"**Security Rule:** An inactivity timeout must expire idle sessions and f
 
 **Secure Pattern (Description):** Each session records a last-activity time, and a request after the configured idle window is rejected and the session terminated, requiring the user to re-authenticate.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 services.AddSession();                    // default, no idle policy
@@ -17023,7 +17023,7 @@ V7.3.2,"**Security Rule:** An absolute maximum session lifetime must force re-au
 
 **Secure Pattern (Description):** Each session records its creation time, and once the absolute lifetime has elapsed the session is terminated and re-authentication required even if the session has been continuously active.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 options.IdleTimeout = TimeSpan.FromHours(1);   // idle only
@@ -17083,7 +17083,7 @@ V7.4.1,"**Security Rule:** When a session is terminated by logout or expiry, all
 
 **Secure Pattern (Description):** Termination deletes or marks invalid the server-side session, or for self-contained tokens records the token in a denylist or advances a per-user cutoff, so the token is rejected on its next use.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 Response.Cookies.Delete("".AspNetCore.Session"");
@@ -17144,7 +17144,7 @@ V7.4.2,"**Security Rule:** When a user account is disabled or deleted, all of th
 
 **Secure Pattern (Description):** The account disable or delete operation also revokes every active session for that user, for example by deleting their session rows or advancing a per-user token cutoff, ending access at once.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await _userManager.SetLockoutEnabledAsync(user, true);
@@ -17206,7 +17206,7 @@ V7.4.3,"**Security Rule:** After a successful change or removal of any authentic
 
 **Secure Pattern (Description):** On any authentication factor change the application terminates, or offers the user a clear option to terminate, every session other than the current one.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 await _userManager.ChangePasswordAsync(user, old, newPwd);
@@ -17298,7 +17298,7 @@ V7.4.5,"**Security Rule:** Application administrators must be able to terminate 
 
 **Secure Pattern (Description):** An administrative function can revoke all sessions for a chosen user, and a global variant can revoke every session, by clearing the session store or advancing the relevant token cutoffs.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 // no admin session-revocation action
@@ -17362,7 +17362,7 @@ V7.5.1,"**Security Rule:** Modifying sensitive account attributes that affect au
 
 **Secure Pattern (Description):** Before any change to authentication-affecting attributes, the application forces a fresh full authentication and only then applies the change.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [Authorize] public IActionResult ChangeEmail(string email) { _user.Email = email; return Ok(); }
@@ -17433,7 +17433,7 @@ V7.5.2,"**Security Rule:** Users must be able to view their currently active ses
 
 **Secure Pattern (Description):** The account area lists active sessions with identifying detail, and a revoke action, gated behind a fresh single-factor check, terminates a selected session or all other sessions.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 // no UI or API for users to see or kill their sessions
@@ -17503,7 +17503,7 @@ V7.5.3,"**Security Rule:** Highly sensitive transactions or operations must requ
 
 **Secure Pattern (Description):** Before a high-risk operation the application demands step-up authentication or a secondary verification — a re-entered factor or a one-time confirmation — and only proceeds once it succeeds.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [Authorize] public IActionResult Payout(decimal amount) { _bank.Payout(amount); return Ok(); }
@@ -17574,7 +17574,7 @@ V7.6.1,"**Security Rule:** Session lifetime and termination between relying part
 
 **Secure Pattern (Description):** The relying party records the identity provider authentication time from the assertion and forces a fresh federated authentication once the documented maximum age has elapsed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (User.Identity.IsAuthenticated) return Ok();
@@ -17640,7 +17640,7 @@ V7.6.2,"**Security Rule:** Creation of a session must require the user's consent
 
 **Secure Pattern (Description):** Establishing a new application session requires an explicit user action or consent step, so a session is never created purely from background redirects.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 public async Task<IActionResult> Callback() { await SignInAsync(idpUser); return Redirect(""/""); }
@@ -17777,7 +17777,7 @@ V8.2.1,"**Security Rule:** Function-level access must be restricted so that only
 
 **Secure Pattern (Description):** Every protected operation verifies that the current consumer holds the explicit permission for that function before the action runs, denying by default when the permission is absent.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpPost(""/payouts"")]
@@ -17847,7 +17847,7 @@ V8.2.2,"**Security Rule:** Data-specific access must be restricted so that a con
 
 **Secure Pattern (Description):** Every object lookup is scoped to the consumer's permitted set — the query filters by owner or the retrieved object's ownership is verified against the subject before it is returned.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var inv = await _db.Invoices.FindAsync(id);
@@ -17911,7 +17911,7 @@ V8.2.3,"**Security Rule:** Field-level access must be restricted so that consume
 
 **Secure Pattern (Description):** Input binding and output serialization use an explicit allowlist of fields per consumer permission, so privileged properties such as role, balance, or internal flags are never mass-assigned or leaked.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 _mapper.Map(request, user);            // maps every field
@@ -17973,7 +17973,7 @@ V8.2.4,"**Security Rule:** Adaptive security controls based on environmental and
 
 **Secure Pattern (Description):** Adaptive checks run at session start and are re-evaluated on sensitive actions during the session, so a context change such as a new location triggers re-authentication, step-up, or denial.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (TokenValid(ctx)) Allow();
@@ -18026,7 +18026,7 @@ V8.3.1,"**Security Rule:** Authorization rules must be enforced at a trusted ser
 
 **Secure Pattern (Description):** The server enforces the authorization check on every request regardless of the client; client-side hiding is treated as a usability hint only and never as a security control.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 [HttpDelete(""/records/{id}"")]
@@ -18094,7 +18094,7 @@ V8.3.2,"**Security Rule:** Changes to the values that authorization decisions de
 
 **Secure Pattern (Description):** Authorization decisions read from a fresh source of truth, or tokens are short-lived and checked against a revocation list, so permission changes apply at once and stale-token actions are alerted and reverted.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var admin = User.IsInRole(""Admin"");   // from token claims only
@@ -18144,7 +18144,7 @@ V8.3.3,"**Security Rule:** When a service calls another service on a consumer's 
 
 **Secure Pattern (Description):** The originating consumer's identity is propagated downstream — by forwarding their token or using a delegation grant — so each service makes permission decisions against the real subject.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 client.DefaultRequestHeaders.Authorization =
@@ -18203,7 +18203,7 @@ V8.4.1,"**Security Rule:** Multi-tenant applications must enforce cross-tenant c
 
 **Secure Pattern (Description):** Every query and mutation is scoped by the consumer's tenant — the tenant id from the authenticated context is an unconditional filter on all data access — so cross-tenant reach is structurally impossible.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var doc = await _db.Documents.FindAsync(id);
@@ -18264,7 +18264,7 @@ V8.4.2,"**Security Rule:** Access to administrative interfaces must use multiple
 
 **Secure Pattern (Description):** Admin access requires layered checks — verified identity with strong authentication, device security posture, and contextual risk scoring — with network location treated as one weak signal among many rather than the gate.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 if (ip.StartsWith(""10."")) return AdminPanel();
@@ -18315,7 +18315,7 @@ V9.1.1,"**Security Rule:** A self-contained token must have its digital signatur
 
 **Secure Pattern (Description):** The token is verified against the issuer's signing key, and the call that returns the claims is the same call that checks the signature, so no claim is available until integrity has been confirmed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var claims = new JwtSecurityTokenHandler().ReadJwtToken(token).Claims;
@@ -18374,7 +18374,7 @@ V9.1.2,"**Security Rule:** Only signing algorithms on an explicit allowlist may 
 
 **Secure Pattern (Description):** The verifier ignores the header algorithm and accepts only algorithms from a fixed allowlist, so a 'none' or mismatched algorithm token is rejected before its claims are read.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var p = new TokenValidationParameters();   // ValidAlgorithms unset
@@ -18432,7 +18432,7 @@ V9.1.3,"**Security Rule:** Key material used to validate self-contained tokens m
 
 **Secure Pattern (Description):** The signing key is resolved only from a pre-configured trusted issuer or a JWKS endpoint on an allowlist, and any key-source header in the token is ignored or validated against that allowlist.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var key = await DownloadKey(ReadHeader(token)[""jku""]);
@@ -18492,7 +18492,7 @@ V9.2.1,"**Security Rule:** When a token carries a validity time span, it must be
 
 **Secure Pattern (Description):** The verifier evaluates the 'nbf' and 'exp' claims against the current time, with at most a small clock-skew tolerance, and rejects any token outside its declared validity window.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var p = new TokenValidationParameters { ValidateLifetime = false };
@@ -18552,7 +18552,7 @@ V9.2.2,"**Security Rule:** A service must confirm a token is the correct type an
 
 **Secure Pattern (Description):** The verifier checks a type indicator — such as the 'typ' header or a purpose claim — and accepts the token only when that type matches the operation being performed.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var c = handler.ValidateToken(token, p, out _);
@@ -18619,7 +18619,7 @@ V9.2.3,"**Security Rule:** A service must accept only tokens whose audience is i
 
 **Secure Pattern (Description):** The verifier compares the token's 'aud' claim against the service's own configured audience identifier and rejects any token whose audience does not match.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var p = new TokenValidationParameters { ValidateAudience = false };
@@ -18678,7 +18678,7 @@ V9.2.4,"**Security Rule:** When one issuer signs tokens for several audiences wi
 
 **Secure Pattern (Description):** Every issued token carries an explicit audience claim that uniquely names its intended recipients, and any audience value provided by a client is validated against a registered allowlist before it is embedded in the token.
 
-[[CSHARP PATTERNS]]
+[[C# PATTERNS]]
 Vulnerable:
 ```
 var t = new JwtSecurityToken(claims: new[] { new Claim(""sub"", user) });

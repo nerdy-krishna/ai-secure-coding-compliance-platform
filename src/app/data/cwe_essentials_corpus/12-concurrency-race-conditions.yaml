@@ -1,0 +1,267 @@
+# CWE Essentials — Concern Area 12: Concurrency & Race Conditions
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns per
+# language (generic + the systems / native set: C, C++, Rust, Go).
+#
+# CWEs: CWE-362, CWE-367, CWE-364, CWE-1265, CWE-366.
+
+# ---------------------------------------------------------------------------
+# CWE-362 — Concurrent Execution using Shared Resource with Improper Synchronization
+# ---------------------------------------------------------------------------
+
+- id: CWE-362
+  facet: Concurrency & Race Conditions
+  section: Race Condition on a Shared Resource
+  security_rule: >-
+    Every access to shared mutable state must be guarded by the same
+    synchronization primitive, held across the whole read-modify-write
+    sequence, so concurrent execution cannot interleave inside it.
+  vulnerability_pattern: >-
+    Two or more threads read and update shared state without holding a
+    common lock, so an unfavourable interleaving lets one thread observe
+    or overwrite a half-updated value and violate an invariant.
+  secure_pattern: >-
+    The shared state is confined behind one mutex or atomic operation,
+    and the entire check-and-act sequence runs inside the critical
+    section so no other thread can interleave with it.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if balance >= amount:        # another thread can spend in this gap
+            balance = balance - amount
+      secure: |
+        with account_lock:           # whole check-and-act is one critical section
+            if balance >= amount: balance = balance - amount
+    c:
+      vulnerable: |
+        counter++;                   /* read-modify-write, no lock, two threads */
+      secure: |
+        pthread_mutex_lock(&m); counter++; pthread_mutex_unlock(&m);
+    cpp:
+      vulnerable: |
+        shared_total += delta;       // unsynchronized access from many threads
+      secure: |
+        std::lock_guard<std::mutex> g(mtx); shared_total += delta;
+    rust:
+      vulnerable: |
+        let total = Rc::new(RefCell::new(0));   // !Send, panics across threads
+      secure: |
+        let total = Arc::new(Mutex::new(0));
+        { let mut t = total.lock().unwrap(); *t += delta; }
+    go:
+      vulnerable: |
+        go func() { counter++ }()    // data race on counter
+      secure: |
+        mu.Lock(); counter++; mu.Unlock()
+
+# ---------------------------------------------------------------------------
+# CWE-367 — Time-of-check Time-of-use (TOCTOU) Race Condition
+# ---------------------------------------------------------------------------
+
+- id: CWE-367
+  facet: Concurrency & Race Conditions
+  section: Time-of-check to Time-of-use Race
+  security_rule: >-
+    Do not validate a resource by name and then act on the name again;
+    resolve the resource once, obtain a handle, and perform both the
+    check and the use against that same handle.
+  vulnerability_pattern: >-
+    A resource is validated through its path or name, then opened or
+    used by that same path in a separate step, so an attacker swaps what
+    the name points to in the gap between the check and the use.
+  secure_pattern: >-
+    The resource is opened once to get a descriptor or handle, and every
+    later check and operation is performed on that handle, so the name
+    cannot be repointed after validation.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if is_safe(path): open(path)        # path swapped between the two calls
+      secure: |
+        fd = open(path)                     # resolve once
+        if is_safe(fd): use(fd)             # check and use the same handle
+    c:
+      vulnerable: |
+        if (access(path, W_OK) == 0) fd = open(path, O_WRONLY);
+      secure: |
+        fd = open(path, O_WRONLY | O_NOFOLLOW);
+        if (fd != -1 && fstat(fd, &st) == 0) { /* check on fd */ }
+    cpp:
+      vulnerable: |
+        if (fs::exists(p)) std::ofstream out(p);   // re-resolves p by name
+      secure: |
+        std::ofstream out(p, std::ios::out);
+        if (out.is_open()) { /* operate on the open stream */ }
+    rust:
+      vulnerable: |
+        if Path::new(p).exists() { File::create(p)?; }
+      secure: |
+        let f = OpenOptions::new().write(true).create_new(true).open(p)?;
+    go:
+      vulnerable: |
+        if _, err := os.Stat(p); err == nil { f, _ = os.Open(p) }
+      secure: |
+        f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+
+# ---------------------------------------------------------------------------
+# CWE-364 — Signal Handler Race Condition
+# ---------------------------------------------------------------------------
+
+- id: CWE-364
+  facet: Concurrency & Race Conditions
+  section: Signal Handler Race Condition
+  security_rule: >-
+    Signal handlers must do the minimum work, calling only
+    async-signal-safe functions and touching only atomic flags, so they
+    cannot re-enter or corrupt state that interrupted code was updating.
+  vulnerability_pattern: >-
+    A signal handler calls non-reentrant functions or mutates shared
+    data structures, so a signal delivered mid-update re-enters that
+    code and leaves the shared state inconsistent or corrupt.
+  secure_pattern: >-
+    The handler only sets a volatile atomic flag and returns; the main
+    program loop observes the flag and performs the real work outside of
+    signal context where normal functions are safe to call.
+  code_patterns:
+    generic:
+      vulnerable: |
+        on_signal: free(buf); log("cleaned up")   # non-reentrant in handler
+      secure: |
+        on_signal: stop_flag = 1                  # atomic flag only
+        main_loop: if stop_flag: cleanup()
+    c:
+      vulnerable: |
+        void handler(int s) { free(g_buf); printf("done\n"); }
+      secure: |
+        volatile sig_atomic_t stop = 0;
+        void handler(int s) { stop = 1; }   /* main loop checks stop */
+    cpp:
+      vulnerable: |
+        void handler(int s) { g_log.append("signal"); }   // not async-safe
+      secure: |
+        std::atomic<bool> stop{false};
+        void handler(int s) { stop.store(true); }
+    rust:
+      vulnerable: |
+        unsafe { signal_hook::low_level::register(SIGINT,
+            || GLOBAL.lock().unwrap().flush())? };   // lock in handler
+      secure: |
+        let stop = Arc::new(AtomicBool::new(false));
+        signal_hook::flag::register(SIGINT, Arc::clone(&stop))?;
+    go:
+      vulnerable: |
+        // a real signal handler mutating shared maps without sync
+      secure: |
+        c := make(chan os.Signal, 1); signal.Notify(c, os.Interrupt)
+        go func() { <-c; shutdown() }()   // handled on a normal goroutine
+
+# ---------------------------------------------------------------------------
+# CWE-1265 — Unintended Reentrant Invocation of Non-reentrant Code
+# ---------------------------------------------------------------------------
+
+- id: CWE-1265
+  facet: Concurrency & Race Conditions
+  section: Unintended Reentrant Invocation of Non-reentrant Code
+  security_rule: >-
+    Code that is non-reentrant must not be re-entered while a prior
+    invocation is still in progress; complete any update to shared state
+    before invoking callbacks, signals, or routines that could call back in.
+  vulnerability_pattern: >-
+    A routine invokes a callback, event, or signal handler while its own
+    shared state is half-updated, and that callback re-enters the same
+    routine, observing or corrupting the inconsistent intermediate state.
+  secure_pattern: >-
+    Shared state is brought to a fully consistent state before any
+    callback or external code is invoked, or a reentrancy guard rejects a
+    nested call until the first one finishes.
+  code_patterns:
+    generic:
+      vulnerable: |
+        items.append(x)              # callback re-enters before count updates
+        notify(observers)            # observer reads items but stale count
+        count = count + 1
+      secure: |
+        items.append(x); count = count + 1   # finish all updates first
+        notify(observers)                     # only then call out
+    c:
+      vulnerable: |
+        void update(void) { state = DIRTY; callback(); state = CLEAN; }
+      secure: |
+        void update(void) {
+          if (in_progress) return;          /* reentrancy guard */
+          in_progress = 1; do_update(); in_progress = 0;
+        }
+    cpp:
+      vulnerable: |
+        void emit() { listeners_dirty = true; for (auto& l : ls) l(); }
+      secure: |
+        if (emitting_) return;              // guard against nested emit
+        emitting_ = true; for (auto& l : ls) l(); emitting_ = false;
+    rust:
+      vulnerable: |
+        let mut g = cell.borrow_mut();       // callback borrows again -> panic
+        callback();
+      secure: |
+        { let mut g = cell.borrow_mut(); *g = next; }   // drop borrow first
+        callback();
+    go:
+      vulnerable: |
+        mu.Lock(); cb(); mu.Unlock()         // cb calls back in -> deadlock
+      secure: |
+        mu.Lock(); snapshot := state; mu.Unlock()
+        cb(snapshot)                         // call out with the lock released
+
+# ---------------------------------------------------------------------------
+# CWE-366 — Race Condition within a Thread
+# ---------------------------------------------------------------------------
+
+- id: CWE-366
+  facet: Concurrency & Race Conditions
+  section: Race Condition within a Thread
+  security_rule: >-
+    When two threads share a variable, all reads and writes must be
+    synchronized or use atomics; never assume a value observed earlier in
+    a thread is still valid after yielding to other threads.
+  vulnerability_pattern: >-
+    A thread caches or relies on a shared variable across a point where
+    other threads can run, so a peer thread changes the value and the
+    first thread acts on a stale or torn read.
+  secure_pattern: >-
+    Shared variables are accessed only through atomics or under a held
+    lock, and any value needed across a yield point is re-read or
+    snapshotted under that synchronization.
+  code_patterns:
+    generic:
+      vulnerable: |
+        if ready: do_work()          # peer thread clears ready before do_work
+      secure: |
+        with lock:                   # observe and act under one lock
+            if ready: do_work()
+    c:
+      vulnerable: |
+        if (g_initialized) use(g_resource);   /* peer may reset between */
+      secure: |
+        pthread_mutex_lock(&m);
+        if (g_initialized) use(g_resource);
+        pthread_mutex_unlock(&m);
+    cpp:
+      vulnerable: |
+        bool flag = shared_flag;     // plain read, racing with a writer
+        if (flag) act();
+      secure: |
+        if (shared_flag.load(std::memory_order_acquire)) act();
+    rust:
+      vulnerable: |
+        static mut READY: bool = false;       // unsynchronized shared mutable
+      secure: |
+        static READY: AtomicBool = AtomicBool::new(false);
+        if READY.load(Ordering::Acquire) { act(); }
+    go:
+      vulnerable: |
+        if ready { doWork() }        // ready written by another goroutine
+      secure: |
+        if ready.Load() { doWork() } // sync/atomic.Bool, race-free read

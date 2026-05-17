@@ -1,0 +1,176 @@
+# CWE Essentials — Concern Area 04: OS & Command Injection
+# Hand-authored enriched corpus (Framework Expansion enrichment effort).
+# Rendered to the RAG corpus by scripts/build_enriched_corpus.py.
+#
+# Source prose: cwe_essentials_corpus/04-os-command-injection.md
+# CWEs: CWE-78, CWE-77, CWE-88.
+#
+# Each entry: a security_rule (the principle), a vulnerability_pattern and
+# secure_pattern (concept descriptions — no '*' or '[' — these feed the
+# agent's generic fallback), and short seed-sized code_patterns. CWE
+# Essentials targets systems / native code, so the language set is
+# generic + C / C++ / Rust / Go.
+
+# ---------------------------------------------------------------------------
+# CWE-78 — OS Command Injection
+# ---------------------------------------------------------------------------
+
+- id: CWE-78
+  facet: OS & Command Injection
+  section: Improper Neutralization of Special Elements used in an OS Command
+  security_rule: >-
+    Untrusted input must never be concatenated into a command string that
+    is handed to a shell. Invoke programs directly through an array-based
+    API that passes arguments as a vector, so the operating system never
+    re-parses shell metacharacters.
+  vulnerability_pattern: >-
+    Untrusted input is concatenated into a command line and run through a
+    shell, so metacharacters such as semicolons, pipes, ampersands,
+    backticks, or command substitution let an attacker append a second
+    command of their own.
+  secure_pattern: >-
+    The target program is launched directly with its arguments passed as
+    a list to an exec-style API, with no shell involved, so each argument
+    is delivered literally and cannot be reinterpreted as a command.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run("ping " + host, shell=true)        # shell parses ; | && $()
+      secure: |
+        run(["ping", "-c", "1", host])         # argument vector, no shell
+    c:
+      vulnerable: |
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "ping -c 1 %s", host);
+        system(cmd);                           /* shell interprets host */
+      secure: |
+        char *argv[] = {"ping", "-c", "1", host, NULL};
+        execvp("ping", argv);                  /* no shell, direct exec */
+    cpp:
+      vulnerable: |
+        std::system(("ping -c 1 " + host).c_str());
+      secure: |
+        const char *argv[] = {"ping", "-c", "1", host.c_str(), NULL};
+        execvp("ping", const_cast<char *const *>(argv));
+    rust:
+      vulnerable: |
+        Command::new("sh").arg("-c").arg(format!("ping -c 1 {host}")).status()?;
+      secure: |
+        Command::new("ping").args(["-c", "1", &host]).status()?;
+    go:
+      vulnerable: |
+        exec.Command("sh", "-c", "ping -c 1 "+host).Run()
+      secure: |
+        exec.Command("ping", "-c", "1", host).Run()
+
+# ---------------------------------------------------------------------------
+# CWE-77 — Command Injection
+# ---------------------------------------------------------------------------
+
+- id: CWE-77
+  facet: OS & Command Injection
+  section: Improper Neutralization of Special Elements used in a Command
+  security_rule: >-
+    Whenever a command is constructed wholly or partly from untrusted
+    input — for an OS shell, a database, or any other command interpreter
+    — the command structure must stay fixed and untrusted values must be
+    delivered as inert data, never as command text.
+  vulnerability_pattern: >-
+    A command string is built by concatenating untrusted input, so the
+    interpreter parses attacker-supplied separators or special elements
+    and executes commands or clauses the developer never intended.
+  secure_pattern: >-
+    The command and its structure come from fixed trusted text, untrusted
+    values are passed only as separate parameters or as a literal
+    argument list, and any value that must be a command name is checked
+    against a strict allowlist.
+  code_patterns:
+    generic:
+      vulnerable: |
+        action = userInput
+        run(buildCommand("svc " + action))     # action chosen by attacker
+      secure: |
+        if action not in {"start", "stop", "status"}: reject()
+        run(["svc", action])                   # allowlisted, vector form
+    c:
+      vulnerable: |
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "/usr/bin/svc %s", action);
+        system(cmd);
+      secure: |
+        if (strcmp(action, "start") && strcmp(action, "stop")) return -1;
+        char *argv[] = {"/usr/bin/svc", action, NULL};
+        execv(argv[0], argv);
+    cpp:
+      vulnerable: |
+        std::system(("/usr/bin/svc " + action).c_str());
+      secure: |
+        static const std::set<std::string> ok{"start", "stop", "status"};
+        if (ok.count(action)) { const char *a[] = {"/usr/bin/svc", action.c_str(), NULL};
+                                execv(a[0], const_cast<char *const *>(a)); }
+    rust:
+      vulnerable: |
+        Command::new("sh").arg("-c").arg(format!("svc {action}")).status()?;
+      secure: |
+        if !["start", "stop", "status"].contains(&action.as_str()) { return Err(..); }
+        Command::new("svc").arg(&action).status()?;
+    go:
+      vulnerable: |
+        exec.Command("sh", "-c", "svc "+action).Run()
+      secure: |
+        allowed := map[string]bool{"start": true, "stop": true, "status": true}
+        if allowed[action] { exec.Command("svc", action).Run() }
+
+# ---------------------------------------------------------------------------
+# CWE-88 — Argument Injection or Modification
+# ---------------------------------------------------------------------------
+
+- id: CWE-88
+  facet: OS & Command Injection
+  section: Improper Neutralization of Argument Delimiters in a Command
+  security_rule: >-
+    Untrusted text placed into a program's argument list must be
+    validated against a strict allowlist of expected forms, and option
+    parsing must be terminated with a double-dash so that a value can
+    never be interpreted as a command-line flag.
+  vulnerability_pattern: >-
+    Untrusted input is inserted into an argument list with no shell
+    involved, but because the value can begin with a dash it is parsed as
+    an option flag that changes the program's behaviour, for example
+    turning a search term into a flag that writes a file.
+  secure_pattern: >-
+    User-supplied operands are validated against an allowlist of expected
+    shapes and the argument list separates trusted option flags from
+    untrusted operands with a double-dash terminator, so input after it
+    is always treated as a positional value.
+  code_patterns:
+    generic:
+      vulnerable: |
+        run(["grep", pattern, file])           # pattern of "--help" or "-r" hijacks
+      secure: |
+        run(["grep", "-e", pattern, "--", file])   # -- ends option parsing
+    c:
+      vulnerable: |
+        char *argv[] = {"grep", pattern, file, NULL};
+        execvp("grep", argv);                  /* pattern may be a flag */
+      secure: |
+        char *argv[] = {"grep", "-e", pattern, "--", file, NULL};
+        execvp("grep", argv);
+    cpp:
+      vulnerable: |
+        const char *argv[] = {"grep", pattern.c_str(), file.c_str(), NULL};
+        execvp("grep", const_cast<char *const *>(argv));
+      secure: |
+        const char *argv[] = {"grep", "-e", pattern.c_str(), "--",
+                               file.c_str(), NULL};
+        execvp("grep", const_cast<char *const *>(argv));
+    rust:
+      vulnerable: |
+        Command::new("grep").arg(&pattern).arg(&file).status()?;
+      secure: |
+        Command::new("grep").arg("-e").arg(&pattern).arg("--").arg(&file).status()?;
+    go:
+      vulnerable: |
+        exec.Command("grep", pattern, file).Run()
+      secure: |
+        exec.Command("grep", "-e", pattern, "--", file).Run()
