@@ -12,7 +12,11 @@ from app.shared.lib.encryption import FernetEncrypt
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_PROVIDERS = {"openai", "anthropic", "google", "litellm", "ollama"}
+# Keep this in sync with the `provider` Literal on
+# `api.v1.models.LLMConfigurationBase` and the providers
+# `llm_client._build_model` can actually construct. DeepSeek and xAI
+# are reached through the OpenAI-compatible path in the client.
+_SUPPORTED_PROVIDERS = {"openai", "anthropic", "google", "deepseek", "xai"}
 
 
 def _validate_cfg(cfg) -> None:
