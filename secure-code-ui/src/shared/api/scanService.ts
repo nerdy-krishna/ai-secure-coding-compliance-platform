@@ -277,6 +277,32 @@ export const scanService = {
   },
 
   /**
+   * Downloads the scan's findings report in the given format and
+   * triggers a browser save. Goes through apiClient so the request
+   * carries the Authorization header (a plain <a download> would not).
+   */
+  downloadReport: async (
+    scanId: string,
+    format: "html" | "csv" | "pdf",
+  ): Promise<void> => {
+    const response = await apiClient.get(
+      `/scans/${encodeURIComponent(scanId)}/report`,
+      { params: { format }, responseType: "blob" },
+    );
+    const disposition = String(response.headers["content-disposition"] ?? "");
+    const match = /filename="?([^"]+)"?/.exec(disposition);
+    const filename = match ? match[1] : `scan-${scanId}-report.${format}`;
+    const url = URL.createObjectURL(response.data as Blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /**
    * Cancels a scan that is pending approval.
    * V01.2.2: scanId encoded.
    */

@@ -278,6 +278,19 @@ const ResultsPage: React.FC = () => {
     }
   }, [scanId, projectId, projectName, navigate, queryClient, toast]);
 
+  const handleDownloadReport = useCallback(
+    async (format: "html" | "csv") => {
+      if (!scanId) return;
+      try {
+        await scanService.downloadReport(scanId, format);
+      } catch (err) {
+        const e = err as { message?: string };
+        toast.error(e.message || `Failed to download ${format} report`);
+      }
+    },
+    [scanId, toast],
+  );
+
 
   if (isLoading) {
     return (
@@ -421,6 +434,20 @@ const ResultsPage: React.FC = () => {
         }
         actions={
           <>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              onClick={() => handleDownloadReport("html")}
+              title="Download the findings report as HTML"
+            >
+              <Icon.Download size={13} /> HTML
+            </button>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              onClick={() => handleDownloadReport("csv")}
+              title="Download the findings report as CSV"
+            >
+              <Icon.Download size={13} /> CSV
+            </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => navigate(`/analysis/scanning/${scanId}`)}

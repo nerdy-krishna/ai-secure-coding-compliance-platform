@@ -53,6 +53,7 @@ from app.core.services.scan import (
     ScanQueryService,
     ScanSubmissionService,
 )
+from app.core.services.report import SUPPORTED_FORMATS, generate_report
 from app.api.v1.dependencies import (
     get_current_user_tenant_id,
     get_scan_lifecycle_service,
@@ -758,6 +759,35 @@ async def get_scan_result_details(
     result = await service.get_scan_result(scan_id, user, include_source=include_source)
 
     return result
+
+
+@router.get("/scans/{scan_id}/report")
+async def download_scan_report(
+    scan_id: uuid.UUID,
+    format: str = Query("html"),
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+):
+    """Download a scan's findings as a report. `format` is one of
+    `html` or `csv`; the report is rendered server-side on request from
+    the scan's stored findings. Visibility is enforced by
+    `get_scan_result` (the same scoping as the result endpoint)."""
+    fmt = (format or "").strip().lower()
+    if fmt not in SUPPORTED_FORMATS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported report format '{format}'; "
+                f"expected one of {', '.join(SUPPORTED_FORMATS)}."
+            ),
+        )
+    result = await service.get_scan_result(scan_id, user)
+    artifact = generate_report(result, fmt)
+    return Response(
+        content=artifact.content,
+        media_type=artifact.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{artifact.filename}"'},
+    )
 
 
 @router.get(
