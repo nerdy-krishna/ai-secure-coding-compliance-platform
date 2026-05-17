@@ -122,3 +122,22 @@ def test_generate_report_dispatches_and_rejects_unknown_format():
 
     with pytest.raises(ValueError):
         generate_report(result, "xml")
+
+
+def test_pdf_artifact_is_a_non_empty_valid_pdf():
+    """The PDF generator produces a non-empty artifact whose bytes carry
+    the PDF magic header. WeasyPrint (+ pango) must be installed."""
+    result = _result([_finding(title="PDFI-SQLI"), _finding(id=2, title="PDFI-XSS")])
+    artifact = generate_report(result, "pdf")
+    assert artifact.media_type == "application/pdf"
+    assert artifact.filename.endswith(".pdf")
+    assert isinstance(artifact.content, bytes)
+    assert artifact.content.startswith(b"%PDF-")
+    assert len(artifact.content) > 1_000  # a real rendered document
+    assert artifact.content.rstrip().endswith(b"%%EOF")
+
+
+def test_pdf_renders_with_no_findings():
+    """An empty scan still produces a valid PDF (cover + empty section)."""
+    artifact = generate_report(_result([]), "pdf")
+    assert artifact.content.startswith(b"%PDF-")

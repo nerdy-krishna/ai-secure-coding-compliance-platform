@@ -279,7 +279,7 @@ const ResultsPage: React.FC = () => {
   }, [scanId, projectId, projectName, navigate, queryClient, toast]);
 
   const handleDownloadReport = useCallback(
-    async (format: "html" | "csv") => {
+    async (format: "html" | "csv" | "pdf") => {
       if (!scanId) return;
       try {
         await scanService.downloadReport(scanId, format);
@@ -440,6 +440,13 @@ const ResultsPage: React.FC = () => {
               title="Download the findings report as HTML"
             >
               <Icon.Download size={13} /> HTML
+            </button>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              onClick={() => handleDownloadReport("pdf")}
+              title="Download the findings report as PDF"
+            >
+              <Icon.Download size={13} /> PDF
             </button>
             <button
               className="sccap-btn sccap-btn-sm"

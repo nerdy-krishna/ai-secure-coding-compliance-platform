@@ -124,9 +124,18 @@ FROM base AS api
 # git is needed by GitPython for the repo-clone submission path in
 # scan_service.create_scan_from_git, and for the semgrep rule ingestion
 # sync which clones rule repos via GitPython in BackgroundTasks.
+#
+# libpango / libpangoft2 are WeasyPrint's runtime system dependencies
+# (#70) — the PDF findings-report generator renders via WeasyPrint on
+# the API process. fonts-dejavu-core gives the PDF a predictable
+# fallback font so text renders consistently in air-gapped deployments.
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends \
+        git \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Semgrep (API) ---
