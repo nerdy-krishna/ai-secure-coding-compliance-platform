@@ -414,6 +414,7 @@ async def _build_initial_state(
         "current_scan_status": None,
         "reasoning_llm_config_id": None,
         "utility_llm_config_id": None,
+        "secondary_reasoning_llm_config_id": None,
         "stage_temperatures": None,
         "disable_temperature": None,
         "cross_file_validation": None,

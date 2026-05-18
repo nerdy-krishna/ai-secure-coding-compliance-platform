@@ -236,6 +236,11 @@ const SubmitPage: React.FC = () => {
   const [scanType, setScanType] = useState<ScanType>("AUDIT");
   const [llmConfigId, setLlmConfigId] = useState<string>("");
   const [utilityLlmConfigId, setUtilityLlmConfigId] = useState<string>("");
+  // Opt-in second reasoning LLM (#93 / PRD #91). When enabled, every
+  // analysis agent also runs on this model and the two findings sets
+  // are unioned — what one model misses, the other may catch.
+  const [useSecondaryLlm, setUseSecondaryLlm] = useState(false);
+  const [secondaryLlmConfigId, setSecondaryLlmConfigId] = useState<string>("");
   // Per-stage LLM temperature (#78). Defaults to 0.2 everywhere; the
   // section is read-only until the user clicks Edit, to guard against
   // changing it by accident.
@@ -299,8 +304,9 @@ const SubmitPage: React.FC = () => {
     if (llmConfigs && llmConfigs.length > 0) {
       if (!llmConfigId) setLlmConfigId(llmConfigs[0].id);
       if (!utilityLlmConfigId) setUtilityLlmConfigId(llmConfigs[0].id);
+      if (!secondaryLlmConfigId) setSecondaryLlmConfigId(llmConfigs[0].id);
     }
-  }, [llmConfigs, llmConfigId, utilityLlmConfigId]);
+  }, [llmConfigs, llmConfigId, utilityLlmConfigId, secondaryLlmConfigId]);
 
   // If the user arrived here via "New scan" on a project page, the
   // navState carries a projectId but the projects list is async — when
@@ -384,6 +390,7 @@ const SubmitPage: React.FC = () => {
   const canSubmit = useMemo(() => {
     if (!projectName.trim()) return false;
     if (!llmConfigId || !utilityLlmConfigId) return false;
+    if (useSecondaryLlm && !secondaryLlmConfigId) return false;
     if (selectedFrameworks.length === 0) return false;
     if (mode === "upload") return files.length > 0;
     if (mode === "git") {
@@ -411,6 +418,8 @@ const SubmitPage: React.FC = () => {
     projectName,
     llmConfigId,
     utilityLlmConfigId,
+    useSecondaryLlm,
+    secondaryLlmConfigId,
     selectedFrameworks,
     mode,
     files,
@@ -518,6 +527,12 @@ const SubmitPage: React.FC = () => {
       payload.append("scan_type", scanType);
       payload.append("reasoning_llm_config_id", llmConfigId);
       payload.append("utility_llm_config_id", utilityLlmConfigId);
+      if (useSecondaryLlm && secondaryLlmConfigId) {
+        payload.append(
+          "secondary_reasoning_llm_config_id",
+          secondaryLlmConfigId,
+        );
+      }
       payload.append("temperature_profiler", String(stageTemps.profiler));
       payload.append("temperature_analysis", String(stageTemps.analysis));
       payload.append(
@@ -1154,6 +1169,74 @@ const SubmitPage: React.FC = () => {
                 verification). A small fast model is fine — or reuse the
                 reasoning model.
               </div>
+
+              {/* Opt-in second reasoning LLM (#93 / PRD #91). */}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  fontSize: 12,
+                  color: "var(--fg-muted)",
+                  cursor: "pointer",
+                  marginTop: 16,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={useSecondaryLlm}
+                  onChange={(e) => setUseSecondaryLlm(e.target.checked)}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  <span style={{ fontWeight: 500 }}>
+                    Add a second reasoning LLM
+                  </span>
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 11,
+                      color: "var(--fg-subtle)",
+                    }}
+                  >
+                    Runs every analysis agent on a second model too and
+                    unions the findings — what one model misses, the other
+                    may catch. Roughly doubles analysis cost.
+                  </div>
+                </span>
+              </label>
+              {useSecondaryLlm && (
+                <div style={{ marginTop: 10 }}>
+                  <select
+                    className="sccap-select"
+                    value={secondaryLlmConfigId}
+                    onChange={(e) => setSecondaryLlmConfigId(e.target.value)}
+                    disabled={loadingLlms || !llmConfigs?.length}
+                  >
+                    {loadingLlms && <option>Loading…</option>}
+                    {!loadingLlms && !llmConfigs?.length && (
+                      <option value="">
+                        No LLMs configured — see Admin → LLM
+                      </option>
+                    )}
+                    {llmConfigs?.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} · {c.provider}/{c.model_name}
+                      </option>
+                    ))}
+                  </select>
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: "var(--fg-subtle)",
+                    }}
+                  >
+                    Pick a <em>different</em> model from the reasoning LLM
+                    above — two models have different blind spots.
+                  </div>
+                </div>
+              )}
 
               {/* Per-stage LLM temperature (#78) — read-only until Edit. */}
               <div

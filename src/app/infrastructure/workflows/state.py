@@ -37,6 +37,12 @@ class WorkerState(TypedDict):
     # in `shared.lib.llm_slots`; utility falls back to reasoning when None.
     reasoning_llm_config_id: Optional[uuid.UUID]
     utility_llm_config_id: Optional[uuid.UUID]
+    # Optional second reasoning LLM for the analysis stage (#93 / PRD
+    # #91). When set, `analyze_files_parallel` runs every routed agent
+    # on both this config and `reasoning_llm_config_id`. None ⇒ today's
+    # single-LLM analysis. Set from `Scan.secondary_reasoning_llm_config_id`
+    # by `retrieve`.
+    secondary_reasoning_llm_config_id: Optional[uuid.UUID]
     # Per-stage LLM temperature map ({profiler, analysis, consolidation,
     # merge} → float) chosen at submit time (#78). `resolve_temperature`
     # falls back to 0.2 per stage when a stage or the map is missing.

@@ -259,6 +259,7 @@ async def create_scan(
     scan_type: str = Form(..., pattern=r"^(AUDIT|SUGGEST|REMEDIATE)$"),
     reasoning_llm_config_id: Optional[uuid.UUID] = Form(None),
     utility_llm_config_id: Optional[uuid.UUID] = Form(None),
+    secondary_reasoning_llm_config_id: Optional[uuid.UUID] = Form(None),
     temperature_profiler: float = Form(0.2, ge=0.0, le=1.0),
     temperature_analysis: float = Form(0.2, ge=0.0, le=1.0),
     temperature_consolidation: float = Form(0.2, ge=0.0, le=1.0),
@@ -343,6 +344,19 @@ async def create_scan(
     if utility_llm_config_id is None:
         utility_llm_config_id = reasoning_llm_config_id
 
+    # #93: the second reasoning LLM is opt-in; when provided it must be a
+    # real config. The FK would otherwise surface a bad id as an opaque
+    # 500 — fail fast with a clear 400 instead.
+    if secondary_reasoning_llm_config_id is not None:
+        if await llm_repo.get_by_id(secondary_reasoning_llm_config_id) is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "secondary_reasoning_llm_config_id does not match any "
+                    "LLM configuration."
+                ),
+            )
+
     # Per-stage LLM temperature (#78) — keys match resolve_temperature's
     # stage vocabulary; Form validation already clamped each to 0.0–1.0.
     stage_temperatures = {
@@ -359,6 +373,7 @@ async def create_scan(
         "scan_type": scan_type,
         "reasoning_llm_config_id": reasoning_llm_config_id,
         "utility_llm_config_id": utility_llm_config_id,
+        "secondary_reasoning_llm_config_id": secondary_reasoning_llm_config_id,
         "stage_temperatures": stage_temperatures,
         "disable_temperature": disable_temperature,
         "cross_file_validation": cross_file_validation,

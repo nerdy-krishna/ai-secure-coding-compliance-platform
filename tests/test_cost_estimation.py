@@ -152,3 +152,81 @@ def test_two_slot_estimate_rejects_negative_tokens():
             utility_config=cfg,
             utility_input_tokens=-1,
         )
+
+
+# ---------------------------------------------------------------------------
+# Dual reasoning LLM cost estimation — #93 / PRD #91
+# ---------------------------------------------------------------------------
+
+
+def test_secondary_reasoning_prices_the_analysis_pass_twice():
+    """With a second reasoning LLM the analysis pass is priced again at
+    that config's rate and added to the total; a `reasoning_secondary`
+    slot appears in the breakdown."""
+    reasoning = _config("openai", "gpt-4o", in_per_m=1_000, out_per_m=2_000)
+    utility = _config("openai", "gpt-4o-mini", in_per_m=100, out_per_m=200)
+    secondary = _config(
+        "anthropic", "claude-sonnet-4-6", in_per_m=3_000, out_per_m=6_000
+    )
+    est = cost_estimation.estimate_cost_two_slot(
+        reasoning_config=reasoning,
+        reasoning_input_tokens=1_000,
+        utility_config=utility,
+        utility_input_tokens=0,
+        secondary_reasoning_config=secondary,
+        secondary_reasoning_input_tokens=1_000,
+    )
+    # reasoning:  1000 in @ $1000/1M = $1.00 + 250 out @ $2000/1M = $0.50
+    # secondary:  1000 in @ $3000/1M = $3.00 + 250 out @ $6000/1M = $1.50
+    assert est["slots"]["reasoning"]["total_estimated_cost"] == pytest.approx(1.50)
+    assert est["slots"]["reasoning_secondary"][
+        "total_estimated_cost"
+    ] == pytest.approx(4.50)
+    assert est["total_estimated_cost"] == pytest.approx(6.00)
+    assert est["total_input_tokens"] == 2_000
+
+
+def test_no_secondary_config_leaves_estimate_unchanged():
+    """When no second reasoning LLM is passed the result is the pre-#93
+    two-slot estimate — no `reasoning_secondary` slot."""
+    reasoning = _config("openai", "gpt-4o", in_per_m=1_000, out_per_m=2_000)
+    utility = _config("openai", "gpt-4o-mini", in_per_m=100, out_per_m=200)
+    est = cost_estimation.estimate_cost_two_slot(
+        reasoning_config=reasoning,
+        reasoning_input_tokens=1_000,
+        utility_config=utility,
+        utility_input_tokens=2_000,
+    )
+    assert "reasoning_secondary" not in est["slots"]
+    assert est["total_estimated_cost"] == pytest.approx(1.80)
+
+
+def test_secondary_same_config_same_basis_doubles_the_analysis_cost():
+    """The dual-LLM analysis runs the same agents over the same tokens
+    on both configs — same config + same basis ⇒ exactly double."""
+    cfg = _config("openai", "gpt-4o", in_per_m=1_000, out_per_m=2_000)
+    est = cost_estimation.estimate_cost_two_slot(
+        reasoning_config=cfg,
+        reasoning_input_tokens=1_000,
+        utility_config=cfg,
+        utility_input_tokens=0,
+        secondary_reasoning_config=cfg,
+        secondary_reasoning_input_tokens=1_000,
+    )
+    primary = est["slots"]["reasoning"]["total_estimated_cost"]
+    secondary = est["slots"]["reasoning_secondary"]["total_estimated_cost"]
+    assert secondary == pytest.approx(primary)
+    assert est["total_estimated_cost"] == pytest.approx(2 * primary)
+
+
+def test_secondary_reasoning_rejects_negative_tokens():
+    cfg = _config("openai", "gpt-4o")
+    with pytest.raises(ValueError):
+        cost_estimation.estimate_cost_two_slot(
+            reasoning_config=cfg,
+            reasoning_input_tokens=100,
+            utility_config=cfg,
+            utility_input_tokens=0,
+            secondary_reasoning_config=cfg,
+            secondary_reasoning_input_tokens=-5,
+        )

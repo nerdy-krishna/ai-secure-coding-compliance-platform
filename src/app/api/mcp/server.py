@@ -142,6 +142,17 @@ class SubmitScanInput(BaseModel):
         min_length=1,
         max_length=64,
     )
+    secondary_reasoning_llm_config_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional UUID of a SECOND reasoning LLM (PRD #91). When set, "
+            "every analysis agent runs on both this config and llm_config_id, "
+            "and their findings are unioned — what one model misses the other "
+            "may catch. Confined to the analysis stage. Defaults to null "
+            "(single-LLM analysis)."
+        ),
+        max_length=64,
+    )
     files: Optional[List[SubmitScanFile]] = Field(
         default=None,
         description=(
@@ -314,6 +325,11 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
                 frameworks=payload.frameworks,
                 cross_file_validation=payload.cross_file_validation,
                 disable_temperature=payload.disable_temperature,
+                secondary_reasoning_llm_config_id=(
+                    uuid.UUID(payload.secondary_reasoning_llm_config_id)
+                    if payload.secondary_reasoning_llm_config_id
+                    else None
+                ),
             )
 
             if payload.files:

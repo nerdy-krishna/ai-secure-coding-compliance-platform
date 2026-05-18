@@ -67,6 +67,7 @@ interface ScanStateMsg {
     total_estimated_cost?: number;
     total_input_tokens?: number;
     predicted_output_tokens?: number;
+    slots?: Record<string, { total_estimated_cost?: number }>;
   } | null;
 }
 
@@ -195,6 +196,7 @@ const ScanRunningPage: React.FC = () => {
     total_estimated_cost?: number;
     total_input_tokens?: number;
     predicted_output_tokens?: number;
+    slots?: Record<string, { total_estimated_cost?: number }>;
   } | null>(null);
   const [approving, setApproving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -1207,6 +1209,29 @@ const ScanRunningPage: React.FC = () => {
                   ? `~${costDetails.total_input_tokens.toLocaleString()} input tokens + ~${costDetails.predicted_output_tokens.toLocaleString()} predicted output tokens. Approve to run the full analysis.`
                   : "Approve to run the full analysis."}
               </div>
+              {/* Dual-LLM per-model breakdown (#93) — shown only when a
+                  second reasoning LLM was configured. */}
+              {costDetails?.slots?.reasoning_secondary && (
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 12,
+                    color: "var(--fg-subtle)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  Primary LLM $
+                  {(
+                    costDetails.slots.reasoning?.total_estimated_cost ?? 0
+                  ).toFixed(4)}
+                  {" · "}
+                  Second LLM $
+                  {(
+                    costDetails.slots.reasoning_secondary
+                      ?.total_estimated_cost ?? 0
+                  ).toFixed(4)}
+                </div>
+              )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button

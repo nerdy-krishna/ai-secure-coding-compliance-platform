@@ -170,6 +170,9 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
                 "current_scan_status": current_status,
                 "reasoning_llm_config_id": scan.reasoning_llm_config_id,
                 "utility_llm_config_id": scan.utility_llm_config_id,
+                "secondary_reasoning_llm_config_id": (
+                    scan.secondary_reasoning_llm_config_id
+                ),
                 "stage_temperatures": scan.stage_temperatures,
                 "disable_temperature": scan.disable_temperature,
                 "cross_file_validation": scan.cross_file_validation,

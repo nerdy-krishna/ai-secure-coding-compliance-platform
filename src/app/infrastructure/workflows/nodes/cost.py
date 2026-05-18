@@ -110,7 +110,13 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
         state.get("utility_llm_config_id") or reasoning_llm_config_id
     )
 
+    # Optional second reasoning LLM (#93): the analysis pass is priced
+    # a second time at this config's rate. None ⇒ single-LLM estimate,
+    # unchanged.
+    secondary_reasoning_config_id = state.get("secondary_reasoning_llm_config_id")
+
     total_input_tokens = 0
+    secondary_reasoning_config = None
     async with AsyncSessionLocal() as db:
         llm_repo = LLMConfigRepository(db)
         llm_config = await llm_repo.get_by_id_with_decrypted_key(
@@ -130,6 +136,25 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
                 return {
                     "error_message": f"LLM Config {utility_llm_config_id} not found for cost estimation."
                 }
+
+        if secondary_reasoning_config_id:
+            if secondary_reasoning_config_id == reasoning_llm_config_id:
+                secondary_reasoning_config = llm_config
+            elif secondary_reasoning_config_id == utility_llm_config_id:
+                secondary_reasoning_config = utility_llm_config
+            else:
+                secondary_reasoning_config = (
+                    await llm_repo.get_by_id_with_decrypted_key(
+                        secondary_reasoning_config_id
+                    )
+                )
+                if not secondary_reasoning_config:
+                    return {
+                        "error_message": (
+                            f"LLM Config {secondary_reasoning_config_id} not "
+                            "found for cost estimation."
+                        )
+                    }
 
         for file_path in processing_order:
             file_content = live_codebase[file_path]
@@ -171,11 +196,19 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
     # Two-slot estimate (#69): the analysis dry-run tokens are priced on
     # the reasoning slot. Utility-slot usage is 0 here until the per-file
     # profiler (#71) feeds its dry-run tokens into the utility term.
+    # Dual-LLM (#93): when a second reasoning LLM is configured, the
+    # analysis pass is priced again at its rate over the SAME token
+    # basis (every routed agent runs once per reasoning LLM), so the
+    # `reasoning_secondary` slot reuses `total_input_tokens`.
     cost_details = cost_estimation.estimate_cost_two_slot(
         reasoning_config=llm_config,
         reasoning_input_tokens=total_input_tokens,
         utility_config=utility_llm_config,
         utility_input_tokens=0,
+        secondary_reasoning_config=secondary_reasoning_config,
+        secondary_reasoning_input_tokens=(
+            total_input_tokens if secondary_reasoning_config is not None else 0
+        ),
     )
 
     # V02.3.5 — flag high-value scans for the lifecycle service's

@@ -219,24 +219,37 @@ def estimate_cost_two_slot(
     reasoning_input_tokens: int,
     utility_config: db_models.LLMConfiguration,
     utility_input_tokens: int,
+    secondary_reasoning_config: Optional[db_models.LLMConfiguration] = None,
+    secondary_reasoning_input_tokens: int = 0,
     output_token_percentage: float = 0.25,
 ) -> Dict[str, Any]:
-    """Pre-call cost estimate across both LLM slots of a scan (#69).
+    """Pre-call cost estimate across the LLM slots of a scan (#69, #93).
 
     Each slot's input tokens are priced at *that slot's* configured
-    rate; the two slot totals are summed. When the same config sits in
-    both slots the result equals a single-config estimate over the
+    rate; the slot totals are summed. When the same config sits in
+    multiple slots the result equals a single-config estimate over the
     combined token count. The per-scan ceiling is applied to the
-    combined total, not to either slot alone.
+    combined total, not to any slot alone.
+
+    When ``secondary_reasoning_config`` is supplied (#93 — the opt-in
+    second reasoning LLM), the analysis pass is priced a second time at
+    that config's rate and added to the total; the breakdown gains a
+    ``reasoning_secondary`` slot. When it is ``None`` the result is
+    byte-identical to the pre-#93 two-slot estimate.
 
     The returned dict carries the same top-level keys as
     `estimate_cost_for_prompt` (so existing `cost_details` consumers
     keep working) plus a `slots` breakdown for transparency.
     """
-    for label, toks in (
+    slot_inputs = [
         ("reasoning", reasoning_input_tokens),
         ("utility", utility_input_tokens),
-    ):
+    ]
+    if secondary_reasoning_config is not None:
+        slot_inputs.append(
+            ("secondary_reasoning", secondary_reasoning_input_tokens)
+        )
+    for label, toks in slot_inputs:
         if not isinstance(toks, int) or toks < 0:
             raise ValueError(f"{label}_input_tokens must be a non-negative int")
     if not (0.0 <= output_token_percentage <= 4.0):
@@ -257,7 +270,19 @@ def estimate_cost_two_slot(
 
     reasoning = _slot(reasoning_config, reasoning_input_tokens)
     utility = _slot(utility_config, utility_input_tokens)
-    total = reasoning["total_estimated_cost"] + utility["total_estimated_cost"]
+    slots: Dict[str, Dict[str, float]] = {
+        "reasoning": reasoning,
+        "utility": utility,
+    }
+    priced = [reasoning, utility]
+    if secondary_reasoning_config is not None:
+        reasoning_secondary = _slot(
+            secondary_reasoning_config, secondary_reasoning_input_tokens
+        )
+        slots["reasoning_secondary"] = reasoning_secondary
+        priced.append(reasoning_secondary)
+
+    total = sum(s["total_estimated_cost"] for s in priced)
 
     MAX_PER_SCAN_USD = getattr(settings, "MAX_PER_SCAN_ESTIMATED_COST_USD", 100.0)
     if total > MAX_PER_SCAN_USD:
@@ -265,22 +290,22 @@ def estimate_cost_two_slot(
             f"Estimated cost ${total:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
         )
     logger.debug(
-        "Two-slot cost estimate: reasoning=$%.6f utility=$%.6f total=$%.6f",
+        "Two-slot cost estimate: reasoning=$%.6f utility=$%.6f "
+        "secondary=$%.6f total=$%.6f",
         reasoning["total_estimated_cost"],
         utility["total_estimated_cost"],
+        slots.get("reasoning_secondary", {}).get("total_estimated_cost", 0.0),
         total,
     )
     return {
-        "input_cost": reasoning["input_cost"] + utility["input_cost"],
-        "predicted_output_cost": (
-            reasoning["predicted_output_cost"] + utility["predicted_output_cost"]
-        ),
+        "input_cost": sum(s["input_cost"] for s in priced),
+        "predicted_output_cost": sum(s["predicted_output_cost"] for s in priced),
         "total_estimated_cost": total,
-        "predicted_output_tokens": (
-            reasoning["predicted_output_tokens"] + utility["predicted_output_tokens"]
+        "predicted_output_tokens": sum(
+            s["predicted_output_tokens"] for s in priced
         ),
-        "total_input_tokens": (reasoning["input_tokens"] + utility["input_tokens"]),
-        "slots": {"reasoning": reasoning, "utility": utility},
+        "total_input_tokens": sum(s["input_tokens"] for s in priced),
+        "slots": slots,
     }
 
 

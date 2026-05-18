@@ -112,3 +112,17 @@ def resolve_llm_config_id(
     if slot_for_step(step) is LLMSlot.UTILITY:
         return utility or reasoning
     return reasoning
+
+
+def resolve_secondary_reasoning_llm_config_id(
+    state: Mapping[str, Any],
+) -> Optional[uuid.UUID]:
+    """The optional second reasoning LLM for the analysis stage (#93).
+
+    Returns ``None`` when the scan didn't opt into a second reasoning
+    LLM — analysis then runs single-pass on the primary reasoning
+    config, exactly as before. The second LLM is confined to the
+    analysis step; consolidation / merge / profiler keep resolving
+    through `resolve_llm_config_id`.
+    """
+    return state.get("secondary_reasoning_llm_config_id")

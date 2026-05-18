@@ -131,6 +131,15 @@ class Scan(Base):
     utility_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("llm_configurations.id")
     )
+    # Optional second reasoning LLM for the analysis stage (#93 / PRD
+    # #91). When set, every routed agent runs on BOTH this config and
+    # `reasoning_llm_config_id`; the union of their findings covers each
+    # model's blind spots. Nullable — null means today's single-LLM
+    # analysis. Confined to analysis; consolidation / merge / profiler
+    # stay on the primary reasoning + utility slots.
+    secondary_reasoning_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id")
+    )
     frameworks: Mapped[Optional[List[str]]] = mapped_column(JSONB)
     cost_details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     repository_map: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
