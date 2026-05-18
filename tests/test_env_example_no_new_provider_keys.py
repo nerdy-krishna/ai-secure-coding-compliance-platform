@@ -10,10 +10,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 ENV_EXAMPLE = Path(__file__).resolve().parents[1] / ".env.example"
 
 
 def test_env_example_omits_new_provider_keys():
+    # `.env.example` lives at the repo root but is not copied into the
+    # Docker image, so this filesystem check can only run where the repo
+    # is checked out (host / CI). Skip cleanly in the container rather
+    # than fail on a missing file.
+    if not ENV_EXAMPLE.is_file():
+        pytest.skip(".env.example not present in this environment")
     body = ENV_EXAMPLE.read_text(encoding="utf-8")
     assert "DEEPSEEK_API_KEY" not in body, (
         "DEEPSEEK_API_KEY placeholder must not be added to .env.example "
