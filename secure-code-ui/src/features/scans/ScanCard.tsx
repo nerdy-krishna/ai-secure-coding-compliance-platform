@@ -14,6 +14,7 @@ import { deriveScanProgress, type ProgressEvent } from "../../shared/lib/scanPro
 import { displayStatus, statusKind } from "../../shared/lib/scanStatus";
 import type { ScanHistoryItem } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
+import { StageIcon } from "../../shared/ui/StageIcon";
 
 const SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"] as const;
 const SEV_COLOR: Record<string, string> = {
@@ -104,58 +105,111 @@ export const ScanCard: React.FC<ScanCardProps> = ({
             >
               {progress.badge}
             </div>
-            {/* Compact stage timeline (#86 follow-up): one dot per
-                pipeline stage, coloured by its derived state. */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                marginTop: 2,
-              }}
-            >
+            {/* Stage timeline (#86): an icon per pipeline stage with
+                its name beneath, coloured by derived state. */}
+            <div style={{ display: "flex", marginTop: 6 }}>
               {progress.stages.map((s, i) => {
-                const dotColor =
+                const last = i === progress.stages.length - 1;
+                const segDone =
+                  i > 0 && progress.stages[i - 1].state === "done";
+                const circleBg =
                   s.state === "done"
                     ? "var(--success)"
                     : s.state === "running"
                       ? "var(--primary)"
                       : s.state === "paused"
                         ? "var(--medium)"
-                        : "transparent";
-                const prevDone =
-                  i > 0 && progress.stages[i - 1].state === "done";
+                        : "var(--bg-elev)";
+                const labelColor =
+                  s.state === "running"
+                    ? "var(--primary)"
+                    : s.state === "paused"
+                      ? "var(--medium)"
+                      : s.state === "done"
+                        ? "var(--fg-muted)"
+                        : "var(--fg-subtle)";
                 return (
-                  <React.Fragment key={s.key}>
-                    {i > 0 && (
+                  <div
+                    key={s.key}
+                    title={`${s.label} — ${s.state}`}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        width: "100%",
+                      }}
+                    >
                       <span
                         style={{
                           flex: 1,
                           height: 2,
-                          background: prevDone
-                            ? "var(--success)"
-                            : "var(--border)",
+                          background:
+                            i === 0
+                              ? "transparent"
+                              : segDone
+                                ? "var(--success)"
+                                : "var(--border)",
                         }}
                       />
-                    )}
+                      <span
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: "50%",
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          background: circleBg,
+                          color:
+                            s.state === "pending"
+                              ? "var(--fg-subtle)"
+                              : "#fff",
+                          border:
+                            s.state === "pending"
+                              ? "1.5px solid var(--border)"
+                              : "1.5px solid transparent",
+                          boxShadow:
+                            s.state === "running"
+                              ? "0 0 0 3px var(--primary-weak)"
+                              : "none",
+                        }}
+                      >
+                        <StageIcon name={s.icon} size={13} />
+                      </span>
+                      <span
+                        style={{
+                          flex: 1,
+                          height: 2,
+                          background: last
+                            ? "transparent"
+                            : s.state === "done"
+                              ? "var(--success)"
+                              : "var(--border)",
+                        }}
+                      />
+                    </div>
                     <span
-                      title={`${s.label} — ${s.state}`}
                       style={{
-                        width: s.state === "running" ? 10 : 8,
-                        height: s.state === "running" ? 10 : 8,
-                        borderRadius: "50%",
-                        flexShrink: 0,
-                        background: dotColor,
-                        border:
-                          s.state === "pending"
-                            ? "1.5px solid var(--border)"
-                            : "1.5px solid transparent",
-                        boxShadow:
-                          s.state === "running"
-                            ? "0 0 0 3px var(--primary-weak)"
-                            : "none",
+                        marginTop: 5,
+                        fontSize: 9.5,
+                        lineHeight: 1.25,
+                        textAlign: "center",
+                        color: labelColor,
+                        fontWeight: s.state === "running" ? 600 : 400,
                       }}
-                    />
-                  </React.Fragment>
+                    >
+                      {s.label}
+                    </span>
+                  </div>
                 );
               })}
             </div>

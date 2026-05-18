@@ -24,6 +24,7 @@ import {
 } from "../../shared/lib/scanStatus";
 import type { PrescanReviewResponse } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
+import { StageIcon } from "../../shared/ui/StageIcon";
 import { deriveScanProgress } from "../../shared/lib/scanProgress";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
 import { Modal } from "../../shared/ui/Modal";
@@ -133,24 +134,6 @@ const mergeScanEvents = (
     a.event_id > 0 && b.event_id > 0 ? a.event_id - b.event_id : 0,
   );
   return merged.slice(-500);
-};
-
-// Per-stage rail icons, keyed by the stage `key` from `scanProgress`.
-// The rail itself (stage list, ordering, derived state) is owned by the
-// pure `deriveScanProgress` deriver (#85) — this map is presentation
-// only.
-const STAGE_ICONS: Record<string, React.ReactNode> = {
-  QUEUED: <Icon.Clock size={14} />,
-  ANALYZING_CONTEXT: <Icon.Folder size={14} />,
-  PRESCAN_REVIEW: <Icon.Shield size={14} />,
-  PROFILING_REVIEW: <Icon.Dollar size={14} />,
-  PROFILING_FILES: <Icon.Folder size={14} />,
-  ESTIMATING_COST: <Icon.Dollar size={14} />,
-  COST_REVIEW: <Icon.Dollar size={14} />,
-  RUNNING_AGENTS: <Icon.Cpu size={14} />,
-  CONSOLIDATING: <Icon.Layers size={14} />,
-  CROSS_FILE_VALIDATION: <Icon.Search size={14} />,
-  GENERATING_REPORTS: <Icon.File size={14} />,
 };
 
 const TERMINAL_STATUSES = new Set([
@@ -1043,7 +1026,7 @@ const ScanRunningPage: React.FC = () => {
                       ) : state === "paused" ? (
                         <Icon.Pause size={12} />
                       ) : (
-                        STAGE_ICONS[s.key] ?? <Icon.Clock size={14} />
+                        <StageIcon name={s.icon} size={14} />
                       )}
                     </div>
                     <div

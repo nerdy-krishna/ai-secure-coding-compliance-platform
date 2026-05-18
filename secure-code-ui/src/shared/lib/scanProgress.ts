@@ -26,6 +26,10 @@ export interface ProgressEvent {
 export interface RailStage {
   key: string;
   label: string;
+  /** Icon-component key for this stage — rendered via `StageIcon`
+   *  (`shared/ui/StageIcon`). Shared so every page that shows the scan
+   *  pipeline (status page, scan cards) uses one consistent icon set. */
+  icon: string;
   /** True for the three human-in-the-loop approval gates. */
   gate?: boolean;
 }
@@ -46,21 +50,32 @@ export interface ScanProgress {
 // The canonical scan pipeline, in display order. Each `key` matches the
 // `stage_name` the worker emits for that stage.
 const BASE_STAGES: RailStage[] = [
-  { key: "QUEUED", label: "Queued" },
-  { key: "ANALYZING_CONTEXT", label: "Analyzing context" },
-  { key: "PRESCAN_REVIEW", label: "Pre-LLM scan review", gate: true },
-  { key: "PROFILING_REVIEW", label: "Profiling cost review", gate: true },
-  { key: "PROFILING_FILES", label: "Profiling files" },
-  { key: "ESTIMATING_COST", label: "Estimating cost" },
-  { key: "COST_REVIEW", label: "Cost review", gate: true },
-  { key: "RUNNING_AGENTS", label: "Running security agents" },
-  { key: "CONSOLIDATING", label: "Consolidating findings" },
-  { key: "GENERATING_REPORTS", label: "Generating reports" },
+  { key: "QUEUED", label: "Queued", icon: "Clock" },
+  { key: "ANALYZING_CONTEXT", label: "Analyzing context", icon: "Layers" },
+  {
+    key: "PRESCAN_REVIEW",
+    label: "Pre-LLM scan review",
+    icon: "Shield",
+    gate: true,
+  },
+  {
+    key: "PROFILING_REVIEW",
+    label: "Profiling cost review",
+    icon: "Gauge",
+    gate: true,
+  },
+  { key: "PROFILING_FILES", label: "Profiling files", icon: "Search" },
+  { key: "ESTIMATING_COST", label: "Estimating cost", icon: "Dollar" },
+  { key: "COST_REVIEW", label: "Cost review", icon: "Check", gate: true },
+  { key: "RUNNING_AGENTS", label: "Running security agents", icon: "Cpu" },
+  { key: "CONSOLIDATING", label: "Consolidating findings", icon: "Filter" },
+  { key: "GENERATING_REPORTS", label: "Generating reports", icon: "BookOpen" },
 ];
 
 const CROSS_FILE_STAGE: RailStage = {
   key: "CROSS_FILE_VALIDATION",
   label: "Cross-file validation",
+  icon: "Link",
 };
 
 const TERMINAL_STATUSES = new Set([
