@@ -236,6 +236,16 @@ const SubmitPage: React.FC = () => {
   const [scanType, setScanType] = useState<ScanType>("AUDIT");
   const [llmConfigId, setLlmConfigId] = useState<string>("");
   const [utilityLlmConfigId, setUtilityLlmConfigId] = useState<string>("");
+  // Per-stage LLM temperature (#78). Defaults to 0.2 everywhere; the
+  // section is read-only until the user clicks Edit, to guard against
+  // changing it by accident.
+  const [stageTemps, setStageTemps] = useState({
+    profiler: 0.2,
+    analysis: 0.2,
+    consolidation: 0.2,
+    merge: 0.2,
+  });
+  const [tempsUnlocked, setTempsUnlocked] = useState(false);
   const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
@@ -501,6 +511,13 @@ const SubmitPage: React.FC = () => {
       payload.append("scan_type", scanType);
       payload.append("reasoning_llm_config_id", llmConfigId);
       payload.append("utility_llm_config_id", utilityLlmConfigId);
+      payload.append("temperature_profiler", String(stageTemps.profiler));
+      payload.append("temperature_analysis", String(stageTemps.analysis));
+      payload.append(
+        "temperature_consolidation",
+        String(stageTemps.consolidation),
+      );
+      payload.append("temperature_merge", String(stageTemps.merge));
       // V02.2.1: intersect selectedFrameworks with the loaded allowlist before submitting
       const safeFrameworks = selectedFrameworks.filter((n) => frameworks?.some((f) => f.name === n));
       payload.append("frameworks", safeFrameworks.join(","));
@@ -1127,6 +1144,93 @@ const SubmitPage: React.FC = () => {
                 Drives the cheap mechanical steps (profiling, fix
                 verification). A small fast model is fine — or reuse the
                 reasoning model.
+              </div>
+
+              {/* Per-stage LLM temperature (#78) — read-only until Edit. */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginTop: 18,
+                  marginBottom: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--fg-muted)",
+                    fontWeight: 500,
+                  }}
+                >
+                  Model temperature
+                </span>
+                {!tempsUnlocked && (
+                  <button
+                    type="button"
+                    className="sccap-btn sccap-btn-sm"
+                    onClick={() => setTempsUnlocked(true)}
+                  >
+                    <Icon.Edit size={12} /> Edit
+                  </button>
+                )}
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 8,
+                }}
+              >
+                {(
+                  [
+                    ["profiler", "Profiler"],
+                    ["analysis", "Analysis"],
+                    ["consolidation", "Consolidation"],
+                    ["merge", "Merge"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <label
+                    key={key}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      fontSize: 12,
+                      color: "var(--fg-muted)",
+                    }}
+                  >
+                    {label}
+                    <input
+                      type="number"
+                      className="sccap-input"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={stageTemps[key]}
+                      disabled={!tempsUnlocked}
+                      onChange={(e) => {
+                        const v = Math.min(
+                          1,
+                          Math.max(0, Number(e.target.value) || 0),
+                        );
+                        setStageTemps((prev) => ({ ...prev, [key]: v }));
+                      }}
+                      style={{ width: 72 }}
+                    />
+                  </label>
+                ))}
+              </div>
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: "var(--fg-subtle)",
+                }}
+              >
+                Lower is more deterministic. Defaults to 0.2 per stage —
+                click Edit to tune.
               </div>
 
               <label

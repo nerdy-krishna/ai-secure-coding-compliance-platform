@@ -30,7 +30,11 @@ from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRe
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib import cost_estimation
-from app.shared.lib.llm_slots import LLMStep, resolve_llm_config_id
+from app.shared.lib.llm_slots import (
+    LLMStep,
+    resolve_llm_config_id,
+    resolve_temperature,
+)
 from app.shared.lib.scan_status import (
     STATUS_ANALYZING_CONTEXT,
     STATUS_PENDING_PROFILING_APPROVAL,
@@ -153,7 +157,10 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     repo_files = getattr(repository_map, "files", None) or {}
 
     try:
-        profiler = await create_file_profiler(utility_llm_config_id)
+        profiler = await create_file_profiler(
+            utility_llm_config_id,
+            temperature=resolve_temperature(LLMStep.PROFILER, state),
+        )
     except Exception as exc:  # noqa: BLE001
         return {"error_message": f"Could not start file profiler: {exc}"}
 

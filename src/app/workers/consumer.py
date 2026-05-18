@@ -400,6 +400,7 @@ async def _build_initial_state(
         "current_scan_status": None,
         "reasoning_llm_config_id": None,
         "utility_llm_config_id": None,
+        "stage_temperatures": None,
         "files": None,
         "initial_file_map": None,
         "final_file_map": None,

@@ -55,6 +55,38 @@ def slot_for_step(step: LLMStep) -> LLMSlot:
     return _STEP_TO_SLOT[step]
 
 
+# Default per-stage LLM temperature when a scan didn't set one (#78).
+DEFAULT_TEMPERATURE: float = 0.2
+
+# Maps an LLM step to its key in the scan's `stage_temperatures` map.
+# FIX_VERIFICATION is a tree-sitter parse check, not an LLM call — it
+# has no temperature key and resolves to the default.
+_STEP_TO_TEMP_KEY: dict[LLMStep, str] = {
+    LLMStep.PROFILER: "profiler",
+    LLMStep.ANALYSIS: "analysis",
+    LLMStep.CONSOLIDATION: "consolidation",
+    LLMStep.MERGE_AGENT: "merge",
+}
+
+
+def resolve_temperature(step: LLMStep, state: Mapping[str, Any]) -> float:
+    """Pick the LLM temperature for a step from the scan's per-stage map.
+
+    Reads `stage_temperatures` from *state* — a ``{stage: float}`` map
+    set on the scan at submit time. Falls back to `DEFAULT_TEMPERATURE`
+    when the step, the map, or a sane value (0.0–2.0) is missing — the
+    twin of `resolve_llm_config_id`, keyed on the same `LLMStep` enum.
+    """
+    key = _STEP_TO_TEMP_KEY.get(step)
+    if key is None:
+        return DEFAULT_TEMPERATURE
+    temps = state.get("stage_temperatures") or {}
+    value = temps.get(key)
+    if isinstance(value, (int, float)) and 0.0 <= float(value) <= 2.0:
+        return float(value)
+    return DEFAULT_TEMPERATURE
+
+
 def resolve_llm_config_id(
     step: LLMStep,
     state: Mapping[str, Any],

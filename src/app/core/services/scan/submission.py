@@ -130,6 +130,7 @@ class ScanSubmissionService:
         reasoning_llm_config_id: uuid.UUID,
         frameworks: List[str],
         utility_llm_config_id: Optional[uuid.UUID] = None,
+        stage_temperatures: Optional[Dict[str, Any]] = None,
         repo_url: Optional[str] = None,
         selected_files: Optional[List[str]] = None,
     ) -> db_models.Scan:
@@ -234,6 +235,7 @@ class ScanSubmissionService:
                 scan_type=scan_type,
                 reasoning_llm_config_id=reasoning_llm_config_id,
                 utility_llm_config_id=utility_llm_config_id,
+                stage_temperatures=stage_temperatures,
                 frameworks=frameworks,
                 tenant_id=tenant_id,
             )

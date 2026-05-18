@@ -21,6 +21,7 @@ from typing import Any, NamedTuple, Optional, Type, TypeVar
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, PromptedOutput
+from pydantic_ai.settings import ModelSettings
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIModel
@@ -79,6 +80,13 @@ def _is_tool_choice_unsupported(err: Exception) -> bool:
     )
 
 
+def _is_temperature_unsupported(err: Exception) -> bool:
+    """True when an LLM error indicates the model rejected the
+    `temperature` parameter — some reasoner models do. The call is
+    retried once without temperature so the scan still completes (#78)."""
+    return "temperature" in str(err).lower()
+
+
 class LLMClient:
     """A client for a specific LLM configuration.
 
@@ -94,7 +102,13 @@ class LLMClient:
     """
 
     # V15.4.1: restrict attributes and prevent post-init mutation.
-    __slots__ = ("provider_name", "db_llm_config", "decrypted_api_key", "_frozen")
+    __slots__ = (
+        "provider_name",
+        "db_llm_config",
+        "decrypted_api_key",
+        "temperature",
+        "_frozen",
+    )
 
     def __setattr__(self, name: str, value: object) -> None:
         if getattr(self, "_frozen", False):
@@ -103,7 +117,11 @@ class LLMClient:
             )
         super().__setattr__(name, value)
 
-    def __init__(self, llm_config: DB_LLMConfiguration):
+    def __init__(
+        self,
+        llm_config: DB_LLMConfiguration,
+        temperature: Optional[float] = None,
+    ):
         self.db_llm_config = llm_config
         self.provider_name = llm_config.provider.lower()
         decrypted_api_key = getattr(llm_config, "decrypted_api_key", None)
@@ -112,11 +130,14 @@ class LLMClient:
                 f"API key for LLM config {llm_config.id} is missing or not decrypted."
             )
         self.decrypted_api_key = decrypted_api_key
+        # Per-stage LLM temperature (#78). None ⇒ provider default.
+        self.temperature = temperature
         self._frozen = True  # V15.4.1: freeze instance; no further attribute writes.
         logger.info(
-            "LLMClient initialized for provider=%s model=%s",
+            "LLMClient initialized for provider=%s model=%s temperature=%s",
             self.provider_name,
             llm_config.model_name,
+            temperature,
         )
 
     # ------------------------------------------------------------------
@@ -206,7 +227,7 @@ class LLMClient:
         model = self._build_model()
         model_key = f"{self.provider_name}:{self.db_llm_config.model_name}"
 
-        def _make_agent(prompted: bool) -> Agent:
+        def _make_agent(prompted: bool, temperature: Optional[float]) -> Agent:
             """Build the Pydantic AI agent.
 
             `system_prompt=` is the stable cache prefix — on Anthropic
@@ -214,7 +235,9 @@ class LLMClient:
             switches structured output from the default tool-based
             strategy to `PromptedOutput`, which needs no `tool_choice`
             and works on models (e.g. DeepSeek's reasoner) that reject
-            function calling.
+            function calling. `temperature` (#78) is applied via
+            model settings when set; ``None`` leaves the provider
+            default.
             """
             kwargs: dict[str, Any] = {
                 "output_type": (
@@ -224,10 +247,12 @@ class LLMClient:
             }
             if system_prompt:
                 kwargs["system_prompt"] = system_prompt
+            if temperature is not None:
+                kwargs["model_settings"] = ModelSettings(temperature=temperature)
             return Agent(model, **kwargs)
 
         use_prompted = model_key in _PROMPTED_OUTPUT_MODELS
-        agent: Agent = _make_agent(prompted=use_prompted)
+        agent: Agent = _make_agent(prompted=use_prompted, temperature=self.temperature)
 
         # V14.2.4 / V16.2.5 / V13.4.2: mask prompt payload before logging to
         # prevent PII/secrets reaching Loki when DEBUG is enabled at runtime.
@@ -283,24 +308,42 @@ class LLMClient:
         try:
             _capture(await agent.run(prompt))
         except Exception as e:
-            # A model that rejects tool-based structured output (e.g.
-            # DeepSeek's reasoner: "does not support this tool_choice")
-            # gets one retry with prompt-based output, which needs no
-            # tool call. The model is remembered so later calls skip
-            # the failed tool attempt entirely.
-            if not use_prompted and _is_tool_choice_unsupported(e):
+            # One recovery retry for two known model quirks:
+            #  - a model that rejects tool-based structured output (e.g.
+            #    DeepSeek's reasoner: "does not support this tool_choice")
+            #    is retried with prompt-based output and remembered;
+            #  - a model that rejects the `temperature` parameter (#78)
+            #    is retried without it.
+            tool_issue = not use_prompted and _is_tool_choice_unsupported(e)
+            temp_issue = self.temperature is not None and (
+                _is_temperature_unsupported(e)
+            )
+            if tool_issue or temp_issue:
                 logger.warning(
-                    "Model %s rejected tool-based structured output (%s); "
-                    "retrying with prompt-based output.",
+                    "Model %s rejected %s (%s); retrying.",
                     model_key,
+                    " and ".join(
+                        x
+                        for x, on in (
+                            ("tool-based output", tool_issue),
+                            ("temperature", temp_issue),
+                        )
+                        if on
+                    ),
                     e,
                 )
-                _PROMPTED_OUTPUT_MODELS.add(model_key)
+                if tool_issue:
+                    _PROMPTED_OUTPUT_MODELS.add(model_key)
                 try:
-                    _capture(await _make_agent(prompted=True).run(prompt))
+                    _capture(
+                        await _make_agent(
+                            prompted=use_prompted or tool_issue,
+                            temperature=None if temp_issue else self.temperature,
+                        ).run(prompt)
+                    )
                 except Exception as e2:
                     logger.error(
-                        "Pydantic AI run failed (prompted retry) "
+                        "Pydantic AI run failed (recovery retry) "
                         "(provider=%s, model=%s): %s",
                         self.provider_name,
                         self.db_llm_config.model_name,
@@ -399,11 +442,15 @@ class LLMClient:
         )
 
 
-async def get_llm_client(llm_config_id: uuid.UUID) -> Optional[LLMClient]:
+async def get_llm_client(
+    llm_config_id: uuid.UUID,
+    temperature: Optional[float] = None,
+) -> Optional[LLMClient]:
     """Factory that resolves the DB config, decrypts its API key, and
     returns an LLMClient ready to run. The repo attaches the decrypted
     key to the ORM instance as a dynamic attribute — LLMClient reads it
-    from there."""
+    from there. `temperature` (#78) is the per-stage LLM temperature;
+    ``None`` leaves the provider default."""
     logger.info(
         "Attempting to get LLM client for config ID.",
         extra={"llm_config_id": str(llm_config_id)},
@@ -421,4 +468,4 @@ async def get_llm_client(llm_config_id: uuid.UUID) -> Optional[LLMClient]:
     logger.info(
         "Successfully retrieved LLM config and returning new LLMClient instance."
     )
-    return LLMClient(config)
+    return LLMClient(config, temperature=temperature)

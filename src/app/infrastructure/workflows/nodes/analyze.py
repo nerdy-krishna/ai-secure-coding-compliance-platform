@@ -29,7 +29,11 @@ from app.infrastructure.workflows.nodes.cost import CHUNK_ONLY_IF_LARGER_THAN
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
 from app.shared.lib.agent_routing import resolve_agents_for_file
-from app.shared.lib.llm_slots import LLMStep, resolve_llm_config_id
+from app.shared.lib.llm_slots import (
+    LLMStep,
+    resolve_llm_config_id,
+    resolve_temperature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +114,12 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     if not all_relevant_agents:
         return {"error_message": "Orchestrator is missing 'all_relevant_agents'."}
 
-    # Per-file analysis runs on the reasoning slot (#69).
+    # Per-file analysis runs on the reasoning slot (#69) at the
+    # analysis stage's per-scan temperature (#78).
     reasoning_llm_id = resolve_llm_config_id(LLMStep.ANALYSIS, state)
     if not reasoning_llm_id:
         return {"error_message": "Orchestrator is missing 'reasoning_llm_config_id'."}
+    analysis_temperature = resolve_temperature(LLMStep.ANALYSIS, state)
     # --- END REVISED GUARD CLAUSE BLOCK ---
 
     generic_agent_graph = build_generic_specialized_agent_graph()
@@ -264,6 +270,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                 initial_agent_state: SpecializedAgentState = {
                     "scan_id": scan_id,
                     "llm_config_id": reasoning_llm_id,
+                    "temperature": analysis_temperature,
                     "filename": file_path,
                     "code_snippet": enriched_code,
                     "file_content_for_verification": file_content,

@@ -310,9 +310,16 @@ def _build_merged_finding(
     )
 
 
-async def create_finding_consolidator(reasoning_llm_config_id) -> FindingConsolidator:
-    """Build a `FindingConsolidator` backed by the scan's reasoning slot."""
-    client = await get_llm_client(llm_config_id=reasoning_llm_config_id)
+async def create_finding_consolidator(
+    reasoning_llm_config_id, temperature: Optional[float] = None
+) -> FindingConsolidator:
+    """Build a `FindingConsolidator` backed by the scan's reasoning slot.
+
+    `temperature` (#78) is the consolidation stage's per-scan temperature.
+    """
+    client = await get_llm_client(
+        llm_config_id=reasoning_llm_config_id, temperature=temperature
+    )
     if client is None:
         raise RuntimeError(
             f"Reasoning LLM config {reasoning_llm_config_id} could not be "

@@ -728,7 +728,11 @@ async def analysis_node(
     if not llm_config_id:
         return {"error": f"[{agent_name}] LLM configuration ID not provided."}
 
-    llm_client = await get_llm_client(llm_config_id=llm_config_id)
+    # Per-stage temperature (#78); the same client is reused for the
+    # snippet-correction sub-call so it inherits the analysis temperature.
+    llm_client = await get_llm_client(
+        llm_config_id=llm_config_id, temperature=state.get("temperature")
+    )
     if not llm_client:
         return {"error": f"[{agent_name}] Failed to initialize LLM client."}
 

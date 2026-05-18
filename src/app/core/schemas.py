@@ -263,6 +263,9 @@ class SpecializedAgentState(TypedDict, total=False):
 
     scan_id: uuid.UUID
     llm_config_id: Optional[uuid.UUID]
+    # Per-stage LLM temperature for the analysis step (#78). None ⇒
+    # provider default.
+    temperature: Optional[float]
     filename: str
     code_snippet: str
     workflow_mode: str

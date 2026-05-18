@@ -24,7 +24,11 @@ from app.infrastructure.agents.finding_consolidator import (
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
-from app.shared.lib.llm_slots import LLMStep, resolve_llm_config_id
+from app.shared.lib.llm_slots import (
+    LLMStep,
+    resolve_llm_config_id,
+    resolve_temperature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +65,10 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         by_file.setdefault(f.file_path, []).append(f)
 
     try:
-        consolidator = await create_finding_consolidator(reasoning_llm_id)
+        consolidator = await create_finding_consolidator(
+            reasoning_llm_id,
+            temperature=resolve_temperature(LLMStep.CONSOLIDATION, state),
+        )
     except Exception as exc:  # noqa: BLE001
         return {"error_message": f"Could not start finding consolidator: {exc}"}
 

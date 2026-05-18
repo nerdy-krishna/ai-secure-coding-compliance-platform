@@ -259,6 +259,10 @@ async def create_scan(
     scan_type: str = Form(..., pattern=r"^(AUDIT|SUGGEST|REMEDIATE)$"),
     reasoning_llm_config_id: Optional[uuid.UUID] = Form(None),
     utility_llm_config_id: Optional[uuid.UUID] = Form(None),
+    temperature_profiler: float = Form(0.2, ge=0.0, le=1.0),
+    temperature_analysis: float = Form(0.2, ge=0.0, le=1.0),
+    temperature_consolidation: float = Form(0.2, ge=0.0, le=1.0),
+    temperature_merge: float = Form(0.2, ge=0.0, le=1.0),
     frameworks: str = Form(
         ..., min_length=1, max_length=2048
     ),  # Received as a string, will be processed in service
@@ -337,6 +341,15 @@ async def create_scan(
     if utility_llm_config_id is None:
         utility_llm_config_id = reasoning_llm_config_id
 
+    # Per-stage LLM temperature (#78) — keys match resolve_temperature's
+    # stage vocabulary; Form validation already clamped each to 0.0–1.0.
+    stage_temperatures = {
+        "profiler": temperature_profiler,
+        "analysis": temperature_analysis,
+        "consolidation": temperature_consolidation,
+        "merge": temperature_merge,
+    }
+
     common_args = {
         "project_name": project_name,
         "user_id": user.id,
@@ -344,6 +357,7 @@ async def create_scan(
         "scan_type": scan_type,
         "reasoning_llm_config_id": reasoning_llm_config_id,
         "utility_llm_config_id": utility_llm_config_id,
+        "stage_temperatures": stage_temperatures,
         "frameworks": [fw.strip() for fw in frameworks.split(",")],
         "selected_files": selected_files_list,
     }

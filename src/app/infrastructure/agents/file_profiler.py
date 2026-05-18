@@ -197,9 +197,16 @@ def _fallback_profile(file_path: str) -> FileProfile:
     )
 
 
-async def create_file_profiler(utility_llm_config_id) -> FileProfiler:
-    """Build a `FileProfiler` backed by the scan's utility LLM slot."""
-    client = await get_llm_client(llm_config_id=utility_llm_config_id)
+async def create_file_profiler(
+    utility_llm_config_id, temperature: Optional[float] = None
+) -> FileProfiler:
+    """Build a `FileProfiler` backed by the scan's utility LLM slot.
+
+    `temperature` (#78) is the profiler stage's per-scan temperature.
+    """
+    client = await get_llm_client(
+        llm_config_id=utility_llm_config_id, temperature=temperature
+    )
     if client is None:
         raise RuntimeError(
             f"Utility LLM config {utility_llm_config_id} could not be loaded "

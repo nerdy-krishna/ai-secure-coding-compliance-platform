@@ -27,7 +27,11 @@ from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.llm_client import get_llm_client
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.files import get_language_from_filename
-from app.shared.lib.llm_slots import LLMStep, resolve_llm_config_id
+from app.shared.lib.llm_slots import (
+    LLMStep,
+    resolve_llm_config_id,
+    resolve_temperature,
+)
 
 try:
     from tree_sitter_languages import get_parser as ts_get_parser
@@ -78,12 +82,15 @@ async def _run_merge_agent(
     code_block: str,
     conflicting_fixes: List[FixResult],
     code_to_search_in: str,
+    temperature: Optional[float] = None,
 ) -> Optional[FixResult]:
     """
     Invokes an LLM to merge multiple conflicting fix suggestions into a single, superior fix.
     Includes verification, syntax checking, and retry logic.
+
+    `temperature` (#78) is the merge stage's per-scan temperature.
     """
-    llm_client = await get_llm_client(reasoning_llm_config_id)
+    llm_client = await get_llm_client(reasoning_llm_config_id, temperature=temperature)
     if not llm_client:
         return None
 
@@ -199,6 +206,7 @@ async def _resolve_file_fix_conflicts(
     reasoning_llm_config_id: uuid.UUID,
     owasp_rank_map: Dict[str, int],
     scan_id: uuid.UUID,
+    merge_temperature: Optional[float] = None,
 ) -> List[FixResult]:
     """Given all proposed fixes for one file, return the non-overlapping set to apply.
 
@@ -285,6 +293,7 @@ async def _resolve_file_fix_conflicts(
                     original_block,
                     conflict_group,
                     file_content,
+                    temperature=merge_temperature,
                 )
 
             # Fall back to highest-priority if merge agent fails or context missing.
@@ -326,12 +335,14 @@ async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
         return {}
 
     # Consolidation + the remediation merge agent run on the reasoning
-    # slot (#69) — code-quality-sensitive work.
+    # slot (#69) — code-quality-sensitive work. The merge agent uses the
+    # merge stage's per-scan temperature (#78).
     reasoning_llm_id = resolve_llm_config_id(LLMStep.CONSOLIDATION, state)
     if not reasoning_llm_id:
         return {
             "error_message": "consolidate_and_patch requires reasoning_llm_config_id."
         }
+    merge_temperature = resolve_temperature(LLMStep.MERGE_AGENT, state)
 
     live_codebase = state.get("live_codebase") or {}
     initial_file_map = state.get("initial_file_map") or {}
@@ -380,6 +391,7 @@ async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
                     reasoning_llm_id,
                     owasp_rank_map,
                     scan_id,
+                    merge_temperature=merge_temperature,
                 )
                 if not resolved:
                     continue

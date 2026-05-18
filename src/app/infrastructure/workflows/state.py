@@ -37,6 +37,10 @@ class WorkerState(TypedDict):
     # in `shared.lib.llm_slots`; utility falls back to reasoning when None.
     reasoning_llm_config_id: Optional[uuid.UUID]
     utility_llm_config_id: Optional[uuid.UUID]
+    # Per-stage LLM temperature map ({profiler, analysis, consolidation,
+    # merge} → float) chosen at submit time (#78). `resolve_temperature`
+    # falls back to 0.2 per stage when a stage or the map is missing.
+    stage_temperatures: Optional[Dict[str, Any]]
     files: Optional[Dict[str, str]]
     initial_file_map: Optional[Dict[str, str]]
     final_file_map: Optional[Dict[str, str]]

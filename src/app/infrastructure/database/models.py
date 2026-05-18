@@ -141,6 +141,10 @@ class Scan(Base):
     # consumed downstream by content-based routing and consolidation.
     # Nullable for scans created before the profiler existed.
     file_profiles: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
+    # Per-stage LLM temperature chosen at submit time (#78): a
+    # {profiler, analysis, consolidation, merge} → float map. Nullable;
+    # `resolve_temperature` falls back to 0.2 per stage when absent.
+    stage_temperatures: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     context_bundles: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB)
     summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     # CycloneDX SBOM emitted by OSV-Scanner during the deterministic
