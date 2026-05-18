@@ -123,8 +123,14 @@ the user:
   roster (#76 / #80).
 - Files larger than `CHUNK_ONLY_IF_LARGER_THAN` (~150 000 chars) are
   split with `semantic_chunker`; small files run as a single chunk.
-- Concurrency is bounded by a single
-  `asyncio.Semaphore(CONCURRENT_LLM_LIMIT=5)` over the union of
+- **Dual-LLM analysis (#93)**: when the scan opted into a second
+  reasoning LLM, the `analysis_dispatch` planner runs every routed
+  agent on **both** reasoning models; the two findings sets union in
+  `consolidate_findings`, and each finding is stamped with the model
+  that produced it (`detected_by_llms`, #94). A single-LLM scan is
+  unchanged.
+- Concurrency is bounded by an `asyncio.Semaphore(CONCURRENT_LLM_LIMIT=5)`
+  **per distinct reasoning-LLM config** over the union of
   file × chunk × agent calls.
 - No mid-graph DB writes. Findings + `proposed_fixes` flow through
   state to `consolidate_findings` and beyond.

@@ -48,6 +48,35 @@ node hard-codes a config id:
 steps fall back to the reasoning config when the utility slot is
 unset, so legacy scans keep working.
 
+## Optional second reasoning LLM (#93)
+
+A scan may also set `Scan.secondary_reasoning_llm_config_id`. When it
+is present, the **analysis** step runs every routed agent on *both*
+reasoning LLMs — the `shared/lib/analysis_dispatch.py` planner expands
+agents across the two reasoning "lanes" — and the two findings sets
+union in `consolidate_findings`. The intent is recall: two models have
+uncorrelated blind spots, so a vulnerability one misses the other may
+catch. The second LLM is confined to analysis; consolidation, the
+remediation merge, and the profiler stay on the primary slots.
+
+Each reasoning LLM gets its own `asyncio.Semaphore` concurrency pool
+(two distinct configs ⇒ two pools, since they are usually different
+providers with independent rate limits; the same config in both slots
+⇒ one shared pool). `estimate_cost_node` prices the analysis pass on
+both configs and the cost-approval gate shows a per-LLM breakdown. If
+every secondary-LLM call fails the scan completes single-LLM and
+records a `SECONDARY_LLM_DEGRADED` timeline event.
+
+## Temperature
+
+Temperature is per-stage — `Scan.stage_temperatures` holds a
+`{profiler, analysis, consolidation, merge, analysis_secondary}` map
+chosen at submit time. `resolve_temperature` (and
+`resolve_secondary_analysis_temperature` for the second reasoning
+LLM's analysis pass) read it. An opt-in `Scan.disable_temperature`
+flag makes both return `None` for every stage, so SCCAP sends no
+temperature at all and each model uses its own provider default.
+
 ## Per-stage temperature
 
 Each scan also carries a per-stage **temperature** map, chosen at

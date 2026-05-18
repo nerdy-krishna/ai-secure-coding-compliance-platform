@@ -68,6 +68,13 @@ separate, opt-in step.
   model for analysis and consolidation, plus a per-stage temperature
   (profiler / analysis / consolidation / merge) tunable at submit
   time. API keys are Fernet-encrypted server-side.
+- **Dual-reasoning-LLM scans** — optionally add a *second* reasoning
+  LLM: every analysis agent then runs on both models and the findings
+  union, so a vulnerability one model misses the other may catch. Each
+  finding records which model(s) detected it. The second model takes
+  its own analysis temperature, so "same model, two temperatures" is a
+  valid diversity strategy. You can also disable the temperature
+  setting entirely and let each model run at its provider default.
 
 ### For security admins
 - **User Groups + scoped visibility** — an admin creates groups and
@@ -111,7 +118,8 @@ separate, opt-in step.
 
 1. **Submit** code (upload, Git URL, or archive) and pick frameworks,
    the two LLM slots (utility + reasoning), the per-stage temperatures,
-   and — optionally — cross-file finding validation.
+   and — optionally — a second reasoning LLM, cross-file finding
+   validation, or disabling the temperature setting altogether.
 2. **Pre-LLM scan** — deterministic SAST (Bandit · Semgrep · Gitleaks ·
    OSV) builds a repo map + dependency graph and runs first. If it
    finds anything the scan pauses at `PENDING_PRESCAN_APPROVAL` so you
@@ -124,16 +132,19 @@ separate, opt-in step.
 4. **Cost gate** — a dry run, scoped to each file's routed agent set
    (the per-language baseline unioned with the profiler's picks),
    produces the deep-analysis cost estimate. The scan pauses at
-   `PENDING_COST_APPROVAL`.
+   `PENDING_COST_APPROVAL`. With a second reasoning LLM configured the
+   estimate is priced on both models, broken down per LLM.
 5. **Approve** (or cancel) each gate in the UI. A live SSE stream
    surfaces estimates and reconnects through token expiry; the worker
    resumes the same LangGraph thread from the checkpoint.
 6. **Analyze** — specialized agents run in parallel (five at a time
-   under `CONCURRENT_LLM_LIMIT`); each file is analysed by its routed
-   agent set.
+   per reasoning LLM under `CONCURRENT_LLM_LIMIT`); each file is
+   analysed by its routed agent set. If a second reasoning LLM was
+   chosen, every agent runs on both models and the findings union.
 7. **Consolidate** — a reasoning-model pass merges same-root-cause
    findings into one root finding per real issue and drops false
-   positives and noise.
+   positives and noise. Each finding records which reasoning LLM(s)
+   detected it.
 8. **Cross-file validation (opt-in)** — if enabled at submit, each
    eligible finding is re-judged against its cross-file callers and
    inputs, attaching a non-destructive `confirmed` / `mitigated` /

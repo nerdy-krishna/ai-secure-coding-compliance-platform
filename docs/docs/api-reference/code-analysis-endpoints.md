@@ -57,6 +57,11 @@ Required form fields:
 | `frameworks` | Comma-separated framework names (e.g. `asvs,proactive_controls`). |
 | `reasoning_llm_config_id` | UUID of the registered `LLMConfiguration` for the **reasoning** slot (analysis, consolidation, merge). Falls back to the first registered config when omitted. |
 | `utility_llm_config_id` | UUID for the **utility** slot (per-file profiler, fix verification). Falls back to the reasoning slot's config when omitted — "the same model in both slots" is the baseline. |
+| `secondary_reasoning_llm_config_id` | *Optional.* UUID of a **second** reasoning LLM. When set, every analysis agent runs on both this config and `reasoning_llm_config_id` and the findings union (PRD #91). Rejected with `400` if it is not a registered config. Null ⇒ single-LLM analysis. |
+| `temperature_profiler` / `temperature_analysis` / `temperature_consolidation` / `temperature_merge` | *Optional* per-stage LLM temperature, `0.0`–`1.0`, default `0.2`. |
+| `temperature_analysis_secondary` | *Optional* analysis temperature for the second reasoning LLM, `0.0`–`1.0`, default `0.2`. Used only when `secondary_reasoning_llm_config_id` is set. |
+| `disable_temperature` | *Optional* boolean, default `false`. When `true`, no temperature is sent on any LLM call — each model runs at its provider default and the per-stage temperatures are ignored. |
+| `cross_file_validation` | *Optional* boolean, default `false`. Opt in to cross-file finding validation. |
 
 Exactly one submission method:
 

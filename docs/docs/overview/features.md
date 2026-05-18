@@ -35,6 +35,11 @@ admins see everything.
   per-file profiler and fix verification, and a **reasoning**
   (capable) model for analysis and consolidation. Put the same model
   in both, or split them.
+- Optional **second reasoning LLM** — every analysis agent runs on
+  both models and the findings union, so what one model misses the
+  other may catch; each finding records which model(s) detected it.
+- Per-stage temperature tunable at submit time, or disable temperature
+  entirely so each model uses its provider default.
 - Framework multi-select (8 bundled OWASP frameworks plus any
   admin-added custom framework).
 

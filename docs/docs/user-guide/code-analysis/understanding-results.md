@@ -38,6 +38,12 @@ reasoning-model pass merges raw per-agent findings describing the
 same root cause into one root finding and drops false positives and
 noise, so the same bug never shows up as several rows.
 
+If the scan used a **second reasoning LLM**, each finding shows which
+model(s) detected it. A finding both models independently flagged is
+labelled *"Independently detected by …"* with highlighted model chips
+— a strong corroboration signal. Findings from the deterministic SAST
+scanners carry no model attribution.
+
 ## Severity vs. confidence
 
 Findings carry **both** a severity (Critical / High / Medium / Low /

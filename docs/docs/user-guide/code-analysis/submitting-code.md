@@ -56,6 +56,33 @@ You can use the same `LLMConfiguration` for both; the UI defaults
 both to the first registered config, and a submitted utility slot
 falls back to the reasoning config when omitted.
 
+## Advanced options
+
+The **Advanced** disclosure on the submit page carries three optional
+LLM controls beyond the two slots:
+
+- **Disable temperature** — when ticked, the scan sends *no*
+  temperature to any LLM call; each model runs at its own provider
+  default instead of SCCAP's per-stage values. The four per-stage
+  temperature inputs are then disabled.
+- **Add a second reasoning LLM** — opt in to a *second* reasoning
+  model. When enabled, every analysis agent runs on **both** reasoning
+  LLMs and the two findings sets are unioned — what one model misses,
+  the other may catch. Each finding records which model(s) detected
+  it; ones both models independently flagged are highlighted. This
+  roughly doubles analysis cost (the cost-approval card shows the
+  per-LLM breakdown). Pick a *different* model from the primary
+  reasoning LLM for the most benefit — two models have different blind
+  spots.
+- **Second LLM analysis temperature** — shown only when a second
+  reasoning LLM is opted in. Lets the second model run at its own
+  analysis temperature, so you can also point both slots at the *same*
+  model and run it at two temperatures.
+
+The second reasoning LLM is confined to the analysis stage —
+consolidation, the remediation merge, and the profiler always run on
+the primary slots.
+
 ## Submit → estimate → approve
 
 After you click **Start scan**:
