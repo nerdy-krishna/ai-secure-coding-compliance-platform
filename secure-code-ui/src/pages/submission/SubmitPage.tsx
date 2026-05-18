@@ -254,10 +254,11 @@ const SubmitPage: React.FC = () => {
     merge: 0.2,
   });
   const [tempsUnlocked, setTempsUnlocked] = useState(false);
-  // Opt-in (#92 / PRD #91): when true, no temperature is sent on any
-  // LLM call — each model runs at its own provider default — and the
-  // per-stage temperature inputs are disabled.
-  const [disableTemperature, setDisableTemperature] = useState(false);
+  // #92 / PRD #91: when true, no temperature is sent on any LLM call —
+  // each model runs at its own provider default — and the per-stage
+  // temperature inputs are disabled. Default ON: most users want the
+  // provider defaults; the per-stage knobs are an opt-in for tuning.
+  const [disableTemperature, setDisableTemperature] = useState(true);
   // Opt-in cross-file finding validation (#81 / PRD #75). Off by
   // default — it costs one extra reasoning-LLM call per eligible finding.
   const [crossFileValidation, setCrossFileValidation] = useState(false);
@@ -390,33 +391,79 @@ const SubmitPage: React.FC = () => {
     }
   };
 
-  const canSubmit = useMemo(() => {
-    if (!projectName.trim()) return false;
-    if (!llmConfigId || !utilityLlmConfigId) return false;
-    if (useSecondaryLlm && !secondaryLlmConfigId) return false;
-    if (selectedFrameworks.length === 0) return false;
-    if (mode === "upload") return files.length > 0;
-    if (mode === "git") {
-      // V12.3.1: only HTTPS git URLs are accepted from the UI
-      const v = repoUrl.trim();
+  // Ordered submit requirements. The first failing one drives the
+  // inline hint under the Start-scan button + the field highlight, so
+  // a blocked submit always tells the user exactly what's missing.
+  const submitChecks = useMemo<
+    { ok: boolean; message: string; fieldId: string }[]
+  >(() => {
+    const checks: { ok: boolean; message: string; fieldId: string }[] = [
+      {
+        ok: !!projectName.trim(),
+        message: "Enter a project name, or pick an existing project.",
+        fieldId: "field-project",
+      },
+      {
+        ok: !!llmConfigId,
+        message: "Choose a reasoning LLM.",
+        fieldId: "field-reasoning-llm",
+      },
+      {
+        ok: !!utilityLlmConfigId,
+        message: "Choose a utility LLM.",
+        fieldId: "field-utility-llm",
+      },
+      {
+        ok: !useSecondaryLlm || !!secondaryLlmConfigId,
+        message:
+          "Choose the second analysis LLM, or turn the second-LLM option off.",
+        fieldId: "field-secondary-llm",
+      },
+      {
+        ok: selectedFrameworks.length > 0,
+        message: "Select at least one compliance framework.",
+        fieldId: "field-frameworks",
+      },
+    ];
+    if (mode === "upload") {
+      checks.push({
+        ok: files.length > 0,
+        message: "Add at least one file to scan.",
+        fieldId: "field-source",
+      });
+    } else if (mode === "git") {
+      let gitOk = false;
       try {
-        const u = new URL(v);
-        if (u.protocol !== "https:") return false;
+        // V12.3.1: only HTTPS git URLs are accepted from the UI.
+        gitOk = new URL(repoUrl.trim()).protocol === "https:";
       } catch {
-        return false;
+        gitOk = false;
       }
-      // If the user has fetched the tree, require at least one file
-      // selected — submitting with everything unchecked would queue
-      // an empty scan.
-      if (previewFiles && selectedFiles.size === 0) return false;
-      return true;
+      checks.push({
+        ok: gitOk,
+        message: "Enter a valid https:// git repository URL.",
+        fieldId: "field-source",
+      });
+      // If the tree was fetched, require at least one file selected —
+      // submitting with everything unchecked would queue an empty scan.
+      checks.push({
+        ok: !gitOk || !previewFiles || selectedFiles.size > 0,
+        message: "Select at least one file from the repository tree.",
+        fieldId: "field-source",
+      });
+    } else if (mode === "archive") {
+      checks.push({
+        ok: !!archiveFile,
+        message: "Upload an archive to scan.",
+        fieldId: "field-source",
+      });
+      checks.push({
+        ok: !archiveFile || !previewFiles || selectedFiles.size > 0,
+        message: "Select at least one file from the archive.",
+        fieldId: "field-source",
+      });
     }
-    if (mode === "archive") {
-      if (!archiveFile) return false;
-      if (previewFiles && selectedFiles.size === 0) return false;
-      return true;
-    }
-    return false;
+    return checks;
   }, [
     projectName,
     llmConfigId,
@@ -431,6 +478,28 @@ const SubmitPage: React.FC = () => {
     previewFiles,
     selectedFiles,
   ]);
+
+  // The first unmet requirement (or null when the form is ready).
+  const submitBlock = useMemo(
+    () => submitChecks.find((c) => !c.ok) ?? null,
+    [submitChecks],
+  );
+  const canSubmit = !submitBlock;
+
+  // Scroll to + briefly outline the field a blocked submit points at.
+  const flagField = (fieldId: string) => {
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.style.outline = "2px solid var(--critical)";
+    el.style.outlineOffset = "4px";
+    el.style.borderRadius = "8px";
+    el.style.transition = "outline .15s var(--ease)";
+    window.setTimeout(() => {
+      el.style.outline = "";
+      el.style.outlineOffset = "";
+    }, 2800);
+  };
 
   const toggleFramework = (name: string) => {
     setSelectedFrameworks((prev) =>
@@ -695,6 +764,7 @@ const SubmitPage: React.FC = () => {
               ))}
             </select>
             <input
+              id="field-project"
               className="sccap-input"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
@@ -710,7 +780,11 @@ const SubmitPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="surface" style={{ padding: 0, overflow: "hidden" }}>
+        <div
+          id="field-source"
+          className="surface"
+          style={{ padding: 0, overflow: "hidden" }}
+        >
           <div
             className="sccap-tabs"
             style={{ padding: "0 18px", background: "var(--bg-soft)" }}
@@ -1111,6 +1185,7 @@ const SubmitPage: React.FC = () => {
                 Reasoning LLM
               </label>
               <select
+                id="field-reasoning-llm"
                 className="sccap-select"
                 value={llmConfigId}
                 onChange={(e) => setLlmConfigId(e.target.value)}
@@ -1150,6 +1225,7 @@ const SubmitPage: React.FC = () => {
                 Utility LLM
               </label>
               <select
+                id="field-utility-llm"
                 className="sccap-select"
                 value={utilityLlmConfigId}
                 onChange={(e) => setUtilityLlmConfigId(e.target.value)}
@@ -1215,6 +1291,7 @@ const SubmitPage: React.FC = () => {
               {useSecondaryLlm && (
                 <div style={{ marginTop: 10 }}>
                   <select
+                    id="field-secondary-llm"
                     className="sccap-select"
                     value={secondaryLlmConfigId}
                     onChange={(e) => setSecondaryLlmConfigId(e.target.value)}
@@ -1450,7 +1527,10 @@ const SubmitPage: React.FC = () => {
               >
                 Compliance frameworks
               </label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <div
+                id="field-frameworks"
+                style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+              >
                 {loadingFrameworks && (
                   <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
                     Loading frameworks…
@@ -1587,14 +1667,43 @@ const SubmitPage: React.FC = () => {
               </button>
               <button
                 className="sccap-btn sccap-btn-primary"
-                onClick={handleSubmit}
-                disabled={!canSubmit || submitting}
+                onClick={() => {
+                  // Button stays clickable when the form is incomplete
+                  // so the click can point the user at the gap (#83
+                  // follow-up) instead of doing nothing.
+                  if (submitBlock) {
+                    toast.error(submitBlock.message);
+                    flagField(submitBlock.fieldId);
+                    return;
+                  }
+                  void handleSubmit();
+                }}
+                disabled={submitting}
               >
                 <Icon.Play size={12} />{" "}
                 {submitting ? "Submitting…" : "Start scan"}
               </button>
             </div>
           </div>
+          {/* Inline reason the scan can't start yet — sits right under
+              the button so the user always knows what's missing. */}
+          {submitBlock && (
+            <div
+              style={{
+                marginTop: 10,
+                fontSize: 12.5,
+                color: "var(--critical)",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                justifyContent: "flex-end",
+                textAlign: "right",
+              }}
+            >
+              <Icon.Alert size={13} />
+              <span>{submitBlock.message}</span>
+            </div>
+          )}
         </div>
       </div>
 
