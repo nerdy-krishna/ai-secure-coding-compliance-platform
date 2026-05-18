@@ -1869,11 +1869,134 @@ _CS_CONCERN_AREAS: Dict[str, str] = {
 }
 
 
+# --------------------------------------------------------------------------
+# Baseline language rosters (#80)
+#
+# `baseline_languages` is the deterministic routing floor (PRD #74): an
+# agent is force-included for a file in one of its baseline languages
+# regardless of the profiler's content-based pick. The curation rule is
+# "the languages where this agent's concern-area is a prevalent threat
+# per CWE Top 25 / OWASP Top 10". CWE Essentials agents carry their
+# baselines inline in their specs; the seven frameworks below are seeded
+# from these maps. The full curated mapping + rationale lives in
+# `docs/docs/architecture/baseline-languages.md`.
+# --------------------------------------------------------------------------
+
+# Server-side web-application languages.
+_WEB_BACKEND_LANGS: List[str] = [
+    "python",
+    "javascript",
+    "typescript",
+    "java",
+    "go",
+    "ruby",
+    "php",
+    "csharp",
+    "rust",
+    "scala",
+    "kotlin",
+]
+# Browser-facing / frontend languages.
+_WEB_FRONTEND_LANGS: List[str] = ["javascript", "typescript", "html", "vue", "svelte"]
+# Injection-class concerns span both client and server.
+_WEB_ALL_LANGS: List[str] = sorted(set(_WEB_BACKEND_LANGS) | set(_WEB_FRONTEND_LANGS))
+# Mobile-application languages — native + cross-platform.
+_MOBILE_LANGS: List[str] = [
+    "swift",
+    "kotlin",
+    "java",
+    "dart",
+    "javascript",
+    "typescript",
+    "csharp",
+]
+# Embedded / IoT firmware + gateway languages.
+_EMBEDDED_LANGS: List[str] = ["c", "cpp", "rust", "go", "python"]
+# Firmware- and hardware-level work — the lower-level subset.
+_FIRMWARE_LANGS: List[str] = ["c", "cpp", "rust"]
+
+# ASVS — general web-application security verification.
+_ASVS_BASELINE_LANGUAGES: Dict[str, List[str]] = {
+    "AccessControlAgent": _WEB_BACKEND_LANGS,
+    "ApiSecurityAgent": _WEB_BACKEND_LANGS,
+    "ArchitectureAgent": _WEB_BACKEND_LANGS,
+    "AuthenticationAgent": _WEB_BACKEND_LANGS,
+    "BusinessLogicAgent": _WEB_BACKEND_LANGS,
+    "CommunicationAgent": _WEB_BACKEND_LANGS,
+    "ConfigurationAgent": _WEB_BACKEND_LANGS,
+    "CryptographyAgent": _WEB_BACKEND_LANGS,
+    "DataProtectionAgent": _WEB_BACKEND_LANGS,
+    "ErrorHandlingAgent": _WEB_BACKEND_LANGS,
+    "FileHandlingAgent": _WEB_BACKEND_LANGS,
+    "SessionManagementAgent": _WEB_BACKEND_LANGS,
+    "ValidationAgent": _WEB_ALL_LANGS,
+    "WebFrontendAgent": _WEB_FRONTEND_LANGS,
+    "SelfContainedTokenAgent": _WEB_BACKEND_LANGS,
+    "OauthOidcAgent": _WEB_BACKEND_LANGS,
+    "WebRtcAgent": _WEB_FRONTEND_LANGS,
+}
+
+# OWASP Proactive Controls — developer practices for web applications.
+_PC_BASELINE_LANGUAGES: Dict[str, List[str]] = {
+    "AccessControlAgent": _WEB_BACKEND_LANGS,
+    "CryptographyAgent": _WEB_BACKEND_LANGS,
+    "InputValidationAgent": _WEB_ALL_LANGS,
+    "SecureDesignAgent": _WEB_BACKEND_LANGS,
+    "SecureConfigurationAgent": _WEB_BACKEND_LANGS,
+    "ComponentSecurityAgent": _WEB_BACKEND_LANGS,
+    "DigitalIdentityAgent": _WEB_BACKEND_LANGS,
+    "BrowserSecurityAgent": _WEB_FRONTEND_LANGS,
+    "LoggingMonitoringAgent": _WEB_BACKEND_LANGS,
+    "SsrfAgent": _WEB_BACKEND_LANGS,
+}
+
+# OWASP Cheat Sheet Series — web-application security guidance.
+_CS_BASELINE_LANGUAGES: Dict[str, List[str]] = {
+    "InjectionAgent": _WEB_ALL_LANGS,
+    "AuthenticationAgent": _WEB_BACKEND_LANGS,
+    "SessionManagementAgent": _WEB_BACKEND_LANGS,
+    "AuthorizationAgent": _WEB_BACKEND_LANGS,
+    "CryptographyAgent": _WEB_BACKEND_LANGS,
+    "TransportSecurityAgent": _WEB_BACKEND_LANGS,
+    "InputValidationAgent": _WEB_ALL_LANGS,
+    "FileHandlingAgent": _WEB_BACKEND_LANGS,
+    "ErrorLoggingAgent": _WEB_BACKEND_LANGS,
+    "ApiSecurityAgent": _WEB_BACKEND_LANGS,
+}
+
+# OWASP ISVS — IoT / embedded-systems security verification.
+_ISVS_BASELINE_LANGUAGES: Dict[str, List[str]] = {
+    "SecureDevelopmentAgent": _EMBEDDED_LANGS,
+    "DeviceApplicationAgent": _EMBEDDED_LANGS,
+    "FirmwareIntegrityAgent": _FIRMWARE_LANGS,
+    "PlatformHardeningAgent": _EMBEDDED_LANGS,
+    "TransportSecurityAgent": _EMBEDDED_LANGS,
+    "NetworkExposureAgent": _EMBEDDED_LANGS,
+    "HardwarePlatformAgent": _FIRMWARE_LANGS,
+}
+
+# OWASP MASVS — mobile-application security verification. Every agent's
+# concern is a mobile-app threat regardless of sub-domain.
+_MASVS_BASELINE_LANGUAGES: Dict[str, List[str]] = {
+    spec["name"]: _MOBILE_LANGS for spec in _MASVS_AGENT_SPECS
+}
+
+# LLM Top 10 / Agentic Top 10 — the threat is "the app integrates an
+# LLM / is agentic", not the implementation language: wildcard baseline.
+_LLM_BASELINE_LANGUAGES: Dict[str, List[str]] = {
+    spec["name"]: ["*"] for spec in _LLM_AGENT_SPECS
+}
+_AGENTIC_BASELINE_LANGUAGES: Dict[str, List[str]] = {
+    spec["name"]: ["*"] for spec in _AGENTIC_AGENT_SPECS
+}
+
+
 def _framework_roster(
     specs: List[Dict[str, Any]],
     framework: str,
     prefix: str,
     concern_areas: Optional[Dict[str, str]] = None,
+    baseline_languages: Optional[Dict[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Expand a per-framework spec list into dedicated `Agent` definitions.
 
@@ -1887,6 +2010,13 @@ def _framework_roster(
     spec's bare name is looked up there and the resulting `concern_area`
     is AND-ed onto the agent's `metadata_filter`, so the agent retrieves
     only its own domain's slice of the bundled corpus.
+
+    When `baseline_languages` is given (#80), the spec's bare name is
+    looked up there and the curated language list is injected into the
+    agent's `domain_query` as the deterministic routing floor. A spec
+    that already carries an inline `baseline_languages` (CWE Essentials)
+    keeps it. A `KeyError` here means the map is missing an agent — that
+    is intentional: every agent must have a curated baseline.
     """
     roster: List[Dict[str, Any]] = []
     for spec in specs:
@@ -1895,6 +2025,11 @@ def _framework_roster(
             metadata_filter = dict(domain_query.get("metadata_filter") or {})
             metadata_filter["concern_area"] = [concern_areas[spec["name"]]]
             domain_query = {**domain_query, "metadata_filter": metadata_filter}
+        if baseline_languages and "baseline_languages" not in domain_query:
+            domain_query = {
+                **domain_query,
+                "baseline_languages": baseline_languages[spec["name"]],
+            }
         roster.append(
             {
                 "name": prefix + spec["name"],
@@ -1911,20 +2046,54 @@ def _framework_roster(
 # Top 10 + 8 MASVS dedicated agents, one per domain across all eight
 # frameworks.
 AGENT_DEFINITIONS: List[Dict[str, Any]] = (
-    _framework_roster(_ASVS_AGENT_SPECS, "asvs", "Asvs")
-    + _framework_roster(
-        _PC_AGENT_SPECS, "proactive_controls", "ProactiveControls", _PC_CONCERN_AREAS
+    _framework_roster(
+        _ASVS_AGENT_SPECS,
+        "asvs",
+        "Asvs",
+        baseline_languages=_ASVS_BASELINE_LANGUAGES,
     )
     + _framework_roster(
-        _CS_AGENT_SPECS, "cheatsheets", "Cheatsheets", _CS_CONCERN_AREAS
+        _PC_AGENT_SPECS,
+        "proactive_controls",
+        "ProactiveControls",
+        _PC_CONCERN_AREAS,
+        baseline_languages=_PC_BASELINE_LANGUAGES,
+    )
+    + _framework_roster(
+        _CS_AGENT_SPECS,
+        "cheatsheets",
+        "Cheatsheets",
+        _CS_CONCERN_AREAS,
+        baseline_languages=_CS_BASELINE_LANGUAGES,
     )
     + _framework_roster(_CWE_AGENT_SPECS, "cwe_essentials", "Cwe")
-    + _framework_roster(_ISVS_AGENT_SPECS, "isvs", "Isvs")
-    + _framework_roster(_LLM_AGENT_SPECS, "llm_top10", "Llm", _LLM_CONCERN_AREAS)
     + _framework_roster(
-        _AGENTIC_AGENT_SPECS, "agentic_top10", "Agentic", _AGENTIC_CONCERN_AREAS
+        _ISVS_AGENT_SPECS,
+        "isvs",
+        "Isvs",
+        baseline_languages=_ISVS_BASELINE_LANGUAGES,
     )
-    + _framework_roster(_MASVS_AGENT_SPECS, "masvs", "Masvs", _MASVS_CONCERN_AREAS)
+    + _framework_roster(
+        _LLM_AGENT_SPECS,
+        "llm_top10",
+        "Llm",
+        _LLM_CONCERN_AREAS,
+        baseline_languages=_LLM_BASELINE_LANGUAGES,
+    )
+    + _framework_roster(
+        _AGENTIC_AGENT_SPECS,
+        "agentic_top10",
+        "Agentic",
+        _AGENTIC_CONCERN_AREAS,
+        baseline_languages=_AGENTIC_BASELINE_LANGUAGES,
+    )
+    + _framework_roster(
+        _MASVS_AGENT_SPECS,
+        "masvs",
+        "Masvs",
+        _MASVS_CONCERN_AREAS,
+        baseline_languages=_MASVS_BASELINE_LANGUAGES,
+    )
 )
 
 
