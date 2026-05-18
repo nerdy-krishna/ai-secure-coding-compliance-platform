@@ -8,9 +8,11 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
+import { ScanCard } from "../../features/scans/ScanCard";
 import { scanService } from "../../shared/api/scanService";
 import { useDebounce } from "../../shared/hooks/useDebounce";
 import { scanRouteFor } from "../../shared/lib/scanRoute";
+import { isTerminalStatus } from "../../shared/lib/scanProgress";
 import { Icon } from "../../shared/ui/Icon";
 import type { ScanHistoryItem } from "../../shared/types/api";
 
@@ -37,25 +39,6 @@ function formatDayBucket(iso: string): string {
     year:
       d.getFullYear() === now.getFullYear() ? undefined : "numeric",
   });
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function statusTone(s: string): { color: string; label: string } {
-  const up = s.toUpperCase();
-  if (["COMPLETED", "REMEDIATION_COMPLETED"].includes(up))
-    return { color: "var(--success)", label: "Completed" };
-  if (up === "FAILED") return { color: "var(--critical)", label: "Failed" };
-  if (up === "CANCELLED" || up === "EXPIRED")
-    return { color: "var(--fg-subtle)", label: up.toLowerCase() };
-  if (up === "PENDING_COST_APPROVAL")
-    return { color: "var(--medium)", label: "Pending approval" };
-  return { color: "var(--primary)", label: "In progress" };
 }
 
 interface DayGroup {
@@ -100,7 +83,13 @@ const SubmissionHistoryPage: React.FC = () => {
         statusFilter,
       ),
     placeholderData: keepPreviousData,
-    refetchInterval: 10_000,
+    // Poll only while a scan in the list is still active (#86); stop
+    // once every scan is terminal so the app isn't polling for nothing.
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? [];
+      const anyActive = items.some((s) => !isTerminalStatus(s.status));
+      return anyActive ? 6_000 : false;
+    },
   });
 
   const groups = useMemo(
@@ -237,12 +226,19 @@ const SubmissionHistoryPage: React.FC = () => {
                 {group.key}
               </div>
               <div className="sccap-card" style={{ padding: 0 }}>
-                {group.scans.map((scan, idx) => {
-                  const tone = statusTone(scan.status);
-                  return (
-                    <div
-                      key={scan.id}
-                      onClick={() =>
+                {group.scans.map((scan, idx) => (
+                  <div
+                    key={scan.id}
+                    style={{
+                      borderBottom:
+                        idx < group.scans.length - 1
+                          ? "1px solid var(--border)"
+                          : "none",
+                    }}
+                  >
+                    <ScanCard
+                      scan={scan}
+                      onOpen={() =>
                         navigate(scanRouteFor(scan.id, scan.status), {
                           state: {
                             fromLabel: "History",
@@ -250,79 +246,9 @@ const SubmissionHistoryPage: React.FC = () => {
                           },
                         })
                       }
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "80px 1fr auto",
-                        alignItems: "center",
-                        gap: 14,
-                        padding: "14px 18px",
-                        borderBottom:
-                          idx < group.scans.length - 1
-                            ? "1px solid var(--border)"
-                            : "none",
-                        cursor: "pointer",
-                        transition: "background var(--t)",
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "var(--bg-soft)")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = "transparent")
-                      }
-                    >
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "var(--fg-muted)",
-                          fontVariantNumeric: "tabular-nums",
-                        }}
-                      >
-                        {formatTime(scan.created_at)}
-                      </div>
-                      <div>
-                        <div
-                          style={{
-                            fontWeight: 500,
-                            color: "var(--fg)",
-                            marginBottom: 2,
-                          }}
-                        >
-                          {scan.project_name}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 11.5,
-                            color: "var(--fg-subtle)",
-                          }}
-                        >
-                          {scan.scan_type.toUpperCase()} ·{" "}
-                          <span style={{ fontFamily: "var(--font-mono)" }}>
-                            {scan.id.slice(0, 12)}
-                          </span>
-                        </div>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                        }}
-                      >
-                        <span
-                          className="chip"
-                          style={{
-                            background: "transparent",
-                            borderColor: tone.color,
-                            color: tone.color,
-                          }}
-                        >
-                          {tone.label}
-                        </span>
-                        <Icon.ChevronR size={14} />
-                      </div>
-                    </div>
-                  );
-                })}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           ))}

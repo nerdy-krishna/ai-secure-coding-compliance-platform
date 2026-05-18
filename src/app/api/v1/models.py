@@ -857,6 +857,13 @@ class ScanHistoryItem(BaseModel):
     completed_at: Optional[datetime] = None
     cost_details: Optional[Dict[str, Any]] = None
     events: List[ScanEventItem] = []
+    # Finding-metrics overview (#86) so list views render the shared
+    # ScanCard without an extra request per scan. Populated from
+    # `Scan.risk_score` + `Scan.summary`; None for scans that never
+    # produced a final report.
+    risk_score: Optional[int] = None
+    total_findings: Optional[int] = None
+    severity_counts: Optional[Dict[str, int]] = None
 
     class Config:
         from_attributes = True

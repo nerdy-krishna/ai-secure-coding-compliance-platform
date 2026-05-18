@@ -75,6 +75,11 @@ const TERMINAL_STATUSES = new Set([
 
 const ERROR_STATUSES = new Set(["FAILED", "EXPIRED"]);
 
+/** True when a scan has reached a terminal status. */
+export function isTerminalStatus(status: string | null | undefined): boolean {
+  return !!status && TERMINAL_STATUSES.has(status);
+}
+
 /** The rail definition for a scan — the cross-file stage is included
  *  only when the scan opted in to cross-file validation (#82). */
 export function railStages(crossFileValidation: boolean): RailStage[] {

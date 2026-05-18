@@ -309,6 +309,11 @@ export interface ScanHistoryItem {
   cost_details: CostDetails | null;
   events: ScanEventItem[];
   llm_interactions?: LLMInteractionResponse[];
+  // Finding-metrics overview (#86) — populated for scans that produced
+  // a final report; null otherwise. Drives the shared ScanCard.
+  risk_score?: number | null;
+  total_findings?: number | null;
+  severity_counts?: Record<string, number> | null;
 }
 
 export interface PaginatedScanHistoryResponse {

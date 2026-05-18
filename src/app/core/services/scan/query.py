@@ -37,6 +37,26 @@ MAX_PAGE_SIZE = 100
 _VALID_SORT_ORDERS = {"asc", "desc"}
 
 
+def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
+    """Finding-metrics overview for a scan-list row (#86).
+
+    Pulls the risk score and the per-severity / total finding counts
+    from the already-loaded `Scan.risk_score` column and `Scan.summary`
+    JSONB — no per-scan findings query. Returns Nones for scans that
+    never produced a final report.
+    """
+    summary = (scan.summary or {}).get("summary") or {}
+    severity_counts = summary.get("severity_counts")
+    total = summary.get("total_findings_count")
+    return {
+        "risk_score": scan.risk_score,
+        "total_findings": total if isinstance(total, int) else None,
+        "severity_counts": (
+            severity_counts if isinstance(severity_counts, dict) else None
+        ),
+    }
+
+
 class ScanQueryService:
     """Read-side scan service.
 
@@ -313,6 +333,7 @@ class ScanQueryService:
                 completed_at=scan.completed_at,
                 cost_details=scan.cost_details,
                 events=[api_models.ScanEventItem.from_orm(e) for e in scan.events],
+                **_scan_metrics(scan),
             )
             for scan in scans_raw
         ]
@@ -390,6 +411,7 @@ class ScanQueryService:
                 completed_at=scan.completed_at,
                 cost_details=scan.cost_details,
                 events=[api_models.ScanEventItem.from_orm(e) for e in scan.events],
+                **_scan_metrics(scan),
             )
             for scan in scans_raw
         ]
@@ -492,6 +514,7 @@ class ScanQueryService:
                     completed_at=s.completed_at,
                     cost_details=s.cost_details,
                     events=[api_models.ScanEventItem.from_orm(e) for e in s.events],
+                    **_scan_metrics(s),
                 )
                 for s in scans_raw
             ]
