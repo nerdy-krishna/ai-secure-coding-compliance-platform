@@ -887,7 +887,14 @@ const ScanRunningPage: React.FC = () => {
           // are not failures.
           <div
             className={`chip ${
-              isError ? "chip-critical" : isBlocked ? "chip-warn" : "chip-info"
+              isError
+                ? "chip-critical"
+                : isBlocked
+                  ? "chip-warn"
+                  : status === "COMPLETED" ||
+                      status === "REMEDIATION_COMPLETED"
+                    ? "chip-success"
+                    : "chip-info"
             }`}
           >
             {/* Pulse dot only while genuinely running. Suppress while

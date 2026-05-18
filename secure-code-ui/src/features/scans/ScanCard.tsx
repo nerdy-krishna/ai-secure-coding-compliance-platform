@@ -11,7 +11,7 @@
 import React from "react";
 
 import { deriveScanProgress, type ProgressEvent } from "../../shared/lib/scanProgress";
-import { displayStatus } from "../../shared/lib/scanStatus";
+import { displayStatus, statusKind } from "../../shared/lib/scanStatus";
 import type { ScanHistoryItem } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 
@@ -214,20 +214,23 @@ export const ScanCard: React.FC<ScanCardProps> = ({
         style={{ display: "flex", alignItems: "center", gap: 10 }}
         onClick={(e) => e.stopPropagation()}
       >
-        {progress.isTerminal && (
-          <span
-            className="chip"
-            style={{
-              background: "transparent",
-              borderColor: progress.isError
-                ? "var(--critical)"
-                : "var(--border)",
-              color: progress.isError ? "var(--critical)" : "var(--fg-muted)",
-            }}
-          >
-            {displayStatus(scan.status)}
-          </span>
-        )}
+        {progress.isTerminal &&
+          (() => {
+            // Green fill/text for a successful scan, red for a failure,
+            // amber for a safety block; stops/expiry stay neutral.
+            const kind = statusKind(scan.status);
+            const chipClass =
+              kind === "completed"
+                ? "chip chip-success"
+                : kind === "failed"
+                  ? "chip chip-critical"
+                  : kind === "blocked"
+                    ? "chip chip-warn"
+                    : "chip";
+            return (
+              <span className={chipClass}>{displayStatus(scan.status)}</span>
+            );
+          })()}
         {controls}
         <span onClick={onOpen} style={{ cursor: "pointer", display: "flex" }}>
           <Icon.ChevronR size={14} />

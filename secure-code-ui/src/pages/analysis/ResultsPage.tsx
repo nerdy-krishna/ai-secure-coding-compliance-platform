@@ -432,6 +432,13 @@ const ResultsPage: React.FC = () => {
                   <span className="chip">{displayStatus(data.status)}</span>
                 );
               }
+              if (kind === "completed") {
+                return (
+                  <span className="chip chip-success">
+                    {displayStatus(data.status)}
+                  </span>
+                );
+              }
               return null;
             })()}
             <span>

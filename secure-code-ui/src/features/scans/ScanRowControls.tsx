@@ -85,6 +85,7 @@ export const ScanRowControls: React.FC<ScanRowControlsProps> = ({
   return (
     <button
       className="sccap-btn sccap-btn-sm"
+      style={{ color: "var(--critical)" }}
       onClick={() => setConfirmDelete(true)}
       title="Delete this scan"
     >
