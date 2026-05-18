@@ -10,10 +10,13 @@
 :: any other user-controlled variable passed into those calls.
 ::
 :: Dangerous-functionality surface areas:
-::   - Lines 49-52: secret values from generate_secrets.py interpolated into
-::     PowerShell -replace strings (trust boundary: script execution context)
-::   - Lines 165-174: SSL_DOMAIN and other config values interpolated into
-::     PowerShell -replace strings (trust boundary: operator terminal input)
+::   - the secret-replacement powershell calls in the Environment Setup block:
+::     secret values from generate_secrets.py interpolated into PowerShell
+::     -replace strings (trust boundary: script execution context)
+::   - the config-replacement powershell calls in SAVE_CONFIG: SSL_DOMAIN and
+::     other config values interpolated into PowerShell -replace strings
+::     (trust boundary: operator terminal input). SCCAP_VARIANT /
+::     COMPOSE_PROFILES come from fixed menu choices, not free-text input.
 ::
 :: Domain input is validated with a strict allow-list regex (STATE_3) to
 :: block PowerShell metacharacters. Secret values come from generate_secrets.py
@@ -41,11 +44,8 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-where node >nul 2>nul
-if %errorlevel% neq 0 (
-    echo Error: node could not be found. Please install Node.js first.
-    exit /b 1
-)
+:: Node.js is intentionally NOT a host prerequisite -- the UI is built
+:: inside the `ui` Docker image, never on the host.
 
 echo [+] Prerequisites met.
 echo.
@@ -85,6 +85,67 @@ if %errorlevel% equ 0 (
 )
 echo.
 
+:: 2.4 Installation Variant (modular setup)
+:: Picks which features SCCAP enables. Written to .env as SCCAP_VARIANT (the
+:: app seeds its feature flags from it on first boot) and COMPOSE_PROFILES
+:: (which optional container stacks boot).
+echo [*] Installation Variant:
+echo   Choose how much of SCCAP to enable. You can change this later.
+echo     1) Vibe coder  - scan + chat + compliance; single superuser
+echo     2) Developer   - adds multi-user, groups, email, MCP, authoring
+echo     3) Enterprise  - everything: SSO, SCIM, tenants, log stack
+echo     4) Custom      - pick the optional container stacks yourself
+echo   (Upgrading an existing install? Enterprise keeps every feature you have.)
+
+set SCCAP_VARIANT=
+set COMPOSE_PROFILES_VALUE=
+
+:STATE_VARIANT
+set /p VCHOICE="Your choice (1/2/3/4): "
+if "%VCHOICE%"=="1" (
+    set SCCAP_VARIANT=vibe_coder
+    set COMPOSE_PROFILES_VALUE=
+    goto VARIANT_DONE
+)
+if "%VCHOICE%"=="2" (
+    set SCCAP_VARIANT=developer
+    set COMPOSE_PROFILES_VALUE=
+    goto VARIANT_DONE
+)
+if "%VCHOICE%"=="3" (
+    set SCCAP_VARIANT=enterprise
+    set COMPOSE_PROFILES_VALUE=log_stack
+    goto VARIANT_DONE
+)
+if "%VCHOICE%"=="4" (
+    set SCCAP_VARIANT=custom
+    goto STATE_VARIANT_CUSTOM
+)
+echo Invalid choice. Please enter 1, 2, 3, or 4.
+goto STATE_VARIANT
+
+:STATE_VARIANT_CUSTOM
+set /p LS_CHOICE="  Enable the log stack - Grafana/Loki dashboards + Fluentd? (y/N): "
+set /p TR_CHOICE="  Enable Langfuse LLM tracing - 6 extra containers? (y/N): "
+set COMPOSE_PROFILES_VALUE=
+if /i "%LS_CHOICE%"=="y" if /i "%TR_CHOICE%"=="y" set COMPOSE_PROFILES_VALUE=log_stack,tracing
+if /i "%LS_CHOICE%"=="y" if /i not "%TR_CHOICE%"=="y" set COMPOSE_PROFILES_VALUE=log_stack
+if /i not "%LS_CHOICE%"=="y" if /i "%TR_CHOICE%"=="y" set COMPOSE_PROFILES_VALUE=tracing
+goto VARIANT_DONE
+
+:VARIANT_DONE
+echo [+] Variant: %SCCAP_VARIANT%  (compose profiles: %COMPOSE_PROFILES_VALUE%)
+
+:: Persist SCCAP_VARIANT and COMPOSE_PROFILES to .env. The -replace clears any
+:: existing line; the echo appends the chosen value. Both values come from the
+:: fixed menu choices above, not free-text input, so no injection surface.
+powershell -Command "(Get-Content .env) -replace '^SCCAP_VARIANT=.*', '' | Set-Content .env"
+echo SCCAP_VARIANT=%SCCAP_VARIANT%>> .env
+powershell -Command "(Get-Content .env) -replace '^COMPOSE_PROFILES=.*', '' | Set-Content .env"
+echo COMPOSE_PROFILES=%COMPOSE_PROFILES_VALUE%>> .env
+echo [+] Wrote SCCAP_VARIANT and COMPOSE_PROFILES to .env.
+echo.
+
 :: 2.5 Deployment Configuration Options
 echo [*] Deployment Configuration Options:
 
@@ -99,6 +160,10 @@ echo   1) Local (Testing/Development)
 echo   2) Cloud (Production Server)
 echo   0) Exit Setup
 set /p CHOICE="Your choice (1/2/0): "
+if "%CHOICE%"=="" if "%SCCAP_VARIANT%"=="vibe_coder" (
+    set CHOICE=1
+    echo   (defaulting to Local for the vibe-coder variant^)
+)
 if "%CHOICE%"=="1" (
     set DEPLOYMENT_TYPE=local
     set SSL_ENABLED=false
@@ -269,14 +334,6 @@ echo [*] Applying database migrations...
 docker compose exec app alembic upgrade head
 
 echo [+] Database initialized. Proceed to the Web UI to create your Admin Superuser.
-echo.
-
-:: 5. UI Installation
-echo [*] Installing UI dependencies...
-cd secure-code-ui
-call npm install
-cd ..
-echo [+] UI dependencies installed.
 echo.
 
 echo ==================================================
