@@ -24,7 +24,7 @@ Before you begin, ensure you have the following installed and configured on your
 
 ## Quick Start (Recommended)
 
-The easiest way to get started is by using the automated setup script. This script handles prerequisite checks, environment configuration (generating secure keys), Docker build, database initialization, and UI dependency installation.
+The easiest way to get started is by using the automated setup script. This script handles prerequisite checks, the installation-variant prompt, environment configuration (generating secure keys), Docker build, and database initialization. The UI is built inside its Docker image — Node.js is not required on the host.
 
 ### macOS / Linux
 
@@ -41,6 +41,7 @@ The easiest way to get started is by using the automated setup script. This scri
     ```
     *   The setup script is fully interactive with backward travel options. It will guide you through:
         *   Checking prerequisites.
+        *   Choosing an installation variant — vibe coder, developer, enterprise, or custom — which seeds the feature flags and selects the optional container stacks.
         *   Prompting for your Domain or IP.
         *   Allowing you to automatically provision Let's Encrypt SSL via a specialized container.
         *   Handling initial Docker and database setup.
@@ -65,8 +66,9 @@ Once the script completes, you will see a dynamic "Setup Complete!" message with
 !!! tip "First user becomes superuser"
 
     The first account you register on the running app becomes the
-    platform's superuser and is routed through `/setup` to finish LLM,
-    SMTP, and system configuration before the rest of the UI unlocks.
+    platform's superuser and is routed through `/setup`, which confirms
+    the installation variant and finishes LLM, SMTP, and system
+    configuration before the rest of the UI unlocks.
 
 ---
 
@@ -80,13 +82,10 @@ Ensure your system is up to date:
 sudo apt update && sudo apt upgrade -y
 ```
 
-### 2. Install Dependencies (Git, Python, Node.js)
-The setup script requires Git (to clone), Python 3 (to generate secure secrets), and Node.js (to install frontend dependencies).
+### 2. Install Dependencies (Git, Python)
+The setup script requires only Git (to clone) and Python 3 (to generate secure secrets). The frontend is built inside its Docker image, so Node.js is **not** needed on the host.
 ```bash
 sudo apt install -y git python3 python3-venv curl
-# Install Node.js (LTS version recommended)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
 ```
 
 ### 3. Install Docker & Docker Compose

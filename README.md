@@ -81,8 +81,14 @@ separate, opt-in step.
   adds users by email; a regular user sees their own scans plus any
   scan owned by a peer they share a group with. Admins see everything.
 - **First-run setup wizard** — the first registered user becomes
-  superuser and is routed through `/setup` to configure LLMs, SMTP,
-  and system settings before the app unlocks for everyone else.
+  superuser and is routed through `/setup`, which confirms the
+  installation variant and configures LLMs, SMTP, and system settings
+  before the app unlocks for everyone else.
+- **Modular feature flags** — every optional surface (chat, compliance,
+  SSO, SCIM, multi-tenancy, the log stack, …) is a runtime flag. The
+  install variant seeds them; *Admin → Features* toggles them live, with
+  dependencies resolved automatically. See
+  [Modular Setup](docs/docs/architecture/modular-setup.md).
 - **Admin console** — LLM configurations, user groups, users,
   frameworks (including CSV / git-URL RAG ingestion), agents, prompt
   templates, system config, SMTP, and runtime logs. A shared Admin
@@ -169,10 +175,29 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The interactive script checks prerequisites, generates secrets, writes
-`.env`, builds + starts the compose stack, runs Alembic migrations, and
-installs the UI dependencies. On Windows, run `setup.bat` from the
-project root.
+The interactive script checks prerequisites, generates secrets, asks
+which **installation variant** to use, writes `.env` (including
+`SCCAP_VARIANT` and `COMPOSE_PROFILES`), builds + starts the compose
+stack, and runs Alembic migrations. The UI is built inside its Docker
+image — Node.js is not a host prerequisite. On Windows, run `setup.bat`
+from the project root.
+
+### Installation variants
+
+`setup.sh` asks which packaging variant to install:
+
+- **Vibe coder** — scan, chat, and compliance only; a single superuser.
+- **Developer** — adds multi-user accounts, groups, email, the MCP
+  surface, and admin authoring.
+- **Enterprise** — every feature, including SSO, SCIM, multi-tenancy,
+  and the log stack.
+- **Custom** — pick the optional container stacks in `setup.sh`, then the
+  individual features in the setup wizard.
+
+The variant seeds a set of runtime feature flags and selects which
+optional container stacks boot (`COMPOSE_PROFILES`). Change features
+later under *Admin → Features*. See
+[Modular Setup](docs/docs/architecture/modular-setup.md).
 
 ### Manual setup
 
