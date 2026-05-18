@@ -21,7 +21,7 @@ this module.
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,12 +35,47 @@ logger = logging.getLogger(__name__)
 # file, not every line, and this bounds utility-slot token spend.
 _MAX_CONTENT_CHARS = 48_000
 
+# Caps for the deterministic structural block (#77) — it is grounding
+# context, not the payload, so it stays small.
+_MAX_STRUCT_IMPORTS = 80
+_MAX_STRUCT_SYMBOLS = 120
+_MAX_STRUCT_CHARS = 4_000
+
 _SYSTEM_PROMPT = (
     "You are a security code profiler. Given one source file, you "
     "produce a concise structured profile used to route the file to "
     "the right security analysis agents. You never invent domain names "
     "— you only choose from the domain list you are given."
 )
+
+
+def _structural_block(repo_summary: Optional[Any]) -> str:
+    """Format a file's deterministic tree-sitter structure — imports and
+    symbols — into a compact, capped grounding block (#77).
+
+    `repo_summary` is duck-typed for `.imports` (list of str) and
+    `.symbols` (each with `.name`, `.type`, `.line_number`); a `None`
+    summary (parse failure / unknown language) yields an empty string
+    and the block is simply omitted from the prompt.
+    """
+    if repo_summary is None:
+        return ""
+    imports = list(getattr(repo_summary, "imports", []) or [])[:_MAX_STRUCT_IMPORTS]
+    symbols = list(getattr(repo_summary, "symbols", []) or [])[:_MAX_STRUCT_SYMBOLS]
+    if not imports and not symbols:
+        return ""
+    lines = ["--- FILE STRUCTURE (deterministic, from tree-sitter) ---"]
+    if imports:
+        lines.append("imports: " + ", ".join(str(i) for i in imports))
+    if symbols:
+        rendered = ", ".join(
+            f"{getattr(s, 'type', '?')} {getattr(s, 'name', '?')} "
+            f"(line {getattr(s, 'line_number', 0)})"
+            for s in symbols
+        )
+        lines.append("symbols: " + rendered)
+    lines.append("--- END FILE STRUCTURE ---")
+    return "\n".join(lines)[:_MAX_STRUCT_CHARS]
 
 
 class _FileProfileLLMResponse(BaseModel):
@@ -71,13 +106,17 @@ class FileProfiler:
         file_path: str,
         content: str,
         domain_vocabulary: Dict[str, str],
+        repo_summary: Optional[Any] = None,
     ) -> FileProfile:
         """Produce a `FileProfile` for one file.
 
         `domain_vocabulary` maps domain name → description; the returned
-        `applicable_domains` is always a subset of its keys. On any LLM
-        error a minimal fallback profile is returned so a single bad
-        file never aborts the scan.
+        `applicable_domains` is always a subset of its keys. `repo_summary`
+        is the file's tree-sitter repository-map entry (imports + symbols);
+        when provided it is added to the prompt as deterministic
+        structural grounding (#77) so the profiler's situational picks
+        are more stable run to run. On any LLM error a minimal fallback
+        profile is returned so a single bad file never aborts the scan.
         """
         snippet = content[:_MAX_CONTENT_CHARS]
         truncated = len(content) > _MAX_CONTENT_CHARS
@@ -87,11 +126,14 @@ class FileProfiler:
             )
             or "(no domains configured)"
         )
+        structure = _structural_block(repo_summary)
+        structure_section = f"{structure}\n\n" if structure else ""
 
         prompt = (
             f"File path: {file_path}\n\n"
             f"Available security domains (choose only from these names):\n"
             f"{vocab_block}\n\n"
+            f"{structure_section}"
             "Profile this file. Return:\n"
             "1. summary — 2-4 sentences on what the file does.\n"
             "2. security_relevant_operations — short phrases for the "

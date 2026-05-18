@@ -127,3 +127,58 @@ def test_llm_response_model_defaults_are_lenient():
     resp = _FileProfileLLMResponse(summary="just a summary")
     assert resp.security_relevant_operations == []
     assert resp.applicable_domains == []
+
+
+# ---------------------------------------------------------------------------
+# Repository-map structural grounding — #77
+# ---------------------------------------------------------------------------
+
+_OK_RESPONSE = {
+    "summary": "x",
+    "security_relevant_operations": [],
+    "applicable_domains": [],
+}
+
+
+def test_repo_summary_structure_reaches_the_prompt():
+    """The file's deterministic tree-sitter imports + symbols are added
+    to the profiler prompt as grounding context."""
+    client = _FakeClient(parsed=_OK_RESPONSE)
+    profiler = FileProfiler(client)
+    repo_summary = SimpleNamespace(
+        imports=["os", "subprocess", "requests"],
+        symbols=[
+            SimpleNamespace(name="login", type="function", line_number=12),
+            SimpleNamespace(name="UserRepo", type="class", line_number=40),
+        ],
+    )
+    asyncio.run(
+        profiler.profile_file(
+            "auth/login.py", "def login(): ...", _VOCAB, repo_summary=repo_summary
+        )
+    )
+    prompt = client.calls[0]
+    assert "FILE STRUCTURE" in prompt
+    assert "subprocess" in prompt and "requests" in prompt
+    assert "login" in prompt and "UserRepo" in prompt
+
+
+def test_profiles_without_a_repo_summary():
+    """A file with no repository-map entry still profiles — the
+    structural block is simply omitted."""
+    client = _FakeClient(parsed=_OK_RESPONSE)
+    profiler = FileProfiler(client)
+    result = asyncio.run(
+        profiler.profile_file("x.py", "code", _VOCAB, repo_summary=None)
+    )
+    assert isinstance(result, FileProfile)
+    assert "FILE STRUCTURE" not in client.calls[0]
+
+
+def test_empty_repo_summary_omits_the_structure_block():
+    """A summary with no imports and no symbols adds nothing."""
+    client = _FakeClient(parsed=_OK_RESPONSE)
+    profiler = FileProfiler(client)
+    empty = SimpleNamespace(imports=[], symbols=[])
+    asyncio.run(profiler.profile_file("x.py", "code", _VOCAB, repo_summary=empty))
+    assert "FILE STRUCTURE" not in client.calls[0]

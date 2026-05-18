@@ -145,6 +145,13 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
         logger.info("profile_files: scan_id=%s no files to profile", scan_id)
         return {"file_profiles": {}}
 
+    # The tree-sitter repository map grounds the profiler with each
+    # file's deterministic imports + symbols (#77). Built in
+    # `retrieve_and_prepare_data`; `.files` survives the checkpointer
+    # round-trip (the cost node reads it the same way).
+    repository_map = state.get("repository_map")
+    repo_files = getattr(repository_map, "files", None) or {}
+
     try:
         profiler = await create_file_profiler(utility_llm_config_id)
     except Exception as exc:  # noqa: BLE001
@@ -154,7 +161,12 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
 
     async def _profile(path: str, content: str):
         async with semaphore:
-            profile = await profiler.profile_file(path, content, domain_vocabulary)
+            profile = await profiler.profile_file(
+                path,
+                content,
+                domain_vocabulary,
+                repo_summary=repo_files.get(path),
+            )
             return path, profile
 
     results = await asyncio.gather(
