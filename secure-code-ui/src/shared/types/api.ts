@@ -391,6 +391,8 @@ export interface LLMInteractionResponse {
   scan_id?: string;
   file_path?: string;
   agent_name: string;
+  llm_config_id?: string | null;
+  llm_name?: string | null;
   timestamp: string;
   cost?: number;
   input_tokens?: number;

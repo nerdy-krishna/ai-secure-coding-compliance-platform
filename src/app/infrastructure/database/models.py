@@ -390,6 +390,14 @@ class LLMInteraction(Base):
         ForeignKey("chat_messages.id")
     )
     agent_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # The LLM config this call ran on — lets the LLM-logs page filter by
+    # model (e.g. reasoning vs the 2nd analysis LLM). Nullable for chat
+    # interactions and rows written before the column existed.
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     file_path: Mapped[Optional[str]] = mapped_column(Text)
     prompt_template_name: Mapped[Optional[str]] = mapped_column(String(100))
     # classification: LLM-payload / level=Restricted (may contain PII or secrets)

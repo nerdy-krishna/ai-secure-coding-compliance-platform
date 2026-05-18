@@ -4,8 +4,8 @@
 // onto SCCAP primitives (card grid + rail nav + expandable rows).
 
 import { useQuery } from "@tanstack/react-query";
-import React, { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { scanService } from "../../shared/api/scanService";
 import type { LLMInteractionResponse } from "../../shared/types/api";
 import { useAuth } from "../../shared/hooks/useAuth";
@@ -42,9 +42,13 @@ function sanitizeErrorMessage(raw: string): string | null {
 
 const LlmLogViewerPage: React.FC = () => {
   const { scanId } = useParams<{ scanId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const isSuperuser = user?.is_superuser === true;
   const [selectedFilePath, setSelectedFilePath] = useState<string>("All Files");
+  const [selectedModel, setSelectedModel] = useState<string>(
+    () => searchParams.get("model") ?? "All Models",
+  );
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showTechDetails, setShowTechDetails] = useState<Record<number, boolean>>({});
 
@@ -84,10 +88,38 @@ const LlmLogViewerPage: React.FC = () => {
     return ["All Files", ...Array.from(paths).sort()];
   }, [interactions]);
 
+  const models = useMemo(() => {
+    const names = new Set<string>();
+    for (const i of interactions) {
+      if (i.llm_name) names.add(i.llm_name);
+    }
+    return ["All Models", ...Array.from(names).sort()];
+  }, [interactions]);
+
+  // Keep the query param honoured even if the data (and thus the model
+  // list) arrives after first render.
+  useEffect(() => {
+    const param = searchParams.get("model");
+    if (param && param !== selectedModel) setSelectedModel(param);
+  }, [searchParams, selectedModel]);
+
+  const selectModel = (m: string) => {
+    setSelectedModel(m);
+    const next = new URLSearchParams(searchParams);
+    if (m === "All Models") next.delete("model");
+    else next.set("model", m);
+    setSearchParams(next, { replace: true });
+  };
+
   const filteredInteractions = useMemo(() => {
-    if (selectedFilePath === "All Files") return interactions;
-    return interactions.filter((i) => i.file_path === selectedFilePath);
-  }, [interactions, selectedFilePath]);
+    return interactions.filter((i) => {
+      if (selectedFilePath !== "All Files" && i.file_path !== selectedFilePath)
+        return false;
+      if (selectedModel !== "All Models" && i.llm_name !== selectedModel)
+        return false;
+      return true;
+    });
+  }, [interactions, selectedFilePath, selectedModel]);
 
   const fileStats = useMemo(() => {
     if (selectedFilePath === "All Files") return null;
@@ -202,6 +234,59 @@ const LlmLogViewerPage: React.FC = () => {
             overflowY: "auto",
           }}
         >
+          {models.length > 1 && (
+            <>
+              <div
+                style={{
+                  fontSize: 10.5,
+                  color: "var(--fg-subtle)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".06em",
+                  padding: "6px 10px 4px",
+                }}
+              >
+                Models
+              </div>
+              {models.map((m) => {
+                const active = m === selectedModel;
+                return (
+                  <button
+                    key={m}
+                    className="sccap-btn sccap-btn-ghost"
+                    style={{
+                      width: "100%",
+                      justifyContent: "flex-start",
+                      padding: "8px 10px",
+                      background: active ? "var(--bg-soft)" : "transparent",
+                      color: active ? "var(--fg)" : "var(--fg-muted)",
+                      fontSize: 12.5,
+                      fontWeight: m === "All Models" ? 600 : 400,
+                    }}
+                    onClick={() => selectModel(m)}
+                    title={m}
+                  >
+                    <span
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1,
+                        textAlign: "left",
+                      }}
+                    >
+                      {m}
+                    </span>
+                  </button>
+                );
+              })}
+              <div
+                style={{
+                  borderTop: "1px solid var(--border)",
+                  margin: "8px 4px",
+                }}
+              />
+            </>
+          )}
           <div
             style={{
               fontSize: 10.5,
@@ -331,6 +416,17 @@ const LlmLogViewerPage: React.FC = () => {
                           >
                             {r.agent_name}
                           </span>
+                          {r.llm_name && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "var(--fg-subtle)",
+                                marginTop: 3,
+                              }}
+                            >
+                              {r.llm_name}
+                            </div>
+                          )}
                         </td>
                         <td
                           style={{

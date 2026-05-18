@@ -572,6 +572,10 @@ class LLMInteractionResponse(BaseModel):
     scan_id: Optional[uuid.UUID] = None
     file_path: Optional[str] = None
     agent_name: str
+    # The LLM this call ran on — id + resolved display name — so the
+    # LLM-logs page can filter by model. Null for older rows.
+    llm_config_id: Optional[uuid.UUID] = None
+    llm_name: Optional[str] = None
     timestamp: datetime
     cost: Optional[float] = None
     input_tokens: Optional[int] = None

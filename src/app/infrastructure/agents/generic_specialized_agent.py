@@ -759,6 +759,7 @@ async def analysis_node(
     interaction = LLMInteraction(
         scan_id=scan_id,
         agent_name=agent_name,
+        llm_config_id=llm_config_id,
         prompt_template_name=prompt_template.name,
         prompt_context=prompt_context_for_log,
         raw_response=_redact_for_persistence(llm_response.raw_output or ""),

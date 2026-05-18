@@ -871,10 +871,7 @@ async def get_llm_interactions_for_scan(
     service: ScanQueryService = Depends(get_scan_query_service),
 ):
     """Retrieves all LLM interactions associated with a specific scan."""
-    interactions_db = await service.get_llm_interactions_for_scan(scan_id, user)
-    return [
-        api_models.LLMInteractionResponse.from_orm(inter) for inter in interactions_db
-    ]
+    return await service.get_llm_interactions_for_scan(scan_id, user)
 
 
 @router.delete("/scans/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -495,8 +495,10 @@ class ScanQueryService:
 
     async def get_llm_interactions_for_scan(
         self, scan_id: uuid.UUID, user: db_models.User
-    ) -> List[db_models.LLMInteraction]:
-        """Gets all LLM interactions for a given scan, ensuring user has access."""
+    ) -> List[api_models.LLMInteractionResponse]:
+        """Gets all LLM interactions for a given scan, ensuring user has
+        access. Each interaction is enriched with the resolved LLM
+        display name so the LLM-logs page can filter by model."""
         logger.info(
             "scan-query: LLM interactions requested",
             extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
@@ -517,7 +519,27 @@ class ScanQueryService:
                 detail="Scan not found or not authorized.",
             )
 
-        return await self.repo.get_llm_interactions_for_scan(scan_id)
+        interactions = await self.repo.get_llm_interactions_for_scan(scan_id)
+
+        # Resolve each interaction's LLM config id to its display name so
+        # the UI can group/filter logs by model. Batched + cached.
+        from app.infrastructure.database.repositories.llm_config_repo import (
+            LLMConfigRepository,
+        )
+
+        llm_repo = LLMConfigRepository(self.repo.db)
+        name_cache: Dict[uuid.UUID, Optional[str]] = {}
+        responses: List[api_models.LLMInteractionResponse] = []
+        for inter in interactions:
+            resp = api_models.LLMInteractionResponse.from_orm(inter)
+            cfg_id = inter.llm_config_id
+            if cfg_id is not None:
+                if cfg_id not in name_cache:
+                    cfg = await llm_repo.get_by_id(cfg_id)
+                    name_cache[cfg_id] = cfg.name if cfg is not None else None
+                resp.llm_name = name_cache[cfg_id]
+            responses.append(resp)
+        return responses
 
     async def get_paginated_projects(
         self,

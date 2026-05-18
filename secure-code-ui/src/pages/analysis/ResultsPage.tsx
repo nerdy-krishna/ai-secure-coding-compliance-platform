@@ -696,16 +696,39 @@ const ResultsPage: React.FC = () => {
                 >
                   {m.provider}/{m.model_name}
                 </span>
-                {/* Per-model findings detected (#94). */}
+                {/* Per-model findings detected (#94). Clicking jumps to
+                    the LLM logs filtered to this model. */}
                 {stats && (
                   <span
+                    role="button"
+                    tabIndex={0}
+                    title={`View ${m.name} interactions in the LLM logs`}
+                    onClick={() =>
+                      navigate(
+                        `/scans/${scanId}/llm-logs?model=${encodeURIComponent(m.name)}`,
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        navigate(
+                          `/scans/${scanId}/llm-logs?model=${encodeURIComponent(m.name)}`,
+                        );
+                      }
+                    }}
                     style={{
                       fontSize: 11.5,
                       color: "var(--fg-muted)",
                       marginTop: 4,
+                      cursor: "pointer",
                     }}
                   >
-                    <strong style={{ color: "var(--fg)" }}>
+                    <strong
+                      style={{
+                        color: "var(--accent)",
+                        textDecoration: "underline",
+                      }}
+                    >
                       {stats.count}
                     </strong>{" "}
                     finding{stats.count === 1 ? "" : "s"} detected

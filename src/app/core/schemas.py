@@ -319,6 +319,9 @@ class LLMInteraction(BaseModel):
     agent_name: str = Field(
         description="The name of the agent that initiated the interaction."
     )
+    llm_config_id: Optional[uuid.UUID] = Field(
+        None, description="The LLM config this interaction ran on."
+    )
     prompt_template_name: Optional[str] = Field(
         None, description="The name of the prompt template used."
     )
