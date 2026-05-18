@@ -86,23 +86,29 @@ def _cwe_roster() -> dict:
     }
 
 
-def test_cwe_roster_on_pure_cpp_repo_skips_only_web_injection():
-    """Issue example: on a pure C++ repo the Web Injection agent is
-    skipped — 13 of the 14 CWE agents run."""
+def test_cwe_roster_on_pure_cpp_repo_routes_to_the_cpp_baseline():
+    """With baseline-aware routing (#76) and no profile, a C++ file
+    routes to the CWE agents baseline for C++ — the memory-safety,
+    numeric, concurrency, input-validation and resource-lifecycle
+    concern-areas — not the whole gating roster."""
     roster = _cwe_roster()
     ran = {a["name"] for a in resolve_agents_for_file("engine.cpp", roster)}
-    assert len(ran) == 13
-    assert "CweWebInjectionAgent" not in ran
     assert "CweSpatialMemorySafetyAgent" in ran
+    assert "CweTemporalMemorySafetyAgent" in ran
+    assert "CweNumericErrorsAgent" in ran
+    assert "CweConcurrencyAgent" in ran
+    # Web Injection is neither C++-baseline nor gating-eligible here.
+    assert "CweWebInjectionAgent" not in ran
 
 
-def test_cwe_roster_on_pure_web_repo_skips_systems_agents():
-    """Issue example: on a pure web repo the three systems-gated agents
-    (spatial/temporal memory safety, concurrency) are skipped — 11 run."""
+def test_cwe_roster_on_pure_web_repo_routes_to_the_python_baseline():
+    """A Python file routes to the CWE agents baseline for Python; the
+    systems-only memory/concurrency agents are not in the Python
+    baseline and the file is web-gated, so they do not run."""
     roster = _cwe_roster()
     ran = {a["name"] for a in resolve_agents_for_file("views.py", roster)}
-    assert len(ran) == 11
+    assert "CweWebInjectionAgent" in ran
+    assert "CweInputValidationAgent" in ran
     assert "CweSpatialMemorySafetyAgent" not in ran
     assert "CweTemporalMemorySafetyAgent" not in ran
     assert "CweConcurrencyAgent" not in ran
-    assert "CweWebInjectionAgent" in ran

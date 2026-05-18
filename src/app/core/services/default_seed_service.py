@@ -842,6 +842,7 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Spatial Memory Safety"],
             },
             "gating": "systems",
+            "baseline_languages": ["c", "cpp"],
         },
     },
     {
@@ -865,6 +866,7 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Temporal Memory Safety"],
             },
             "gating": "systems",
+            "baseline_languages": ["c", "cpp"],
         },
     },
     {
@@ -889,6 +891,7 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Numeric, Type & Conversion Errors"],
             },
             "gating": "all",
+            "baseline_languages": ["c", "cpp", "go", "java", "csharp", "rust"],
         },
     },
     {
@@ -907,6 +910,18 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["OS & Command Injection"],
             },
             "gating": "all",
+            "baseline_languages": [
+                "python",
+                "javascript",
+                "typescript",
+                "ruby",
+                "php",
+                "go",
+                "java",
+                "csharp",
+                "shell",
+                "perl",
+            ],
         },
     },
     {
@@ -929,6 +944,15 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Code Injection & Unsafe Deserialization"],
             },
             "gating": "all",
+            "baseline_languages": [
+                "python",
+                "javascript",
+                "typescript",
+                "ruby",
+                "php",
+                "java",
+                "csharp",
+            ],
         },
     },
     {
@@ -950,6 +974,18 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Web Injection"],
             },
             "gating": "web",
+            "baseline_languages": [
+                "javascript",
+                "typescript",
+                "html",
+                "php",
+                "python",
+                "ruby",
+                "java",
+                "csharp",
+                "vue",
+                "svelte",
+            ],
         },
     },
     {
@@ -971,6 +1007,22 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Improper Input Validation"],
             },
             "gating": "all",
+            "baseline_languages": [
+                "python",
+                "javascript",
+                "typescript",
+                "java",
+                "go",
+                "ruby",
+                "php",
+                "csharp",
+                "c",
+                "cpp",
+                "rust",
+                "swift",
+                "kotlin",
+                "scala",
+            ],
         },
     },
     {
@@ -994,6 +1046,16 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["External Resource Access"],
             },
             "gating": "all",
+            "baseline_languages": [
+                "python",
+                "javascript",
+                "typescript",
+                "java",
+                "go",
+                "ruby",
+                "php",
+                "csharp",
+            ],
         },
     },
     {
@@ -1016,6 +1078,8 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Authentication & Credential Management"],
             },
             "gating": "all",
+            # Situational, not language-intrinsic — profiler-routed only.
+            "baseline_languages": [],
         },
     },
     {
@@ -1038,6 +1102,8 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Authorization & Access Control"],
             },
             "gating": "all",
+            # Situational, not language-intrinsic — profiler-routed only.
+            "baseline_languages": [],
         },
     },
     {
@@ -1059,6 +1125,8 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Privilege Management"],
             },
             "gating": "all",
+            # Situational, not language-intrinsic — profiler-routed only.
+            "baseline_languages": [],
         },
     },
     {
@@ -1081,6 +1149,7 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Concurrency & Race Conditions"],
             },
             "gating": "systems",
+            "baseline_languages": ["c", "cpp", "go", "rust", "java", "csharp"],
         },
     },
     {
@@ -1103,6 +1172,15 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Resource Lifecycle & Exhaustion"],
             },
             "gating": "all",
+            "baseline_languages": [
+                "c",
+                "cpp",
+                "go",
+                "java",
+                "csharp",
+                "rust",
+                "python",
+            ],
         },
     },
     {
@@ -1127,6 +1205,8 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
                 "concern_area": ["Sensitive Information Exposure"],
             },
             "gating": "all",
+            # Situational, not language-intrinsic — profiler-routed only.
+            "baseline_languages": [],
         },
     },
 ]
