@@ -555,13 +555,56 @@ class FindingDispositionUpdateRequest(BaseModel):
 
 
 class FindingDispositionResponse(BaseModel):
-    """The triage state of a finding after a disposition change."""
+    """The triage state of a finding after a disposition change, plus
+    the scan's freshly recomputed 0-10 risk score (PRD #96 / #99)."""
 
     finding_id: int
     disposition: str
     disposition_by: Optional[int] = None
     disposition_at: Optional[datetime] = None
     disposition_note: Optional[str] = None
+    scan_risk_score: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class BulkFindingDispositionUpdateRequest(BaseModel):
+    """Body of the bulk disposition PATCH (PRD #96 / #100) — one
+    disposition + note applied to many findings of a single scan."""
+
+    finding_ids: List[int] = Field(
+        ..., min_length=1, max_length=2000, description="Findings to update."
+    )
+    disposition: str = Field(..., description="Target disposition state.")
+    note: Optional[str] = Field(
+        None,
+        max_length=4000,
+        description=(
+            "Justification note. Required when the target disposition is "
+            "false_positive or risk_accepted."
+        ),
+    )
+
+
+class BulkFindingDispositionResponse(BaseModel):
+    """Outcome of a bulk disposition change."""
+
+    updated_count: int
+    disposition: str
+    scan_risk_score: Optional[int] = None
+
+
+class FindingDispositionEventResponse(BaseModel):
+    """One entry in a finding's disposition-change history (PRD #96)."""
+
+    id: int
+    finding_id: int
+    old_disposition: str
+    new_disposition: str
+    actor_user_id: Optional[int] = None
+    note: Optional[str] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True

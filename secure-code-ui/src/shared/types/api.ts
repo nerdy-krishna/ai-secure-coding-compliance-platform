@@ -226,6 +226,24 @@ export interface FindingDispositionResponse {
   disposition_by?: number | null;
   disposition_at?: string | null;
   disposition_note?: string | null;
+  // The scan's 0-10 risk score, recomputed after this change (#99).
+  scan_risk_score?: number | null;
+}
+
+export interface BulkFindingDispositionResponse {
+  updated_count: number;
+  disposition: FindingDisposition;
+  scan_risk_score?: number | null;
+}
+
+export interface FindingDispositionEvent {
+  id: number;
+  finding_id: number;
+  old_disposition: FindingDisposition;
+  new_disposition: FindingDisposition;
+  actor_user_id?: number | null;
+  note?: string | null;
+  created_at: string;
 }
 
 export interface SubmittedFile {

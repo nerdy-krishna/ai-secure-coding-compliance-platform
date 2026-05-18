@@ -124,6 +124,12 @@ const ResultsPage: React.FC = () => {
   const [diffSelectedFile, setDiffSelectedFile] = useState<string | null>(null);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [listCollapsed, setListCollapsed] = useState(false);
+  // Triage (#100): filter the list by disposition, and multi-select
+  // findings for a bulk disposition change.
+  const [dispFilter, setDispFilter] = useState<"all" | FindingDisposition>(
+    "all",
+  );
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const { user } = useAuth();
   const isSuperuser = !!user?.is_superuser;
 
@@ -241,6 +247,8 @@ const ResultsPage: React.FC = () => {
           )
             return false;
         }
+        if (dispFilter !== "all" && (f.disposition ?? "open") !== dispFilter)
+          return false;
         if (
           search &&
           !(
@@ -252,7 +260,7 @@ const ResultsPage: React.FC = () => {
           return false;
         return true;
       }),
-    [allFindings, sevFilter, sourceFilter, filePathFilter, search],
+    [allFindings, sevFilter, sourceFilter, filePathFilter, search, dispFilter],
   );
 
   // Cross-file validation (#82): `mitigated` findings are collapsed out
@@ -1031,9 +1039,37 @@ const ResultsPage: React.FC = () => {
           >
             {/* Collapse button row */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <span style={{ fontSize: 11, color: "var(--fg-muted)", fontWeight: 500 }}>
+              <label
+                style={{
+                  fontSize: 11,
+                  color: "var(--fg-muted)",
+                  fontWeight: 500,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  cursor: "pointer",
+                }}
+                title="Select all findings in view for bulk triage"
+              >
+                <input
+                  type="checkbox"
+                  checked={
+                    displayedFindings.length > 0 &&
+                    displayedFindings.every((f) => selectedIds.has(f.id))
+                  }
+                  onChange={(e) => {
+                    const ids = displayedFindings.map((f) => f.id);
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) ids.forEach((id) => next.add(id));
+                      else ids.forEach((id) => next.delete(id));
+                      return next;
+                    });
+                  }}
+                  style={{ margin: 0, cursor: "pointer" }}
+                />
                 {filtered.length} finding{filtered.length === 1 ? "" : "s"}
-              </span>
+              </label>
               <button
                 className="sccap-btn sccap-btn-ghost sccap-btn-icon"
                 onClick={() => setListCollapsed(true)}
@@ -1077,7 +1113,53 @@ const ResultsPage: React.FC = () => {
                 </button>
               ))}
             </div>
+            {/* Disposition filter (#100). */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span
+                style={{
+                  fontSize: 10.5,
+                  color: "var(--fg-subtle)",
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                }}
+              >
+                Triage
+              </span>
+              <select
+                className="sccap-input"
+                value={dispFilter}
+                onChange={(e) =>
+                  setDispFilter(e.target.value as "all" | FindingDisposition)
+                }
+                style={{ height: 30, flex: 1, fontSize: 12 }}
+              >
+                <option value="all">All dispositions</option>
+                {DISPOSITIONS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label} ·{" "}
+                    {
+                      allFindings.filter(
+                        (f) => (f.disposition ?? "open") === d.value,
+                      ).length
+                    }
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
+          {scanId && selectedIds.size > 0 && (
+            <BulkDispositionBar
+              scanId={scanId}
+              findingIds={Array.from(selectedIds)}
+              onClear={() => setSelectedIds(new Set())}
+              onApplied={() => {
+                setSelectedIds(new Set());
+                queryClient.invalidateQueries({
+                  queryKey: ["scan-result", scanId],
+                });
+              }}
+            />
+          )}
           <div style={{ flex: 1, overflow: "auto" }}>
             {displayedFindings.length === 0 && mitigatedCount === 0 ? (
               <div
@@ -1114,6 +1196,23 @@ const ResultsPage: React.FC = () => {
                         marginBottom: 4,
                       }}
                     >
+                      {/* Multi-select for bulk triage (#100). */}
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(f.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(f.id)) next.delete(f.id);
+                            else next.add(f.id);
+                            return next;
+                          });
+                        }}
+                        title="Select for bulk triage"
+                        style={{ cursor: "pointer", margin: 0 }}
+                      />
                       <span
                         style={{
                           width: 6,
@@ -1574,6 +1673,9 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["scan-result", scanId] });
+      qc.invalidateQueries({
+        queryKey: ["disposition-events", scanId, f.id],
+      });
       setPending(null);
       setNote("");
       toast.success("Disposition updated");
@@ -1742,6 +1844,226 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
             >
               {f.disposition_note}
             </div>
+          )}
+        </div>
+      )}
+
+      <DispositionHistory scanId={scanId} findingId={f.id} />
+    </div>
+  );
+};
+
+/** Bulk-triage action bar — shown above the findings list when one or
+ *  more findings are multi-selected (#100). */
+const BulkDispositionBar: React.FC<{
+  scanId: string;
+  findingIds: number[];
+  onClear: () => void;
+  onApplied: () => void;
+}> = ({ scanId, findingIds, onClear, onApplied }) => {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [disp, setDisp] = useState<FindingDisposition | "">("");
+  const [note, setNote] = useState("");
+  const needsNote =
+    disp !== "" && NOTE_REQUIRED.includes(disp as FindingDisposition);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      scanService.setFindingDispositionsBulk(
+        scanId,
+        findingIds,
+        disp as FindingDisposition,
+        note.trim() || undefined,
+      ),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["disposition-events", scanId] });
+      toast.success(
+        `Updated ${res.updated_count} finding${
+          res.updated_count === 1 ? "" : "s"
+        }`,
+      );
+      setDisp("");
+      setNote("");
+      onApplied();
+    },
+    onError: (e: unknown) => {
+      const err = e as {
+        response?: { data?: { detail?: string } };
+        message?: string;
+      };
+      toast.error(
+        err?.response?.data?.detail ??
+          err?.message ??
+          "Bulk update failed",
+      );
+    },
+  });
+
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        background: "var(--primary-weak)",
+        borderBottom: "1px solid var(--border)",
+        display: "grid",
+        gap: 8,
+      }}
+    >
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+      >
+        <strong style={{ fontSize: 12, color: "var(--fg)" }}>
+          {findingIds.length} selected
+        </strong>
+        <select
+          className="sccap-input"
+          value={disp}
+          onChange={(e) => setDisp(e.target.value as FindingDisposition | "")}
+          style={{ height: 30, fontSize: 12, flex: 1, minWidth: 150 }}
+        >
+          <option value="">Set disposition…</option>
+          {DISPOSITIONS.map((d) => (
+            <option key={d.value} value={d.value}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="sccap-btn sccap-btn-primary"
+          disabled={
+            !disp || (needsNote && !note.trim()) || mutation.isPending
+          }
+          onClick={() => mutation.mutate()}
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          className="sccap-btn sccap-btn-ghost"
+          disabled={mutation.isPending}
+          onClick={onClear}
+        >
+          Clear
+        </button>
+      </div>
+      {needsNote && (
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={2}
+          maxLength={4000}
+          placeholder={`Justification (required for ${
+            disp === "false_positive" ? "False Positive" : "Risk Accepted"
+          })`}
+          style={{
+            width: "100%",
+            padding: "7px 9px",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+            background: "var(--bg)",
+            color: "var(--fg)",
+            fontSize: 12.5,
+            fontFamily: "inherit",
+            resize: "vertical",
+          }}
+        />
+      )}
+    </div>
+  );
+};
+
+/** Collapsible per-finding disposition-change history (#100). */
+const DispositionHistory: React.FC<{
+  scanId?: string;
+  findingId: number;
+}> = ({ scanId, findingId }) => {
+  const [open, setOpen] = useState(false);
+  const { data: events = [], isLoading } = useQuery({
+    queryKey: ["disposition-events", scanId, findingId],
+    queryFn: () =>
+      scanService.getFindingDispositionEvents(scanId!, findingId),
+    enabled: open && !!scanId,
+  });
+  if (!scanId) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          color: "var(--accent)",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+      >
+        {open ? "Hide" : "Show"} disposition history
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {isLoading ? (
+            <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+              Loading…
+            </div>
+          ) : events.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+              No disposition changes recorded.
+            </div>
+          ) : (
+            <ol
+              style={{
+                listStyle: "none",
+                margin: 0,
+                padding: 0,
+                display: "grid",
+                gap: 8,
+              }}
+            >
+              {events.map((ev) => (
+                <li
+                  key={ev.id}
+                  style={{
+                    fontSize: 12,
+                    color: "var(--fg-muted)",
+                    borderLeft: "2px solid var(--border-strong)",
+                    paddingLeft: 9,
+                  }}
+                >
+                  <div>
+                    <strong style={{ color: "var(--fg)" }}>
+                      {dispositionMeta(ev.old_disposition).label}
+                    </strong>{" "}
+                    →{" "}
+                    <strong
+                      style={{ color: dispositionMeta(ev.new_disposition).color }}
+                    >
+                      {dispositionMeta(ev.new_disposition).label}
+                    </strong>
+                    {" · "}
+                    {new Date(ev.created_at).toLocaleString()}
+                    {ev.actor_user_id != null && (
+                      <> · user #{ev.actor_user_id}</>
+                    )}
+                  </div>
+                  {ev.note && (
+                    <div
+                      style={{
+                        marginTop: 2,
+                        color: "var(--fg)",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {ev.note}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
           )}
         </div>
       )}

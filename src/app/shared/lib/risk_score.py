@@ -213,3 +213,23 @@ def to_posture_score(aggregate: float) -> int:
     compliance heuristics so API JSON shapes do not change.
     """
     return max(5, 100 - min(95, round(aggregate * 10)))
+
+
+def scoreable_findings(findings: Sequence[Any]) -> list[Any]:
+    """Filter to the findings that count toward the risk score — those
+    whose triage disposition is `open` or `confirmed` (PRD #96 / #99).
+
+    `false_positive` / `remediated` / `risk_accepted` findings are
+    dropped. A finding with no `disposition` attribute (legacy callers,
+    pre-#96 finding-like objects) is kept — a missing field must never
+    silently hide a finding from the score. `compute_cvss_aggregate`
+    itself stays disposition-agnostic; callers filter through this.
+    """
+    from app.shared.lib.finding_disposition import is_scoreable
+
+    out: list[Any] = []
+    for finding in findings:
+        disposition = getattr(finding, "disposition", None)
+        if disposition is None or is_scoreable(str(disposition)):
+            out.append(finding)
+    return out

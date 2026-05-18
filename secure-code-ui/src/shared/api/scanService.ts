@@ -1,5 +1,7 @@
 import {
+  type BulkFindingDispositionResponse,
   type FindingDisposition,
+  type FindingDispositionEvent,
   type FindingDispositionResponse,
   type GitRepoPreviewRequest,
   type LLMInteractionResponse,
@@ -292,6 +294,34 @@ export const scanService = {
     const response = await apiClient.patch<FindingDispositionResponse>(
       `/scans/${encodeURIComponent(scanId)}/findings/${findingId}/disposition`,
       { disposition, note: note ?? null },
+    );
+    return response.data;
+  },
+
+  /**
+   * Applies one triage disposition to many findings of a scan at once
+   * (PRD #96 / #100). All-or-nothing on the backend.
+   */
+  setFindingDispositionsBulk: async (
+    scanId: string,
+    findingIds: number[],
+    disposition: FindingDisposition,
+    note?: string,
+  ): Promise<BulkFindingDispositionResponse> => {
+    const response = await apiClient.patch<BulkFindingDispositionResponse>(
+      `/scans/${encodeURIComponent(scanId)}/findings/disposition`,
+      { finding_ids: findingIds, disposition, note: note ?? null },
+    );
+    return response.data;
+  },
+
+  /** The disposition-change history for a finding, oldest first. */
+  getFindingDispositionEvents: async (
+    scanId: string,
+    findingId: number,
+  ): Promise<FindingDispositionEvent[]> => {
+    const response = await apiClient.get<FindingDispositionEvent[]>(
+      `/scans/${encodeURIComponent(scanId)}/findings/${findingId}/disposition-events`,
     );
     return response.data;
   },

@@ -184,3 +184,54 @@ def test_never_raises_on_completely_empty_finding():
     """Belt-and-braces — a finding with every field None still scores 0.0."""
     finding = _F()
     assert compute_cvss_aggregate([finding]) == 0.0
+
+
+# --- scoreable_findings filter (PRD #96 / #99) --------------------------
+
+from app.shared.lib.risk_score import scoreable_findings  # noqa: E402
+
+
+@dataclass
+class _FD:
+    """Test double exposing a `disposition`, for the scoreable filter."""
+
+    disposition: str
+    severity: Optional[str] = None
+    cvss_score: Optional[float] = None
+    cvss_vector: Optional[str] = None
+    id: Optional[int] = None
+
+
+def test_scoreable_findings_keeps_open_and_confirmed():
+    findings = [_FD("open"), _FD("confirmed")]
+    assert scoreable_findings(findings) == findings
+
+
+def test_scoreable_findings_drops_resolved_states():
+    findings = [
+        _FD("open"),
+        _FD("false_positive"),
+        _FD("remediated"),
+        _FD("risk_accepted"),
+        _FD("confirmed"),
+    ]
+    kept = scoreable_findings(findings)
+    assert [f.disposition for f in kept] == ["open", "confirmed"]
+
+
+def test_scoreable_findings_keeps_objects_without_disposition_attr():
+    # Legacy finding-like objects with no `disposition` must be kept —
+    # a missing field must never silently hide a finding from the score.
+    findings = [_F(severity="HIGH")]
+    assert scoreable_findings(findings) == findings
+
+
+def test_score_drops_to_zero_when_only_finding_is_dispositioned():
+    # The behaviour #99 guarantees: triaging a finding away lowers the
+    # risk score. A lone Critical scored ~9.8 → 0.0 once resolved.
+    crit = _FD("open", cvss_vector=VALID_CVSS_31)
+    before = compute_cvss_aggregate(scoreable_findings([crit]))
+    assert before > 9.0
+    crit.disposition = "false_positive"
+    after = compute_cvss_aggregate(scoreable_findings([crit]))
+    assert after == 0.0

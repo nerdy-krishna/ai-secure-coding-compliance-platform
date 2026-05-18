@@ -866,6 +866,43 @@ async def set_finding_disposition(
     )
 
 
+@router.patch(
+    "/scans/{scan_id}/findings/disposition",
+    response_model=api_models.BulkFindingDispositionResponse,
+)
+async def set_finding_dispositions_bulk(
+    scan_id: uuid.UUID,
+    request: api_models.BulkFindingDispositionUpdateRequest,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+):
+    """Apply one triage disposition to many of a scan's findings at once
+    (PRD #96 / #100). All-or-nothing: every finding id must belong to
+    the scan, and the note requirement is enforced once for the batch.
+    """
+    return await service.set_finding_dispositions_bulk(
+        scan_id, user, request, visible_user_ids=visible_user_ids
+    )
+
+
+@router.get(
+    "/scans/{scan_id}/findings/{finding_id}/disposition-events",
+    response_model=List[api_models.FindingDispositionEventResponse],
+)
+async def get_finding_disposition_events(
+    scan_id: uuid.UUID,
+    finding_id: int,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+):
+    """The disposition-change history for a finding, oldest first."""
+    return await service.get_finding_disposition_history(
+        scan_id, finding_id, user, visible_user_ids=visible_user_ids
+    )
+
+
 @router.delete("/scans/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_scan(
     scan_id: uuid.UUID,

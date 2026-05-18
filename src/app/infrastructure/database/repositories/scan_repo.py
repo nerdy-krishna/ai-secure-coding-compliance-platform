@@ -673,28 +673,52 @@ class ScanRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_finding(
-        self, finding_id: int
-    ) -> Optional[db_models.Finding]:
+    async def get_finding(self, finding_id: int) -> Optional[db_models.Finding]:
         """Retrieve a single finding by its primary key."""
         result = await self.db.execute(
-            select(db_models.Finding).where(
-                db_models.Finding.id == finding_id
-            )
+            select(db_models.Finding).where(db_models.Finding.id == finding_id)
         )
         return result.scalars().first()
 
-    async def apply_finding_disposition(
+    async def get_findings_by_ids(
+        self, scan_id: uuid.UUID, finding_ids: List[int]
+    ) -> List[db_models.Finding]:
+        """Retrieve the given findings, scoped to one scan. Ids that
+        don't belong to the scan (or don't exist) are simply absent
+        from the result — the caller decides how to treat a mismatch."""
+        if not finding_ids:
+            return []
+        result = await self.db.execute(
+            select(db_models.Finding).where(
+                db_models.Finding.scan_id == scan_id,
+                db_models.Finding.id.in_(finding_ids),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def get_disposition_events(
+        self, finding_id: int
+    ) -> List[db_models.FindingDispositionEvent]:
+        """The full disposition-change history for a finding, oldest
+        first (PRD #96 / #100)."""
+        result = await self.db.execute(
+            select(db_models.FindingDispositionEvent)
+            .where(db_models.FindingDispositionEvent.finding_id == finding_id)
+            .order_by(db_models.FindingDispositionEvent.id.asc())
+        )
+        return list(result.scalars().all())
+
+    def _stage_disposition(
         self,
         finding: db_models.Finding,
         *,
         new_disposition: str,
         actor_user_id: int,
         note: Optional[str],
-    ) -> db_models.Finding:
-        """Set a finding's disposition and append an audit event in one
-        transaction (PRD #96 / #97). The caller is responsible for
-        transition validation — this method only persists."""
+    ) -> None:
+        """Mutate a finding's disposition columns and queue an audit
+        event. Does NOT commit — the caller commits once, after the risk
+        score is recomputed, so the whole change is one transaction."""
         old = finding.disposition or "open"
         finding.disposition = new_disposition
         finding.disposition_by = actor_user_id
@@ -709,6 +733,45 @@ class ScanRepository:
                 note=note,
             )
         )
+
+    async def _recompute_risk_score(self, scan_id: uuid.UUID) -> int:
+        """Recompute `Scan.risk_score` from the scan's current scoreable
+        findings and stage the update on the scan row (PRD #96 / #99).
+        No commit — the caller commits. Returns the new 0-10 score."""
+        from app.shared.lib.risk_score import (
+            compute_cvss_aggregate,
+            scoreable_findings,
+        )
+
+        findings = await self.get_findings_for_scan(scan_id)
+        aggregate = compute_cvss_aggregate(
+            scoreable_findings(findings), scan_id=scan_id
+        )
+        new_score = min(10, int(round(aggregate)))
+        scan = await self.get_scan(scan_id)
+        if scan is not None:
+            scan.risk_score = new_score
+        return new_score
+
+    async def apply_finding_disposition(
+        self,
+        finding: db_models.Finding,
+        *,
+        new_disposition: str,
+        actor_user_id: int,
+        note: Optional[str],
+    ) -> tuple[db_models.Finding, int]:
+        """Set a finding's disposition, append an audit event, and
+        recompute `Scan.risk_score` — all in one transaction (PRD #96 /
+        #97 / #99). The caller validates the transition; this method
+        only persists. Returns `(finding, new_risk_score)`."""
+        self._stage_disposition(
+            finding,
+            new_disposition=new_disposition,
+            actor_user_id=actor_user_id,
+            note=note,
+        )
+        new_score = await self._recompute_risk_score(finding.scan_id)
         try:
             await self.db.commit()
         except SQLAlchemyError:
@@ -719,7 +782,38 @@ class ScanRepository:
             )
             raise
         await self.db.refresh(finding)
-        return finding
+        return finding, new_score
+
+    async def apply_finding_dispositions(
+        self,
+        scan_id: uuid.UUID,
+        findings: List[db_models.Finding],
+        *,
+        new_disposition: str,
+        actor_user_id: int,
+        note: Optional[str],
+    ) -> tuple[int, int]:
+        """Apply one disposition + audit event to many findings of a
+        scan and recompute `Scan.risk_score` — one transaction (PRD #96
+        / #100). Returns `(count_changed, new_risk_score)`."""
+        for finding in findings:
+            self._stage_disposition(
+                finding,
+                new_disposition=new_disposition,
+                actor_user_id=actor_user_id,
+                note=note,
+            )
+        new_score = await self._recompute_risk_score(scan_id)
+        try:
+            await self.db.commit()
+        except SQLAlchemyError:
+            await self.db.rollback()
+            logger.error(
+                "scan_repo.apply_finding_dispositions.commit_failed",
+                extra={"scan_id": str(scan_id), "count": len(findings)},
+            )
+            raise
+        return len(findings), new_score
 
     async def query_findings(
         self,

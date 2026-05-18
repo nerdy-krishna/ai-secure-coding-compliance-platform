@@ -29,11 +29,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
 from app.infrastructure.rag.rag_client import RAGService
+from app.shared.lib.finding_disposition import NON_SCOREABLE
 from app.shared.lib.risk_score import (
     MAX_FINDINGS,
     compute_cvss_aggregate,
     to_posture_score,
 )
+
+# Triage states excluded from compliance posture + counts (PRD #96 / #99).
+_NON_SCOREABLE = tuple(NON_SCOREABLE)
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +240,7 @@ class ComplianceService:
                 db_models.Finding.cvss_vector,
             )
             .join(db_models.Finding, db_models.Finding.scan_id == db_models.Scan.id)
+            .where(db_models.Finding.disposition.not_in(_NON_SCOREABLE))
             .order_by(severity_rank.desc())
         )
         if visible_user_ids is not None:

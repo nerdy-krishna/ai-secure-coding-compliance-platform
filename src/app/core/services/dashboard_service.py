@@ -24,6 +24,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
+from app.shared.lib.finding_disposition import NON_SCOREABLE
 from app.shared.lib.risk_score import (
     MAX_FINDINGS,
     compute_cvss_aggregate,
@@ -31,6 +32,9 @@ from app.shared.lib.risk_score import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Triage states excluded from posture/severity counts (PRD #96 / #99).
+_NON_SCOREABLE = tuple(NON_SCOREABLE)
 
 
 SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "informational")
@@ -170,6 +174,7 @@ class DashboardService:
             .join(db_models.Scan, db_models.Scan.id == db_models.Finding.scan_id)
             .where(scope_filter)
             .where(db_models.Finding.is_applied_in_remediation.is_(False))
+            .where(db_models.Finding.disposition.not_in(_NON_SCOREABLE))
             .group_by(func.lower(db_models.Finding.severity))
         )
         rows = (await self.db.execute(stmt)).all()
@@ -209,6 +214,7 @@ class DashboardService:
             .join(db_models.Scan, db_models.Scan.id == db_models.Finding.scan_id)
             .where(scope_filter)
             .where(db_models.Finding.is_applied_in_remediation.is_(False))
+            .where(db_models.Finding.disposition.not_in(_NON_SCOREABLE))
             .order_by(severity_rank.desc())
             .limit(limit)
         )

@@ -344,20 +344,7 @@ class ScanLifecycleService:
         """
         from app.shared.lib import finding_disposition as fd
 
-        scan = await self._get_scan_or_404(scan_id)
-        if visible_user_ids is not None and scan.user_id not in visible_user_ids:
-            logger.warning(
-                "scan: authorization denied",
-                extra={
-                    "scan_id": str(scan_id),
-                    "actor_user_id": user.id,
-                    "action": "set_finding_disposition",
-                },
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Scan not found or not authorized.",
-            )
+        await self._get_triageable_scan_or_404(scan_id, user, visible_user_ids)
 
         finding = await self.repo.get_finding(finding_id)
         if finding is None or finding.scan_id != scan_id:
@@ -375,7 +362,7 @@ class ScanLifecycleService:
             )
 
         note = request.note.strip() if request.note else None
-        updated = await self.repo.apply_finding_disposition(
+        updated, new_score = await self.repo.apply_finding_disposition(
             finding,
             new_disposition=request.disposition,
             actor_user_id=user.id,
@@ -397,4 +384,139 @@ class ScanLifecycleService:
             disposition_by=updated.disposition_by,
             disposition_at=updated.disposition_at,
             disposition_note=updated.disposition_note,
+            scan_risk_score=new_score,
         )
+
+    async def _get_triageable_scan_or_404(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        visible_user_ids: Optional[list[int]],
+    ) -> db_models.Scan:
+        """Fetch a scan the caller is allowed to triage (PRD #96).
+
+        Authorization follows the H.2 visibility model: any user who can
+        view the scan can triage its findings (`visible_user_ids is
+        None` ⇒ admin, sees everything). A scan outside the caller's
+        scope is reported as 404, not 403, so triage cannot be used to
+        probe for scan existence.
+        """
+        scan = await self._get_scan_or_404(scan_id)
+        if visible_user_ids is not None and scan.user_id not in visible_user_ids:
+            logger.warning(
+                "scan: authorization denied",
+                extra={
+                    "scan_id": str(scan_id),
+                    "actor_user_id": user.id,
+                    "action": "triage_findings",
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan not found or not authorized.",
+            )
+        return scan
+
+    async def set_finding_dispositions_bulk(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        request: "api_models.BulkFindingDispositionUpdateRequest",
+        visible_user_ids: Optional[list[int]] = None,
+    ) -> "api_models.BulkFindingDispositionResponse":
+        """Apply one disposition (and one note) to many findings of a
+        scan in a single transaction (PRD #96 / #100).
+
+        Validation is all-or-nothing: the target disposition and the
+        note requirement are checked once up front, and every requested
+        finding id must belong to the scan — otherwise the whole batch
+        is rejected and nothing is written. A finding already in the
+        target disposition is skipped (no redundant audit row), but its
+        presence is not an error.
+        """
+        from app.shared.lib import finding_disposition as fd
+
+        await self._get_triageable_scan_or_404(scan_id, user, visible_user_ids)
+
+        if not fd.is_valid_disposition(request.disposition):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown disposition {request.disposition!r}.",
+            )
+        if fd.note_required(request.disposition) and not (
+            request.note and request.note.strip()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "A justification note is required to mark findings "
+                    f"{request.disposition!r}."
+                ),
+            )
+
+        requested_ids = list(dict.fromkeys(request.finding_ids))
+        findings = await self.repo.get_findings_by_ids(scan_id, requested_ids)
+        if len(findings) != len(requested_ids):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="One or more findings were not found for this scan.",
+            )
+
+        # Skip findings already in the target state — a no-op transition
+        # must not land a redundant row in the audit log.
+        to_change = [
+            f
+            for f in findings
+            if (f.disposition or fd.DEFAULT_DISPOSITION) != request.disposition
+        ]
+        note = request.note.strip() if request.note else None
+        if not to_change:
+            scan = await self._get_scan_or_404(scan_id)
+            return api_models.BulkFindingDispositionResponse(
+                updated_count=0,
+                disposition=request.disposition,
+                scan_risk_score=scan.risk_score,
+            )
+
+        count, new_score = await self.repo.apply_finding_dispositions(
+            scan_id,
+            to_change,
+            new_disposition=request.disposition,
+            actor_user_id=user.id,
+            note=note,
+        )
+        logger.info(
+            "scan: bulk finding disposition set",
+            extra={
+                "scan_id": str(scan_id),
+                "actor_user_id": user.id,
+                "new_disposition": request.disposition,
+                "updated_count": count,
+            },
+        )
+        return api_models.BulkFindingDispositionResponse(
+            updated_count=count,
+            disposition=request.disposition,
+            scan_risk_score=new_score,
+        )
+
+    async def get_finding_disposition_history(
+        self,
+        scan_id: uuid.UUID,
+        finding_id: int,
+        user: db_models.User,
+        visible_user_ids: Optional[list[int]] = None,
+    ) -> "list[api_models.FindingDispositionEventResponse]":
+        """The disposition-change history for a finding, oldest first
+        (PRD #96 / #100). Same H.2 scope as the triage write paths."""
+        await self._get_triageable_scan_or_404(scan_id, user, visible_user_ids)
+        finding = await self.repo.get_finding(finding_id)
+        if finding is None or finding.scan_id != scan_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Finding not found for this scan.",
+            )
+        events = await self.repo.get_disposition_events(finding_id)
+        return [
+            api_models.FindingDispositionEventResponse.model_validate(e) for e in events
+        ]
