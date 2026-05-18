@@ -246,9 +246,7 @@ def estimate_cost_two_slot(
         ("utility", utility_input_tokens),
     ]
     if secondary_reasoning_config is not None:
-        slot_inputs.append(
-            ("secondary_reasoning", secondary_reasoning_input_tokens)
-        )
+        slot_inputs.append(("secondary_reasoning", secondary_reasoning_input_tokens))
     for label, toks in slot_inputs:
         if not isinstance(toks, int) or toks < 0:
             raise ValueError(f"{label}_input_tokens must be a non-negative int")
@@ -301,9 +299,7 @@ def estimate_cost_two_slot(
         "input_cost": sum(s["input_cost"] for s in priced),
         "predicted_output_cost": sum(s["predicted_output_cost"] for s in priced),
         "total_estimated_cost": total,
-        "predicted_output_tokens": sum(
-            s["predicted_output_tokens"] for s in priced
-        ),
+        "predicted_output_tokens": sum(s["predicted_output_tokens"] for s in priced),
         "total_input_tokens": sum(s["input_tokens"] for s in priced),
         "slots": slots,
     }

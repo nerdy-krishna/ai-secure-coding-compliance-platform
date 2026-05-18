@@ -74,9 +74,7 @@ def resolve_reasoning_lanes(
     ]
     if secondary_config_id is not None:
         lanes.append(
-            ReasoningLane(
-                LANE_SECONDARY, secondary_config_id, secondary_temperature
-            )
+            ReasoningLane(LANE_SECONDARY, secondary_config_id, secondary_temperature)
         )
     return lanes
 
