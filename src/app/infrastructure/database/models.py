@@ -304,6 +304,12 @@ class Finding(Base):
     source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     cve_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     corroborating_agents: Mapped[Optional[List[str]]] = mapped_column(JSONB)
+    # The reasoning LLM(s) that detected this finding (#94 / PRD #91).
+    # A list of LLM-config display names — one entry for a single-LLM
+    # scan, two when the dual-LLM analysis (#93) had both models flag
+    # the same finding (a strong corroboration signal). NULL for
+    # scanner-emitted and pre-#94 findings.
+    detected_by_llms: Mapped[Optional[List[str]]] = mapped_column(JSONB)
     cvss_score: Mapped[Optional[float]] = mapped_column(DECIMAL(3, 1))
     cvss_vector: Mapped[Optional[str]] = mapped_column(String(100))
     references: Mapped[Optional[List[str]]] = mapped_column(JSONB)

@@ -96,6 +96,32 @@ def resolve_temperature(step: LLMStep, state: Mapping[str, Any]) -> Optional[flo
     return DEFAULT_TEMPERATURE
 
 
+def resolve_secondary_analysis_temperature(
+    state: Mapping[str, Any],
+) -> Optional[float]:
+    """Analysis temperature for the *second* reasoning LLM (#95).
+
+    The dual-LLM analysis (#93) runs every agent on two reasoning LLMs.
+    The second LLM gets its own analysis temperature — read from the
+    scan's ``stage_temperatures["analysis_secondary"]`` — so an operator
+    can run the same model in both slots at two different temperatures.
+
+    Honours the global opt-out exactly like :func:`resolve_temperature`
+    (``disable_temperature`` ⇒ ``None``, #92) and falls back to
+    `DEFAULT_TEMPERATURE` when the key or a sane 0.0–2.0 value is
+    missing. Only the analysis stage has a secondary temperature; every
+    other stage runs single-LLM and resolves through
+    :func:`resolve_temperature`.
+    """
+    if state.get("disable_temperature"):
+        return None
+    temps = state.get("stage_temperatures") or {}
+    value = temps.get("analysis_secondary")
+    if isinstance(value, (int, float)) and 0.0 <= float(value) <= 2.0:
+        return float(value)
+    return DEFAULT_TEMPERATURE
+
+
 def resolve_llm_config_id(
     step: LLMStep,
     state: Mapping[str, Any],

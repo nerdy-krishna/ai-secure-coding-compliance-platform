@@ -193,3 +193,71 @@ def test_llm_error_passes_findings_through_unchanged():
 
 def test_empty_findings_returns_empty():
     assert _consolidate(_FakeClient(), []) == []
+
+
+# ---------------------------------------------------------------------------
+# Per-LLM finding provenance — #94 / PRD #91
+# ---------------------------------------------------------------------------
+
+
+def test_detected_by_llms_is_unioned_across_merged_findings():
+    """When two reasoning LLMs both flag the same root cause, the merged
+    finding records both — a strong independent-corroboration signal."""
+    raw = [
+        _raw(agent_name="InjectionAgent", detected_by_llms=["Opus4.7"]),
+        _raw(
+            agent_name="ApiAgent",
+            title="Unsanitised SQL",
+            detected_by_llms=["G3.1Pro"],
+        ),
+    ]
+    response = _ConsolidationResponse(
+        merged_findings=[
+            _MergedFinding(
+                subsumed_finding_numbers=[1, 2],
+                title="SQL injection in q()",
+                description="Root cause: user input concatenated into SQL.",
+                remediation="Use a parameterised query.",
+                cvss_vector=_CRIT_VECTOR,
+                primary_line_number=2,
+                affected_locations=[_ConsolidatedLocation(line_number=2)],
+            )
+        ],
+        dropped_finding_numbers=[],
+    )
+    result = _consolidate(_FakeClient(response=response), raw)
+    assert len(result) == 1
+    # Sorted union of both subsumed findings' provenance.
+    assert result[0].detected_by_llms == ["G3.1Pro", "Opus4.7"]
+
+
+def test_detected_by_llms_survives_passthrough():
+    """A finding the consolidator neither merges nor drops keeps its
+    reasoning-LLM provenance."""
+    raw = [_raw(detected_by_llms=["Opus4.7"])]
+    result = _consolidate(_FakeClient(raises=True), raw)
+    assert len(result) == 1
+    assert result[0].detected_by_llms == ["Opus4.7"]
+
+
+def test_detected_by_llms_none_for_scanner_findings():
+    """Scanner-emitted findings carry no LLM provenance — the merged
+    finding's `detected_by_llms` stays None, not an empty list."""
+    raw = [_raw(agent_name="bandit"), _raw(agent_name="semgrep", line_number=2)]
+    response = _ConsolidationResponse(
+        merged_findings=[
+            _MergedFinding(
+                subsumed_finding_numbers=[1, 2],
+                title="Merged",
+                description="Root cause.",
+                remediation="Fix it.",
+                cvss_vector=_CRIT_VECTOR,
+                primary_line_number=2,
+                affected_locations=[_ConsolidatedLocation(line_number=2)],
+            )
+        ],
+        dropped_finding_numbers=[],
+    )
+    result = _consolidate(_FakeClient(response=response), raw)
+    assert len(result) == 1
+    assert result[0].detected_by_llms is None

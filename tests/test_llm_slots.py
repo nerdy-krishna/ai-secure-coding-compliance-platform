@@ -11,6 +11,7 @@ from app.shared.lib.llm_slots import (
     LLMSlot,
     LLMStep,
     resolve_llm_config_id,
+    resolve_secondary_analysis_temperature,
     resolve_temperature,
     slot_for_step,
 )
@@ -173,3 +174,39 @@ def test_resolve_temperature_unchanged_when_flag_absent():
     state = {"stage_temperatures": {"merge": 0.9}}
     assert resolve_temperature(LLMStep.MERGE_AGENT, state) == 0.9
     assert resolve_temperature(LLMStep.ANALYSIS, state) == DEFAULT_TEMPERATURE
+
+
+# ---------------------------------------------------------------------------
+# Secondary reasoning-LLM analysis temperature — #95 / PRD #91
+# ---------------------------------------------------------------------------
+
+
+def test_secondary_analysis_temperature_reads_its_own_key():
+    """The second LLM's analysis temperature is its own `analysis_secondary`
+    key — independent of the primary `analysis` value."""
+    state = {"stage_temperatures": {"analysis": 0.2, "analysis_secondary": 0.8}}
+    assert resolve_secondary_analysis_temperature(state) == 0.8
+    # primary stays on its own key
+    assert resolve_temperature(LLMStep.ANALYSIS, state) == 0.2
+
+
+def test_secondary_analysis_temperature_defaults_when_absent():
+    assert resolve_secondary_analysis_temperature({}) == DEFAULT_TEMPERATURE
+    # a map without the secondary key still falls back to the default
+    state = {"stage_temperatures": {"analysis": 0.5}}
+    assert resolve_secondary_analysis_temperature(state) == DEFAULT_TEMPERATURE
+
+
+def test_secondary_analysis_temperature_none_when_disabled():
+    """The global temperature opt-out (#92) overrides the secondary
+    analysis temperature too."""
+    state = {
+        "disable_temperature": True,
+        "stage_temperatures": {"analysis_secondary": 0.8},
+    }
+    assert resolve_secondary_analysis_temperature(state) is None
+
+
+def test_secondary_analysis_temperature_rejects_out_of_range():
+    state = {"stage_temperatures": {"analysis_secondary": 9.0}}
+    assert resolve_secondary_analysis_temperature(state) == DEFAULT_TEMPERATURE

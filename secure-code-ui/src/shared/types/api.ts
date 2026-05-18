@@ -187,6 +187,10 @@ export interface Finding {
   // drive the by-source filter chip row on ResultsPage.
   source?: string | null;
   corroborating_agents?: string[];
+  // Reasoning LLM(s) that detected the finding (#94). Two entries ⇒
+  // both models in a dual-LLM scan independently flagged it. Absent /
+  // null for scanner-emitted and pre-#94 findings.
+  detected_by_llms?: string[] | null;
   cvss_score?: number;
   cvss_vector?: string;
   references: string[];

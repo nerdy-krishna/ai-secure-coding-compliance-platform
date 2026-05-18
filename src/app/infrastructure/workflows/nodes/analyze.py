@@ -38,6 +38,7 @@ from app.shared.lib.scan_progress import EV_COMPLETED, EV_STARTED
 from app.shared.lib.llm_slots import (
     LLMStep,
     resolve_llm_config_id,
+    resolve_secondary_analysis_temperature,
     resolve_secondary_reasoning_llm_config_id,
     resolve_temperature,
 )
@@ -130,13 +131,14 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     # Dual-LLM analysis (#93): when the scan opted into a second
     # reasoning LLM, every routed agent runs once per lane and the two
     # findings sets union downstream in `consolidate_findings`. One
-    # lane = today's single-pass analysis. The secondary lane uses the
-    # same analysis temperature for now; #95 gives it its own.
+    # lane = today's single-pass analysis. The secondary lane carries
+    # its own analysis temperature (#95) so "same model, two
+    # temperatures" is a valid diversity strategy.
     lanes = resolve_reasoning_lanes(
         primary_config_id=reasoning_llm_id,
         primary_temperature=analysis_temperature,
         secondary_config_id=resolve_secondary_reasoning_llm_config_id(state),
-        secondary_temperature=analysis_temperature,
+        secondary_temperature=resolve_secondary_analysis_temperature(state),
     )
     logger.info(
         "analyze: scan_id=%s reasoning lanes=%s",
@@ -152,6 +154,30 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     semaphores: Dict[Any, asyncio.Semaphore] = {
         lane.pool_key: asyncio.Semaphore(CONCURRENT_LLM_LIMIT) for lane in lanes
     }
+
+    # Resolve each lane's LLM-config display name once, for finding
+    # provenance (#94) — one cheap lookup per distinct config (1–2).
+    # A lookup failure degrades to the raw config id; it never aborts
+    # the analysis.
+    lane_config_names: Dict[Any, str] = {}
+    try:
+        from app.infrastructure.database import (
+            AsyncSessionLocal as _AsyncSessionLocal_llm,
+        )
+        from app.infrastructure.database.repositories.llm_config_repo import (
+            LLMConfigRepository as _LLMConfigRepository,
+        )
+
+        async with _AsyncSessionLocal_llm() as _db_llm:
+            _llm_repo = _LLMConfigRepository(_db_llm)
+            for _lane in lanes:
+                if _lane.config_id not in lane_config_names:
+                    _cfg = await _llm_repo.get_by_id(_lane.config_id)
+                    lane_config_names[_lane.config_id] = (
+                        _cfg.name if _cfg else str(_lane.config_id)
+                    )
+    except Exception as _e:  # noqa: BLE001
+        logger.warning("analyze: lane config-name lookup failed: %s", _e)
 
     def build_dep_summary(file_path: str) -> str:
         """Per-file dependency context. Pure read from repository_map; safe to
@@ -382,7 +408,17 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                         },
                     )
                     continue
-                file_findings.extend(r.get("findings", []))
+                # Stamp finding provenance (#94): which reasoning LLM
+                # produced it. `consolidate_findings` unions this across
+                # the findings it merges.
+                agent_findings = r.get("findings", []) or []
+                if inv_spec is not None:
+                    llm_name = lane_config_names.get(
+                        inv_spec.lane.config_id, str(inv_spec.lane.config_id)
+                    )
+                    for finding in agent_findings:
+                        finding.detected_by_llms = [llm_name]
+                file_findings.extend(agent_findings)
                 # The agent returns `fixes` as a separate list of FixResult
                 # objects; collect them directly for the terminal consolidation.
                 file_fixes.extend(r.get("fixes", []))

@@ -1416,6 +1416,36 @@ const FindingDetail: React.FC<{
                 ))}
               </>
             )}
+            {/* Reasoning-LLM provenance (#94). Two models ⇒ a strong
+                independent-corroboration signal, shown highlighted. */}
+            {f.detected_by_llms && f.detected_by_llms.length > 0 && (
+              <>
+                <span style={{ margin: "0 8px" }}>·</span>
+                {f.detected_by_llms.length > 1
+                  ? "Independently detected by"
+                  : "Detected by"}{" "}
+                {f.detected_by_llms.map((m, i) => (
+                  <span
+                    key={i}
+                    className="chip"
+                    style={{
+                      fontSize: 10,
+                      padding: "1px 7px",
+                      marginLeft: 4,
+                      ...(f.detected_by_llms!.length > 1
+                        ? {
+                            background: "var(--primary-weak)",
+                            color: "var(--primary-strong)",
+                            fontWeight: 600,
+                          }
+                        : {}),
+                    }}
+                  >
+                    {m}
+                  </span>
+                ))}
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -153,6 +153,17 @@ class SubmitScanInput(BaseModel):
         ),
         max_length=64,
     )
+    temperature_analysis_secondary: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Optional analysis temperature for the SECOND reasoning LLM "
+            "(PRD #91) — lets you run the same model in both slots at two "
+            "temperatures. Ignored unless secondary_reasoning_llm_config_id "
+            "is set. Defaults to the standard 0.2."
+        ),
+    )
     files: Optional[List[SubmitScanFile]] = Field(
         default=None,
         description=(
@@ -328,6 +339,11 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
                 secondary_reasoning_llm_config_id=(
                     uuid.UUID(payload.secondary_reasoning_llm_config_id)
                     if payload.secondary_reasoning_llm_config_id
+                    else None
+                ),
+                stage_temperatures=(
+                    {"analysis_secondary": payload.temperature_analysis_secondary}
+                    if payload.temperature_analysis_secondary is not None
                     else None
                 ),
             )

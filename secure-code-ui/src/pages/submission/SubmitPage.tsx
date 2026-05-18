@@ -241,6 +241,9 @@ const SubmitPage: React.FC = () => {
   // are unioned — what one model misses, the other may catch.
   const [useSecondaryLlm, setUseSecondaryLlm] = useState(false);
   const [secondaryLlmConfigId, setSecondaryLlmConfigId] = useState<string>("");
+  // The second reasoning LLM's own analysis temperature (#95) — lets a
+  // user run the same model in both slots at two temperatures.
+  const [secondaryAnalysisTemp, setSecondaryAnalysisTemp] = useState(0.2);
   // Per-stage LLM temperature (#78). Defaults to 0.2 everywhere; the
   // section is read-only until the user clicks Edit, to guard against
   // changing it by accident.
@@ -531,6 +534,10 @@ const SubmitPage: React.FC = () => {
         payload.append(
           "secondary_reasoning_llm_config_id",
           secondaryLlmConfigId,
+        );
+        payload.append(
+          "temperature_analysis_secondary",
+          String(secondaryAnalysisTemp),
         );
       }
       payload.append("temperature_profiler", String(stageTemps.profiler));
@@ -1233,8 +1240,39 @@ const SubmitPage: React.FC = () => {
                     }}
                   >
                     Pick a <em>different</em> model from the reasoning LLM
-                    above — two models have different blind spots.
+                    above — two models have different blind spots. Or reuse
+                    the same model with a different temperature below.
                   </div>
+                  {/* Second LLM's own analysis temperature (#95). */}
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      fontSize: 12,
+                      color: "var(--fg-muted)",
+                      marginTop: 10,
+                      opacity: disableTemperature ? 0.45 : 1,
+                    }}
+                  >
+                    Second LLM analysis temperature
+                    <input
+                      type="number"
+                      className="sccap-input"
+                      min={0}
+                      max={1}
+                      step={0.1}
+                      value={secondaryAnalysisTemp}
+                      disabled={disableTemperature}
+                      onChange={(e) =>
+                        setSecondaryAnalysisTemp(
+                          Math.min(1, Math.max(0, Number(e.target.value) || 0)),
+                        )
+                      }
+                      style={{ width: 72 }}
+                    />
+                  </label>
                 </div>
               )}
 

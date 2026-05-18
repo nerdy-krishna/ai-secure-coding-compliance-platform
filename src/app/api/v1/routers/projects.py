@@ -264,6 +264,7 @@ async def create_scan(
     temperature_analysis: float = Form(0.2, ge=0.0, le=1.0),
     temperature_consolidation: float = Form(0.2, ge=0.0, le=1.0),
     temperature_merge: float = Form(0.2, ge=0.0, le=1.0),
+    temperature_analysis_secondary: float = Form(0.2, ge=0.0, le=1.0),
     disable_temperature: bool = Form(False),
     cross_file_validation: bool = Form(False),
     frameworks: str = Form(
@@ -364,6 +365,9 @@ async def create_scan(
         "analysis": temperature_analysis,
         "consolidation": temperature_consolidation,
         "merge": temperature_merge,
+        # The second reasoning LLM's analysis temperature (#95). Used
+        # only when a secondary reasoning LLM is configured.
+        "analysis_secondary": temperature_analysis_secondary,
     }
 
     common_args = {

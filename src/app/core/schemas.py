@@ -170,6 +170,15 @@ class VulnerabilityFinding(BaseModel):
     corroborating_agents: Optional[List[str]] = Field(
         default=None, description="List of agents that identified this finding."
     )
+    detected_by_llms: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "The reasoning LLM(s) that detected this finding (#94). One "
+            "entry on a single-LLM scan; two when the dual-LLM analysis "
+            "had both models independently flag it. None for scanner / "
+            "pre-#94 findings."
+        ),
+    )
     is_applied_in_remediation: bool = Field(
         default=False,
         description="Flag indicating if this finding's fix was applied in a remediation scan.",

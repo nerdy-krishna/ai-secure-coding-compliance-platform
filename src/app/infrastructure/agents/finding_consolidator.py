@@ -278,6 +278,15 @@ def _build_merged_finding(
         for a in f.corroborating_agents or []:
             agents.add(a)
 
+    # Union the reasoning-LLM provenance the same way (#94): the merged
+    # finding was detected by every LLM that detected any subsumed one.
+    # Two entries ⇒ both models in a dual-LLM scan independently found
+    # the same root cause.
+    detected_llms: set[str] = set()
+    for f in subsumed:
+        for llm in f.detected_by_llms or []:
+            detected_llms.add(llm)
+
     # First real CWE among the subsumed findings (SAST-emitted only).
     cwe = next((f.cwe for f in subsumed if f.cwe), None)
 
@@ -306,6 +315,7 @@ def _build_merged_finding(
         cve_id=base.cve_id,
         agent_name=base.agent_name,
         corroborating_agents=sorted(agents) or None,
+        detected_by_llms=sorted(detected_llms) or None,
         is_applied_in_remediation=any(f.is_applied_in_remediation for f in subsumed),
     )
 

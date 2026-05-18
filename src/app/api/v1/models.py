@@ -505,6 +505,10 @@ class VulnerabilityFindingResponse(BaseModel):
     # value the `source_counts` aggregate is computed from.
     source: Optional[str] = None
     corroborating_agents: Optional[List[str]] = None
+    # The reasoning LLM(s) that detected the finding (#94 / PRD #91).
+    # Two entries ⇒ both models in a dual-LLM scan independently flagged
+    # it. NULL for scanner-emitted / pre-#94 findings.
+    detected_by_llms: Optional[List[str]] = None
     cvss_score: Optional[float] = Field(default=None, ge=0.0, le=10.0)
     cvss_vector: Optional[str] = None
     references: List[str]
