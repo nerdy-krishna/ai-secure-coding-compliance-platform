@@ -14,46 +14,60 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from app.api.v1.models import AnalysisResultDetailResponse
-from app.core.services.report._common import affected_lines, collect_findings
+from app.core.services.report._common import (
+    PALETTE,
+    affected_lines,
+    collect_findings,
+    severity_color,
+    severity_text_color,
+)
 
-_SEV_COLOR = {
-    "Critical": "#b4232a",
-    "High": "#c2410c",
-    "Medium": "#b45309",
-    "Low": "#3f6212",
-    "Informational": "#475569",
-}
+_P = PALETTE
 
-_STYLE = """
-:root { color-scheme: light; }
-* { box-sizing: border-box; }
-body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0;
-  background: #f6f6f4; color: #1a1a1a; line-height: 1.5; }
-.wrap { max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; }
-h1 { font-size: 22px; margin: 0 0 4px; }
-.meta { color: #555; font-size: 13px; margin-bottom: 20px; }
-.meta b { color: #1a1a1a; }
-.counts { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 28px; }
-.count { border-radius: 6px; padding: 6px 12px; font-size: 13px;
-  font-weight: 600; color: #fff; }
-.finding { background: #fff; border: 1px solid #e2e2dd; border-radius: 8px;
-  padding: 18px 20px; margin-bottom: 14px; }
-.finding h2 { font-size: 16px; margin: 0 0 6px; }
-.sev { display: inline-block; font-size: 11px; font-weight: 700;
-  padding: 2px 8px; border-radius: 4px; color: #fff; margin-right: 8px;
-  vertical-align: middle; }
-.loc { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
-  color: #555; }
-.label { font-size: 11px; font-weight: 700; text-transform: uppercase;
-  color: #888; letter-spacing: .04em; margin: 12px 0 3px; }
-.body { font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
-pre { background: #f6f6f4; border: 1px solid #e2e2dd; border-radius: 6px;
-  padding: 10px 12px; font-size: 12px; overflow-x: auto;
-  white-space: pre-wrap; overflow-wrap: anywhere; }
-.also { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
-  color: #777; margin-top: 8px; }
-.empty { color: #555; font-size: 14px; }
-.foot { color: #999; font-size: 11px; margin-top: 32px; text-align: center; }
+# Print-tuned restyle (PRD #96 / #98) — the website's light / variant-A
+# palette, shared via `_common.PALETTE`. White surfaces, SCCAP teal
+# accent, app severity colors.
+_STYLE = f"""
+:root {{ color-scheme: light; }}
+* {{ box-sizing: border-box; }}
+body {{ font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+  sans-serif; margin: 0; background: {_P['bg']}; color: {_P['fg']};
+  line-height: 1.55; }}
+.wrap {{ max-width: 940px; margin: 0 auto; padding: 36px 28px 72px; }}
+.brand {{ display: flex; align-items: center; gap: 9px; margin-bottom: 22px; }}
+.brand .mark {{ width: 26px; height: 26px; border-radius: 7px;
+  background: {_P['accent']}; color: #fff; font-weight: 800; font-size: 13px;
+  display: flex; align-items: center; justify-content: center; }}
+.brand .name {{ font-size: 13px; font-weight: 700; letter-spacing: .02em;
+  color: {_P['fg']}; }}
+h1 {{ font-size: 23px; margin: 0 0 4px; color: {_P['fg']}; }}
+.meta {{ color: {_P['fg_muted']}; font-size: 13px; margin-bottom: 22px; }}
+.meta b {{ color: {_P['fg']}; }}
+.counts {{ display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0 30px; }}
+.count {{ border-radius: 7px; padding: 6px 13px; font-size: 13px;
+  font-weight: 700; }}
+.finding {{ background: {_P['surface']}; border: 1px solid {_P['border']};
+  border-radius: 10px; padding: 20px 22px; margin-bottom: 14px; }}
+.finding h2 {{ font-size: 16px; margin: 0 0 6px; color: {_P['fg']}; }}
+.sev {{ display: inline-block; font-size: 11px; font-weight: 700;
+  padding: 2px 9px; border-radius: 5px; margin-right: 8px;
+  vertical-align: middle; }}
+.loc {{ font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+  color: {_P['fg_muted']}; }}
+.label {{ font-size: 11px; font-weight: 700; text-transform: uppercase;
+  color: {_P['fg_subtle']}; letter-spacing: .05em; margin: 13px 0 3px; }}
+.body {{ font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: {_P['fg']}; }}
+pre {{ background: {_P['bg_soft']}; border: 1px solid {_P['border']};
+  border-radius: 7px; padding: 11px 13px; font-size: 12px; overflow-x: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: ui-monospace, Menlo, monospace; }}
+.also {{ font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+  color: {_P['fg_subtle']}; margin-top: 8px; }}
+.empty {{ color: {_P['fg_muted']}; font-size: 14px; }}
+.foot {{ color: {_P['fg_subtle']}; font-size: 11px; margin-top: 36px;
+  text-align: center; border-top: 1px solid {_P['border']};
+  padding-top: 16px; }}
 """
 
 
@@ -74,7 +88,8 @@ def render_html(result: AnalysisResultDetailResponse) -> str:
 
     counts = Counter(f.severity for f in findings)
     count_chips = "".join(
-        f'<span class="count" style="background:{_SEV_COLOR.get(sev, "#475569")}">'
+        f'<span class="count" style="background:{severity_color(sev)};'
+        f'color:{severity_text_color(sev)}">'
         f"{_e(sev)}: {counts[sev]}</span>"
         for sev in ("Critical", "High", "Medium", "Low", "Informational")
         if counts.get(sev)
@@ -89,6 +104,8 @@ def render_html(result: AnalysisResultDetailResponse) -> str:
 <html lang="en"><head><meta charset="utf-8">
 <title>Security scan report — {project}</title>
 <style>{_STYLE}</style></head><body><div class="wrap">
+<div class="brand"><span class="mark">S</span>
+  <span class="name">SCCAP &middot; Secure Coding &amp; Compliance</span></div>
 <h1>Security scan report</h1>
 <div class="meta">
   <b>{project}</b> &middot; {scan_type} scan &middot;
@@ -103,7 +120,8 @@ def render_html(result: AnalysisResultDetailResponse) -> str:
 
 def _finding_card(finding) -> str:
     sev = finding.severity or "Informational"
-    color = _SEV_COLOR.get(sev, "#475569")
+    color = severity_color(sev)
+    sev_fg = severity_text_color(sev)
     cvss = (
         f" &middot; CVSS {finding.cvss_score}" if finding.cvss_score is not None else ""
     )
@@ -135,7 +153,7 @@ def _finding_card(finding) -> str:
             f'<pre>{_e(finding.fixes.get("code"))}</pre>'
         )
     return f"""<div class="finding">
-  <h2><span class="sev" style="background:{color}">{_e(sev)}</span>{_e(finding.title)}</h2>
+  <h2><span class="sev" style="background:{color};color:{sev_fg}">{_e(sev)}</span>{_e(finding.title)}</h2>
   <div class="loc">{_e(finding.file_path)}:{finding.line_number}{cvss}{cwe}</div>
   <div class="label">Description</div>
   <div class="body">{_e(finding.description)}</div>
