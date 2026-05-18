@@ -22,14 +22,14 @@ flowchart LR
       A7["sccap_disk_monitor<br/>(df-emitter, 30 s JSON)"]:::app
     end
 
-    subgraph Stack["Observability tier"]
+    subgraph Stack["Observability tier · feature flag: log_stack · compose profile: log_stack"]
       FD["Fluentd v1.18<br/>· tcp/udp 24224<br/>· 2 GB file buffer<br/>· drop-oldest-chunk<br/>· labels: service_name, level, logger_name"]:::obs
       Loki["Grafana Loki 3.4.2<br/>· boltdb-shipper<br/>· retention: LOKI_RETENTION_DAYS<br/>· compactor delete_delay 2h<br/>· LogQL query API"]:::obs
       Graf["Grafana 11.5.2<br/>· provisioned datasource (Loki UID 'loki')<br/>· provisioned alert rules<br/>· admin user/pass required"]:::obs
       Alerts["Provisioned alerts<br/>· sccap-host-disk-warn (>=75% 10m)<br/>· sccap-host-disk-crit (>=90% 5m)<br/>· sccap-fluentd-buffer-overflow"]:::obs
     end
 
-    subgraph LF["Optional Langfuse v3 stack"]
+    subgraph LF["Optional Langfuse v3 stack · feature flag: tracing · compose profile: tracing"]
       LFP[("langfuse-postgres<br/>users · runs")]:::data
       LFC[("langfuse-clickhouse<br/>traces · spans · events")]:::data
       LFR[("langfuse-redis<br/>queue")]:::data
@@ -106,6 +106,17 @@ flowchart TB
 ---
 
 ## Legend
+
+### Feature-flag gating (modular setup — #103–111)
+
+Both observability tiers are **container-backed feature flags** — the only two in the catalog. A container-backed feature needs *two* things to be live: the `features.<name>` flag ON **and** its compose profile present in `COMPOSE_PROFILES` so the containers actually boot. The lifespan consistency check logs a one-time WARN when the flag is on but the profile is missing.
+
+| Feature     | Compose profile | Gates                                                                                       | When OFF                                                                            |
+|-------------|-----------------|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| `log_stack` | `log_stack`     | The §1 Fluentd → Loki → Grafana stack **and** the LLM log viewer (`/scans/:id/llm-logs`)     | Containers don't boot; app/worker logs stay on the Docker `json-file` driver only    |
+| `tracing`   | `tracing`       | The optional Langfuse v3 stack (§1 `LF` subgraph); `LLMClient` Langfuse spans                | `LANGFUSE_ENABLED` is effectively a no-op; no per-LLM-call traces; no `:3001` UI      |
+
+Neither flag affects audit logging: `auth_audit_events` and `scan_events` are Postgres tables written regardless — §2 is part of the always-on `scan` floor. Variant defaults: `vibe_coder` / `developer` ship neither; `enterprise` enables `log_stack` but deliberately leaves `tracing` **off** (its profile ships, so an operator can flip it on without a redeploy, but a 6-container Langfuse stack does not boot unasked).
 
 ### Log fields (bound at request scope — V16.4.1)
 

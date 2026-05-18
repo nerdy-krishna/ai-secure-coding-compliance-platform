@@ -193,6 +193,21 @@ sequenceDiagram
 
 ## Legend
 
+### Feature-flag gating (modular setup — #103–111)
+
+The identity surfaces above are **not all present in every install** — they are gated by five feature flags. The dependency resolver enforces the chain so an enabled set is always consistent (`scim` → `sso` → `multi_user`; `user_groups` → `multi_user`; `multi_tenant` → `multi_user`):
+
+| Feature        | Gates                                                                                       | When OFF                                                                              |
+|----------------|----------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
+| (none — `scan` floor) | Password login, WebAuthn passkeys, JWT mint/refresh/logout, the bootstrap superuser   | Always present — a single-superuser install still authenticates                        |
+| `multi_user`   | Self-service registration, `admin_users` router, the admin Users page                        | Install is single-account; the §1 surfaces collapse to password + passkey for that user |
+| `user_groups`  | `admin_groups` router, group CRUD, peer visibility (`get_visible_user_ids` resolves to self) | `get_visible_user_ids()` returns `{current_user.id}` only — no peer scope               |
+| `sso`          | `sso` + `admin_sso` routers, the §2 OIDC/SAML flow, JIT provisioning, SSO audit log           | SSO buttons absent on `LoginPage`; only password / passkey remain                       |
+| `scim`         | `scim` + `admin_scim` routers, the §5 provisioning flow, `scim_tokens`                        | External IAM cannot provision; `/api/v1/scim/*` is unmounted (404)                      |
+| `multi_tenant` | `admin_tenants` router, tenant management UI                                                  | All rows resolve to `DEFAULT_TENANT`; §4 tenant filter still runs but is single-valued  |
+
+Gating is enforced **server-side**: `bootstrap_enabled_features_sync()` decides which routers `main.py` mounts at import time, so a disabled surface returns 404 — the hidden nav link (diagram 03) is defence-in-depth, not the boundary. The `vibe_coder` variant ships none of these five (single-user); `developer` adds `multi_user` + `user_groups`; `enterprise` enables all five.
+
 ### Authentication mechanisms
 
 | Mechanism            | Library              | Endpoints                                                                                            | Persistence                           |

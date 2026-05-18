@@ -26,15 +26,16 @@ flowchart TB
 
       subgraph Providers["Provider chain (App.tsx)"]
         QC["QueryClientProvider<br/>@tanstack/react-query 5.77"]:::app
+        Feat["FeatureProvider<br/>· GET /features (public, pre-auth)<br/>· useFeatures() → isFeatureEnabled(name)<br/>· staleTime: Infinity"]:::gate
         Auth["AuthProvider<br/>· login / register / refresh<br/>· proactive 5 min before exp<br/>· cross-tab storage sync<br/>· circuit breaker (3 fails → 30 s)"]:::app
         Theme["ThemeProvider<br/>light/dark · variant A/B · accent<br/>localStorage: sccap-theme/variant/accent"]:::app
         ToastP["ToastProvider<br/>top-right · auto-dismiss 4.5 s"]:::app
       end
 
       subgraph Router["React Router v7.6"]
-        RG["RouteGuard<br/>requires: unauth · auth · superuser · root-redirect"]:::app
+        RG["RouteGuard<br/>requires: unauth · auth · superuser · root-redirect<br/>+ feature gate (redirect when feature off)"]:::app
         LayoutA["AuthLayout"]:::app
-        LayoutD["DashboardLayout<br/>+ TopNav + (admin) AdminSubNav"]:::app
+        LayoutD["DashboardLayout<br/>+ TopNav + (admin) AdminSubNav<br/>nav links hidden by isFeatureEnabled()"]:::app
       end
 
       subgraph Pages["Page surfaces (pages/, features/, widgets/)"]
@@ -113,6 +114,9 @@ flowchart TB
     Auth <-- "refresh cookie" --> CK
     PScan --> SSEClient
     SSEClient -- "SSE · text/event-stream" --> Backend
+    Backend -. "GET /features (unauthenticated)" .-> Feat
+    Feat -. "isFeatureEnabled() gates routes" .-> Router
+    Feat -. "hides feature-off surfaces + nav" .-> Pages
 
     %% ===== Classes =====
     classDef actor fill:#fafafa,stroke:#475569,color:#0f172a;
@@ -120,6 +124,7 @@ flowchart TB
     classDef app   fill:#e0e7ff,stroke:#4338ca,color:#1e1b4b;
     classDef data  fill:#dcfce7,stroke:#15803d,color:#052e16;
     classDef ext   fill:#ffe4e6,stroke:#9f1239,color:#4c0519;
+    classDef gate  fill:#ede9fe,stroke:#6d28d9,color:#2e1065,stroke-dasharray: 4 3;
 ```
 
 ---
@@ -239,6 +244,28 @@ Includes a 30-second no-data safety timer and a max-5-retry frontend bound on to
 | `accessToken`   | `localStorage`   | Needs to be read by axios interceptor; risk accepted (V15.1.5) with CSP + sanitized React |
 | `refresh_token` | HttpOnly cookie  | Inaccessible to JS; sent on `/auth/refresh` via `withCredentials: true`       |
 | `sccap-theme`, `sccap-variant`, `sccap-accent` | `localStorage` | Theme persistence; synced cross-tab via `storage` event |
+
+### Feature-flag gating (modular setup — #103–111)
+
+`FeatureProvider` fetches the enabled-feature set once from the **public, unauthenticated** `GET /api/v1/features` (so route guards and the login page can decide before any user exists). `useFeatures()` exposes `isFeatureEnabled(name)`; it fails *open* — while `/features` is in flight every feature reads as enabled, so a slow fetch never flashes a stripped-down UI. Each route guard, `TopNav`/`AdminSubNav` link, and feature-scoped surface consults it. `scan` is `always_on` — the product floor is never gated off.
+
+| Feature           | Frontend surface gated off when disabled                                                  |
+|-------------------|--------------------------------------------------------------------------------------------|
+| `scan`            | — (always on: submission, scan runtime, results, dashboard)                                |
+| `chat`            | `/advisor` route + `SecurityAdvisorPage`, TopNav **Advisor** link                          |
+| `compliance`      | `/compliance` route + `CompliancePage`, TopNav **Compliance** link                         |
+| `multi_user`      | `/admin/users`, self-service registration                                                  |
+| `user_groups`     | `/admin/user-groups`, group-membership UI                                                   |
+| `sso`             | SSO buttons on `LoginPage`, `/admin/sso/providers` + `/admin/sso/audit`                     |
+| `scim`            | `/admin/scim/tokens`                                                                         |
+| `multi_tenant`    | `/admin/tenants`                                                                             |
+| `email`           | `/forgot-password` + `/reset-password` flow                                                  |
+| `log_stack`       | `LlmLogViewerPage`, `/scans/:scanId/llm-logs`, LLM-log links on results                      |
+| `tracing`         | — (no dedicated SPA surface; Langfuse has its own UI — see diagram 10)                       |
+| `mcp`             | — (no SPA surface; the `/mcp` tool endpoint is backend-only)                                 |
+| `admin_authoring` | `/admin/{agents,frameworks,prompts}` + RAG ingest UI                                         |
+
+A disabled feature is enforced server-side too: `bootstrap_enabled_features_sync()` skips mounting the corresponding routers at import time, so hiding a link is defence-in-depth, not the security boundary.
 
 ### Code-gen flow
 

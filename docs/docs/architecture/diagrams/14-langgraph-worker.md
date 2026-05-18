@@ -8,82 +8,72 @@ Deep dive into `sccap_worker` — the heart of every scan. Built on **LangGraph 
 
 ```mermaid
 flowchart TB
-    Start([RabbitMQ message<br/>code_submission_queue new scan<br/>or analysis_approved_queue resume]):::edge
+    Start([RabbitMQ message<br/>code_submission_queue new scan<br/>· analysis_approved_queue resume]):::edge
+    Consumer["consumer.py · aio_pika robust connection<br/>idempotency precheck on scans.status<br/>SCAN_WORKFLOW_TIMEOUT_SECONDS bound<br/>LangGraph thread_id = scan_id"]:::app
 
-    Consumer["consumer.py<br/>aio_pika robust connection<br/>· idempotency precheck on scans.status<br/>· SCAN_WORKFLOW_TIMEOUT_SECONDS bound<br/>· LangGraph thread_id = scan_id"]:::app
-
-    subgraph Graph["LangGraph StateGraph (AsyncPostgresSaver)"]
+    subgraph Graph["LangGraph StateGraph (AsyncPostgresSaver checkpointer)"]
       direction TB
-      N1["1 · retrieve_and_prepare_data_node<br/>load code_snapshots<br/>build repo_map + dep_graph"]:::app
-      N2["2 · deterministic_prescan_node<br/>Bandit · Semgrep · Gitleaks · OSV<br/>build CycloneDX 1.5 BOM"]:::app
-      DG{Critical<br/>Gitleaks<br/>secret?}:::gate
-      N3["3 · pending_prescan_approval_node<br/>(interrupt)<br/>status=PENDING_PRESCAN_APPROVAL"]:::app
-      DGU{User<br/>decision}:::gate
-      N4["4 · user_decline_node<br/>status=BLOCKED_USER_DECLINE"]:::app
-      N5["5 · blocked_pre_llm_node<br/>status=BLOCKED_PRE_LLM"]:::app
-      N6["6 · estimate_cost_node<br/>per file × framework × agent token estimate<br/>scan.cost_details JSONB"]:::app
-      N6G["interrupt<br/>status=PENDING_COST_APPROVAL"]:::app
-      DGC{Cost<br/>approval}:::gate
-      N7["7 · analyze_files_parallel_node<br/>fan-out CONCURRENT_LLM_LIMIT=16<br/>per-file/framework/agent LLM calls<br/>(Pydantic AI structured output)<br/>RAG-enriched context"]:::app
-      N8["8 · consolidate_findings_node<br/>FindingConsolidator (reasoning LLM)<br/>merge same-defect findings, drop FPs<br/>+ validate_cross_file_node (opt-in #81)"]:::app
-      N9["9 · consolidate_and_patch_node<br/>(only when scan_type=REMEDIATE)<br/>_run_merge_agent · single-shot<br/>tree-sitter syntax verify"]:::app
-      N10["10 · verify_patches_node<br/>re-run Semgrep on patched files<br/>set fix_verified + regression guard"]:::app
-      N11["11 · save_results_node<br/>bulk INSERT findings · fixes JSONB"]:::app
-      N12["12 · save_final_report_node<br/>scan.summary · risk_score<br/>status=COMPLETED or REMEDIATION_COMPLETED"]:::app
-      N13["13 · handle_error_node<br/>status=FAILED<br/>scan.error_message"]:::app
+      N1["retrieve_and_prepare_data<br/>load ORIGINAL_SUBMISSION · repo map + dep graph"]:::app
+      N2["deterministic_prescan<br/>Bandit · Semgrep · Gitleaks · OSV<br/>CycloneDX BOM · seed WorkerState.findings"]:::app
+      DP{prescan<br/>findings?}:::gate
+      N3["pending_prescan_approval — interrupt<br/>status=PENDING_PRESCAN_APPROVAL"]:::app
+      DPA{prescan<br/>decision}:::gate
+      N4["estimate_profiling_cost — work node<br/>utility-slot token estimate<br/>status=PENDING_PROFILING_APPROVAL"]:::app
+      N5["profiling_cost_gate — interrupt"]:::app
+      DPF{profiling<br/>decision}:::gate
+      N6["profile_files<br/>FileProfiler on the utility LLM"]:::app
+      N7["estimate_cost — work node<br/>analysis dry-run · prices both reasoning LLMs<br/>status=PENDING_COST_APPROVAL"]:::app
+      N8["cost_gate — interrupt"]:::app
+      N9["analyze_files_parallel<br/>routed agents × file × reasoning lane(s)<br/>Pydantic AI structured output"]:::app
+      N10["consolidate_findings<br/>FindingConsolidator — merge / drop"]:::app
+      N11["validate_cross_file<br/>opt-in #81 — no-op unless enabled"]:::app
+      N12["consolidate_and_patch<br/>REMEDIATE: merge agent + tree-sitter verify<br/>(no snapshot for AUDIT / SUGGEST)"]:::app
+      N13["verify_patches<br/>REMEDIATE: re-run Semgrep on patched code"]:::app
+      N14["save_results"]:::app
+      N15["save_final_report<br/>risk_score + summary JSON<br/>status=COMPLETED / REMEDIATION_COMPLETED"]:::app
+      T1["user_decline<br/>status=BLOCKED_USER_DECLINE"]:::app
+      T2["blocked_pre_llm<br/>status=BLOCKED_PRE_LLM"]:::app
+      ERR["handle_error<br/>status=FAILED · scan.error_message"]:::app
     end
 
-    CkPt[(checkpoints<br/>thread_id=scan_id<br/>snapshot per node)]:::data
-    DB[(scans · scan_events · findings ·<br/>llm_interactions · code_snapshots)]:::data
-    MQ2[/RabbitMQ<br/>analysis_approved_queue/]:::data
-    LLM{{"Anthropic / OpenAI / Google<br/>Pydantic AI · cache_control"}}:::ext
-    RAG[(Qdrant<br/>SECURITY_GUIDELINES · CWE)]:::data
+    CkPt[(checkpoints<br/>thread_id=scan_id · snapshot per node)]:::data
+    MQ2[/analysis_approved_queue/]:::data
+    LLM{{Reasoning + utility LLMs<br/>Pydantic AI}}:::ext
     SC{{Subprocess scanners<br/>Bandit · Semgrep · Gitleaks · OSV}}:::ext
+    Done([END]):::edge
 
-    Start --> Consumer --> N1
-    N1 --> N2
+    Start --> Consumer --> N1 --> N2
     N2 -. subprocess .-> SC
-    N2 --> DG
-    DG -- yes --> N3
-    DG -- no --> N6
-    N3 -- interrupt persisted --> CkPt
-    N3 -. resume payload via MQ .-> MQ2
+    N2 --> DP
+    DP -- "findings present" --> N3
+    DP -- "none" --> N4
+    N3 -. "interrupt → checkpoint" .-> CkPt
+    N3 -. "resume via POST /approve" .-> MQ2
     MQ2 --> Consumer
-    Consumer -- "Command(resume=...)" --> DGU
-    DGU -- "approved + override" --> N6
-    DGU -- "approved (non-overridable)" --> N5
-    DGU -- "declined" --> N4
-    N4 --> N12
-    N5 --> N12
-    N6 --> N6G
-    N6G --> CkPt
-    N6G -. resume payload via MQ .-> MQ2
-    MQ2 --> Consumer
-    Consumer --> DGC
-    DGC -- approved --> N7
-    DGC -- declined --> N4
-    N7 -. fan-out RAG search .-> RAG
-    N7 -. fan-out LLM calls .-> LLM
-    N7 --> N8
-    N8 -->|scan_type=AUDIT or SUGGEST| N11
-    N8 -->|scan_type=REMEDIATE| N9
-    N9 -. merge-agent LLM .-> LLM
-    N9 --> N10
-    N10 -. subprocess .-> SC
-    N10 --> N11
-    N11 --> N12
-    N12 --> DB
-    N12 -- terminal: adelete_thread(scan_id) --> CkPt
-
-    N1 -. on error .-> N13
-    N2 -. on error .-> N13
-    N6 -. on error .-> N13
-    N7 -. on error .-> N13
-    N8 -. on error .-> N13
-    N9 -. on error .-> N13
-    N10 -. on error .-> N13
-    N11 -. on error .-> N13
-    N13 --> DB
+    Consumer -- "Command(resume)" --> DPA
+    DPA -- "declined · or >3 resume attempts" --> T1
+    DPA -- "approved · critical secret, no override" --> T2
+    DPA -- "approved" --> N4
+    N4 --> N5
+    N5 -. "interrupt → checkpoint" .-> CkPt
+    N5 -. "resume via POST /approve" .-> MQ2
+    Consumer -- "Command(resume)" --> DPF
+    DPF -- "declined" --> T1
+    DPF -- "approved" --> N6
+    N6 --> N7 --> N8
+    N8 -. "interrupt → checkpoint" .-> CkPt
+    N8 -. "resume via POST /approve" .-> MQ2
+    Consumer -- "Command(resume)" --> N9
+    N9 -. "fan-out (per reasoning lane)" .-> LLM
+    N9 --> N10 --> N11 --> N12
+    N12 -. merge-agent .-> LLM
+    N12 --> N13
+    N13 -. subprocess .-> SC
+    N13 --> N14 --> N15 --> Done
+    T1 --> Done
+    T2 --> Done
+    N1 & N2 & N4 & N6 & N7 & N9 & N10 & N11 & N12 & N13 & N14 -. error_message .-> ERR
+    ERR --> Done
 
     classDef edge fill:#e0f2fe,stroke:#0369a1,color:#082f49;
     classDef app  fill:#e0e7ff,stroke:#4338ca,color:#1e1b4b;
@@ -136,45 +126,61 @@ sequenceDiagram
 classDiagram
     class WorkerState {
       +UUID scan_id
-      +str  scan_type            "AUDIT | SUGGEST | REMEDIATE"
-      +list[str] frameworks
-      +UUID reasoning_llm_config_id
-      +dict[str,bytes] files              "file_path → content"
-      +dict[str,str]   initial_file_map   "file_path → hash"
-      +dict[str,str]   final_file_map     "file_path → hash (post-remediation)"
-      +dict[str,str]   patched_files      "file_path → patched content"
+      +str  scan_type                       "AUDIT | SUGGEST | REMEDIATE"
+      +str  current_scan_status
+      +UUID reasoning_llm_config_id          "primary reasoning slot"
+      +UUID secondary_reasoning_llm_config_id "optional 2nd analysis LLM (#93)"
+      +UUID utility_llm_config_id            "profiler + fix verification"
+      +dict stage_temperatures               "profiler/analysis/consolidation/merge → float (#78)"
+      +bool disable_temperature              "opt-in: provider default temp (#92)"
+      +bool cross_file_validation            "opt-in cross-file validation (#81)"
+      +dict[str,str] files                   "file_path → content"
+      +dict[str,str] initial_file_map        "file_path → hash"
+      +dict[str,str] final_file_map          "file_path → hash (post-remediation)"
+      +dict[str,str] patched_files           "file_path → patched content (REMEDIATE)"
+      +dict repository_map
+      +dict dependency_graph
+      +dict file_profiles                    "file_path → FileProfile (#71)"
+      +dict all_relevant_agents
       +list[VulnerabilityFinding] findings
       +list[FixResult] proposed_fixes
       +dict bom_cyclonedx
-      +dict repository_map
-      +dict dependency_graph
-      +dict prescan_approval     "approved + override_critical_secret"
-      +dict cost_approval        "approved"
-      +dict cost_details
+      +dict prescan_approval                 "approved + override_critical_secret"
+      +dict profiling_approval               "approved"
+      +int  resume_attempts                  "prescan-gate loop-back cap (≤3)"
       +str  error_message
     }
     class VulnerabilityFinding {
       +str file_path
       +int line_number
       +str title
-      +str severity              "Critical|High|Medium|Low|Info"
-      +str source                "bandit|semgrep|gitleaks|osv|agent"
-      +str framework
+      +str severity              "Critical|High|Medium|Low|Informational"
+      +str confidence            "High|Medium|Low"
+      +str source                "bandit|semgrep|gitleaks|osv · None for agent"
       +str cwe
+      +float cvss_score
       +str description
       +str remediation
-      +list[str] references
+      +FixSuggestion fixes
+      +list[AffectedLocation] affected_locations
+      +list[str] corroborating_agents
+      +list[str] detected_by_llms          "reasoning LLM(s) that flagged it (#94)"
+      +bool fix_verified                   "Semgrep re-run verdict (REMEDIATE)"
+      +str cross_file_status               "confirmed|mitigated|unconfirmed (#81)"
     }
     class FixResult {
-      +UUID finding_id
-      +str  file_path
-      +str  type                 "search_replace | rewrite"
-      +str  suggestion
-      +str  reasoning
-      +float confidence
+      +VulnerabilityFinding finding
+      +FixSuggestion suggestion
+    }
+    class FixSuggestion {
+      +str description
+      +str original_snippet
+      +str code
     }
     WorkerState "1" o-- "*" VulnerabilityFinding
     WorkerState "1" o-- "*" FixResult
+    FixResult "1" o-- "1" FixSuggestion
+    VulnerabilityFinding "1" o-- "0..1" FixSuggestion
 ```
 
 ---
@@ -183,41 +189,52 @@ classDiagram
 
 ### Node responsibilities (one-line each)
 
-| #   | Node                                       | Reads                                                | Writes                                                                                              |
-|-----|--------------------------------------------|------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| 1   | `retrieve_and_prepare_data_node`           | `scans`, `code_snapshots`, `source_code_files`       | `WorkerState.files/initial_file_map/repo_map/dep_graph`, `scan_events(RETRIEVE)`                    |
-| 2   | `deterministic_prescan_node`               | `WorkerState.files`                                  | `WorkerState.findings (prescan)`, `WorkerState.bom_cyclonedx`, `scan_events(PRESCAN_ANALYSIS)`       |
-| 3   | `pending_prescan_approval_node`            | prescan findings                                     | `scans.status = PENDING_PRESCAN_APPROVAL`, LangGraph interrupt + checkpoint                          |
-| 4   | `user_decline_node`                        | resume payload                                       | `scans.status = BLOCKED_USER_DECLINE`                                                                |
-| 5   | `blocked_pre_llm_node`                     | resume payload (non-overridable critical secret)     | `scans.status = BLOCKED_PRE_LLM`, audit event                                                       |
-| 6   | `estimate_cost_node`                       | `WorkerState.files`, frameworks, agent registry      | `scans.cost_details`, interrupt                                                                      |
-| 7   | `analyze_files_parallel_node`              | files + framework controls (RAG)                     | `WorkerState.findings`, `proposed_fixes`, `llm_interactions`, per-file `scan_events(FILE_ANALYZED)` |
-| 8   | `consolidate_findings_node`                | per-agent findings                                   | `FindingConsolidator` reasoning-LLM pass — merge same-defect findings, drop demonstrable FPs        |
-| 9   | `consolidate_and_patch_node`               | `WorkerState.findings + proposed_fixes`              | `WorkerState.patched_files`, `final_file_map`                                                       |
-| 10  | `verify_patches_node`                      | `patched_files` vs original                          | `finding.fix_verified`, regression detection                                                         |
-| 11  | `save_results_node`                        | `WorkerState.findings`                               | `findings` (bulk insert), `scans.summary`                                                            |
-| 12  | `save_final_report_node`                   | `scans.summary`                                      | `scans.status = COMPLETED \| REMEDIATION_COMPLETED`, `adelete_thread()`                              |
-| 13  | `handle_error_node`                        | exception                                            | `scans.status = FAILED`, `scans.error_message`, audit event                                          |
+| #   | Node                          | Reads                                              | Writes                                                                                              |
+|-----|-------------------------------|----------------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| 1   | `retrieve_and_prepare_data`   | `scans`, `code_snapshots`, `source_code_files`     | `WorkerState.files/initial_file_map/repository_map/dependency_graph`, `scan_events(RETRIEVE)`        |
+| 2   | `deterministic_prescan`       | `WorkerState.files`                                | `WorkerState.findings (prescan)`, `WorkerState.bom_cyclonedx`, `scan_events(PRESCAN_ANALYSIS)`       |
+| 3   | `pending_prescan_approval`    | prescan findings, resume payload                   | `scans.status = PENDING_PRESCAN_APPROVAL`, LangGraph interrupt + checkpoint                          |
+| 4   | `estimate_profiling_cost`     | `WorkerState.files`                                | `scans.cost_details (profiling)`, `scans.status = PENDING_PROFILING_APPROVAL`                        |
+| 5   | `profiling_cost_gate`         | resume payload                                     | LangGraph interrupt + checkpoint; routes on the profiling decision                                   |
+| 6   | `profile_files`               | files + repository map                             | `WorkerState.file_profiles` (FileProfiler on the utility LLM slot)                                   |
+| 7   | `estimate_cost`               | `file_profiles`, routed agents, reasoning configs  | `scans.cost_details (analysis)`, `scans.status = PENDING_COST_APPROVAL`                              |
+| 8   | `cost_gate`                   | resume payload                                     | LangGraph interrupt + checkpoint; routes to `analyze_files_parallel`                                 |
+| 9   | `analyze_files_parallel`      | files + routed agents + dep summary (RAG)          | `WorkerState.findings`, `proposed_fixes`, `llm_interactions`, per-file `scan_events(FILE_ANALYZED)` |
+| 10  | `consolidate_findings`        | per-agent findings                                 | `FindingConsolidator` reasoning-LLM pass — merge same-defect findings, drop demonstrable FPs        |
+| 11  | `validate_cross_file`         | consolidated findings                              | opt-in #81 — stamps `cross_file_status`/`cross_file_rationale`; no-op unless `Scan.cross_file_validation` |
+| 12  | `consolidate_and_patch`       | `WorkerState.findings + proposed_fixes`            | REMEDIATE only — `WorkerState.patched_files`, `final_file_map`; merge agent + tree-sitter verify     |
+| 13  | `verify_patches`              | `patched_files` vs original                        | REMEDIATE only — `finding.fix_verified`, Semgrep regression detection                                |
+| 14  | `save_results`                | `WorkerState.findings`                             | `findings` (bulk insert), fixes JSONB                                                                |
+| 15  | `save_final_report`           | findings + fixes                                   | `scans.summary`, `scans.risk_score`, `scans.status = COMPLETED \| REMEDIATION_COMPLETED`, `adelete_thread()` |
+| —   | `user_decline`                | resume payload (declined)                          | `scans.status = BLOCKED_USER_DECLINE`                                                                |
+| —   | `blocked_pre_llm`             | resume payload (non-overridable critical secret)   | `scans.status = BLOCKED_PRE_LLM`, audit event                                                        |
+| —   | `handle_error`                | `WorkerState.error_message`                        | `scans.status = FAILED`, `scans.error_message`, `scan_events(FAILED)`                                |
+
+### Two cost gates
+
+The graph pauses for cost approval **twice**, because profiling (#71) itself spends utility-LLM tokens:
+
+1. **`PENDING_PROFILING_APPROVAL`** — `estimate_profiling_cost` prices the FileProfiler pass on the utility-LLM slot; `profiling_cost_gate` is the bare `interrupt()`.
+2. **`PENDING_COST_APPROVAL`** — `estimate_cost` prices the per-agent analysis fan-out (across both reasoning-LLM slots when a secondary is configured); `cost_gate` is the bare `interrupt()`.
+
+The estimate node and its gate node are deliberately split (#84): the estimate node does the work and persists `cost_details`, the gate node only carries the `interrupt()` so a resume re-enters a side-effect-free node.
 
 ### Concurrency
 
-- **CONCURRENT_LLM_LIMIT**: 16 (env var) — `analyze_files_parallel_node` fans out up to this many concurrent agent calls. Backpressure is enforced by the per-provider rate limiter token bucket (`*_TOKENS_PER_MINUTE`).
-- **Merge agent (REMEDIATE)**: when proposed fixes overlap within a file, `consolidate_and_patch_node` makes a single reasoning-LLM call (`_run_merge_agent`) to unify them; the merged file is tree-sitter parse-checked, and on a parse failure the file is left unpatched rather than emitting broken code (see diagram 05).
-- **`SCAN_WORKFLOW_TIMEOUT_SECONDS`**: 7200 (2 h default). The consumer wraps the entire workflow run in `asyncio.wait_for()` — exceeding the bound forces a `handle_error_node` transition.
+- **CONCURRENT_LLM_LIMIT**: 5 — `analyze_files_parallel` bounds file × chunk × agent calls with a single `asyncio.Semaphore`. With a secondary reasoning LLM configured, each lane gets its own pool. Backpressure is also enforced by the per-provider rate limiter token bucket (`*_TOKENS_PER_MINUTE`).
+- **Merge agent (REMEDIATE)**: when proposed fixes overlap within a file, `consolidate_and_patch` makes a single reasoning-LLM call (`_run_merge_agent`) to unify them; the merged file is tree-sitter parse-checked, and on a parse failure the file is left unpatched rather than emitting broken code (see diagram 05).
+- **`SCAN_WORKFLOW_TIMEOUT_SECONDS`**: 7200 (2 h default). The consumer wraps the entire workflow run in `asyncio.wait_for()` — exceeding the bound forces a `handle_error` transition.
 
 ### Resume semantics
 
-When an interrupt fires, the node persists the partial `WorkerState` into the `checkpoints` table and the worker ACKs the message. To resume, the API (in response to `POST /scans/{id}/approve`) inserts a message into `analysis_approved_queue` whose payload includes the approval decision. The consumer reads it, calls:
+When an interrupt fires, the node persists the partial `WorkerState` into the `checkpoints` table and the worker ACKs the message. To resume, the API (in response to `POST /scans/{id}/approve`) inserts a message into `analysis_approved_queue` whose payload includes the approval decision. The consumer reads it and re-invokes the **same** graph thread with a `Command`:
 
 ```python
-await graph.aupdate_state(
-    {"configurable": {"thread_id": scan_id}},
-    {"prescan_approval": {...}}  # or "cost_approval"
-)
-await graph.ainvoke(None, config)   # continues from the checkpoint
+config = {"configurable": {"thread_id": str(scan_id)}}
+await graph.ainvoke(Command(resume=payload), config)   # continues from the checkpoint
 ```
 
-…which moves the state graph past the interrupt.
+`payload` is the approval decision (`{"kind": "prescan_approval" | "profiling_approval" | "cost_approval", "approved": ...}`). The interrupt site receives it as the `interrupt()` return value, and the gate's routing function moves the state graph past the interrupt.
 
 ### Idempotency precheck
 
@@ -227,6 +244,8 @@ ENTRY_STATUSES = {
     "QUEUED_FOR_SCAN",
     "PENDING_APPROVAL",
     "PENDING_PRESCAN_APPROVAL",
+    "PENDING_PROFILING_APPROVAL",
+    "PENDING_COST_APPROVAL",
 }
 if scan.status not in ENTRY_STATUSES:
     log.info("worker.duplicate_delivery", scan_id=scan.id, status=scan.status)

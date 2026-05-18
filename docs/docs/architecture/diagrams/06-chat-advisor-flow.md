@@ -169,6 +169,16 @@ Single page `SecurityAdvisorPage` (`secure-code-ui/src/pages/chat/SecurityAdviso
 | Center   | Message thread (user / assistant bubbles) · quick-reply chips · draft textarea · send button         |
 | Right    | Context stub — referenced findings, files, knowledge sources from `/chat/sessions/{id}/context`      |
 
+### Feature-flag gating (modular setup — #103–111)
+
+The **entire Security Advisor surface is gated by the `chat` feature flag**:
+
+- **Backend** — `bootstrap_enabled_features_sync()` mounts the `/api/v1/chat` router only when `chat` is enabled. With it off, every `/chat/*` endpoint is absent (404), not merely hidden.
+- **Frontend** — `FeatureProvider` / `isFeatureEnabled("chat")` hides the TopNav **Advisor** link and the `/advisor` route guard redirects away (see diagram 03).
+- **Dependency** — `chat` `depends_on` `scan`; the dependency resolver guarantees `chat` can never be enabled without the product floor. It is **off** in the `vibe_coder` variant's sibling-free minimal builds only when explicitly customised — the three named variants (`vibe_coder`, `developer`, `enterprise`) all include `chat`.
+
+Disabling `chat` has no effect on scan analysis — the FindingConsolidator / cross-file reasoning LLMs are unrelated to the chat agent.
+
 ### Tools
 
 The chat agent can call **read-only** tools if the model supports tool use:
