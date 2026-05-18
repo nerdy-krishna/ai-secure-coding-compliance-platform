@@ -38,8 +38,10 @@ flowchart LR
     %% External systems
     %% =========================
     Anthropic{{Anthropic API<br/>Claude Opus 4.7 / Sonnet 4.6 / Haiku 4.5}}:::ext
-    OpenAI{{OpenAI API<br/>GPT-4o / GPT-4o-mini}}:::ext
-    Google{{Google GenAI<br/>Gemini 2.0}}:::ext
+    OpenAI{{OpenAI API}}:::ext
+    Google{{Google GenAI · Gemini}}:::ext
+    DeepSeek{{DeepSeek API}}:::ext
+    XAI{{xAI Grok API}}:::ext
     OIDC{{OIDC IdP<br/>Okta / Auth0 / Entra ID / Google}}:::ext
     SAML{{SAML 2.0 IdP<br/>ADFS / Okta / PingFederate}}:::ext
     SMTP{{SMTP Relay<br/>SendGrid / SES / Mailgun}}:::ext
@@ -85,6 +87,8 @@ flowchart LR
     Worker -- "HTTPS · Pydantic AI · Anthropic SDK" --> Anthropic
     Worker -- "HTTPS · Pydantic AI · OpenAI SDK" --> OpenAI
     Worker -- "HTTPS · Pydantic AI · google-genai" --> Google
+    Worker -- "HTTPS · Pydantic AI" --> DeepSeek
+    Worker -- "HTTPS · Pydantic AI" --> XAI
     API -- "HTTPS · rule pull" --> Semgrep
     Edge -- "ACME challenge · /var/www/certbot" --> LE
     API -.-> Obs
@@ -135,8 +139,10 @@ flowchart LR
 | External           | Protocol          | Purpose                                                                 |
 |--------------------|-------------------|-------------------------------------------------------------------------|
 | Anthropic API      | HTTPS · Pydantic AI · Anthropic SDK | Claude Opus/Sonnet/Haiku for analysis & chat agents      |
-| OpenAI API         | HTTPS · OpenAI SDK              | GPT-4o / 4o-mini fallback provider                                       |
-| Google GenAI       | HTTPS · `google-genai`          | Gemini 2.0 fallback provider                                             |
+| OpenAI API         | HTTPS · OpenAI SDK              | Alternative analysis / chat provider                                     |
+| Google GenAI       | HTTPS · `google-genai`          | Alternative analysis / chat provider (Gemini)                            |
+| DeepSeek API       | HTTPS · Pydantic AI             | Alternative analysis / chat provider                                     |
+| xAI Grok API       | HTTPS · Pydantic AI             | Alternative analysis / chat provider                                     |
 | OIDC IdP           | HTTPS · OIDC 1.0 + PKCE         | SSO login (Okta, Auth0, Entra ID, Google Workspace, …)                  |
 | SAML 2.0 IdP       | HTTPS · SAML 2.0                | SSO login via `python3-saml`                                             |
 | SMTP relay         | SMTP/STARTTLS · 587             | Password-reset, scan-completion, approval-reminder emails                |

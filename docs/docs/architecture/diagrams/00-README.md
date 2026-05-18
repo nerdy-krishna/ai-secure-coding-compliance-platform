@@ -15,8 +15,8 @@ Diagrams are written in [Mermaid](https://mermaid.js.org/) so they render direct
 | 01 | [System Overview (C4 Context)](./01-system-overview.md)              | Top-level black-box view: actors, external systems, SCCAP container boundary           |
 | 02 | [Backend Architecture](./02-backend-architecture.md)                 | FastAPI app, LangGraph worker, RabbitMQ, Postgres, Qdrant, RAG, scanners, observability |
 | 03 | [Frontend Architecture](./03-frontend-architecture.md)               | React 18 + Vite SPA, routing, state, services, SSE client, theming                     |
-| 04 | [Audit Scan Flow](./04-audit-scan-flow.md)                            | End-to-end sequence: upload → prescan → cost → analyze → correlate → persist           |
-| 05 | [Remediation Flow](./05-remediation-flow.md)                          | Fix proposal, consolidation, Aider-style SEARCH/REPLACE, verification                  |
+| 04 | [Audit Scan Flow](./04-audit-scan-flow.md)                            | End-to-end sequence: upload → prescan → profiling/cost gates → analyze → consolidate → persist |
+| 05 | [Remediation Flow](./05-remediation-flow.md)                          | REMEDIATE in-graph patching: fix proposal, per-file merge agent, tree-sitter + Semgrep verification |
 | 06 | [Chat Advisor Flow](./06-chat-advisor-flow.md)                        | Session lifecycle, RAG context assembly, LLM turn, masking, retention                  |
 | 07 | [Framework Management & Ingestion](./07-framework-management.md)      | Framework CRUD, RAG preprocessing job lifecycle, Qdrant population                     |
 | 08 | [Auth, SSO, SCIM, Tenancy](./08-auth-tenancy-sso.md)                  | JWT, OIDC, SAML 2.0, WebAuthn passkeys, SCIM 2.0, multi-tenant scoping                 |
@@ -80,7 +80,7 @@ The same visual vocabulary is reused across all diagrams. Every page repeats the
 | **Qdrant**               | Vector database (SHA-pinned `qdrant/qdrant`) backing all framework / CWE RAG retrieval                            |
 | **fastembed**            | ONNX-based embedding library; SCCAP uses `sentence-transformers/all-MiniLM-L6-v2` (384-dim) pre-warmed at build  |
 | **CycloneDX 1.5**        | SBOM format emitted by OSV-Scanner; stored in `Scan.bom_cyclonedx` JSONB                                          |
-| **SEARCH/REPLACE block** | Aider-style multi-line patch format used by the consolidator and editor sub-agent                                 |
+| **Merge agent** | The reasoning-LLM call (`_run_merge_agent`) that unifies overlapping per-file fix suggestions during `consolidate_and_patch` |
 | **SSE**                  | Server-Sent Events; one-way stream from FastAPI to browser for scan progress                                      |
 | **Stream-token JWT**     | Short-TTL (60 s) JWT bound to a scan_id, audience `sse:scan-stream`, used in the SSE URL fragment                 |
 | **Transactional outbox** | `scan_outbox` table holding messages that *will* be published to RabbitMQ; swept by a background task            |
