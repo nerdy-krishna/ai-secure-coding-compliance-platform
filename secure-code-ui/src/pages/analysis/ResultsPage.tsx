@@ -2120,6 +2120,8 @@ const CodeSnippet: React.FC<{
     return [lineNumber, lineNumber];
   }, [fileContent, vulnerableSnippet, lineNumber]);
 
+  const [expanded, setExpanded] = useState(false);
+
   if (!source || lineNumber <= 0) return null;
 
   const allLines = source.split("\n");
@@ -2138,6 +2140,66 @@ const CodeSnippet: React.FC<{
     if (displayLines[displayLines.length - 1] === "") displayLines.pop();
     startLineNum = lineNumber;
   }
+
+  const lineLabel =
+    hlEnd > hlStart ? `lines ${hlStart}–${hlEnd}` : `line ${hlStart}`;
+
+  // The code block — rendered inline (capped) and again in the
+  // full-screen modal (tall); `mh` is the max-height.
+  const codeBlock = (mh: number | string) => (
+    <div className="diff" style={{ maxHeight: mh, overflow: "auto" }}>
+      {displayLines.map((line, i) => {
+        const lineNum = startLineNum + i;
+        const isFlagged = fileContent
+          ? lineNum >= hlStart && lineNum <= hlEnd
+          : lineNum === startLineNum;
+        return (
+          <div
+            key={i}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "38px 1fr",
+              minHeight: 22,
+              background: isFlagged ? "var(--diff-del)" : "transparent",
+              borderLeft: isFlagged
+                ? `2px solid ${severityColor}`
+                : "2px solid transparent",
+            }}
+          >
+            <span
+              className="diff-ln"
+              style={{
+                padding: "0 8px",
+                color: isFlagged ? severityColor : "var(--fg-subtle)",
+                textAlign: "right",
+                userSelect: "none",
+                background: isFlagged ? "var(--diff-del)" : "var(--bg-soft)",
+                borderRight: "1px solid var(--border)",
+                fontSize: 11,
+                lineHeight: "22px",
+                fontWeight: isFlagged ? 700 : 400,
+              }}
+            >
+              {lineNum}
+            </span>
+            <span
+              className="diff-code"
+              style={{
+                padding: "2px 12px",
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+                lineHeight: "22px",
+                color: isFlagged ? "var(--fg)" : "var(--fg-muted)",
+                fontWeight: isFlagged ? 500 : 400,
+              }}
+            >
+              {line || " "}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div>
@@ -2159,61 +2221,38 @@ const CodeSnippet: React.FC<{
         </svg>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>{filePath}</span>
         <span style={{ color: "var(--fg-subtle)" }}>·</span>
-        <span style={{ color: severityColor, fontWeight: 600 }}>
-          {hlEnd > hlStart ? `lines ${hlStart}–${hlEnd}` : `line ${hlStart}`}
-        </span>
+        <span style={{ color: severityColor, fontWeight: 600 }}>{lineLabel}</span>
+        <button
+          className="sccap-btn sccap-btn-sm"
+          style={{ marginLeft: "auto" }}
+          onClick={() => setExpanded(true)}
+          title="Open this code in a full-screen view"
+        >
+          <Icon.Eye size={12} /> Expand
+        </button>
       </div>
-      {/* Code block — reuses .diff container for consistent look */}
-      <div className="diff" style={{ maxHeight: 220, overflowY: "auto" }}>
-        {displayLines.map((line, i) => {
-          const lineNum = startLineNum + i;
-          const isFlagged = fileContent
-            ? lineNum >= hlStart && lineNum <= hlEnd
-            : lineNum === startLineNum;
-          return (
-            <div
-              key={i}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "38px 1fr",
-                minHeight: 22,
-                background: isFlagged ? "var(--diff-del)" : "transparent",
-                borderLeft: isFlagged ? `2px solid ${severityColor}` : "2px solid transparent",
-              }}
+      {codeBlock(220)}
+
+      {/* Full-screen code view. */}
+      <Modal
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        width="96vw"
+        title={
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className="mono" style={{ fontSize: 13 }}>
+              {filePath}
+            </span>
+            <span
+              style={{ color: severityColor, fontWeight: 600, fontSize: 12 }}
             >
-              <span
-                className="diff-ln"
-                style={{
-                  padding: "0 8px",
-                  color: isFlagged ? severityColor : "var(--fg-subtle)",
-                  textAlign: "right",
-                  userSelect: "none",
-                  background: isFlagged ? "var(--diff-del)" : "var(--bg-soft)",
-                  borderRight: "1px solid var(--border)",
-                  fontSize: 11,
-                  lineHeight: "22px",
-                  fontWeight: isFlagged ? 700 : 400,
-                }}
-              >
-                {lineNum}
-              </span>
-              <span
-                className="diff-code"
-                style={{
-                  padding: "2px 12px",
-                  whiteSpace: "pre-wrap",
-                  overflowWrap: "anywhere",
-                  lineHeight: "22px",
-                  color: isFlagged ? "var(--fg)" : "var(--fg-muted)",
-                  fontWeight: isFlagged ? 500 : 400,
-                }}
-              >
-                {line || " "}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+              {lineLabel}
+            </span>
+          </span>
+        }
+      >
+        {codeBlock("calc(86vh - 80px)")}
+      </Modal>
     </div>
   );
 };
@@ -2231,6 +2270,8 @@ const RemediationDiffPanel: React.FC<{
   onSelectFile: (path: string) => void;
 }> = ({ changedFiles, originalCodeMap, fixedCodeMap, findingsByFile, selectedFile, onSelectFile }) => {
   const effectiveSelected = selectedFile ?? (changedFiles.length > 0 ? changedFiles[0] : null);
+  // Full-screen view of the selected file's remediation diff.
+  const [diffExpanded, setDiffExpanded] = useState(false);
 
   // Stats for the selected file diff
   const diffStats = useMemo(() => {
@@ -2245,6 +2286,7 @@ const RemediationDiffPanel: React.FC<{
   }, [effectiveSelected, originalCodeMap, fixedCodeMap]);
 
   return (
+    <>
     <div
       style={{
         display: "grid",
@@ -2342,7 +2384,14 @@ const RemediationDiffPanel: React.FC<{
               }}
             >
               <span className="mono" style={{ fontSize: 12, color: "var(--fg)", fontWeight: 500 }}>{effectiveSelected}</span>
-              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto", alignItems: "center" }}>
+                <button
+                  className="sccap-btn sccap-btn-sm"
+                  onClick={() => setDiffExpanded(true)}
+                  title="Open this diff in a full-screen view"
+                >
+                  <Icon.Eye size={12} /> Expand
+                </button>
                 {diffStats.removed > 0 && (
                   <span className="chip" style={{ background: "var(--diff-del)", borderColor: "var(--diff-del-line)", color: "var(--critical)", fontSize: 10.5 }}>
                     −{diffStats.removed}
@@ -2372,6 +2421,28 @@ const RemediationDiffPanel: React.FC<{
         )}
       </div>
     </div>
+    {/* Full-screen view of the selected file's remediation diff. */}
+    <Modal
+      open={diffExpanded && !!effectiveSelected}
+      onClose={() => setDiffExpanded(false)}
+      width="96vw"
+      title={
+        <span className="mono" style={{ fontSize: 13 }}>
+          {effectiveSelected}
+        </span>
+      }
+    >
+      {effectiveSelected && (
+        <DiffViewer
+          original={originalCodeMap[effectiveSelected] ?? ""}
+          fixed={fixedCodeMap[effectiveSelected] ?? ""}
+          startLine={1}
+          filePath={effectiveSelected}
+          maxHeight="calc(86vh - 80px)"
+        />
+      )}
+    </Modal>
+    </>
   );
 };
 
