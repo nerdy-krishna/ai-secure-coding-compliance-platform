@@ -241,6 +241,15 @@ export interface SummaryReport {
   overall_risk_score?: OverallRiskScore;
 }
 
+// One LLM slot a scan ran with — shown in the Results page "Models
+// used" panel.
+export interface LLMUsageItem {
+  category: string;
+  name: string;
+  provider: string;
+  model_name: string;
+}
+
 export interface ScanResultResponse {
   scan_id: string;
   status: string;
@@ -263,6 +272,9 @@ export interface ScanResultResponse {
   // Whether the scan opted in to cross-file finding validation (#82).
   // Drives the cross-file-validation stage in ScanRunningPage's rail.
   cross_file_validation?: boolean;
+  // The LLM configs the scan ran with — reasoning / utility / 2nd
+  // analysis LLM — each with its provider + model. Shown on Results.
+  llms_used?: LLMUsageItem[];
   // Stage-event audit trail. SSE emits these live for in-progress
   // scans; the same list is included here so a terminal scan's page
   // can seed the live-event-log deterministically on mount, instead

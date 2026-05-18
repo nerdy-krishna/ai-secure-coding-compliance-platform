@@ -258,6 +258,43 @@ class ScanQueryService:
         # cover legacy LLM-emitted rows.
         source_counts = await self.repo.count_findings_by_source(scan_id)
 
+        # The LLM configs the scan ran with, by role. Utility falls back
+        # to the reasoning slot when it was left unset (mirrors
+        # `resolve_llm_config_id`); the second analysis LLM appears only
+        # when the scan opted into it.
+        from app.infrastructure.database.repositories.llm_config_repo import (
+            LLMConfigRepository,
+        )
+
+        llm_repo = LLMConfigRepository(self.repo.db)
+        llm_slots = [
+            ("Reasoning LLM", scan.reasoning_llm_config_id),
+            (
+                "Utility LLM",
+                scan.utility_llm_config_id or scan.reasoning_llm_config_id,
+            ),
+            ("2nd Analysis LLM", scan.secondary_reasoning_llm_config_id),
+        ]
+        llms_used: List[api_models.LLMUsageItem] = []
+        _cfg_cache: Dict[uuid.UUID, object] = {}
+        for category, cfg_id in llm_slots:
+            if not cfg_id:
+                continue
+            cfg = _cfg_cache.get(cfg_id)
+            if cfg is None:
+                cfg = await llm_repo.get_by_id(cfg_id)
+                if cfg is not None:
+                    _cfg_cache[cfg_id] = cfg
+            if cfg is not None:
+                llms_used.append(
+                    api_models.LLMUsageItem(
+                        category=category,
+                        name=cfg.name,
+                        provider=cfg.provider,
+                        model_name=cfg.model_name,
+                    )
+                )
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             project_id=scan.project_id,
@@ -268,6 +305,7 @@ class ScanQueryService:
             source_counts=source_counts,
             cost_details=scan.cost_details,
             cross_file_validation=bool(scan.cross_file_validation),
+            llms_used=llms_used,
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )
 

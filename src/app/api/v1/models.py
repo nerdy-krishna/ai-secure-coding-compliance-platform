@@ -749,6 +749,16 @@ class SummaryReportResponse(BaseModel):
         from_attributes = True
 
 
+class LLMUsageItem(BaseModel):
+    """One LLM slot a scan used — surfaced on the Results page so the
+    operator can see which model ran in each role."""
+
+    category: str  # "Reasoning LLM" / "Utility LLM" / "2nd Analysis LLM"
+    name: str
+    provider: str
+    model_name: str
+
+
 class AnalysisResultDetailResponse(BaseModel):
     status: str
     # Always-present pointers to the scan's owning project. Top-level
@@ -776,6 +786,10 @@ class AnalysisResultDetailResponse(BaseModel):
     # Surfaced so ScanRunningPage can show the cross-file-validation
     # stage in the progress rail only for opted-in scans.
     cross_file_validation: bool = False
+    # The LLM configs the scan ran with — reasoning, utility, and the
+    # optional second analysis LLM — each with its model. Surfaced on
+    # the Results page. Empty for scans created before the column set.
+    llms_used: List["LLMUsageItem"] = Field(default_factory=list)
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing

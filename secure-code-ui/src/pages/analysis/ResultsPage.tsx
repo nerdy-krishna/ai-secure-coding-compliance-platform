@@ -591,6 +591,64 @@ const ResultsPage: React.FC = () => {
         ))}
       </div>
 
+      {/* Models used — the LLM config in each role for this scan. */}
+      {data.llms_used && data.llms_used.length > 0 && (
+        <div
+          className="sccap-card"
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 24,
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              textTransform: "uppercase",
+              letterSpacing: ".06em",
+              color: "var(--fg-subtle)",
+              fontWeight: 600,
+            }}
+          >
+            Models used
+          </span>
+          {data.llms_used.map((m) => (
+            <div
+              key={m.category}
+              style={{ display: "flex", flexDirection: "column", gap: 1 }}
+            >
+              <span
+                style={{
+                  fontSize: 10.5,
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  color: "var(--fg-subtle)",
+                  fontWeight: 600,
+                }}
+              >
+                {m.category}
+              </span>
+              <span
+                style={{
+                  fontSize: 13,
+                  color: "var(--fg)",
+                  fontWeight: 500,
+                }}
+              >
+                {m.name}
+              </span>
+              <span
+                className="mono"
+                style={{ fontSize: 11, color: "var(--fg-muted)" }}
+              >
+                {m.provider}/{m.model_name}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Per-source filter row. Pills are buttons that filter the
           findings list to that single source. The leading "All" pill
           clears the filter; a "Clear" affordance appears once a
