@@ -31,9 +31,9 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      # Changed back to service_healthy now that we know Fluentd works
-      fluentd:
-        condition: service_healthy
+    # fluentd is gated behind the `log_stack` compose profile (modular
+    # setup). The fluentd logging driver below is async, so app starts
+    # fine whether or not fluentd is running.
     # Added logging driver configuration with retry options
     logging:
       driver: "fluentd"
@@ -60,9 +60,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_PORT_HOST:-5432}:5432"
-    depends_on:
-      fluentd:
-        condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 10s
@@ -164,8 +161,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      fluentd:
-        condition: service_healthy
+    # fluentd gated behind the `log_stack` profile; async driver tolerates
+    # its absence (modular setup).
     logging:
       driver: "fluentd"
       options:
@@ -181,6 +178,8 @@ services:
   fluentd:
     build: ./fluentd
     container_name: sccap_fluentd
+    # Log stack — only runs when `log_stack` is in COMPOSE_PROFILES.
+    profiles: ["log_stack"]
     volumes:
       - ./fluentd/log:/fluentd/log
     ports:
@@ -209,6 +208,7 @@ services:
   loki:
     image: grafana/loki:3.4.2
     container_name: sccap_loki
+    profiles: ["log_stack"]
     ports:
       - "127.0.0.1:3100:3100"
     # Custom config (loki/loki-config.yaml) enables the compactor with
@@ -231,6 +231,7 @@ services:
   grafana:
     image: grafana/grafana:11.5.2
     container_name: sccap_grafana
+    profiles: ["log_stack"]
     ports:
       - "127.0.0.1:3000:3000"
     environment:
@@ -261,6 +262,8 @@ services:
   langfuse-postgres:
     image: postgres@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
     container_name: sccap_langfuse_postgres
+    # Langfuse stack — only runs when `tracing` is in COMPOSE_PROFILES.
+    profiles: ["tracing"]
     environment:
       POSTGRES_USER: langfuse
       POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?LANGFUSE_POSTGRES_PASSWORD is required}
@@ -283,6 +286,7 @@ services:
   langfuse-clickhouse:
     image: clickhouse/clickhouse-server@sha256:85b97f63dcfff47790d26bb5d5801637aaddb2b93e5e9aee27a686c2fb2b9916
     container_name: sccap_langfuse_clickhouse
+    profiles: ["tracing"]
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: clickhouse
@@ -309,6 +313,7 @@ services:
   langfuse-redis:
     image: redis@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
     container_name: sccap_langfuse_redis
+    profiles: ["tracing"]
     command:
       - redis-server
       - --requirepass
@@ -333,6 +338,7 @@ services:
   langfuse-minio:
     image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: sccap_langfuse_minio
+    profiles: ["tracing"]
     command: server /data --address ":9000" --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
@@ -355,6 +361,7 @@ services:
   langfuse-web:
     image: langfuse/langfuse@sha256:31bf938d0e678026f39d35151771fad8854b4ec83ba7bff8c6d232760e276296
     container_name: sccap_langfuse_web
+    profiles: ["tracing"]
     depends_on:
       langfuse-postgres:
         condition: service_healthy
@@ -403,6 +410,7 @@ services:
   langfuse-worker:
     image: langfuse/langfuse-worker@sha256:a6725ff2c11f10b3a2e212694f5ecacc9e48d2a59e71058a7008ff951620307c
     container_name: sccap_langfuse_worker
+    profiles: ["tracing"]
     depends_on:
       langfuse-postgres:
         condition: service_healthy
@@ -461,8 +469,8 @@ services:
     depends_on:
       app:
         condition: service_started
-      fluentd:
-        condition: service_healthy
+    # fluentd gated behind the `log_stack` profile; async driver tolerates
+    # its absence (modular setup).
     # nginx access logs land in Loki under retention (ADR-010 P1-R1)
     # so probe / abuse patterns survive longer than the json-file cap.
     logging:
@@ -485,6 +493,8 @@ services:
   disk-monitor:
     build: ./tools/df-emitter
     container_name: sccap_disk_monitor
+    # Emits disk metrics to fluentd → Loki; only useful with the log stack.
+    profiles: ["log_stack"]
     read_only: true
     cap_drop:
       - ALL

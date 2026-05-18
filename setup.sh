@@ -21,10 +21,8 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-if ! command -v node &> /dev/null; then
-    echo "Error: node could not be found. Please install Node.js first."
-    exit 1
-fi
+# Note: Node.js is intentionally NOT a host prerequisite — the UI is built
+# inside the `ui` Docker image, never on the host.
 
 echo "[+] Prerequisites met."
 echo ""
@@ -104,6 +102,70 @@ else
 fi
 flock -u 9
 
+# 2.4. Installation Variant (modular setup)
+# ----------------------------------------------------------------------
+# Picks which features SCCAP enables. Written to .env as SCCAP_VARIANT (the
+# app seeds its feature flags from it on first boot) and COMPOSE_PROFILES
+# (which optional container stacks boot). Re-running setup.sh on an existing
+# .env that predates modular setup simply adds both keys.
+echo ""
+echo "[*] Installation Variant:"
+echo "  Choose how much of SCCAP to enable. You can change this later."
+echo "    1) Vibe coder  — scan + chat + compliance; single superuser"
+echo "    2) Developer   — adds multi-user, groups, email, MCP, authoring"
+echo "    3) Enterprise  — everything: SSO, SCIM, tenants, log stack"
+echo "    4) Custom      — pick the optional container stacks yourself"
+echo "  (Upgrading an existing install? Enterprise keeps every feature you have.)"
+SCCAP_VARIANT=""
+COMPOSE_PROFILES_VALUE=""
+while [ -z "$SCCAP_VARIANT" ]; do
+    read -p "Your choice (1/2/3/4): " vchoice
+    case "$vchoice" in
+        1) SCCAP_VARIANT="vibe_coder"; COMPOSE_PROFILES_VALUE="" ;;
+        2) SCCAP_VARIANT="developer";  COMPOSE_PROFILES_VALUE="" ;;
+        3) SCCAP_VARIANT="enterprise"; COMPOSE_PROFILES_VALUE="log_stack" ;;
+        4)
+            SCCAP_VARIANT="custom"
+            _custom_profiles=""
+            read -p "  Enable the log stack — Grafana/Loki dashboards + Fluentd? (y/N): " _ls_choice
+            case "$_ls_choice" in
+                [Yy]*) _custom_profiles="log_stack" ;;
+            esac
+            read -p "  Enable Langfuse LLM tracing — 6 extra containers? (y/N): " _tr_choice
+            case "$_tr_choice" in
+                [Yy]*) _custom_profiles="${_custom_profiles:+$_custom_profiles,}tracing" ;;
+            esac
+            COMPOSE_PROFILES_VALUE="$_custom_profiles"
+            ;;
+        *) echo "  Invalid choice. Please enter 1, 2, 3, or 4." ;;
+    esac
+done
+echo "[+] Variant: $SCCAP_VARIANT  (compose profiles: ${COMPOSE_PROFILES_VALUE:-none})"
+
+# Is the log stack active? Drives the host-wide daemon.json prompt below.
+case ",${COMPOSE_PROFILES_VALUE}," in
+    *,log_stack,*) _LOG_STACK_ON=1 ;;
+    *) _LOG_STACK_ON=0 ;;
+esac
+
+# Persist SCCAP_VARIANT and COMPOSE_PROFILES to .env (create-or-replace).
+_sccap_set_env_kv() {
+    local key="$1" val="$2" esc
+    esc=$(printf '%s\n' "$val" | sed -e 's/[\/&]/\\&/g')
+    if grep -q "^${key}=" .env; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/^${key}=.*$/${key}=${esc}/" .env
+        else
+            sed -i "s/^${key}=.*$/${key}=${esc}/" .env
+        fi
+    else
+        echo "${key}=${val}" >> .env
+    fi
+}
+_sccap_set_env_kv "SCCAP_VARIANT" "$SCCAP_VARIANT"
+_sccap_set_env_kv "COMPOSE_PROFILES" "$COMPOSE_PROFILES_VALUE"
+echo "[+] Wrote SCCAP_VARIANT and COMPOSE_PROFILES to .env."
+
 # 2.5. Deployment Configuration Prompt
 echo ""
 echo "[*] Deployment Configuration Options:"
@@ -122,6 +184,10 @@ while true; do
             echo "  2) Cloud (Production Server)"
             echo "  0) Exit Setup"
             read -p "Your choice (1/2/0): " choice
+            if [ -z "$choice" ] && [ "$SCCAP_VARIANT" = "vibe_coder" ]; then
+                choice=1
+                echo "  (defaulting to Local for the vibe-coder variant)"
+            fi
             if [ "$choice" = "1" ]; then
                 DEPLOYMENT_TYPE="local"
                 SSL_ENABLED="false"
@@ -322,6 +388,10 @@ PY
 }
 
 echo ""
+if [ "$_LOG_STACK_ON" != "1" ]; then
+    echo "[*] Host-wide Docker log rotation: skipped (log stack not enabled for"
+    echo "    this variant). Per-compose logging caps still bound SCCAP services."
+else
 echo "[*] Docker daemon log rotation (ADR-010 — bounded log volume):"
 echo "    Sets host-wide json-file defaults (max-size 50m, max-file 5)"
 echo "    via /etc/docker/daemon.json. This restarts the Docker daemon"
@@ -382,6 +452,7 @@ else
     echo "    Skipped. Per-compose `logging:` blocks still bound SCCAP services;"
     echo "    only ad-hoc \`docker run\` containers on this host stay unbounded."
 fi
+fi
 
 
 # 2. Environment Setup (Cont.)
@@ -416,9 +487,6 @@ echo "[*] Applying database migrations..."
 docker compose exec app alembic upgrade head
 
 echo "[+] Database initialized. Proceed to the Web UI to create your Admin Superuser."
-echo ""
-
-echo "[+] Database initialized."
 echo ""
 
 echo "=================================================="
