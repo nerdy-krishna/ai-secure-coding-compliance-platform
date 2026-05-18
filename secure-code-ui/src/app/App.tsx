@@ -9,6 +9,8 @@ import {
 } from "react-router-dom";
 import { useAuth } from "../shared/hooks/useAuth";
 import { AuthProvider } from "./providers/AuthProvider";
+import { FeatureProvider } from "./providers/FeatureProvider";
+import { useFeatures } from "../shared/hooks/useFeatures";
 import { ToastProvider } from "../shared/ui/Toast";
 
 import LLMSettingsPage from "../features/admin-settings/components/LLMSettingsPage";
@@ -138,6 +140,23 @@ const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
   );
 };
 
+/**
+ * Route guard for a feature-flagged area (modular setup). Redirects to the
+ * dashboard when the named feature is disabled. The backend already 404s the
+ * disabled feature's endpoints; this keeps the SPA from rendering a dead page.
+ */
+const FeatureRoute: React.FC<{ feature: string }> = ({ feature }) => {
+  const { isFeatureEnabled, featuresLoading } = useFeatures();
+
+  if (featuresLoading) {
+    return <LoadingScreen />;
+  }
+  if (!isFeatureEnabled(feature)) {
+    return <Navigate to="/account/dashboard" replace />;
+  }
+  return <Outlet />;
+};
+
 function AppContent() {
   return (
     <Router>
@@ -173,7 +192,9 @@ function AppContent() {
             path="/scans/:scanId/llm-logs"
             element={<LlmLogViewerPage />}
           />
-          <Route path="/advisor" element={<SecurityAdvisorPage />} />
+          <Route element={<FeatureRoute feature="chat" />}>
+            <Route path="/advisor" element={<SecurityAdvisorPage />} />
+          </Route>
           <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/account/history" element={<SubmissionHistoryPage />} />
           <Route
@@ -227,7 +248,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <AuthProvider>
-          <AppContent />
+          <FeatureProvider>
+            <AppContent />
+          </FeatureProvider>
         </AuthProvider>
       </ToastProvider>
     </QueryClientProvider>

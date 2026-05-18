@@ -7,6 +7,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../shared/hooks/useAuth";
+import { useFeatures } from "../../shared/hooks/useFeatures";
 import { useTheme } from "../../app/providers/ThemeProvider";
 import { Icon } from "../../shared/ui/Icon";
 import { NotificationCenter } from "../../shared/ui/NotificationCenter";
@@ -19,6 +20,8 @@ interface NavItem {
   match: string;
   /** Actual route to navigate to. */
   to: string;
+  /** When set, the item is hidden unless this feature flag is enabled. */
+  feature?: string;
 }
 
 // Order matches the design's center nav.
@@ -27,7 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "submit", label: "Submit", match: "/submission", to: "/submission/submit" },
   { id: "projects", label: "Projects", match: "/analysis", to: "/analysis/results" },
   { id: "compliance", label: "Compliance", match: "/compliance", to: "/compliance" },
-  { id: "advisor", label: "Advisor", match: "/advisor", to: "/advisor" },
+  { id: "advisor", label: "Advisor", match: "/advisor", to: "/advisor", feature: "chat" },
   { id: "history", label: "History", match: "/account/history", to: "/account/history" },
 ];
 
@@ -35,10 +38,16 @@ export const TopNav: React.FC = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
+  const { isFeatureEnabled } = useFeatures();
   const isSuperuser = !!user?.is_superuser;
 
+  // Hide nav items whose backing feature is disabled (modular setup).
+  const navItems = NAV_ITEMS.filter(
+    (it) => !it.feature || isFeatureEnabled(it.feature),
+  );
+
   const activeId =
-    NAV_ITEMS.find((it) => location.pathname.startsWith(it.match))?.id ?? null;
+    navItems.find((it) => location.pathname.startsWith(it.match))?.id ?? null;
 
   return (
     <header
@@ -77,7 +86,7 @@ export const TopNav: React.FC = () => {
             border: "1px solid var(--border)",
           }}
         >
-          {NAV_ITEMS.map((it) => {
+          {navItems.map((it) => {
             const isActive = activeId === it.id;
             return (
               <Link

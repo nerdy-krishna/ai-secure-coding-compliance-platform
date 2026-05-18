@@ -1,5 +1,5 @@
 import threading
-from typing import Dict, List, Literal
+from typing import Dict, FrozenSet, Iterable, List, Literal
 
 # Canonical values for the LLM optimization mode. "anthropic_optimized"
 # enables prompt caching, tuned prompt variants, and Anthropic-only dispatch.
@@ -149,3 +149,36 @@ class SystemConfigCache:
     def get_master_admin_user_id(cls) -> int | None:
         with cls._lock:
             return cls._master_admin_user_id
+
+    # --- Feature flags (modular setup — issue #103) ---------------------------
+    # Mirrors the `features.*` system_config rows. ``None`` until the lifespan
+    # (or the import-time bootstrap in main.py) populates it; a pre-hydration
+    # read falls back to the in-code default set so it is never wrong by
+    # omission. The stored set is always dependency-resolved by the caller.
+    _enabled_features: FrozenSet[str] | None = None
+
+    @classmethod
+    def set_enabled_features(cls, features: Iterable[str]) -> None:
+        with cls._lock:
+            cls._enabled_features = frozenset(features)
+
+    @classmethod
+    def get_enabled_features(cls) -> FrozenSet[str]:
+        """Return the enabled-feature set.
+
+        Falls back to the dependency-resolved ``DEFAULT_ENABLED_FEATURES``
+        until the cache has been hydrated.
+        """
+        with cls._lock:
+            cached = cls._enabled_features
+        if cached is not None:
+            return cached
+        # Resolve outside the lock — avoids importing app.core.features under it.
+        from app.core.features import DEFAULT_ENABLED_FEATURES, resolve_dependencies
+
+        return frozenset(resolve_dependencies(DEFAULT_ENABLED_FEATURES))
+
+    @classmethod
+    def is_feature_enabled(cls, name: str) -> bool:
+        """True when feature ``name`` is in the enabled set."""
+        return name in cls.get_enabled_features()

@@ -20,6 +20,7 @@ from app.api.v1.routers.admin_rag import rag_router
 from app.api.v1.routers.admin_logs import router as logs_router
 from app.api.v1.routers.chat import router as chat_router
 from app.api.v1.routers.compliance import router as compliance_router
+from app.api.v1.routers.features import router as features_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.setup import router as setup_router
 from app.api.v1.routers.admin_config import router as admin_config_router
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI):
         SystemConfigRepository,
     )
     from app.api.v1.routers.setup import is_setup_completed
+    from app.core.features import load_or_seed_enabled_features
     from app.config.logging_config import update_logging_level
 
     # Lifespan-health observability (V14.1.2): announce hydration entry at
@@ -136,6 +138,20 @@ async def lifespan(app: FastAPI):
                 "lifespan.log_level.resolved",
                 extra={"level": target_log_level, "source": log_level_source},
             )
+
+            # --- Feature flags: authoritative load + seed-if-empty -----------
+            # Runs regardless of setup state so the cache is consistent even
+            # pre-setup. Nested try: a feature-load failure must not skip the
+            # CORS / SMTP / retention hydration that follows.
+            try:
+                enabled_features = await load_or_seed_enabled_features(repo)
+                SystemConfigCache.set_enabled_features(enabled_features)
+                logger.info(
+                    "lifespan.features.loaded",
+                    extra={"enabled": sorted(enabled_features)},
+                )
+            except Exception:
+                logger.error("lifespan.features.load_failed", exc_info=True)
 
             if setup_done:
                 # Load allowed origins from DB
@@ -866,8 +882,25 @@ async def _last_resort_handler(request: Request, exc: Exception):
 
 # --- Include API Routers ---
 
+# Feature flags (modular setup — issue #103). Router mounting is a
+# process-start decision made before the lifespan runs: a disabled feature's
+# router is not included at all, so its endpoints 404 and are absent from
+# /docs. This import-time bootstrap reads the flag set over a synchronous
+# connection; the lifespan re-loads it (and seeds-if-empty) once the DB is up.
+# Fail-open — a boot-time DB hiccup falls back to all features enabled.
+from app.core.features import bootstrap_enabled_features_sync  # noqa: E402
+
+_enabled_features = bootstrap_enabled_features_sync()
+SystemConfigCache.set_enabled_features(_enabled_features)
+logger.info(
+    "startup.features.bootstrap", extra={"enabled": sorted(_enabled_features)}
+)
+
 # Main application router for submissions and results
 app.include_router(projects_router, prefix="/api/v1", tags=["Submissions"])
+
+# Public feature-flag discovery endpoint (unauthenticated).
+app.include_router(features_router, prefix="/api/v1", tags=["Features"])
 
 # Router for managing LLM Configurations
 app.include_router(
@@ -891,8 +924,13 @@ app.include_router(rag_router, prefix="/api/v1/admin", tags=["Admin: RAG Managem
 # Router for System Logs
 app.include_router(logs_router, prefix="/api/v1/admin", tags=["Admin: System Logs"])
 
-# Router for Chat
-app.include_router(chat_router, prefix="/api/v1/chat", tags=["Chat"])
+# Router for Chat — gated by the `chat` feature flag (modular setup). When
+# disabled the router is not mounted at all: /api/v1/chat/* 404s and is
+# absent from the OpenAPI schema.
+if "chat" in _enabled_features:
+    app.include_router(chat_router, prefix="/api/v1/chat", tags=["Chat"])
+else:
+    logger.info("startup.features.router_skipped", extra={"feature": "chat"})
 
 # Router for Compliance (per-framework rollups for the Compliance page)
 app.include_router(compliance_router, prefix="/api/v1", tags=["Compliance"])

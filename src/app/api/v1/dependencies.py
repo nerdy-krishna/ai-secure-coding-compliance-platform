@@ -1,8 +1,9 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config_cache import SystemConfigCache
 from app.infrastructure.auth.core import current_active_user, current_active_user_sse
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
@@ -28,6 +29,26 @@ from app.core.services.chat_service import ChatService
 from app.core.services.rag_preprocessor_service import RAGPreprocessorService
 from app.core.services.security_standards_service import SecurityStandardsService
 from app.shared.lib import scan_scope
+
+
+def require_feature(feature: str):
+    """FastAPI dependency factory that 404s when ``feature`` is disabled.
+
+    Used for endpoints that cannot simply be left unmounted — a route inside a
+    shared router (e.g. ``/auth/register`` under the fastapi-users router) or
+    an endpoint whose *behaviour* is feature-gated. Returns 404 (not 403) so a
+    disabled feature is indistinguishable from one that never existed and no
+    feature-existence signal leaks. Whole-router features are gated more
+    cheaply by skipping ``include_router`` in ``main.py``.
+    """
+
+    def _dependency() -> None:
+        if not SystemConfigCache.is_feature_enabled(feature):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Not Found"
+            )
+
+    return _dependency
 
 
 def get_llm_config_repository(

@@ -345,6 +345,18 @@ async def perform_setup(
                 exc_info=True,
             )
 
+    # Seed feature flags (modular setup — issue #103). On a fresh install the
+    # first app boot ran before migrations created `system_config`, so the
+    # lifespan could not seed; do it here, now the table exists. Idempotent —
+    # seeding is a no-op once `features.*` rows exist.
+    try:
+        from app.core.features import load_or_seed_enabled_features
+
+        enabled_features = await load_or_seed_enabled_features(sys_conf_repo)
+        SystemConfigCache.set_enabled_features(enabled_features)
+    except Exception:
+        logger.error("setup: failed to seed feature flags", exc_info=True)
+
     logger.info(
         "setup: platform setup complete",
         extra={"deployment_type": request.deployment_type},
