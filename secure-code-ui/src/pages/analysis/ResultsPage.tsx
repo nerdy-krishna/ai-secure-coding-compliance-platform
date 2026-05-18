@@ -56,6 +56,26 @@ function normaliseSeverity(raw?: string | null): string {
   }
 }
 
+// Compliance-framework slug → human label. Scans store the slug; the
+// header shows the readable name so it's clear it is a framework.
+const FRAMEWORK_LABELS: Record<string, string> = {
+  asvs: "OWASP ASVS",
+  masvs: "OWASP MASVS",
+  isvs: "OWASP ISVS",
+  proactive_controls: "OWASP Proactive Controls",
+  cheatsheets: "OWASP Cheat Sheets",
+  cwe_essentials: "CWE Essentials",
+  llm_top10: "OWASP LLM Top 10",
+  agentic_top10: "OWASP Agentic Top 10",
+};
+
+function frameworkLabel(slug: string): string {
+  return (
+    FRAMEWORK_LABELS[slug] ??
+    slug.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+}
+
 function prescanToFinding(item: PrescanFindingItem): Finding {
   return {
     id: item.id,
@@ -414,12 +434,14 @@ const ResultsPage: React.FC = () => {
             {displayProjectName ?? "Scan"}{" "}
             <span
               style={{
-                color: "var(--fg-subtle)",
-                fontWeight: 400,
-                fontSize: 20,
+                color: "var(--fg-muted)",
+                fontWeight: 500,
+                fontSize: 13,
+                textTransform: "uppercase",
+                letterSpacing: ".04em",
               }}
             >
-              / {report?.scan_type ?? data.status}
+              {report?.scan_type ?? data.status}
             </span>
           </>
         }
@@ -459,8 +481,8 @@ const ResultsPage: React.FC = () => {
               }
               return null;
             })()}
-            <span>
-              {allFindings.length} finding
+            <span style={{ color: "var(--fg)" }}>
+              <strong>{allFindings.length}</strong> finding
               {allFindings.length === 1 ? "" : "s"}
             </span>
             {fixesReady > 0 && (
@@ -470,8 +492,35 @@ const ResultsPage: React.FC = () => {
               </span>
             )}
             {report?.selected_frameworks?.length ? (
-              <span style={{ color: "var(--fg-subtle)" }}>
-                · {report.selected_frameworks.join(", ")}
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    textTransform: "uppercase",
+                    letterSpacing: ".05em",
+                    color: "var(--fg-subtle)",
+                    fontWeight: 700,
+                  }}
+                >
+                  {report.selected_frameworks.length === 1
+                    ? "Framework"
+                    : "Frameworks"}
+                </span>
+                {report.selected_frameworks.map((fw) => (
+                  <span
+                    key={fw}
+                    className="chip"
+                    title="Compliance framework this scan was assessed against"
+                  >
+                    <Icon.Book size={10} /> {frameworkLabel(fw)}
+                  </span>
+                ))}
               </span>
             ) : null}
             {scanId && (
@@ -479,11 +528,11 @@ const ResultsPage: React.FC = () => {
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 2,
-                  color: "var(--fg-subtle)",
+                  gap: 4,
+                  color: "var(--fg-muted)",
                 }}
               >
-                · Scan{" "}
+                Scan{" "}
                 <span className="mono" style={{ fontSize: 11 }}>
                   {scanId}
                 </span>

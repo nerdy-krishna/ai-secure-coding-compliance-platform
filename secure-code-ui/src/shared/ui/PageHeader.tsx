@@ -95,7 +95,16 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
         }}
       >
         <div>
-          <h1 style={{ color: "var(--fg)" }}>{title}</h1>
+          <h1
+            style={{
+              color: "var(--fg)",
+              fontSize: 22,
+              lineHeight: 1.3,
+              margin: 0,
+            }}
+          >
+            {title}
+          </h1>
           {subtitle && (
             <div
               style={{
