@@ -632,155 +632,188 @@ const ResultsPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Models used — the LLM config in each role, with per-model
-          performance stats. */}
+      {/* Models used — one tile per LLM role, with per-model finding
+          stats; the consolidation tally is a separate pipeline footer. */}
       {data.llms_used && data.llms_used.length > 0 && (
-        <div
-          className="sccap-card"
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 32,
-            alignItems: "flex-start",
-          }}
-        >
+        <div className="sccap-card" style={{ display: "grid", gap: 14 }}>
           <span
             style={{
               fontSize: 11,
               textTransform: "uppercase",
               letterSpacing: ".06em",
               color: "var(--fg-subtle)",
-              fontWeight: 600,
-              paddingTop: 2,
+              fontWeight: 700,
             }}
           >
             Models used
           </span>
-          {data.llms_used.map((m) => {
-            const stats = llmFindingStats[m.name];
-            const cs =
-              m.category === "Reasoning LLM"
-                ? data.consolidation_stats
-                : null;
-            return (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(230px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {data.llms_used.map((m) => {
+              const stats = llmFindingStats[m.name];
+              return (
+                <div
+                  key={m.category}
+                  style={{
+                    border: "1px solid var(--border)",
+                    borderRadius: 10,
+                    background: "var(--bg-soft)",
+                    padding: "12px 14px",
+                    display: "grid",
+                    gap: 5,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 9.5,
+                      textTransform: "uppercase",
+                      letterSpacing: ".06em",
+                      color: "var(--accent)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {m.category}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 14,
+                      color: "var(--fg)",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {m.name}
+                  </span>
+                  <span
+                    className="mono"
+                    style={{ fontSize: 11, color: "var(--fg-muted)" }}
+                  >
+                    {m.provider}/{m.model_name}
+                  </span>
+                  <div
+                    style={{
+                      borderTop: "1px solid var(--border)",
+                      marginTop: 4,
+                      paddingTop: 8,
+                    }}
+                  >
+                    {stats ? (
+                      <button
+                        type="button"
+                        title={`View ${m.name} interactions in the LLM logs`}
+                        onClick={() =>
+                          navigate(
+                            `/scans/${scanId}/llm-logs?model=${encodeURIComponent(m.name)}`,
+                          )
+                        }
+                        style={{
+                          all: "unset",
+                          cursor: "pointer",
+                          display: "flex",
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <span style={{ fontSize: 12.5, color: "var(--fg)" }}>
+                          <strong
+                            style={{
+                              color: "var(--accent)",
+                              fontSize: 15,
+                            }}
+                          >
+                            {stats.count}
+                          </strong>{" "}
+                          finding{stats.count === 1 ? "" : "s"}
+                        </span>
+                        {(
+                          [
+                            ["CRITICAL", "C"],
+                            ["HIGH", "H"],
+                            ["MEDIUM", "M"],
+                            ["LOW", "L"],
+                            ["INFORMATIONAL", "I"],
+                          ] as const
+                        )
+                          .filter(([k]) => stats.sev[k])
+                          .map(([k, short]) => (
+                            <span
+                              key={k}
+                              style={{
+                                fontSize: 10.5,
+                                fontWeight: 700,
+                                padding: "1px 6px",
+                                borderRadius: 5,
+                                background: `${SEV_COLOR[k] ?? "var(--fg-muted)"}22`,
+                                color: SEV_COLOR[k] ?? "var(--fg-muted)",
+                              }}
+                            >
+                              {short} {stats.sev[k]}
+                            </span>
+                          ))}
+                        <Icon.ArrowR size={11} />
+                      </button>
+                    ) : (
+                      <span
+                        style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}
+                      >
+                        No findings attributed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* Consolidation — a pipeline stat, not per-model. */}
+          {data.consolidation_stats &&
+            data.consolidation_stats.raw_count > 0 && (
               <div
-                key={m.category}
                 style={{
+                  borderTop: "1px solid var(--border)",
+                  paddingTop: 12,
                   display: "flex",
-                  flexDirection: "column",
-                  gap: 2,
-                  minWidth: 180,
+                  flexWrap: "wrap",
+                  alignItems: "baseline",
+                  gap: "4px 18px",
                 }}
               >
                 <span
                   style={{
-                    fontSize: 10.5,
+                    fontSize: 9.5,
                     textTransform: "uppercase",
-                    letterSpacing: ".05em",
+                    letterSpacing: ".06em",
                     color: "var(--fg-subtle)",
-                    fontWeight: 600,
+                    fontWeight: 700,
                   }}
                 >
-                  {m.category}
+                  Consolidation
                 </span>
-                <span
-                  style={{ fontSize: 13, color: "var(--fg)", fontWeight: 500 }}
-                >
-                  {m.name}
-                </span>
-                <span
-                  className="mono"
-                  style={{ fontSize: 11, color: "var(--fg-muted)" }}
-                >
-                  {m.provider}/{m.model_name}
-                </span>
-                {/* Per-model findings detected (#94). Clicking jumps to
-                    the LLM logs filtered to this model. */}
-                {stats && (
+                {(
+                  [
+                    ["raw findings", data.consolidation_stats.raw_count],
+                    ["kept", data.consolidation_stats.consolidated_count],
+                    ["merged", data.consolidation_stats.merged_inputs],
+                    ["dropped", data.consolidation_stats.dropped],
+                  ] as const
+                ).map(([label, value]) => (
                   <span
-                    role="button"
-                    tabIndex={0}
-                    title={`View ${m.name} interactions in the LLM logs`}
-                    onClick={() =>
-                      navigate(
-                        `/scans/${scanId}/llm-logs?model=${encodeURIComponent(m.name)}`,
-                      )
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        navigate(
-                          `/scans/${scanId}/llm-logs?model=${encodeURIComponent(m.name)}`,
-                        );
-                      }
-                    }}
-                    style={{
-                      fontSize: 11.5,
-                      color: "var(--fg-muted)",
-                      marginTop: 4,
-                      cursor: "pointer",
-                    }}
+                    key={label}
+                    style={{ fontSize: 12, color: "var(--fg-muted)" }}
                   >
-                    <strong
-                      style={{
-                        color: "var(--accent)",
-                        textDecoration: "underline",
-                      }}
-                    >
-                      {stats.count}
+                    <strong style={{ color: "var(--fg)", fontSize: 13 }}>
+                      {value}
                     </strong>{" "}
-                    finding{stats.count === 1 ? "" : "s"} detected
-                    {(
-                      [
-                        ["CRITICAL", "C"],
-                        ["HIGH", "H"],
-                        ["MEDIUM", "M"],
-                        ["LOW", "L"],
-                        ["INFORMATIONAL", "I"],
-                      ] as const
-                    )
-                      .filter(([k]) => stats.sev[k])
-                      .map(([k, short]) => (
-                        <span
-                          key={k}
-                          style={{
-                            color: SEV_COLOR[k] ?? "var(--fg-muted)",
-                            fontWeight: 600,
-                            marginLeft: 6,
-                          }}
-                        >
-                          {short} {stats.sev[k]}
-                        </span>
-                      ))}
+                    {label}
                   </span>
-                )}
-                {/* Consolidation tally — attached to the reasoning LLM,
-                    which is the slot consolidation runs on. */}
-                {cs && cs.raw_count > 0 && (
-                  <span
-                    style={{
-                      fontSize: 11.5,
-                      color: "var(--fg-muted)",
-                      marginTop: 2,
-                    }}
-                  >
-                    Consolidation:{" "}
-                    <strong style={{ color: "var(--fg)" }}>
-                      {cs.raw_count}
-                    </strong>{" "}
-                    raw →{" "}
-                    <strong style={{ color: "var(--fg)" }}>
-                      {cs.consolidated_count}
-                    </strong>{" "}
-                    kept
-                    {(cs.merged_inputs > 0 || cs.dropped > 0) && (
-                      <> · {cs.merged_inputs} merged · {cs.dropped} dropped</>
-                    )}
-                  </span>
-                )}
+                ))}
               </div>
-            );
-          })}
+            )}
         </div>
       )}
 
