@@ -26,6 +26,7 @@ import {
 } from "../../shared/lib/scanStatus";
 import type { PrescanReviewResponse } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
+import { deriveScanProgress } from "../../shared/lib/scanProgress";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
 import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
@@ -135,105 +136,23 @@ const mergeScanEvents = (
   return merged.slice(-500);
 };
 
-// Known pipeline stages, in order. The backend emits stage_name values
-// matching these keys; unknown stage names are appended live.
-interface Stage {
-  key: string;
-  label: string;
-  icon: React.ReactNode;
-}
-
-// Pipeline stages, in display order. `PRESCAN_REVIEW` and `COST_REVIEW`
-// are *virtual* stages — the worker doesn't emit a matching stage_name,
-// they're derived from the live status (`PENDING_PRESCAN_APPROVAL` /
-// `PENDING_COST_APPROVAL`) plus the events that mark the gate as
-// crossed. They exist because the prior list left "Pre-LLM scan
-// review" out entirely (so during the prescan gate we'd misleadingly
-// show "Analyzing context" as the active step) and treated the stage
-// right after `ESTIMATING_COST` as active during the cost-approval
-// gate (so "Running security agents" spun even though the scan was
-// paused waiting for the user). Dropping the literal `QUEUED_FOR_SCAN`
-// row — it fires twice (after each gate) and isn't user-meaningful.
-const KNOWN_STAGES: Stage[] = [
-  { key: "QUEUED", label: "Queued", icon: <Icon.Clock size={14} /> },
-  { key: "ANALYZING_CONTEXT", label: "Analyzing context", icon: <Icon.Folder size={14} /> },
-  { key: "PRESCAN_REVIEW", label: "Pre-LLM scan review", icon: <Icon.Shield size={14} /> },
-  { key: "ESTIMATING_COST", label: "Estimating cost", icon: <Icon.Dollar size={14} /> },
-  { key: "COST_REVIEW", label: "Cost review", icon: <Icon.Dollar size={14} /> },
-  { key: "RUNNING_AGENTS", label: "Running security agents", icon: <Icon.Cpu size={14} /> },
-  { key: "CONSOLIDATING", label: "Consolidating findings", icon: <Icon.Layers size={14} /> },
-  { key: "GENERATING_REPORTS", label: "Generating reports", icon: <Icon.File size={14} /> },
-];
-
-// Stage events whose presence in `seenStages` proves the corresponding
-// gate has been crossed (used to mark the virtual gate stages "done"
-// regardless of which decline/override path the user took).
-const POST_PRESCAN_EVENTS = [
-  "ESTIMATING_COST",
-  "PRESCAN_OVERRIDE_CRITICAL_SECRET",
-  "PRESCAN_USER_DECLINED",
-  "PRESCAN_AUTO_DECLINED",
-  "QUEUED_FOR_SCAN",
-];
-const POST_COST_EVENTS = [
-  "RUNNING_AGENTS",
-  "FILE_ANALYZED",
-  "CONSOLIDATING",
-  "PATCH_VERIFICATION",
-  "GENERATING_REPORTS",
-];
-
-type StageState = "done" | "active" | "paused" | "pending";
-
-function computeStageStates(
-  stages: Stage[],
-  seenStages: Set<string>,
-  isTerminal: boolean,
-  isPendingPrescan: boolean,
-  isPendingApproval: boolean,
-  prescanSubmitted: boolean,
-  costSubmitted: boolean,
-): StageState[] {
-  const isPastPrescan = POST_PRESCAN_EVENTS.some((k) => seenStages.has(k));
-  const isPastCost = POST_COST_EVENTS.some((k) => seenStages.has(k));
-
-  // First pass: assign done/paused/pending without considering "active"
-  // — that's a one-shot promotion in pass 2. The `*Submitted` flags
-  // collapse the click → SSE round-trip: the moment the user dismisses
-  // a gate, mark it done (optimistic) so the next real stage takes
-  // over with its spinner instead of the gate flickering through
-  // pending → active before the post-gate event arrives.
-  const states: StageState[] = stages.map((s) => {
-    if (s.key === "PRESCAN_REVIEW") {
-      if (isPendingPrescan) return "paused";
-      if (prescanSubmitted || isPastPrescan) return "done";
-      return "pending";
-    }
-    if (s.key === "COST_REVIEW") {
-      if (isPendingApproval) return "paused";
-      if (costSubmitted || isPastCost) return "done";
-      return "pending";
-    }
-    return seenStages.has(s.key) ? "done" : "pending";
-  });
-
-  // Second pass: promote the first eligible "pending" to "active".
-  // Eligibility: every prior stage must already be "done" — so a
-  // "paused" gate (any earlier stage) blocks promotion, which is
-  // exactly the behaviour we want (no spinner anywhere while the
-  // user is on an approval card). Skip entirely on terminal scans.
-  if (!isTerminal) {
-    for (let i = 0; i < stages.length; i++) {
-      if (states[i] !== "pending") continue;
-      const priorsDone = states.slice(0, i).every((st) => st === "done");
-      if (priorsDone) {
-        states[i] = "active";
-        break;
-      }
-    }
-  }
-  return states;
-}
+// Per-stage rail icons, keyed by the stage `key` from `scanProgress`.
+// The rail itself (stage list, ordering, derived state) is owned by the
+// pure `deriveScanProgress` deriver (#85) — this map is presentation
+// only.
+const STAGE_ICONS: Record<string, React.ReactNode> = {
+  QUEUED: <Icon.Clock size={14} />,
+  ANALYZING_CONTEXT: <Icon.Folder size={14} />,
+  PRESCAN_REVIEW: <Icon.Shield size={14} />,
+  PROFILING_REVIEW: <Icon.Dollar size={14} />,
+  PROFILING_FILES: <Icon.Folder size={14} />,
+  ESTIMATING_COST: <Icon.Dollar size={14} />,
+  COST_REVIEW: <Icon.Dollar size={14} />,
+  RUNNING_AGENTS: <Icon.Cpu size={14} />,
+  CONSOLIDATING: <Icon.Layers size={14} />,
+  CROSS_FILE_VALIDATION: <Icon.Search size={14} />,
+  GENERATING_REPORTS: <Icon.File size={14} />,
+};
 
 const TERMINAL_STATUSES = new Set([
   "COMPLETED",
@@ -244,41 +163,6 @@ const TERMINAL_STATUSES = new Set([
   "BLOCKED_PRE_LLM",
   "BLOCKED_USER_DECLINE",
 ]);
-
-function progressFromStages(
-  stages: Stage[],
-  seenStages: Set<string>,
-  currentStatus: string | null,
-  isPendingPrescan: boolean,
-  isPendingApproval: boolean,
-  prescanSubmitted: boolean,
-  costSubmitted: boolean,
-): number {
-  if (!currentStatus) return 0;
-  if (currentStatus === "COMPLETED" || currentStatus === "REMEDIATION_COMPLETED") return 100;
-  if (
-    currentStatus === "FAILED" ||
-    currentStatus === "CANCELLED" ||
-    currentStatus === "EXPIRED" ||
-    currentStatus === "BLOCKED_PRE_LLM" ||
-    currentStatus === "BLOCKED_USER_DECLINE"
-  )
-    return 100;
-  // Count "done" using the same state machine the stage list uses, so
-  // virtual gate stages (PRESCAN_REVIEW / COST_REVIEW) contribute too.
-  const states = computeStageStates(
-    stages,
-    seenStages,
-    false,
-    isPendingPrescan,
-    isPendingApproval,
-    prescanSubmitted,
-    costSubmitted,
-  );
-  const done = states.filter((s) => s === "done").length;
-  // Ensure we don't show 100% while still running.
-  return Math.min(95, Math.round((done / stages.length) * 100));
-}
 
 // `fmtStatus` was a raw `BLOCKED_USER_DECLINE → "blocked user decline"`
 // transform that surfaced the backend enum name in chips and the
@@ -299,7 +183,6 @@ const ScanRunningPage: React.FC = () => {
   // for the few hundred ms before the one-shot getScanResult resolves.
   // Renders a small loading skeleton until the first known status.
   const [status, setStatus] = useState<string | null>(null);
-  const [seenStages, setSeenStages] = useState<Set<string>>(new Set());
   // Whether the scan opted in to cross-file validation (#82). Seeded
   // from the one-shot getScanResult below; drives the extra stage row.
   const [crossFileValidation, setCrossFileValidation] = useState(false);
@@ -393,11 +276,6 @@ const ScanRunningPage: React.FC = () => {
           .filter((e): e is ScanEventMsg => e !== null);
         if (seeded.length > 0) {
           setEvents((prev) => mergeScanEvents(prev, seeded));
-          setSeenStages((prev) => {
-            const next = new Set(prev);
-            for (const e of seeded) next.add(e.stage_name);
-            return next;
-          });
         }
       })
       .catch(() => {
@@ -439,11 +317,6 @@ const ScanRunningPage: React.FC = () => {
           .filter((e): e is ScanEventMsg => e !== null);
         if (polled.length > 0) {
           setEvents((prev) => mergeScanEvents(prev, polled));
-          setSeenStages((prev) => {
-            const next = new Set(prev);
-            for (const e of polled) next.add(e.stage_name);
-            return next;
-          });
         }
       } catch {
         // Best-effort — the next tick (or SSE) recovers.
@@ -526,11 +399,6 @@ const ScanRunningPage: React.FC = () => {
           // mergeScanEvents dedupes by event_id, so a replay on
           // reconnect or an overlap with the seed/poll feed is a no-op.
           setEvents((prev) => mergeScanEvents(prev, [msg]));
-          setSeenStages((prev) => {
-            const next = new Set(prev);
-            next.add(msg.stage_name);
-            return next;
-          });
           if (msg.stage_name === "FILE_ANALYZED" && msg.details?.file_path) {
             const filePath = String(msg.details.file_path).slice(0, 512);
             if (!filePath) return;
@@ -766,43 +634,16 @@ const ScanRunningPage: React.FC = () => {
   const isPendingProfiling =
     status === "PENDING_PROFILING_APPROVAL" && !profilingSubmitted;
 
-  // Stage rail (#82): a scan that opted in to cross-file validation
-  // gets an extra "Cross-file validation" row after consolidation.
-  // Opted-out scans see the unchanged KNOWN_STAGES list.
-  const stages = useMemo<Stage[]>(() => {
-    if (!crossFileValidation) return KNOWN_STAGES;
-    const next = [...KNOWN_STAGES];
-    const idx = next.findIndex((s) => s.key === "CONSOLIDATING");
-    const cfStage: Stage = {
-      key: "CROSS_FILE_VALIDATION",
-      label: "Cross-file validation",
-      icon: <Icon.Search size={14} />,
-    };
-    next.splice(idx >= 0 ? idx + 1 : next.length, 0, cfStage);
-    return next;
-  }, [crossFileValidation]);
-
-  const progress = useMemo(
-    () =>
-      progressFromStages(
-        stages,
-        seenStages,
-        status,
-        isPendingPrescan,
-        isPendingApproval,
-        prescanSubmitted,
-        costSubmitted,
-      ),
-    [
-      stages,
-      seenStages,
-      status,
-      isPendingPrescan,
-      isPendingApproval,
-      prescanSubmitted,
-      costSubmitted,
-    ],
+  // Scan progress (#85): the rail, the progress bar, and the live
+  // badge all derive from ONE pure function over the `scan_events`
+  // stream — they can never disagree. `status` is consulted only to
+  // classify a terminal scan. The cross-file stage appears only for
+  // opted-in scans (#82).
+  const scanProgress = useMemo(
+    () => deriveScanProgress(events, status, crossFileValidation),
+    [events, status, crossFileValidation],
   );
+  const progress = scanProgress.progressPct;
   const isTerminal = status !== null && TERMINAL_STATUSES.has(status);
   // Split the previous catch-all `isFailed` lump into the four kinds
   // of unsuccessful terminals so the UI can stop labeling user stops
@@ -1113,7 +954,7 @@ const ScanRunningPage: React.FC = () => {
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
               {scanId?.slice(0, 12)}
             </span>{" "}
-            · {displayStatus(status)}
+            · {isTerminal ? displayStatus(status) : scanProgress.badge}
           </div>
         }
         title={
@@ -1188,18 +1029,10 @@ const ScanRunningPage: React.FC = () => {
 
           <div style={{ display: "grid", gap: 10, marginTop: 22 }}>
             {(() => {
-              const stageStates = computeStageStates(
-                stages,
-                seenStages,
-                isTerminal,
-                isPendingPrescan,
-                isPendingApproval,
-                prescanSubmitted,
-                costSubmitted,
-              );
-              return stages.map((s, i) => {
-                const state = stageStates[i];
-                const isHighlighted = state === "active" || state === "paused";
+              return scanProgress.stages.map((s) => {
+                const state = s.state;
+                const isHighlighted =
+                  state === "running" || state === "paused";
                 return (
                   <div
                     key={s.key}
@@ -1226,7 +1059,7 @@ const ScanRunningPage: React.FC = () => {
                         background:
                           state === "done"
                             ? "var(--success)"
-                            : state === "active"
+                            : state === "running"
                               ? "var(--primary)"
                               : state === "paused"
                                 ? "var(--primary)"
@@ -1239,7 +1072,7 @@ const ScanRunningPage: React.FC = () => {
                     >
                       {state === "done" ? (
                         <Icon.Check size={12} />
-                      ) : state === "active" ? (
+                      ) : state === "running" ? (
                         <div
                           className="sccap-spin"
                           style={{
@@ -1253,7 +1086,7 @@ const ScanRunningPage: React.FC = () => {
                       ) : state === "paused" ? (
                         <Icon.Pause size={12} />
                       ) : (
-                        s.icon
+                        STAGE_ICONS[s.key] ?? <Icon.Clock size={14} />
                       )}
                     </div>
                     <div
@@ -1683,12 +1516,15 @@ const ScanRunningPage: React.FC = () => {
                   : "var(--fg)",
             }}
           >
-            {displayStatus(status)}
+            {isTerminal ? displayStatus(status) : scanProgress.badge}
           </div>
           <div
             style={{ marginTop: 10, fontSize: 12, color: "var(--fg-muted)" }}
           >
-            {seenStages.size} stage{seenStages.size === 1 ? "" : "s"} complete
+            {
+              scanProgress.stages.filter((s) => s.state === "done").length
+            }{" "}
+            of {scanProgress.stages.length} stages complete
           </div>
         </div>
 

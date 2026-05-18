@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "test": "vitest run",
     "preview": "vite preview",
     "generate:api": "openapi-typescript ${SCCAP_OPENAPI_URL:-http://localhost:8000/openapi.json} -o src/shared/types/api-generated.ts"
   },
@@ -28,7 +29,8 @@
     "openapi-typescript": "^7.13.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.30.1",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "vitest": "^4.1.6"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/"
