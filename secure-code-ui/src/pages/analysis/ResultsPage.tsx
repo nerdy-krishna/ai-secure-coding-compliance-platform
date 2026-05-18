@@ -11,10 +11,10 @@
 // The detail pane renders description, remediation, compliance chips,
 // and (when a fix suggestion exists) a side-by-side diff using the
 // design's `.diff` / `.diff-row` utilities. Actions: SARIF download,
-// navigate to LLM logs, apply selective fix.
+// navigate to LLM logs.
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { scanService } from "../../shared/api/scanService";
 import { useAuth } from "../../shared/hooks/useAuth";
@@ -116,7 +116,6 @@ const ResultsPage: React.FC = () => {
   // of the default view — they stay expandable via this toggle.
   const [showMitigated, setShowMitigated] = useState(false);
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
-  const [applyingId, setApplyingId] = useState<number | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [filePathFilter, setFilePathFilter] = useState<string | null>(null);
@@ -151,16 +150,6 @@ const ResultsPage: React.FC = () => {
       navigate(`/analysis/scanning/${scanId}`, { replace: true });
     }
   }, [data?.status, scanId, navigate]);
-
-  const applyFix = useMutation({
-    mutationFn: (findingId: number) =>
-      scanService.applySelectiveFixes(scanId!, [findingId]),
-    onSuccess: () => {
-      toast.success("Fix applied. Refreshing results…");
-      queryClient.invalidateQueries({ queryKey: ["scan-result", scanId] });
-    },
-    onError: (err: Error) => toast.error(err.message || "Apply failed"),
-  });
 
   const allFindings = useMemo(() => {
     const llmFindings = flattenFindings(data?.summary_report);
@@ -1262,11 +1251,6 @@ const ResultsPage: React.FC = () => {
         {selected ? (
           <FindingDetail
             f={selected}
-            applying={applyingId === selected.id && applyFix.isPending}
-            onApply={() => {
-              setApplyingId(selected.id);
-              applyFix.mutate(selected.id);
-            }}
             originalCodeMap={data?.original_code_map ?? undefined}
           />
         ) : (
@@ -1534,14 +1518,11 @@ const DiffViewer: React.FC<{
 
 const FindingDetail: React.FC<{
   f: Finding;
-  applying: boolean;
-  onApply: () => void;
   originalCodeMap?: Record<string, string>;
-}> = ({ f, applying, onApply, originalCodeMap }) => {
+}> = ({ f, originalCodeMap }) => {
   const sev = (f.severity || "").toUpperCase();
   const sevColor = SEV_COLOR[sev] ?? "var(--fg-muted)";
   const hasFix = !!f.fixes?.code;
-  const alreadyApplied = f.is_applied_in_remediation;
   const fileContent = originalCodeMap?.[f.file_path] ?? null;
   // Full-screen diff view (#83 follow-up) — the inline pane is narrow;
   // this opens the before/after diff in a near-fullscreen modal.
@@ -1830,23 +1811,6 @@ const FindingDetail: React.FC<{
                   title="Open this diff in a full-screen view"
                 >
                   <Icon.Eye size={12} /> Expand
-                </button>
-                <button
-                  className="sccap-btn sccap-btn-sm sccap-btn-primary"
-                  onClick={onApply}
-                  disabled={applying || alreadyApplied}
-                >
-                  {alreadyApplied ? (
-                    <>
-                      <Icon.Check size={12} /> Applied
-                    </>
-                  ) : applying ? (
-                    "Applying…"
-                  ) : (
-                    <>
-                      <Icon.Zap size={12} /> Apply fix
-                    </>
-                  )}
                 </button>
               </div>
             </div>

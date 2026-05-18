@@ -764,36 +764,6 @@ async def stream_scan_progress(
     )
 
 
-class SelectiveRemediationRequest(BaseModel):
-    finding_ids: List[int]
-
-
-@router.post(
-    "/scans/{scan_id}/apply-fixes",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=dict,
-)
-async def apply_fixes(
-    scan_id: uuid.UUID,
-    request: SelectiveRemediationRequest,
-    user: db_models.User = Depends(current_active_user),
-    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
-):
-    """Triggers the application of selected fixes for a scan."""
-    await service.apply_selective_fixes(scan_id, request.finding_ids, user)
-    logger.info(
-        "scans.fixes_applied",
-        extra={
-            "actor_id": user.id,
-            "scan_id": str(scan_id),
-            "finding_count": len(request.finding_ids),
-        },
-    )
-    return {
-        "message": "Fix application process initiated. The scan status will be updated upon completion."
-    }
-
-
 @router.get(
     "/scans/{scan_id}/result", response_model=api_models.AnalysisResultDetailResponse
 )

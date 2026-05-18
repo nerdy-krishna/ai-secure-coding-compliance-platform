@@ -21,7 +21,7 @@ All routers are prefixed with `/api/v1` and live under
 | ------ | ---------------- |
 | `setup.py` | First-run wizard (`/setup/*`). Gates the app via `SystemConfigCache.is_setup_completed()`. |
 | `refresh.py` | Custom `/auth/refresh` endpoint (fastapi-users doesn't ship one for the Bearer transport). |
-| `projects.py` | Project + scan CRUD, scan submission, cost approval / cancel, SSE status stream, apply-fixes, PDF summary, SARIF download. |
+| `projects.py` | Project + scan CRUD, scan submission, cost approval / cancel, SSE status stream, PDF summary, SARIF download. |
 | `chat.py` | Chat sessions + messages + live context rail (`/chat/sessions/{id}/context`). |
 | `compliance.py` | Per-framework posture stats + RAG control listing for the Compliance page. |
 | `dashboard.py` | `/dashboard/stats` — risk score, severity bar, trend, spend. |
@@ -48,7 +48,7 @@ Services live under `src/app/core/services/`. They are the only code
 that spans multiple repositories in a single operation:
 
 - `scan_service.SubmissionService` — the big one. Owns scan
-  submission, cost estimation lookups, apply-fixes, paginated list
+  submission, cost estimation lookups, paginated list
   queries that forward `visible_user_ids` into `scan_repo`.
 - `chat_service.ChatService` — chat sessions, message history,
   context-rail aggregation.
@@ -131,7 +131,7 @@ Authorization: Bearer <token>
 ```
 
 Current tool surface: `sccap_submit_scan`, `sccap_get_scan_status`,
-`sccap_get_scan_result`, `sccap_approve_scan`, `sccap_apply_fixes`,
+`sccap_get_scan_result`, `sccap_approve_scan`,
 `sccap_ask_advisor`. Each tool calls straight into the existing
 service layer (no extra duplicated logic). Admin surfaces
 (user management, framework ingestion) stay REST-only — those are

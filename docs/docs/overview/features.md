@@ -117,7 +117,6 @@ Current tool surface:
 | `sccap_get_scan_status` | `GET /scans/{id}` |
 | `sccap_get_scan_result` | `GET /scans/{id}/result` |
 | `sccap_approve_scan` | resumes the LangGraph thread with `Command(resume=...)` |
-| `sccap_apply_fixes` | `scan_service.apply_selective_fixes` |
 | `sccap_ask_advisor` | single-shot chat through `chat_service`, skips session persistence |
 
 External agentic clients (Claude Code, Cursor, etc.) authenticate with

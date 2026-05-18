@@ -9,7 +9,7 @@
     {
       "vhost": "/",
       "name": "sccap-bounded-queues",
-      "pattern": "^(code_submission_queue|analysis_approved_queue|remediation_trigger_queue)$",
+      "pattern": "^(code_submission_queue|analysis_approved_queue)$",
       "apply-to": "queues",
       "priority": 0,
       "definition": {

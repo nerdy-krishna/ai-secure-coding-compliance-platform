@@ -100,7 +100,7 @@ separate, opt-in step.
 ### Integrations and automation
 - **MCP server** — the scan + advisor workflow is exposed as MCP tools
   (`sccap_submit_scan`, `sccap_get_scan_status`,
-  `sccap_get_scan_result`, `sccap_approve_scan`, `sccap_apply_fixes`,
+  `sccap_get_scan_result`, `sccap_approve_scan`,
   `sccap_ask_advisor`) at `/mcp`, reusing JWT auth so Claude Code,
   Cursor, or other agentic clients can drive the platform remotely.
 - **LiteLLM-backed cost ledger** — token counting and cost estimation

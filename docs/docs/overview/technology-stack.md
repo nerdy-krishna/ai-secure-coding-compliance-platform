@@ -34,8 +34,8 @@ sidebar_position: 2
 A separate container consumes RabbitMQ via the blocking
 [`pika`](https://pika.readthedocs.io/) client and runs the compiled
 LangGraph workflow with an `AsyncPostgresSaver` checkpointer. Queues:
-`code_submission_queue`, `analysis_approved_queue`,
-`remediation_trigger_queue` (names live in `src/app/config/config.py`).
+`code_submission_queue`, `analysis_approved_queue` (names live in
+`src/app/config/config.py`).
 
 ## Data + infra
 

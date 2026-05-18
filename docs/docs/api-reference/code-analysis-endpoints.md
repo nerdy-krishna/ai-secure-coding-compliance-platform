@@ -115,16 +115,14 @@ Because browsers can't set arbitrary headers on an `EventSource`,
 the endpoint reads the access token from the `token` query param via
 `current_active_user_sse`.
 
-## Apply fixes
+## Applying fixes
 
-```http
-POST /scans/{scan_id}/apply-fixes
-{ "finding_ids": [101, 102, 103] }
-```
-
-Starts an incremental remediation run. The worker applies each fix
-in order; a merge agent resolves conflicts when multiple fixes touch
-the same file. Status lands at `REMEDIATION_COMPLETED` on success.
+There is no separate apply-fixes endpoint. To have fixes applied to
+the code, submit the scan with `scan_type=REMEDIATE` — the worker
+graph then merges the per-finding fixes, syntax-verifies them with
+tree-sitter, and writes a patched `POST_REMEDIATION` snapshot. A
+`SUGGEST` scan is advisory: it shows the suggested fix inline but does
+not mutate code.
 
 ## Preview endpoints
 

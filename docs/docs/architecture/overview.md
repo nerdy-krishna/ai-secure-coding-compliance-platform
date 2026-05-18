@@ -33,9 +33,8 @@ data stores the two share, and an observability pipeline.
   chat sessions, and the MCP tool surface. Writes scan rows +
   outbox rows in a single transaction; never publishes to RabbitMQ
   inline.
-- **Worker (`worker`)** — consumes `code_submission_queue`,
-  `analysis_approved_queue`, and `remediation_trigger_queue` via
-  the blocking `pika` client. Every message invokes the compiled
+- **Worker (`worker`)** — consumes `code_submission_queue` and
+  `analysis_approved_queue` via `aio-pika`. Every message invokes the compiled
   LangGraph (`infrastructure/workflows/worker_graph.py`) keyed on
   `scan_id` via an `AsyncPostgresSaver` checkpointer.
 - **Outbox sweeper** — a background task inside the API (see

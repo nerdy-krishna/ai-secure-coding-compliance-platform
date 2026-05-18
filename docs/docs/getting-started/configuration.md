@@ -76,7 +76,6 @@ defaults):
 | ----- | ------------ | ------- |
 | `RABBITMQ_SUBMISSION_QUEUE` | `code_submission_queue` | New scan submissions (worker runs the audit pass and pauses at cost approval) |
 | `RABBITMQ_APPROVAL_QUEUE` | `analysis_approved_queue` | User approved the cost estimate; worker resumes the paused LangGraph thread |
-| `RABBITMQ_REMEDIATION_QUEUE` | `remediation_trigger_queue` | User requested fixes; worker runs incremental remediation |
 
 ---
 

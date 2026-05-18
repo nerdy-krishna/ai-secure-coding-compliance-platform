@@ -228,7 +228,6 @@ Wired from `src/app/config/config.py`:
 
 - `RABBITMQ_SUBMISSION_QUEUE` → `code_submission_queue`
 - `RABBITMQ_APPROVAL_QUEUE` → `analysis_approved_queue`
-- `RABBITMQ_REMEDIATION_QUEUE` → `remediation_trigger_queue`
 
 ## Status strings
 

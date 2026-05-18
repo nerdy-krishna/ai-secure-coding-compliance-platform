@@ -1,7 +1,7 @@
 """Scan-lifecycle service: post-creation state transitions.
 
-Handles the prescan-approval gate, cost-approval gate, cancellation,
-and the two apply-fixes paths (full + selective).
+Handles the prescan-approval gate, cost-approval gate, and scan
+cancellation.
 
 Split out of `core/services/scan_service.py` (2026-04-26). Method
 bodies are verbatim copies — no logic change. The threat-model
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from fastapi import HTTPException, status
 
@@ -26,16 +26,13 @@ from app.infrastructure.database.repositories.scan_outbox_repo import (
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.messaging.publisher import publish_message
-from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     STATUS_CANCELLED,
-    STATUS_COMPLETED,
     STATUS_PENDING_APPROVAL,
     STATUS_PENDING_PRESCAN_APPROVAL,
     STATUS_PENDING_PROFILING_APPROVAL,
     STATUS_QUEUED_FOR_SCAN,
-    STATUS_REMEDIATION_COMPLETED,
 )
 
 logger = logging.getLogger(__name__)
@@ -327,280 +324,4 @@ class ScanLifecycleService:
         )
         logger.info(
             "scan: cancelled", extra={"scan_id": str(scan_id), "actor_user_id": user.id}
-        )
-
-    async def apply_fixes_for_scan(
-        self, scan_id: uuid.UUID, user: db_models.User
-    ) -> None:
-        """Applies all suggested and verified fixes for a completed REMEDIATE scan."""
-        MAX_FIXES_PER_APPLY = 1000
-
-        logger.info(
-            "scan: apply_fixes attempt",
-            extra={"actor_user_id": user.id, "scan_id": str(scan_id)},
-        )
-        scan = await self.repo.get_scan_with_details(scan_id)
-
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
-            logger.warning(
-                "scan: authorization denied",
-                extra={
-                    "scan_id": str(scan_id),
-                    "actor_user_id": user.id,
-                    "action": "apply_fixes",
-                },
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Scan not found or not authorized.",
-            )
-
-        if scan.scan_type != "REMEDIATE" or scan.status != STATUS_COMPLETED:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Fixes can only be applied to completed 'Remediate' scans.",
-            )
-
-        original_snapshot = next(
-            (s for s in scan.snapshots if s.snapshot_type == "ORIGINAL_SUBMISSION"),
-            None,
-        )
-        if not original_snapshot:
-            raise HTTPException(
-                status_code=500, detail="Original code snapshot not found."
-            )
-
-        content_map = await self.repo.get_source_files_by_hashes(
-            list(original_snapshot.file_map.values())
-        )
-        live_codebase = {
-            path: content_map.get(h, "")
-            for path, h in original_snapshot.file_map.items()
-        }
-
-        findings_with_fixes = [f for f in scan.findings if f.fixes]
-
-        if len(findings_with_fixes) > MAX_FIXES_PER_APPLY:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Too many fixes requested ({len(findings_with_fixes)}); maximum is {MAX_FIXES_PER_APPLY}.",
-            )
-
-        try:
-            async with self.repo.db.begin_nested():
-                for finding in findings_with_fixes:
-                    fix_data = finding.fixes
-                    if fix_data:
-                        original_snippet = fix_data.get("original_snippet")
-                        new_code = fix_data.get("code")
-
-                        if (
-                            finding.file_path in live_codebase
-                            and original_snippet
-                            and new_code
-                        ):
-                            if original_snippet in live_codebase[finding.file_path]:
-                                live_codebase[finding.file_path] = live_codebase[
-                                    finding.file_path
-                                ].replace(original_snippet, new_code, 1)
-                                logger.debug(
-                                    "scan: applied fix",
-                                    extra={
-                                        "scan_id": str(scan.id),
-                                        "cwe": finding.cwe,
-                                        "file_path": finding.file_path,
-                                    },
-                                )
-                            else:
-                                logger.warning(
-                                    "scan: apply_fix snippet not found",
-                                    extra={
-                                        "scan_id": str(scan.id),
-                                        "cwe": finding.cwe,
-                                        "file_path": finding.file_path,
-                                    },
-                                )
-
-                # Create a new snapshot with the updated code
-                new_hashes = await self.repo.get_or_create_source_files(
-                    [
-                        {
-                            "path": path,
-                            "content": content,
-                            "language": get_language_from_filename(path),
-                        }
-                        for path, content in live_codebase.items()
-                    ]
-                )
-
-                new_file_map = {
-                    path: file_hash
-                    for path, file_hash in zip(live_codebase.keys(), new_hashes)
-                }
-
-                await self.repo.create_code_snapshot(
-                    scan_id=scan.id,
-                    file_map=new_file_map,
-                    snapshot_type="POST_REMEDIATION",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            logger.error(
-                "scan: apply_fixes failed mid-flight",
-                extra={
-                    "scan_id": str(scan_id),
-                    "actor_user_id": user.id,
-                    "file_count": len(live_codebase),
-                },
-                exc_info=True,
-            )
-            raise HTTPException(
-                500, detail="Fix application failed; scan left in prior state."
-            )
-
-        await self.repo.update_status(scan_id, STATUS_REMEDIATION_COMPLETED)
-        logger.info(
-            "scan: all fixes applied",
-            extra={"scan_id": str(scan_id), "actor_user_id": user.id},
-        )
-
-    async def apply_selective_fixes(
-        self, scan_id: uuid.UUID, finding_ids: List[int], user: db_models.User
-    ):
-        """Applies fixes only for a selected list of finding IDs."""
-        MAX_FIXES_PER_APPLY = 1000
-
-        logger.info(
-            "scan: apply_selective_fixes attempt",
-            extra={
-                "actor_user_id": user.id,
-                "scan_id": str(scan_id),
-                "finding_count": len(finding_ids),
-            },
-        )
-        scan = await self.repo.get_scan_with_details(scan_id)
-
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
-            logger.warning(
-                "scan: authorization denied",
-                extra={
-                    "scan_id": str(scan_id),
-                    "actor_user_id": user.id,
-                    "action": "apply_selective_fixes",
-                },
-            )
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Scan not found or not authorized.",
-            )
-
-        original_snapshot = next(
-            (s for s in scan.snapshots if s.snapshot_type == "ORIGINAL_SUBMISSION"),
-            None,
-        )
-        if not original_snapshot:
-            raise HTTPException(
-                status_code=500, detail="Original code snapshot not found."
-            )
-
-        content_map = await self.repo.get_source_files_by_hashes(
-            list(original_snapshot.file_map.values())
-        )
-        live_codebase = {
-            path: content_map.get(h, "")
-            for path, h in original_snapshot.file_map.items()
-        }
-
-        # Filter findings to only those selected for fixing
-        findings_to_fix = [f for f in scan.findings if f.id in finding_ids and f.fixes]
-
-        if not findings_to_fix:
-            raise HTTPException(
-                status_code=400, detail="No valid findings with fixes were selected."
-            )
-
-        if len(findings_to_fix) > MAX_FIXES_PER_APPLY:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Too many fixes requested ({len(findings_to_fix)}); maximum is {MAX_FIXES_PER_APPLY}.",
-            )
-
-        try:
-            async with self.repo.db.begin_nested():
-                for finding in findings_to_fix:
-                    fix_data = finding.fixes
-                    if fix_data:
-                        original_snippet = fix_data.get("original_snippet")
-                        new_code = fix_data.get("code")
-
-                        if (
-                            finding.file_path in live_codebase
-                            and original_snippet
-                            and new_code
-                        ):
-                            if original_snippet in live_codebase[finding.file_path]:
-                                live_codebase[finding.file_path] = live_codebase[
-                                    finding.file_path
-                                ].replace(original_snippet, new_code, 1)
-                                logger.debug(
-                                    "scan: applied fix",
-                                    extra={
-                                        "scan_id": str(scan.id),
-                                        "cwe": finding.cwe,
-                                        "file_path": finding.file_path,
-                                    },
-                                )
-                            else:
-                                logger.warning(
-                                    "scan: apply_fix snippet not found",
-                                    extra={
-                                        "scan_id": str(scan.id),
-                                        "cwe": finding.cwe,
-                                        "file_path": finding.file_path,
-                                    },
-                                )
-
-                # Create a new snapshot with the updated code
-                new_hashes = await self.repo.get_or_create_source_files(
-                    [
-                        {
-                            "path": path,
-                            "content": content,
-                            "language": get_language_from_filename(path),
-                        }
-                        for path, content in live_codebase.items()
-                    ]
-                )
-
-                new_file_map = {
-                    path: file_hash
-                    for path, file_hash in zip(live_codebase.keys(), new_hashes)
-                }
-
-                await self.repo.create_code_snapshot(
-                    scan_id=scan.id,
-                    file_map=new_file_map,
-                    snapshot_type="POST_REMEDIATION",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            logger.error(
-                "scan: apply_fixes failed mid-flight",
-                extra={
-                    "scan_id": str(scan_id),
-                    "actor_user_id": user.id,
-                    "file_count": len(live_codebase),
-                },
-                exc_info=True,
-            )
-            raise HTTPException(
-                500, detail="Fix application failed; scan left in prior state."
-            )
-
-        await self.repo.update_status(scan_id, STATUS_REMEDIATION_COMPLETED)
-        logger.info(
-            "scan: selective fixes applied",
-            extra={"scan_id": str(scan_id), "actor_user_id": user.id},
         )

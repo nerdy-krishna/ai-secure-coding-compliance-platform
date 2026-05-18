@@ -14,7 +14,6 @@ Tool surface (v1):
     - sccap_get_scan_status
     - sccap_get_scan_result
     - sccap_approve_scan
-    - sccap_apply_fixes
     - sccap_ask_advisor
 """
 
@@ -548,58 +547,6 @@ async def sccap_approve_scan(scan_id: str) -> Dict[str, Any]:
     except Exception:
         logger.exception(
             "mcp.tool.unexpected_error", extra={"tool": "sccap_approve_scan"}
-        )
-        raise
-
-
-@mcp.tool
-async def sccap_apply_fixes(scan_id: str, finding_ids: List[int]) -> Dict[str, Any]:
-    """Apply AI-suggested fixes from a completed SUGGEST-mode scan.
-
-    ``finding_ids`` is REQUIRED — the underlying service rejects an empty list
-    (it has no concept of "apply all"). Pass the list of finding ids returned
-    by ``sccap_get_scan_result``.  Maximum 1000 ids per request.
-    """
-    try:
-        if not finding_ids:
-            raise ValueError("finding_ids must be a non-empty list of finding ids.")
-        if len(finding_ids) > 1000:
-            raise ValueError("finding_ids must contain at most 1000 ids per request.")
-        async with AsyncSessionLocal() as session:
-            user = await _current_user(session)
-            logger.info(
-                "mcp.tool.invoke",
-                extra={
-                    "tool": "sccap_apply_fixes",
-                    "user_id": str(user.id),
-                    "is_superuser": user.is_superuser,
-                    "scan_id": scan_id,
-                },
-            )
-            repo = ScanRepository(session)
-            # V08.2.2 / V08.4.1 — explicit ownership check at MCP boundary.
-            query = _build_query_service(repo)
-            scan = await query.get_scan_status(uuid.UUID(scan_id), user)
-            if scan.user_id != user.id and not user.is_superuser:
-                logger.warning(
-                    "mcp.authz.denied",
-                    extra={
-                        "tool": "sccap_apply_fixes",
-                        "user_id": str(user.id),
-                        "resource_id": scan_id,
-                    },
-                )
-                raise PermissionError("Not authorized to apply fixes on this scan.")
-            scan_service = _build_lifecycle_service(repo)
-            applied = await scan_service.apply_selective_fixes(
-                uuid.UUID(scan_id), finding_ids=finding_ids, user=user
-            )
-            return {"scan_id": scan_id, "applied": applied}
-    except (ValueError, PermissionError):
-        raise
-    except Exception:
-        logger.exception(
-            "mcp.tool.unexpected_error", extra={"tool": "sccap_apply_fixes"}
         )
         raise
 

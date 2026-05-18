@@ -440,10 +440,7 @@ async def _build_initial_state(
     # Queue-type routing hints (scan_type gets overwritten by the DB value
     # regardless; this is mostly for logging).
     queue_name = message.routing_key or ""
-    if queue_name == settings.RABBITMQ_REMEDIATION_QUEUE:
-        logger.info("MSG: REMEDIATION trigger for scan_id: %s", scan_uuid)
-        initial_state["scan_type"] = "REMEDIATE"
-    elif queue_name == settings.RABBITMQ_APPROVAL_QUEUE:
+    if queue_name == settings.RABBITMQ_APPROVAL_QUEUE:
         logger.info("MSG: Resuming ANALYSIS for scan_id: %s", scan_uuid)
     else:
         logger.info("MSG: Starting new ANALYSIS for scan_id: %s", scan_uuid)
@@ -583,7 +580,6 @@ class WorkerRunner:
             for queue_name in (
                 settings.RABBITMQ_SUBMISSION_QUEUE,
                 settings.RABBITMQ_APPROVAL_QUEUE,
-                settings.RABBITMQ_REMEDIATION_QUEUE,
             ):
                 queue = await channel.declare_queue(queue_name, durable=True)
                 await queue.consume(_handle_message)

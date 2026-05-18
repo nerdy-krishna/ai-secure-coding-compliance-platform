@@ -127,7 +127,7 @@ for a Claude Code connection example.
 ### Which admin operations are exposed over MCP?
 
 None. The v1 MCP surface covers scan + advisor (submit, approve,
-status, result, apply-fixes, ask-advisor). Admin surfaces
+status, result, ask-advisor). Admin surfaces
 (user management, framework ingestion) stay REST-only — those are
 human workflows where agentic automation is a bad fit.
 

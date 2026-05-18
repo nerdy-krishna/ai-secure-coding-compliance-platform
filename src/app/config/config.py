@@ -68,7 +68,6 @@ class Settings(BaseSettings):
     # Renamed CODE_QUEUE for clarity and added the new approval queue
     RABBITMQ_SUBMISSION_QUEUE: str = "code_submission_queue"
     RABBITMQ_APPROVAL_QUEUE: str = "analysis_approved_queue"
-    RABBITMQ_REMEDIATION_QUEUE: str = "remediation_trigger_queue"
 
     @field_validator("RABBITMQ_URL", mode="before")
     def assemble_rabbitmq_connection(cls, v, info):

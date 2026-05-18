@@ -330,21 +330,6 @@ export const scanService = {
     return response.data;
   },
 
-  /**
-   * Triggers the application of selected fixes for a completed scan.
-   * V01.2.2: scanId encoded. V02.3.4: idempotency key forwarded as header.
-   * Backend MUST treat duplicate X-Idempotency-Key values as a no-op
-   * to prevent double-applying fixes on concurrent or retry requests.
-   */
-  applySelectiveFixes: async (scanId: string, findingIds: number[], idempotencyKey?: string): Promise<{ message: string }> => {
-    const response = await apiClient.post<{ message: string }>(
-      `/scans/${encodeURIComponent(scanId)}/apply-fixes`, // V01.2.2
-      { finding_ids: findingIds },
-      { headers: { "X-Idempotency-Key": idempotencyKey ?? crypto.randomUUID() } }, // V02.3.4
-    );
-    return response.data;
-  },
-
   createProject: async (name: string): Promise<{ id: string; name: string }> => {
     const response = await apiClient.post<{ id: string; name: string }>("/projects", { name });
     return response.data;
