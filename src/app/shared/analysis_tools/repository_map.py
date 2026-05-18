@@ -502,3 +502,103 @@ class RepositoryMappingEngine:
 
         self.logger.info("Repository mapping complete.")
         return repo_map
+
+
+# --- Call-site extraction (#79) -------------------------------------------
+#
+# Cross-file finding validation needs the call graph, not just the symbol
+# index. `_CALLS_QUERIES` captures call-expression callee names per
+# language; `extract_call_sites` runs the query for one file. Queries are
+# deliberately conservative — a grammar that rejects one degrades to no
+# call sites for that language (callers simply aren't found), never an
+# error. Co-located with `LANGUAGE_QUERIES` as part of the repo-map
+# query set.
+
+_CALLS_QUERIES: Dict[str, str] = {
+    "python": """
+        (call function: (identifier) @name)
+        (call function: (attribute attribute: (identifier) @name))
+    """,
+    "java": "(method_invocation name: (identifier) @name)",
+    "javascript": """
+        (call_expression function: (identifier) @name)
+        (call_expression function: (member_expression property: (property_identifier) @name))
+    """,
+    "typescript": """
+        (call_expression function: (identifier) @name)
+        (call_expression function: (member_expression property: (property_identifier) @name))
+    """,
+    "go": """
+        (call_expression function: (identifier) @name)
+        (call_expression function: (selector_expression field: (field_identifier) @name))
+    """,
+    "c": "(call_expression function: (identifier) @name)",
+    "c_plus_plus": """
+        (call_expression function: (identifier) @name)
+        (call_expression function: (field_expression field: (field_identifier) @name))
+    """,
+    "c_sharp": """
+        (invocation_expression function: (identifier) @name)
+        (invocation_expression function: (member_access_expression name: (identifier) @name))
+    """,
+    "php": """
+        (function_call_expression function: (name) @name)
+        (member_call_expression name: (name) @name)
+    """,
+    "ruby": "(call method: (identifier) @name)",
+    "rust": """
+        (call_expression function: (identifier) @name)
+        (call_expression function: (field_expression field: (field_identifier) @name))
+        (call_expression function: (scoped_identifier name: (identifier) @name))
+    """,
+}
+
+
+class CallSite(BaseModel):
+    """One call expression found in a file: the callee name + its line."""
+
+    name: str = Field(..., description="The callee identifier.")
+    line_number: int = Field(..., description="1-based line of the call.")
+
+
+def extract_call_sites(file_path: str, content: str) -> List[CallSite]:
+    """Return the call sites in one file (callee name + line number).
+
+    Best-effort and deterministic: an unknown language, a missing
+    `calls` query, a parse failure, or a query that the bundled grammar
+    rejects all yield an empty list rather than raising — so a caller
+    that can't be resolved simply isn't found.
+    """
+    if not content.strip():
+        return []
+    engine = RepositoryMappingEngine()
+    try:
+        lang_name, language = engine._get_language_handler(file_path)
+    except GrammarLoadingError:
+        return []
+    query_string = _CALLS_QUERIES.get(lang_name)
+    if not query_string:
+        return []
+    parser = Parser()
+    parser.set_language(language)  # type: ignore
+    try:
+        tree = parser.parse(bytes(content, "utf8"))
+    except Exception:  # noqa: BLE001 — never raise out of extraction
+        return []
+    try:
+        captures = language.query(query_string).captures(tree.root_node)
+    except Exception as exc:  # noqa: BLE001 — bad query → no call sites
+        logging.getLogger(__name__).warning(
+            "calls query failed for %s: %s", lang_name, exc
+        )
+        return []
+    sites: List[CallSite] = []
+    for node, capture_name in captures:
+        if capture_name == "name" and node.text:
+            sites.append(
+                CallSite(
+                    name=node.text.decode("utf8", "replace"),
+                    line_number=node.start_point[0] + 1,
+                )
+            )
+    return sites[:20_000]
