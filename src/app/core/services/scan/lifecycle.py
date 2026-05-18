@@ -346,6 +346,15 @@ class ScanLifecycleService:
 
         await self._get_triageable_scan_or_404(scan_id, user, visible_user_ids)
 
+        # Reverting a finding to the untriaged `open` state is a delete,
+        # not an add — restricted to superusers (PRD #96). Regular users
+        # add and change dispositions; only admins clear them.
+        if request.disposition == fd.OPEN and not user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=("Only an administrator can clear a finding's " "disposition."),
+            )
+
         finding = await self.repo.get_finding(finding_id)
         if finding is None or finding.scan_id != scan_id:
             raise HTTPException(
@@ -443,6 +452,11 @@ class ScanLifecycleService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unknown disposition {request.disposition!r}.",
             )
+        if request.disposition == fd.OPEN and not user.is_superuser:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=("Only an administrator can clear a finding's " "disposition."),
+            )
         if fd.note_required(request.disposition) and not (
             request.note and request.note.strip()
         ):
@@ -520,3 +534,39 @@ class ScanLifecycleService:
         return [
             api_models.FindingDispositionEventResponse.model_validate(e) for e in events
         ]
+
+    async def clear_finding_disposition(
+        self,
+        scan_id: uuid.UUID,
+        finding_id: int,
+        user: db_models.User,
+    ) -> "api_models.FindingDispositionResponse":
+        """Delete a finding's triage disposition — reset it to the
+        untriaged `open` state and wipe its disposition-event history
+        (PRD #96). Superuser-only; the router enforces that via the
+        `current_superuser` dependency, so no H.2 scope check is needed
+        here (admins see every scan)."""
+        await self._get_scan_or_404(scan_id)
+        finding = await self.repo.get_finding(finding_id)
+        if finding is None or finding.scan_id != scan_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Finding not found for this scan.",
+            )
+        updated, new_score = await self.repo.clear_finding_disposition(finding)
+        logger.info(
+            "scan: finding disposition cleared",
+            extra={
+                "scan_id": str(scan_id),
+                "finding_id": finding_id,
+                "actor_user_id": user.id,
+            },
+        )
+        return api_models.FindingDispositionResponse(
+            finding_id=updated.id,
+            disposition=updated.disposition,
+            disposition_by=updated.disposition_by,
+            disposition_at=updated.disposition_at,
+            disposition_note=updated.disposition_note,
+            scan_risk_score=new_score,
+        )

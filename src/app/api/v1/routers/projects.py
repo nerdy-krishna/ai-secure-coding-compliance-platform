@@ -903,6 +903,22 @@ async def get_finding_disposition_events(
     )
 
 
+@router.delete(
+    "/scans/{scan_id}/findings/{finding_id}/disposition",
+    response_model=api_models.FindingDispositionResponse,
+)
+async def delete_finding_disposition(
+    scan_id: uuid.UUID,
+    finding_id: int,
+    user: db_models.User = Depends(current_superuser),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+):
+    """Delete a finding's triage disposition — reset it to untriaged
+    and wipe its history (PRD #96). Superuser-only: regular users can
+    add and change dispositions but cannot delete them."""
+    return await service.clear_finding_disposition(scan_id, finding_id, user)
+
+
 @router.delete("/scans/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_scan(
     scan_id: uuid.UUID,

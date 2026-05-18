@@ -327,6 +327,20 @@ export const scanService = {
   },
 
   /**
+   * Deletes a finding's triage disposition — resets it to untriaged and
+   * wipes its history (PRD #96). Superuser-only on the backend.
+   */
+  clearFindingDisposition: async (
+    scanId: string,
+    findingId: number,
+  ): Promise<FindingDispositionResponse> => {
+    const response = await apiClient.delete<FindingDispositionResponse>(
+      `/scans/${encodeURIComponent(scanId)}/findings/${findingId}/disposition`,
+    );
+    return response.data;
+  },
+
+  /**
    * Downloads the scan's findings report in the given format and
    * triggers a browser save. Goes through apiClient so the request
    * carries the Authorization header (a plain <a download> would not).

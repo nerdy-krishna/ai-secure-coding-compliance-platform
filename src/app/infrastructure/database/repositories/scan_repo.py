@@ -735,9 +735,15 @@ class ScanRepository:
         )
 
     async def _recompute_risk_score(self, scan_id: uuid.UUID) -> int:
-        """Recompute `Scan.risk_score` from the scan's current scoreable
+        """Recompute the scan's risk score from its current scoreable
         findings and stage the update on the scan row (PRD #96 / #99).
-        No commit — the caller commits. Returns the new 0-10 score."""
+        No commit — the caller commits. Returns the new 0-10 score.
+
+        Updates BOTH `Scan.risk_score` (the column scan lists read) and
+        `Scan.summary["overall_risk_score"]["score"]` (the JSONB blob
+        the scan-result endpoint surfaces as `summary_report`). Keeping
+        them in sync is load-bearing — the results page reads the JSONB
+        copy, so skipping it leaves a stale score after triage."""
         from app.shared.lib.risk_score import (
             compute_cvss_aggregate,
             scoreable_findings,
@@ -751,6 +757,14 @@ class ScanRepository:
         scan = await self.get_scan(scan_id)
         if scan is not None:
             scan.risk_score = new_score
+            # JSONB is mutated by reassignment so SQLAlchemy flags the
+            # column dirty (no MutableDict wrapper on this column).
+            if isinstance(scan.summary, dict):
+                new_summary = dict(scan.summary)
+                overall = dict(new_summary.get("overall_risk_score") or {})
+                overall["score"] = new_score
+                new_summary["overall_risk_score"] = overall
+                scan.summary = new_summary
         return new_score
 
     async def apply_finding_disposition(
@@ -814,6 +828,36 @@ class ScanRepository:
             )
             raise
         return len(findings), new_score
+
+    async def clear_finding_disposition(
+        self, finding: db_models.Finding
+    ) -> tuple[db_models.Finding, int]:
+        """Delete a finding's triage disposition — reset it to the
+        untriaged `open` state, clear the disposition columns, wipe its
+        disposition-event history, and recompute the scan risk score
+        (PRD #96, superuser-only). One transaction. Returns
+        `(finding, new_risk_score)`."""
+        finding.disposition = "open"
+        finding.disposition_by = None
+        finding.disposition_at = None
+        finding.disposition_note = None
+        await self.db.execute(
+            delete(db_models.FindingDispositionEvent).where(
+                db_models.FindingDispositionEvent.finding_id == finding.id
+            )
+        )
+        new_score = await self._recompute_risk_score(finding.scan_id)
+        try:
+            await self.db.commit()
+        except SQLAlchemyError:
+            await self.db.rollback()
+            logger.error(
+                "scan_repo.clear_finding_disposition.commit_failed",
+                extra={"finding_id": finding.id},
+            )
+            raise
+        await self.db.refresh(finding)
+        return finding, new_score
 
     async def query_findings(
         self,

@@ -1648,6 +1648,11 @@ const DISPOSITIONS: {
 ];
 const NOTE_REQUIRED: FindingDisposition[] = ["false_positive", "risk_accepted"];
 
+// The four states a user actively sets. `open` is the untriaged
+// default — you don't "set" it, you clear back to it (superuser-only,
+// PRD #96). So the triage control + bulk bar offer only these four.
+const ACTIONABLE_DISPOSITIONS = DISPOSITIONS.filter((d) => d.value !== "open");
+
 function dispositionMeta(d: FindingDisposition) {
   return DISPOSITIONS.find((x) => x.value === d) ?? DISPOSITIONS[0];
 }
@@ -1660,6 +1665,8 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
 }) => {
   const qc = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
+  const isSuperuser = user?.is_superuser === true;
   const current: FindingDisposition = f.disposition ?? "open";
   // A state the user picked that needs a note before it can be saved.
   const [pending, setPending] = useState<FindingDisposition | null>(null);
@@ -1695,8 +1702,34 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
     },
   });
 
+  // Deleting a disposition (reset to untriaged) is superuser-only — it
+  // also wipes the finding's disposition history (PRD #96).
+  const clearMutation = useMutation({
+    mutationFn: () => scanService.clearFindingDisposition(scanId, f.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["scan-result", scanId] });
+      qc.invalidateQueries({
+        queryKey: ["disposition-events", scanId, f.id],
+      });
+      toast.success("Disposition deleted");
+    },
+    onError: (e: unknown) => {
+      const err = e as {
+        response?: { data?: { detail?: string } };
+        message?: string;
+      };
+      toast.error(
+        err?.response?.data?.detail ??
+          err?.message ??
+          "Failed to delete disposition",
+      );
+    },
+  });
+
+  const busy = mutation.isPending || clearMutation.isPending;
+
   const choose = (d: FindingDisposition) => {
-    if (d === current || mutation.isPending) return;
+    if (d === current || busy) return;
     if (NOTE_REQUIRED.includes(d)) {
       setPending(d);
       setNote("");
@@ -1744,15 +1777,17 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
           </span>
         )}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {DISPOSITIONS.map((d) => {
+      <div
+        style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}
+      >
+        {ACTIONABLE_DISPOSITIONS.map((d) => {
           const active = d.value === current;
           return (
             <button
               key={d.value}
               type="button"
               onClick={() => choose(d.value)}
-              disabled={mutation.isPending}
+              disabled={busy}
               aria-pressed={active}
               style={{
                 padding: "4px 11px",
@@ -1762,15 +1797,44 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
                 color: active ? "#fff" : d.color,
                 fontSize: 12,
                 fontWeight: 600,
-                cursor: mutation.isPending ? "default" : "pointer",
+                cursor: busy ? "default" : "pointer",
                 fontFamily: "inherit",
-                opacity: mutation.isPending && !active ? 0.5 : 1,
+                opacity: busy && !active ? 0.5 : 1,
               }}
             >
               {d.label}
             </button>
           );
         })}
+        {current === "open" && (
+          <span style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}>
+            Not triaged
+          </span>
+        )}
+        {/* Deleting a disposition is superuser-only (PRD #96). */}
+        {isSuperuser && current !== "open" && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!busy) clearMutation.mutate();
+            }}
+            disabled={busy}
+            title="Delete this disposition — reset to untriaged and wipe its history"
+            style={{
+              padding: "4px 11px",
+              borderRadius: 12,
+              border: "1px solid var(--critical)",
+              background: "transparent",
+              color: "var(--critical)",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: busy ? "default" : "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Delete disposition
+          </button>
+        )}
       </div>
 
       {/* Note prompt — shown only while a note-required state is pending. */}
@@ -1926,7 +1990,7 @@ const BulkDispositionBar: React.FC<{
           style={{ height: 30, fontSize: 12, flex: 1, minWidth: 150 }}
         >
           <option value="">Set disposition…</option>
-          {DISPOSITIONS.map((d) => (
+          {ACTIONABLE_DISPOSITIONS.map((d) => (
             <option key={d.value} value={d.value}>
               {d.label}
             </option>
