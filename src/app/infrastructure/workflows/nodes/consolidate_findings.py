@@ -53,7 +53,17 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             state["scan_id"], "CONSOLIDATING", EV_STARTED
         )
     if not findings:
-        await _emit_event(state["scan_id"], 0)
+        await _emit_event(
+            state["scan_id"],
+            {
+                "raw_count": 0,
+                "consolidated_count": 0,
+                "merged_roots": 0,
+                "merged_inputs": 0,
+                "dropped": 0,
+                "finding_count": 0,
+            },
+        )
         return {"findings": []}
 
     reasoning_llm_id = resolve_llm_config_id(LLMStep.CONSOLIDATION, state)
@@ -111,19 +121,30 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         len(consolidated),
         len(by_file),
     )
-    await _emit_event(state["scan_id"], len(consolidated))
+    await _emit_event(
+        state["scan_id"],
+        {
+            "raw_count": len(findings),
+            "consolidated_count": len(consolidated),
+            "merged_roots": consolidator.merged_roots,
+            "merged_inputs": consolidator.merged_inputs,
+            "dropped": consolidator.dropped,
+            "finding_count": len(consolidated),  # back-compat key
+        },
+    )
     return {"findings": consolidated}
 
 
-async def _emit_event(scan_id, finding_count: int) -> None:
-    """Best-effort CONSOLIDATING timeline marker."""
+async def _emit_event(scan_id, stats: Dict[str, int]) -> None:
+    """Best-effort CONSOLIDATING timeline marker carrying the
+    consolidation tally (raw → consolidated, merged, dropped)."""
     try:
         async with AsyncSessionLocal() as db:
             await ScanRepository(db).create_scan_event(
                 scan_id=scan_id,
                 stage_name="CONSOLIDATING",
                 status="COMPLETED",
-                details={"finding_count": finding_count},
+                details=stats,
             )
     except Exception as exc:  # noqa: BLE001
         logger.warning("consolidate_findings: CONSOLIDATING event emit failed: %s", exc)

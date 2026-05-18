@@ -103,6 +103,14 @@ class FindingConsolidator:
 
     def __init__(self, client: LLMClient):
         self._client = client
+        # Running consolidation tally across every `consolidate_file`
+        # call — surfaced on the Results page (#83 follow-up).
+        # `merged_roots`   — root findings the LLM merged from >1 raw;
+        # `merged_inputs`  — raw findings absorbed into those roots;
+        # `dropped`        — raw findings dropped as FP / noise.
+        self.merged_roots = 0
+        self.merged_inputs = 0
+        self.dropped = 0
 
     async def consolidate_file(
         self,
@@ -176,6 +184,13 @@ class FindingConsolidator:
             if i not in covered and i not in dropped
         ]
         consolidated.extend(_passthrough(f) for f in orphans)
+
+        # Accumulate the consolidation tally (#83 follow-up).
+        self.merged_roots += len(
+            [m for m in response.merged_findings if m.subsumed_finding_numbers]
+        )
+        self.merged_inputs += len(covered)
+        self.dropped += len(dropped)
 
         logger.info(
             "finding_consolidator: %s — %d raw -> %d consolidated "

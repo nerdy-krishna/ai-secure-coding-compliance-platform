@@ -188,6 +188,25 @@ const ResultsPage: React.FC = () => {
     [allFindings],
   );
 
+  // Per-reasoning-LLM finding tally — keyed by the LLM config name the
+  // worker stamped onto each finding's `detected_by_llms` (#94). Drives
+  // the per-model stats in the "Models used" card.
+  const llmFindingStats = useMemo(() => {
+    const map: Record<
+      string,
+      { count: number; sev: Record<string, number> }
+    > = {};
+    for (const f of allFindings) {
+      for (const llm of f.detected_by_llms ?? []) {
+        const entry = map[llm] ?? (map[llm] = { count: 0, sev: {} });
+        entry.count += 1;
+        const s = (f.severity || "").toUpperCase();
+        entry.sev[s] = (entry.sev[s] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [allFindings]);
+
   // All submitted files — used by FileTree and the full-diff panel.
   const allFiles = useMemo<SubmittedFile[]>(() => {
     if (data?.summary_report?.files_analyzed?.length) {
@@ -615,15 +634,16 @@ const ResultsPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Models used — the LLM config in each role for this scan. */}
+      {/* Models used — the LLM config in each role, with per-model
+          performance stats. */}
       {data.llms_used && data.llms_used.length > 0 && (
         <div
           className="sccap-card"
           style={{
             display: "flex",
             flexWrap: "wrap",
-            gap: 24,
-            alignItems: "center",
+            gap: 32,
+            alignItems: "flex-start",
           }}
         >
           <span
@@ -633,43 +653,113 @@ const ResultsPage: React.FC = () => {
               letterSpacing: ".06em",
               color: "var(--fg-subtle)",
               fontWeight: 600,
+              paddingTop: 2,
             }}
           >
             Models used
           </span>
-          {data.llms_used.map((m) => (
-            <div
-              key={m.category}
-              style={{ display: "flex", flexDirection: "column", gap: 1 }}
-            >
-              <span
+          {data.llms_used.map((m) => {
+            const stats = llmFindingStats[m.name];
+            const cs =
+              m.category === "Reasoning LLM"
+                ? data.consolidation_stats
+                : null;
+            return (
+              <div
+                key={m.category}
                 style={{
-                  fontSize: 10.5,
-                  textTransform: "uppercase",
-                  letterSpacing: ".05em",
-                  color: "var(--fg-subtle)",
-                  fontWeight: 600,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 2,
+                  minWidth: 180,
                 }}
               >
-                {m.category}
-              </span>
-              <span
-                style={{
-                  fontSize: 13,
-                  color: "var(--fg)",
-                  fontWeight: 500,
-                }}
-              >
-                {m.name}
-              </span>
-              <span
-                className="mono"
-                style={{ fontSize: 11, color: "var(--fg-muted)" }}
-              >
-                {m.provider}/{m.model_name}
-              </span>
-            </div>
-          ))}
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    textTransform: "uppercase",
+                    letterSpacing: ".05em",
+                    color: "var(--fg-subtle)",
+                    fontWeight: 600,
+                  }}
+                >
+                  {m.category}
+                </span>
+                <span
+                  style={{ fontSize: 13, color: "var(--fg)", fontWeight: 500 }}
+                >
+                  {m.name}
+                </span>
+                <span
+                  className="mono"
+                  style={{ fontSize: 11, color: "var(--fg-muted)" }}
+                >
+                  {m.provider}/{m.model_name}
+                </span>
+                {/* Per-model findings detected (#94). */}
+                {stats && (
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      color: "var(--fg-muted)",
+                      marginTop: 4,
+                    }}
+                  >
+                    <strong style={{ color: "var(--fg)" }}>
+                      {stats.count}
+                    </strong>{" "}
+                    finding{stats.count === 1 ? "" : "s"} detected
+                    {(
+                      [
+                        ["CRITICAL", "C"],
+                        ["HIGH", "H"],
+                        ["MEDIUM", "M"],
+                        ["LOW", "L"],
+                        ["INFORMATIONAL", "I"],
+                      ] as const
+                    )
+                      .filter(([k]) => stats.sev[k])
+                      .map(([k, short]) => (
+                        <span
+                          key={k}
+                          style={{
+                            color: SEV_COLOR[k] ?? "var(--fg-muted)",
+                            fontWeight: 600,
+                            marginLeft: 6,
+                          }}
+                        >
+                          {short} {stats.sev[k]}
+                        </span>
+                      ))}
+                  </span>
+                )}
+                {/* Consolidation tally — attached to the reasoning LLM,
+                    which is the slot consolidation runs on. */}
+                {cs && cs.raw_count > 0 && (
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      color: "var(--fg-muted)",
+                      marginTop: 2,
+                    }}
+                  >
+                    Consolidation:{" "}
+                    <strong style={{ color: "var(--fg)" }}>
+                      {cs.raw_count}
+                    </strong>{" "}
+                    raw →{" "}
+                    <strong style={{ color: "var(--fg)" }}>
+                      {cs.consolidated_count}
+                    </strong>{" "}
+                    kept
+                    {(cs.merged_inputs > 0 || cs.dropped > 0) && (
+                      <> · {cs.merged_inputs} merged · {cs.dropped} dropped</>
+                    )}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

@@ -295,6 +295,27 @@ class ScanQueryService:
                     )
                 )
 
+        # Consolidation tally — pulled from the latest CONSOLIDATING
+        # timeline event's details (worker-emitted).
+        consolidation_stats = None
+        for ev in reversed(scan.events or []):
+            if (
+                ev.stage_name == "CONSOLIDATING"
+                and ev.status == "COMPLETED"
+                and ev.details
+            ):
+                d = ev.details
+                consolidation_stats = api_models.ConsolidationStats(
+                    raw_count=d.get("raw_count", 0),
+                    consolidated_count=d.get(
+                        "consolidated_count", d.get("finding_count", 0)
+                    ),
+                    merged_roots=d.get("merged_roots", 0),
+                    merged_inputs=d.get("merged_inputs", 0),
+                    dropped=d.get("dropped", 0),
+                )
+                break
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             project_id=scan.project_id,
@@ -306,6 +327,7 @@ class ScanQueryService:
             cost_details=scan.cost_details,
             cross_file_validation=bool(scan.cross_file_validation),
             llms_used=llms_used,
+            consolidation_stats=consolidation_stats,
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )
 

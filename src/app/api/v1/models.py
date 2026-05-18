@@ -759,6 +759,17 @@ class LLMUsageItem(BaseModel):
     model_name: str
 
 
+class ConsolidationStats(BaseModel):
+    """The consolidation pass tally — surfaced on the Results page so the
+    operator sees how the reasoning model reduced the raw findings."""
+
+    raw_count: int = 0
+    consolidated_count: int = 0
+    merged_roots: int = 0  # root findings merged from >1 raw finding
+    merged_inputs: int = 0  # raw findings absorbed into those roots
+    dropped: int = 0  # raw findings dropped as false-positive / noise
+
+
 class AnalysisResultDetailResponse(BaseModel):
     status: str
     # Always-present pointers to the scan's owning project. Top-level
@@ -790,6 +801,10 @@ class AnalysisResultDetailResponse(BaseModel):
     # optional second analysis LLM — each with its model. Surfaced on
     # the Results page. Empty for scans created before the column set.
     llms_used: List["LLMUsageItem"] = Field(default_factory=list)
+    # The consolidation-pass tally (raw → consolidated, merged, dropped),
+    # read from the CONSOLIDATING timeline event. None for scans that
+    # never reached consolidation.
+    consolidation_stats: Optional["ConsolidationStats"] = None
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing

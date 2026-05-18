@@ -250,6 +250,15 @@ export interface LLMUsageItem {
   model_name: string;
 }
 
+// The consolidation-pass tally, shown in the Results "Models used" card.
+export interface ConsolidationStats {
+  raw_count: number;
+  consolidated_count: number;
+  merged_roots: number;
+  merged_inputs: number;
+  dropped: number;
+}
+
 export interface ScanResultResponse {
   scan_id: string;
   status: string;
@@ -275,6 +284,8 @@ export interface ScanResultResponse {
   // The LLM configs the scan ran with — reasoning / utility / 2nd
   // analysis LLM — each with its provider + model. Shown on Results.
   llms_used?: LLMUsageItem[];
+  // Consolidation-pass tally (raw → consolidated, merged, dropped).
+  consolidation_stats?: ConsolidationStats | null;
   // Stage-event audit trail. SSE emits these live for in-progress
   // scans; the same list is included here so a terminal scan's page
   // can seed the live-event-log deterministically on mount, instead
