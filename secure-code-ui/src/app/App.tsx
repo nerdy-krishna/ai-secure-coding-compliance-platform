@@ -19,6 +19,7 @@ import DashboardPage from "../pages/account/DashboardPage";
 import SecuritySettingsPage from "../pages/account/SecuritySettingsPage";
 import SubmissionHistoryPage from "../pages/account/SubmissionHistoryPage";
 import AdminFindingsPage from "../pages/admin/AdminFindingsPage";
+import FeaturesPage from "../pages/admin/FeaturesPage";
 import SystemConfigTab from "../pages/admin/SystemConfigTab";
 import UserManagementTab from "../pages/admin/UserManagement";
 import UserGroupsPage from "../pages/admin/UserGroupsPage";
@@ -213,6 +214,7 @@ function AppContent() {
 
         <Route element={<RouteGuard requires="superuser" />}>
           <Route path="/admin/system" element={<SystemConfigTab />} />
+          <Route path="/admin/features" element={<FeaturesPage />} />
           <Route path="/admin/findings" element={<AdminFindingsPage />} />
           <Route path="/admin/appearance" element={<AppearanceSettingsPage />} />
           <Route path="/account/settings/llm" element={<LLMSettingsPage />} />

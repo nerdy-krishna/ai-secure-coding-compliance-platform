@@ -20,6 +20,7 @@ interface AdminLink {
 
 const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/system", label: "Platform" },
+  { to: "/admin/features", label: "Features" },
   { to: "/admin/users", label: "Users", feature: "multi_user" },
   { to: "/admin/user-groups", label: "Groups", feature: "user_groups" },
   { to: "/admin/tenants", label: "Tenants", feature: "multi_tenant" },

@@ -251,6 +251,90 @@ def test_require_feature_passes_when_enabled():
 
 
 # ----------------------------------------------------------------------
+# Admin: GET / PUT /api/v1/admin/features  (issue #108)
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_admin_features_rejects_non_superuser():
+    from fastapi import HTTPException as _HTTPExc
+
+    from app.infrastructure.auth.core import current_superuser
+    from app.main import app
+
+    async def _not_admin():
+        raise _HTTPExc(status_code=403, detail="not admin")
+
+    app.dependency_overrides[current_superuser] = _not_admin
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            res = await client.get("/api/v1/admin/features")
+            assert res.status_code == 403
+    finally:
+        app.dependency_overrides.pop(current_superuser, None)
+
+
+@pytest.mark.asyncio
+async def test_admin_features_get_lists_full_catalog(db_session):
+    from types import SimpleNamespace
+
+    from app.infrastructure.auth.core import current_superuser
+    from app.infrastructure.database.database import get_db
+    from app.main import app
+
+    async def _override_db():
+        yield db_session
+
+    app.dependency_overrides[current_superuser] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            res = await client.get("/api/v1/admin/features")
+        assert res.status_code == 200
+        names = {f["name"] for f in res.json()["features"]}
+        assert names == set(features.ALL_FEATURES)
+    finally:
+        app.dependency_overrides.pop(current_superuser, None)
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.mark.asyncio
+async def test_admin_features_put_prunes_dependents(db_session):
+    from types import SimpleNamespace
+
+    from app.infrastructure.auth.core import current_superuser
+    from app.infrastructure.database.database import get_db
+    from app.main import app
+
+    async def _override_db():
+        yield db_session
+
+    previous = SystemConfigCache.get_enabled_features()
+    app.dependency_overrides[current_superuser] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            # Ask for sso without multi_user — the server must prune sso.
+            res = await client.put(
+                "/api/v1/admin/features",
+                json={"enabled": ["chat", "sso"]},
+            )
+        assert res.status_code == 200
+        state = {f["name"]: f["enabled"] for f in res.json()["features"]}
+        assert state["sso"] is False  # pruned: multi_user absent
+        assert state["chat"] is True
+        assert state["scan"] is True  # always-on
+    finally:
+        app.dependency_overrides.pop(current_superuser, None)
+        app.dependency_overrides.pop(get_db, None)
+        SystemConfigCache.set_enabled_features(previous)
+
+
+# ----------------------------------------------------------------------
 # GET /api/v1/features
 # ----------------------------------------------------------------------
 @pytest.mark.asyncio

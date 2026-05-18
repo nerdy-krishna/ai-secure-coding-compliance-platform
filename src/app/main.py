@@ -21,6 +21,7 @@ from app.api.v1.routers.admin_logs import router as logs_router
 from app.api.v1.routers.chat import router as chat_router
 from app.api.v1.routers.compliance import router as compliance_router
 from app.api.v1.routers.features import router as features_router
+from app.api.v1.routers.admin_features import router as admin_features_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.setup import router as setup_router
 from app.api.v1.routers.admin_config import router as admin_config_router
@@ -927,6 +928,8 @@ app.include_router(projects_router, prefix="/api/v1", tags=["Submissions"])
 
 # Public feature-flag discovery endpoint (unauthenticated).
 app.include_router(features_router, prefix="/api/v1", tags=["Features"])
+# Admin feature-flag management (superuser-only) — always mounted.
+app.include_router(admin_features_router, prefix="/api/v1")
 
 
 def _include_if_enabled(feature: str, *args, **kwargs) -> None:
