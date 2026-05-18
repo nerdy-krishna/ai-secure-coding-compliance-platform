@@ -37,11 +37,15 @@ export const featureService = {
 
   updateFeatures: async (
     enabled: string[],
+    confirmDestructive = false,
   ): Promise<{ features: AdminFeature[]; note: string }> => {
     const response = await apiClient.put<{
       features: AdminFeature[];
       note: string;
-    }>("/admin/features", { enabled });
+    }>("/admin/features", {
+      enabled,
+      confirm_destructive: confirmDestructive,
+    });
     return response.data;
   },
 };

@@ -319,15 +319,98 @@ async def test_admin_features_put_prunes_dependents(db_session):
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             # Ask for sso without multi_user — the server must prune sso.
+            # confirm_destructive acknowledges the implied multi_user OFF.
             res = await client.put(
                 "/api/v1/admin/features",
-                json={"enabled": ["chat", "sso"]},
+                json={"enabled": ["chat", "sso"], "confirm_destructive": True},
             )
         assert res.status_code == 200
         state = {f["name"]: f["enabled"] for f in res.json()["features"]}
         assert state["sso"] is False  # pruned: multi_user absent
         assert state["chat"] is True
         assert state["scan"] is True  # always-on
+    finally:
+        app.dependency_overrides.pop(current_superuser, None)
+        app.dependency_overrides.pop(get_db, None)
+        SystemConfigCache.set_enabled_features(previous)
+
+
+# ----------------------------------------------------------------------
+# multi_user ON->OFF destructive transition  (issue #109)
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_disabling_multi_user_requires_confirmation(db_session, seeded_user):
+    from types import SimpleNamespace
+
+    from app.infrastructure.auth.core import current_superuser
+    from app.infrastructure.database.database import get_db
+    from app.main import app
+
+    async def _override_db():
+        yield db_session
+
+    previous = SystemConfigCache.get_enabled_features()
+    app.dependency_overrides[current_superuser] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            res = await client.put(
+                "/api/v1/admin/features", json={"enabled": ["scan", "chat"]}
+            )
+        assert res.status_code == 409
+        assert "multi_user" in res.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(current_superuser, None)
+        app.dependency_overrides.pop(get_db, None)
+        SystemConfigCache.set_enabled_features(previous)
+
+
+@pytest.mark.asyncio
+async def test_multi_user_off_deactivates_then_on_restores(
+    db_session, seeded_user, seeded_admin
+):
+    from types import SimpleNamespace
+
+    from app.infrastructure.auth.core import current_superuser
+    from app.infrastructure.database.database import get_db
+    from app.main import app
+
+    async def _override_db():
+        yield db_session
+
+    previous = SystemConfigCache.get_enabled_features()
+    app.dependency_overrides[current_superuser] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[get_db] = _override_db
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            off = await client.put(
+                "/api/v1/admin/features",
+                json={"enabled": ["scan", "chat"], "confirm_destructive": True},
+            )
+            assert off.status_code == 200
+
+        await db_session.refresh(seeded_user)
+        await db_session.refresh(seeded_admin)
+        # Non-superuser deactivated; superuser untouched.
+        assert seeded_user.is_active is False
+        assert seeded_admin.is_active is True
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            on = await client.put(
+                "/api/v1/admin/features",
+                json={"enabled": ["scan", "chat", "multi_user"]},
+            )
+            assert on.status_code == 200
+
+        await db_session.refresh(seeded_user)
+        # Re-enabling multi_user restores the transition-deactivated account.
+        assert seeded_user.is_active is True
     finally:
         app.dependency_overrides.pop(current_superuser, None)
         app.dependency_overrides.pop(get_db, None)

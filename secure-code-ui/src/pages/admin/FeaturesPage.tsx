@@ -78,15 +78,35 @@ const FeaturesPage: React.FC = () => {
     });
   };
 
-  const save = async () => {
+  const save = async (confirmDestructive = false) => {
     setSaving(true);
     try {
-      const res = await featureService.updateFeatures([...enabled]);
+      const res = await featureService.updateFeatures(
+        [...enabled],
+        confirmDestructive,
+      );
       setFeatures(res.features);
-      setEnabled(new Set(res.features.filter((f) => f.enabled).map((f) => f.name)));
+      setEnabled(
+        new Set(res.features.filter((f) => f.enabled).map((f) => f.name)),
+      );
       toast.success("Feature flags saved.");
-    } catch {
-      toast.error("Failed to save feature flags.");
+    } catch (e) {
+      const err = e as {
+        response?: { status?: number; data?: { detail?: unknown } };
+      };
+      const detail = err.response?.data?.detail;
+      // 409 = destructive transition (disabling multi_user) needs confirmation.
+      if (
+        err.response?.status === 409 &&
+        typeof detail === "string" &&
+        !confirmDestructive
+      ) {
+        if (window.confirm(`${detail}\n\nProceed?`)) {
+          await save(true);
+        }
+      } else {
+        toast.error("Failed to save feature flags.");
+      }
     } finally {
       setSaving(false);
     }
@@ -157,7 +177,7 @@ const FeaturesPage: React.FC = () => {
 
       <button
         className="sccap-btn sccap-btn-primary"
-        onClick={save}
+        onClick={() => save()}
         disabled={saving}
         style={{ marginTop: 16 }}
       >
