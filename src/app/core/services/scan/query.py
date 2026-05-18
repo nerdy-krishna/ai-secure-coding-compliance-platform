@@ -328,6 +328,10 @@ class ScanQueryService:
             cross_file_validation=bool(scan.cross_file_validation),
             llms_used=llms_used,
             consolidation_stats=consolidation_stats,
+            scan_type=scan.scan_type,
+            disable_temperature=bool(scan.disable_temperature),
+            stage_temperatures=scan.stage_temperatures,
+            repository_url=(scan.project.repository_url if scan.project else None),
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )
 

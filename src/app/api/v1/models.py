@@ -896,6 +896,13 @@ class AnalysisResultDetailResponse(BaseModel):
     # read from the CONSOLIDATING timeline event. None for scans that
     # never reached consolidation.
     consolidation_stats: Optional["ConsolidationStats"] = None
+    # Submission settings — surfaced in the results-page "Scan
+    # information" panel. `scan_type` / `repository_url` are top-level
+    # here so the panel never depends on `summary_report` being set.
+    scan_type: str = "audit"
+    disable_temperature: bool = False
+    stage_temperatures: Optional[Dict[str, Any]] = None
+    repository_url: Optional[str] = None
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing

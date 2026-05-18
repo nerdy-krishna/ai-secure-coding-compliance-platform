@@ -329,6 +329,13 @@ export interface ScanResultResponse {
   llms_used?: LLMUsageItem[];
   // Consolidation-pass tally (raw → consolidated, merged, dropped).
   consolidation_stats?: ConsolidationStats | null;
+  // Submission settings — shown in the results-page "Scan information"
+  // panel. `scan_type` / `repository_url` are top-level so the panel
+  // never depends on `summary_report`.
+  scan_type?: string;
+  disable_temperature?: boolean;
+  stage_temperatures?: { [stage: string]: number } | null;
+  repository_url?: string | null;
   // Stage-event audit trail. SSE emits these live for in-progress
   // scans; the same list is included here so a terminal scan's page
   // can seed the live-event-log deterministically on mount, instead

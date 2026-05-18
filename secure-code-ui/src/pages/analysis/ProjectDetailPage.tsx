@@ -191,16 +191,12 @@ const ProjectDetailPage: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="sccap-card" style={{ padding: 0, overflow: "hidden" }}>
-          {scans.map((s, idx) => (
+        <div style={{ display: "grid", gap: 10 }}>
+          {scans.map((s) => (
             <div
               key={s.id}
-              style={{
-                borderBottom:
-                  idx < scans.length - 1
-                    ? "1px solid var(--border)"
-                    : "none",
-              }}
+              className="sccap-card"
+              style={{ padding: 0, overflow: "hidden" }}
             >
               <ScanCard
                 scan={s}

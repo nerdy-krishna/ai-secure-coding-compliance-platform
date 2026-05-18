@@ -76,6 +76,116 @@ function frameworkLabel(slug: string): string {
   );
 }
 
+/** Modal listing the settings a scan was submitted with — opened from
+ *  the "Scan information" affordance in the results header. */
+const ScanInfoModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  data: ScanResultResponse;
+}> = ({ open, onClose, data }) => {
+  const report = data.summary_report;
+  const frameworks = report?.selected_frameworks ?? [];
+  const temps = data.stage_temperatures;
+  const rows: { label: string; value: React.ReactNode }[] = [
+    {
+      label: "Scan type",
+      value: (data.scan_type ?? report?.scan_type ?? "—").toUpperCase(),
+    },
+    {
+      label: "Source",
+      value: data.repository_url ? (
+        <>
+          Git repository ·{" "}
+          <span className="mono" style={{ fontSize: 11.5 }}>
+            {data.repository_url}
+          </span>
+        </>
+      ) : (
+        "Uploaded files / archive"
+      ),
+    },
+    {
+      label: frameworks.length === 1 ? "Framework" : "Frameworks",
+      value: frameworks.length
+        ? frameworks.map(frameworkLabel).join(", ")
+        : "—",
+    },
+    {
+      label: "Cross-file validation",
+      value: data.cross_file_validation ? "Enabled" : "Disabled",
+    },
+    {
+      label: "Temperature",
+      value: data.disable_temperature
+        ? "Disabled — deterministic output"
+        : temps && Object.keys(temps).length
+          ? Object.entries(temps)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(" · ")
+          : "Provider default",
+    },
+    {
+      label: "Models",
+      value: data.llms_used?.length ? (
+        <div style={{ display: "grid", gap: 4 }}>
+          {data.llms_used.map((m) => (
+            <div key={m.category}>
+              <span style={{ color: "var(--fg-subtle)" }}>
+                {m.category}:{" "}
+              </span>
+              <strong style={{ color: "var(--fg)" }}>{m.name}</strong>{" "}
+              <span
+                className="mono"
+                style={{ fontSize: 11, color: "var(--fg-muted)" }}
+              >
+                {m.provider}/{m.model_name}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        "—"
+      ),
+    },
+  ];
+  return (
+    <Modal open={open} onClose={onClose} title="Scan information" width={540}>
+      <div style={{ display: "grid" }}>
+        {rows.map((r, i) => (
+          <div
+            key={r.label}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "160px 1fr",
+              gap: 14,
+              padding: "10px 0",
+              borderBottom:
+                i < rows.length - 1 ? "1px solid var(--border)" : "none",
+              fontSize: 13,
+            }}
+          >
+            <span
+              style={{
+                color: "var(--fg-subtle)",
+                fontWeight: 700,
+                textTransform: "uppercase",
+                fontSize: 10.5,
+                letterSpacing: ".05em",
+                paddingTop: 2,
+              }}
+            >
+              {r.label}
+            </span>
+            <span style={{ color: "var(--fg)", wordBreak: "break-word" }}>
+              {r.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+};
+
 function prescanToFinding(item: PrescanFindingItem): Finding {
   return {
     id: item.id,
@@ -139,6 +249,7 @@ const ResultsPage: React.FC = () => {
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [scanInfoOpen, setScanInfoOpen] = useState(false);
   const [filePathFilter, setFilePathFilter] = useState<string | null>(null);
   const [diffTab, setDiffTab] = useState<"findings" | "full-diff">("findings");
   const [diffSelectedFile, setDiffSelectedFile] = useState<string | null>(null);
@@ -491,38 +602,6 @@ const ResultsPage: React.FC = () => {
                 {fixesReady === 1 ? "" : "es"} ready
               </span>
             )}
-            {report?.selected_frameworks?.length ? (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10.5,
-                    textTransform: "uppercase",
-                    letterSpacing: ".05em",
-                    color: "var(--fg-subtle)",
-                    fontWeight: 700,
-                  }}
-                >
-                  {report.selected_frameworks.length === 1
-                    ? "Framework"
-                    : "Frameworks"}
-                </span>
-                {report.selected_frameworks.map((fw) => (
-                  <span
-                    key={fw}
-                    className="chip"
-                    title="Compliance framework this scan was assessed against"
-                  >
-                    <Icon.Book size={10} /> {frameworkLabel(fw)}
-                  </span>
-                ))}
-              </span>
-            ) : null}
             {scanId && (
               <span
                 style={{
@@ -539,6 +618,27 @@ const ResultsPage: React.FC = () => {
                 <CopyButton value={scanId} title="Copy scan ID" />
               </span>
             )}
+            {/* Scan settings live behind this — keeps the header clean. */}
+            <button
+              type="button"
+              onClick={() => setScanInfoOpen(true)}
+              title="View the settings this scan was submitted with"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                color: "var(--accent)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                fontFamily: "inherit",
+              }}
+            >
+              <Icon.Info size={13} /> Scan information
+            </button>
           </>
         }
         actions={
@@ -1469,6 +1569,12 @@ const ResultsPage: React.FC = () => {
         )}
       </div>
       )}
+
+      <ScanInfoModal
+        open={scanInfoOpen}
+        onClose={() => setScanInfoOpen(false)}
+        data={data}
+      />
 
       <Modal
         open={deleteConfirmOpen}

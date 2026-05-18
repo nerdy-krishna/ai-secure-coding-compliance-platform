@@ -169,6 +169,14 @@
 @keyframes sccap-pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 .pulse-dot { animation: sccap-pulse-dot 1.4s ease-in-out infinite; }
 
+/* Expanding glow ring — marks the in-progress scan stage. */
+@keyframes sccap-pulse-ring {
+  0%   { box-shadow: 0 0 0 2px var(--primary-weak); }
+  70%  { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.pulse-ring { animation: sccap-pulse-ring 1.8s ease-out infinite; }
+
 @keyframes sccap-spin { to { transform: rotate(360deg); } }
 .sccap-spin { animation: sccap-spin 1s linear infinite; }
 

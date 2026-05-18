@@ -12,6 +12,7 @@ import React from "react";
 
 import { deriveScanProgress, type ProgressEvent } from "../../shared/lib/scanProgress";
 import { displayStatus, statusKind } from "../../shared/lib/scanStatus";
+import { useElapsed } from "../../shared/lib/useElapsed";
 import type { ScanHistoryItem } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 import { StageIcon } from "../../shared/ui/StageIcon";
@@ -58,6 +59,25 @@ export const ScanCard: React.FC<ScanCardProps> = ({
     progress.isTerminal &&
     (typeof scan.total_findings === "number" || sev !== null);
 
+  // Live timer: ticks while the scan is active, freezes once it ends.
+  const elapsed = useElapsed(
+    scan.created_at,
+    progress.isTerminal ? (scan.completed_at ?? scan.created_at) : null,
+  );
+
+  // Status-coloured left accent so stacked scan items are easy to tell
+  // apart at a glance.
+  const kind = statusKind(scan.status);
+  const accent = !progress.isTerminal
+    ? "var(--primary)"
+    : kind === "completed"
+      ? "var(--success)"
+      : kind === "failed"
+        ? "var(--critical)"
+        : kind === "blocked"
+          ? "var(--high)"
+          : "var(--border-strong)";
+
   return (
     <div
       onClick={onOpen}
@@ -69,6 +89,7 @@ export const ScanCard: React.FC<ScanCardProps> = ({
         padding: "14px 18px",
         cursor: "pointer",
         transition: "background var(--t)",
+        borderLeft: `3px solid ${accent}`,
       }}
       onMouseEnter={(e) =>
         (e.currentTarget.style.background = "var(--bg-soft)")
@@ -97,13 +118,45 @@ export const ScanCard: React.FC<ScanCardProps> = ({
           <div style={{ marginTop: 8 }}>
             <div
               style={{
-                fontSize: 12,
-                color: "var(--primary)",
-                fontWeight: 500,
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
                 marginBottom: 4,
               }}
             >
-              {progress.badge}
+              <span
+                className="pulse-dot"
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: "var(--primary)",
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "var(--primary)",
+                  fontWeight: 600,
+                }}
+              >
+                {progress.badge}
+              </span>
+              {elapsed && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 3,
+                    fontSize: 11.5,
+                    color: "var(--fg-muted)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  <Icon.Clock size={11} /> {elapsed}
+                </span>
+              )}
             </div>
             {/* Stage timeline (#86): an icon per pipeline stage with
                 its name beneath, coloured by derived state. */}
@@ -160,6 +213,9 @@ export const ScanCard: React.FC<ScanCardProps> = ({
                         }}
                       />
                       <span
+                        className={
+                          s.state === "running" ? "pulse-ring" : undefined
+                        }
                         style={{
                           width: 26,
                           height: 26,
@@ -177,10 +233,6 @@ export const ScanCard: React.FC<ScanCardProps> = ({
                             s.state === "pending"
                               ? "1.5px solid var(--border)"
                               : "1.5px solid transparent",
-                          boxShadow:
-                            s.state === "running"
-                              ? "0 0 0 3px var(--primary-weak)"
-                              : "none",
                         }}
                       >
                         <StageIcon name={s.icon} size={13} />
@@ -258,6 +310,20 @@ export const ScanCard: React.FC<ScanCardProps> = ({
                     {SEV_SHORT[k]} {sev[k]}
                   </span>
                 ))}
+              </span>
+            )}
+            {scan.completed_at && elapsed && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  fontSize: 12,
+                  color: "var(--fg-muted)",
+                }}
+                title="Scan duration"
+              >
+                <Icon.Clock size={11} /> {elapsed}
               </span>
             )}
           </div>

@@ -26,6 +26,7 @@ import type { PrescanReviewResponse } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 import { StageIcon } from "../../shared/ui/StageIcon";
 import { deriveScanProgress } from "../../shared/lib/scanProgress";
+import { useElapsed } from "../../shared/lib/useElapsed";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
 import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
@@ -578,6 +579,28 @@ const ScanRunningPage: React.FC = () => {
   );
   const progress = scanProgress.progressPct;
   const isTerminal = status !== null && TERMINAL_STATUSES.has(status);
+  // Scan-event timestamps bound the elapsed timer — earliest event is
+  // the start; once terminal, the latest event freezes it.
+  const scanStartedAt = useMemo(() => {
+    let earliest: string | null = null;
+    for (const e of events) {
+      if (e.timestamp && (!earliest || e.timestamp < earliest)) {
+        earliest = e.timestamp;
+      }
+    }
+    return earliest;
+  }, [events]);
+  const scanEndedAt = useMemo(() => {
+    if (!isTerminal) return null;
+    let latest: string | null = null;
+    for (const e of events) {
+      if (e.timestamp && (!latest || e.timestamp > latest)) {
+        latest = e.timestamp;
+      }
+    }
+    return latest;
+  }, [events, isTerminal]);
+  const elapsed = useElapsed(scanStartedAt, scanEndedAt);
   // Split the previous catch-all `isFailed` lump into the four kinds
   // of unsuccessful terminals so the UI can stop labeling user stops
   // and safety blocks as "Scan failed":
@@ -945,14 +968,34 @@ const ScanRunningPage: React.FC = () => {
               Overall progress
             </div>
             <div
-              style={{
-                fontSize: 13,
-                fontVariantNumeric: "tabular-nums",
-                fontWeight: 500,
-                color: "var(--fg)",
-              }}
+              style={{ display: "flex", alignItems: "baseline", gap: 12 }}
             >
-              {progress}%
+              {elapsed && (
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    fontSize: 12.5,
+                    color: isTerminal ? "var(--fg-muted)" : "var(--primary)",
+                    fontWeight: 500,
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                  title={isTerminal ? "Scan duration" : "Elapsed time"}
+                >
+                  <Icon.Clock size={12} /> {elapsed}
+                </span>
+              )}
+              <div
+                style={{
+                  fontSize: 13,
+                  fontVariantNumeric: "tabular-nums",
+                  fontWeight: 500,
+                  color: "var(--fg)",
+                }}
+              >
+                {progress}%
+              </div>
             </div>
           </div>
           <div className="sccap-progress">
@@ -990,6 +1033,7 @@ const ScanRunningPage: React.FC = () => {
                     }}
                   >
                     <div
+                      className={state === "running" ? "pulse-ring" : undefined}
                       style={{
                         width: 26,
                         height: 26,
