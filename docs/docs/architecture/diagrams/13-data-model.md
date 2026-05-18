@@ -34,6 +34,8 @@ erDiagram
     SCANS ||--o{ CODE_SNAPSHOTS : "before/after"
     SCANS ||--o{ FINDINGS : "yields"
     SCANS ||--o{ LLM_INTERACTIONS : "spend"
+    FINDINGS ||--o{ FINDING_DISPOSITION_EVENTS : "triage history"
+    USER ||--o{ FINDING_DISPOSITION_EVENTS : "triaged by"
     SOURCE_CODE_FILES ||--o{ CODE_SNAPSHOTS : "referenced"
     CWE_DETAILS ||--o{ FINDINGS : "categorizes"
     CWE_DETAILS ||--o{ CWE_OWASP_MAPPINGS : "maps"
@@ -158,6 +160,12 @@ erDiagram
         text status "see diagram 04"
         text[] frameworks
         uuid reasoning_llm_config_id FK
+        uuid utility_llm_config_id FK
+        uuid secondary_reasoning_llm_config_id FK "#93"
+        bool disable_temperature "#92"
+        bool cross_file_validation "#81"
+        jsonb stage_temperatures
+        jsonb file_profiles
         jsonb summary
         jsonb cost_details
         jsonb bom_cyclonedx "≤5 MB"
@@ -220,7 +228,22 @@ erDiagram
         bool is_applied_in_remediation
         bool fix_verified
         text framework
+        jsonb detected_by_llms "dual-LLM provenance (#94)"
+        text cross_file_status "confirmed|mitigated|unconfirmed (#81)"
+        text disposition "open|confirmed|false_positive|remediated|risk_accepted"
+        int disposition_by FK
+        timestamp disposition_at
+        text disposition_note
         timestamp expires_at
+    }
+    FINDING_DISPOSITION_EVENTS {
+        bigserial id PK
+        int finding_id FK
+        text old_disposition
+        text new_disposition
+        int actor_user_id FK
+        text note
+        timestamp created_at
     }
     CWE_DETAILS {
         text cwe_id PK
@@ -282,7 +305,7 @@ erDiagram
     PROMPT_TEMPLATES {
         uuid id PK
         text name UK
-        text template_type "QUICK_AUDIT|CHAT|REMEDIATE|MERGE|EDITOR"
+        text template_type "QUICK_AUDIT|DETAILED_REMEDIATION|CHAT"
         text agent_name
         text variant "generic|anthropic"
         int version
@@ -417,6 +440,7 @@ The Fernet key is `ENCRYPTION_KEY` from `.env`. The app refuses to start without
 - `sso_providers.protocol` CHECK in `('oidc','saml','ldap')`.
 - `scans.scan_type` CHECK in `('AUDIT','SUGGEST','REMEDIATE')`.
 - `code_snapshots.type` CHECK in `('ORIGINAL_SUBMISSION','POST_REMEDIATION')`.
+- `findings.disposition` CHECK in `('open','confirmed','false_positive','remediated','risk_accepted')` (`ck_findings_disposition`); `open` is the default, and `false_positive` / `remediated` / `risk_accepted` drop the finding out of all risk-score math (#97–#100). `finding_disposition_events` is the append-only transition log.
 - `chat_sessions.frameworks` length ≤ 10 (enforced application-side; not a DB check, kept for portability).
 
 ### Table sizes / cardinality intuition

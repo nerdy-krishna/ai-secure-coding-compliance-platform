@@ -25,8 +25,8 @@ flowchart TB
       N6G["interrupt<br/>status=PENDING_COST_APPROVAL"]:::app
       DGC{Cost<br/>approval}:::gate
       N7["7 · analyze_files_parallel_node<br/>fan-out CONCURRENT_LLM_LIMIT=16<br/>per-file/framework/agent LLM calls<br/>(Pydantic AI structured output)<br/>RAG-enriched context"]:::app
-      N8["8 · correlate_findings_node<br/>dedupe (file,line,rule)<br/>CWE/CVSS rollup"]:::app
-      N9["9 · consolidate_and_patch_node<br/>(only when scan_type=REMEDIATE)<br/>Aider SEARCH/REPLACE blocks<br/>3-retry editor + merge agents"]:::app
+      N8["8 · consolidate_findings_node<br/>FindingConsolidator (reasoning LLM)<br/>merge same-defect findings, drop FPs<br/>+ validate_cross_file_node (opt-in #81)"]:::app
+      N9["9 · consolidate_and_patch_node<br/>(only when scan_type=REMEDIATE)<br/>_run_merge_agent · single-shot<br/>tree-sitter syntax verify"]:::app
       N10["10 · verify_patches_node<br/>re-run Semgrep on patched files<br/>set fix_verified + regression guard"]:::app
       N11["11 · save_results_node<br/>bulk INSERT findings · fixes JSONB"]:::app
       N12["12 · save_final_report_node<br/>scan.summary · risk_score<br/>status=COMPLETED or REMEDIATION_COMPLETED"]:::app
@@ -192,7 +192,7 @@ classDiagram
 | 5   | `blocked_pre_llm_node`                     | resume payload (non-overridable critical secret)     | `scans.status = BLOCKED_PRE_LLM`, audit event                                                       |
 | 6   | `estimate_cost_node`                       | `WorkerState.files`, frameworks, agent registry      | `scans.cost_details`, interrupt                                                                      |
 | 7   | `analyze_files_parallel_node`              | files + framework controls (RAG)                     | `WorkerState.findings`, `proposed_fixes`, `llm_interactions`, per-file `scan_events(FILE_ANALYZED)` |
-| 8   | `correlate_findings_node`                  | per-agent findings                                   | dedup + CWE/CVSS roll-up on `WorkerState.findings`                                                  |
+| 8   | `consolidate_findings_node`                | per-agent findings                                   | `FindingConsolidator` reasoning-LLM pass — merge same-defect findings, drop demonstrable FPs        |
 | 9   | `consolidate_and_patch_node`               | `WorkerState.findings + proposed_fixes`              | `WorkerState.patched_files`, `final_file_map`                                                       |
 | 10  | `verify_patches_node`                      | `patched_files` vs original                          | `finding.fix_verified`, regression detection                                                         |
 | 11  | `save_results_node`                        | `WorkerState.findings`                               | `findings` (bulk insert), `scans.summary`                                                            |
@@ -279,7 +279,7 @@ Every LLM call goes through `LLMClient`, which:
 - `src/app/workers/consumer.py`
 - `src/app/infrastructure/workflows/state.py` — `WorkerState`, `VulnerabilityFinding`, `FixResult` types
 - `src/app/infrastructure/workflows/graph.py` — `get_workflow()` factory
-- `src/app/infrastructure/workflows/nodes/{retrieve,prescan,prescan_approval,user_decline,blocked_pre_llm,cost,analyze,correlate,consolidate,verify,results,error}.py`
+- `src/app/infrastructure/workflows/nodes/{retrieve,prescan,profile,cost,analyze,consolidate_findings,validate_cross_file,consolidate,verify,results,error}.py`
 - `src/app/infrastructure/workflows/callbacks/scan_progress_notifier.py`
 - `src/app/infrastructure/messaging/{publisher,outbox_sweeper}.py`
 - `src/app/infrastructure/llm_client.py`, `llm_client_rate_limiter.py`

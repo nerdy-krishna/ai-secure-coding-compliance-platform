@@ -113,13 +113,13 @@ sequenceDiagram
     end
 
     rect rgba(199, 210, 254, 0.25)
-      Note over W: Node 8 - correlate_findings_node
-      W->>W: dedupe + CWE/CVSS rollup
+      Note over W: consolidate_findings_node + validate_cross_file_node
+      W->>LLM: FindingConsolidator — merge same-defect findings, drop FPs
     end
 
     rect rgba(199, 210, 254, 0.25)
-      Note over W,DB: Node 11/12 - save_results_node + save_final_report_node
-      W->>DB: bulk insert findings (cwe, severity, source, fixes JSONB, fix_verified=null)
+      Note over W,DB: save_results_node + save_final_report_node
+      W->>DB: bulk insert findings (cwe, severity, source, fixes JSONB, disposition='open')
       W->>DB: scan.summary (totals, risk_score)
       W->>DB: scans.status = COMPLETED, completed_at=now()
       W->>DB: insert scan_events (COMPLETED)
