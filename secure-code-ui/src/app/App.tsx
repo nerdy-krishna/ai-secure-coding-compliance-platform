@@ -39,6 +39,7 @@ import CompliancePage from "../pages/compliance/CompliancePage";
 import SubmitPage from "../pages/submission/SubmitPage";
 import ScanRunningPage from "../pages/submission/ScanRunningPage";
 import SetupPage from "../pages/setup/SetupPage";
+import { ScanWatcher } from "../features/scans/ScanWatcher";
 import AuthLayout from "../widgets/AuthLayout";
 import DashboardLayout from "../widgets/DashboardLayout";
 
@@ -131,6 +132,7 @@ const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
 
   return (
     <DashboardLayout>
+      <ScanWatcher />
       <Outlet />
     </DashboardLayout>
   );

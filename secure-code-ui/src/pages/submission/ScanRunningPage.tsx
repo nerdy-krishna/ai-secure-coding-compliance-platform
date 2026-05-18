@@ -15,8 +15,6 @@ import { CriticalSecretOverrideModal } from "../../features/prescan-approval/Cri
 import { PrescanReviewCard } from "../../features/prescan-approval/PrescanReviewCard";
 import { scanService } from "../../shared/api/scanService";
 import { useAuth } from "../../shared/hooks/useAuth";
-import { useNotificationPermission } from "../../shared/hooks/useNotificationPermission";
-import { pushNotification } from "../../shared/hooks/useNotifications";
 import {
   displayStatus,
   isBlockedStatus,
@@ -177,7 +175,6 @@ const ScanRunningPage: React.FC = () => {
   const location = useLocation();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const notificationPerm = useNotificationPermission();
   // Status starts `null` — NOT "QUEUED" — so the page doesn't flap
   // from "Analyzing your code" / "queued" to the real terminal state
   // for the few hundred ms before the one-shot getScanResult resolves.
@@ -233,9 +230,6 @@ const ScanRunningPage: React.FC = () => {
   );
   const lastFetchedStatusRef = useRef<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
-  // N3: dedupe — only one notification per scan_id per page lifetime,
-  // even if SSE reconnects after the `done` event.
-  const notifiedRef = useRef<Record<string, boolean>>({});
 
   // Seed `status` from a one-shot HTTP fetch on mount. The SSE stream
   // emits live updates only and currently can't authenticate (cookie
@@ -563,55 +557,9 @@ const ScanRunningPage: React.FC = () => {
     }
   }, [status, scanId, navigate]);
 
-  // §6 desktop + in-app notification on terminal status. Lives in its own
-  // effect so it picks up the latest `notificationPerm` state (the
-  // SSE listener captures stale values at registration time).
-  // Threat-model mitigations:
-  //   N1 — generic body, no findings count / severity / file paths
-  //   N3 — `tag: scan_id` + `notifiedRef` dedupes per-scan
-  useEffect(() => {
-    if (!scanId) return;
-    if (!status || !TERMINAL_STATUSES.has(status)) return;
-    if (notifiedRef.current[scanId]) return;
-    notifiedRef.current[scanId] = true;
-
-    const isSuccess = status === "COMPLETED" || status === "REMEDIATION_COMPLETED";
-    const isBlocked = status === "BLOCKED_PRE_LLM" || status === "BLOCKED_USER_DECLINE";
-    const notifType = isSuccess ? "success" : isBlocked ? "warning" : "error";
-    const notifTitle = projectInfo
-      ? `${projectInfo.name} — scan ${isSuccess ? "completed" : isBlocked ? "blocked" : "failed"}`
-      : `Scan ${scanId.slice(0, 12)} — ${isSuccess ? "completed" : isBlocked ? "blocked" : "failed"}`;
-
-    // Always push an in-app notification.
-    pushNotification({
-      type: notifType,
-      title: notifTitle,
-      href: `/analysis/results/${scanId}`,
-    });
-
-    if (
-      notificationPerm.supported &&
-      notificationPerm.permission === "granted"
-    ) {
-      try {
-        new Notification("SCCAP — Scan finished", {
-          body: "Scan finished",
-          tag: scanId,
-        });
-      } catch {
-        // Notification constructor can throw on iOS Safari etc.
-        // Fail silently — the in-app redirect still happens.
-      }
-    }
-  }, [
-    status,
-    scanId,
-    projectInfo,
-    notificationPerm.supported,
-    notificationPerm.permission,
-    notificationPerm.dismissed,
-    toast,
-  ]);
+  // Scan-completion notifications are fired by the global ScanWatcher
+  // (#89), mounted at the app root — so they land regardless of which
+  // page is open. The old page-bound effect was removed.
 
   // Which gate (if any) the user has just dismissed. Only counts as
   // "submitted" while the live status still matches what was current
