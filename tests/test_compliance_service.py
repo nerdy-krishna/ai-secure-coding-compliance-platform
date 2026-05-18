@@ -88,7 +88,18 @@ async def test_open_findings_lower_the_score(db_session, seeded_user):
 
 @pytest.mark.asyncio
 async def test_admin_scope_aggregates_all_users(db_session, seeded_user, seeded_admin):
-    # A regular user's finding shouldn't show in another user's scope.
+    service = ComplianceService(db=db_session, rag_service=_NullRAGService())
+
+    def _asvs_open(stats) -> int:
+        return next(r for r in stats if r["name"] == "asvs")["open_findings"]
+
+    # Tests share the dev Postgres (see conftest): SAVEPOINT rollback
+    # isolates rows this test creates, but an unscoped admin query
+    # (visible_user_ids=None) still sees every pre-existing finding in
+    # the DB. So assert on the *delta* our finding introduces, not an
+    # absolute count.
+    before = _asvs_open(await service.get_stats(visible_user_ids=None))
+
     project = db_models.Project(user_id=seeded_user.id, name="alpha")
     db_session.add(project)
     await db_session.flush()
@@ -112,12 +123,12 @@ async def test_admin_scope_aggregates_all_users(db_session, seeded_user, seeded_
     )
     await db_session.flush()
 
-    service = ComplianceService(db=db_session, rag_service=_NullRAGService())
+    # Admin (visible_user_ids=None) sees everything — so the unscoped
+    # asvs open-findings count rises by exactly the one we just added.
+    after = _asvs_open(await service.get_stats(visible_user_ids=None))
+    assert after - before == 1
 
-    # Admin (visible_user_ids=None) sees everything.
-    admin_stats = await service.get_stats(visible_user_ids=None)
-    assert next(r for r in admin_stats if r["name"] == "asvs")["open_findings"] == 1
-
-    # A different user's scope sees zero.
+    # A different user's scope sees none of seeded_user's findings —
+    # this is an exact count because the scope is empty of our data.
     other_stats = await service.get_stats(visible_user_ids=[seeded_admin.id])
-    assert next(r for r in other_stats if r["name"] == "asvs")["open_findings"] == 0
+    assert _asvs_open(other_stats) == 0
