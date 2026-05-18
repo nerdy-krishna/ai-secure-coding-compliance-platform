@@ -8,25 +8,28 @@ import React from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { useAuth } from "../shared/hooks/useAuth";
+import { useFeatures } from "../shared/hooks/useFeatures";
 import { isSafeHttpUrl } from "../shared/lib/safeUrl";
 
 interface AdminLink {
   to: string;
   label: string;
+  /** When set, the link is hidden unless this feature flag is enabled. */
+  feature?: string;
 }
 
 const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/system", label: "Platform" },
-  { to: "/admin/users", label: "Users" },
-  { to: "/admin/user-groups", label: "Groups" },
-  { to: "/admin/tenants", label: "Tenants" },
-  { to: "/admin/agents", label: "Agents" },
-  { to: "/admin/frameworks", label: "Frameworks" },
-  { to: "/admin/prompts", label: "Prompts" },
-  { to: "/admin/smtp", label: "SMTP" },
-  { to: "/admin/sso/providers", label: "SSO" },
-  { to: "/admin/scim/tokens", label: "SCIM tokens" },
-  { to: "/admin/sso/audit", label: "Auth audit" },
+  { to: "/admin/users", label: "Users", feature: "multi_user" },
+  { to: "/admin/user-groups", label: "Groups", feature: "user_groups" },
+  { to: "/admin/tenants", label: "Tenants", feature: "multi_tenant" },
+  { to: "/admin/agents", label: "Agents", feature: "admin_authoring" },
+  { to: "/admin/frameworks", label: "Frameworks", feature: "admin_authoring" },
+  { to: "/admin/prompts", label: "Prompts", feature: "admin_authoring" },
+  { to: "/admin/smtp", label: "SMTP", feature: "email" },
+  { to: "/admin/sso/providers", label: "SSO", feature: "sso" },
+  { to: "/admin/scim/tokens", label: "SCIM tokens", feature: "scim" },
+  { to: "/admin/sso/audit", label: "Auth audit", feature: "sso" },
   { to: "/account/settings/llm", label: "LLM configs" },
   { to: "/admin/appearance", label: "Appearance" },
 ];
@@ -36,11 +39,20 @@ const LANGFUSE_HOST = (import.meta.env.VITE_LANGFUSE_HOST as string | undefined)
 export const AdminSubNav: React.FC = () => {
   const { pathname } = useLocation();
   const { user } = useAuth();
+  const { isFeatureEnabled } = useFeatures();
   const isSuperuser = !!user?.is_superuser;
+  // Hide admin links whose backing feature is disabled (modular setup).
+  const adminLinks = ADMIN_LINKS.filter(
+    (l) => !l.feature || isFeatureEnabled(l.feature),
+  );
   // External link to the self-hosted Langfuse UI. Superuser-only because
   // Langfuse traces span all tenants (no per-project isolation in the
-  // first iteration — see threat model #2).
-  const showLangfuse = isSuperuser && LANGFUSE_HOST.length > 0 && isSafeHttpUrl(LANGFUSE_HOST);
+  // first iteration — see threat model #2). Also gated by `tracing`.
+  const showLangfuse =
+    isSuperuser &&
+    isFeatureEnabled("tracing") &&
+    LANGFUSE_HOST.length > 0 &&
+    isSafeHttpUrl(LANGFUSE_HOST);
   const itemStyle = (active: boolean): React.CSSProperties => ({
     padding: "6px 12px",
     borderRadius: 8,
@@ -64,7 +76,7 @@ export const AdminSubNav: React.FC = () => {
         marginBottom: 20,
       }}
     >
-      {ADMIN_LINKS.map((l) => {
+      {adminLinks.map((l) => {
         const active = pathname === l.to || pathname.startsWith(l.to + "/");
         return (
           <Link key={l.to} to={l.to} style={itemStyle(active)}>

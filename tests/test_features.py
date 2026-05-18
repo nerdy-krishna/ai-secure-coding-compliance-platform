@@ -67,11 +67,48 @@ def test_catalog_contains_scan_and_chat():
     assert "scan" in features.FEATURE_CATALOG["chat"].depends_on
 
 
+def test_catalog_has_all_thirteen_features():
+    expected = {
+        "scan",
+        "chat",
+        "compliance",
+        "multi_user",
+        "user_groups",
+        "sso",
+        "scim",
+        "multi_tenant",
+        "email",
+        "log_stack",
+        "tracing",
+        "mcp",
+        "admin_authoring",
+    }
+    assert set(features.FEATURE_CATALOG) == expected
+
+
+def test_container_backed_features_carry_a_compose_profile():
+    for name in ("log_stack", "tracing"):
+        feat = features.FEATURE_CATALOG[name]
+        assert feat.container_backed is True
+        assert feat.compose_profile == name
+
+
 def test_resolve_dependencies_pulls_deps_and_always_on():
     # Requesting only chat must pull in its dependency scan.
     assert features.resolve_dependencies({"chat"}) == {"chat", "scan"}
     # always_on features appear even when nothing is requested.
     assert "scan" in features.resolve_dependencies(set())
+
+
+def test_resolve_dependencies_closes_transitive_chain():
+    # scim -> sso -> multi_user must all be pulled in.
+    resolved = features.resolve_dependencies({"scim"})
+    assert {"scim", "sso", "multi_user"}.issubset(resolved)
+
+
+def test_resolve_dependencies_collaboration_chain():
+    assert "multi_user" in features.resolve_dependencies({"user_groups"})
+    assert "multi_user" in features.resolve_dependencies({"multi_tenant"})
 
 
 def test_resolve_dependencies_drops_unknown_names():

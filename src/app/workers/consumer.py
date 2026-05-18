@@ -607,6 +607,24 @@ async def _async_main() -> None:
     # findings. (2026-05-04)
     initialize_rate_limiters()
 
+    # Hydrate the feature-flag cache (modular setup — #104) so any
+    # feature-gated workflow node sees the same enabled set as the API. The
+    # worker has no FastAPI lifespan, so it loads the flags itself here.
+    try:
+        from app.infrastructure.database import AsyncSessionLocal
+        from app.infrastructure.database.repositories.system_config_repo import (
+            SystemConfigRepository,
+        )
+        from app.core.features import load_or_seed_enabled_features
+        from app.core.config_cache import SystemConfigCache
+
+        async with AsyncSessionLocal() as db:
+            enabled = await load_or_seed_enabled_features(SystemConfigRepository(db))
+        SystemConfigCache.set_enabled_features(enabled)
+        logger.info("WORKER: feature flags loaded: %s", sorted(enabled))
+    except Exception as e:
+        logger.error("WORKER: feature flag load failed: %s", e, exc_info=True)
+
     runner = WorkerRunner()
 
     loop = asyncio.get_running_loop()

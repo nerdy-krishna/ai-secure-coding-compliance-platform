@@ -45,9 +45,13 @@ class Feature:
     #: contain a feature without its dependencies.
     depends_on: FrozenSet[str] = frozenset()
     #: True when the feature needs an optional docker-compose container to be
-    #: running (e.g. ``log_stack``, ``tracing``). Issue #104 adds a boot-time
-    #: consistency check for these; #103 only records the attribute.
+    #: running (e.g. ``log_stack``, ``tracing``). The lifespan consistency
+    #: check warns when such a feature is enabled but its ``compose_profile``
+    #: is absent from ``COMPOSE_PROFILES``.
     container_backed: bool = False
+    #: For a container-backed feature, the docker-compose profile that must be
+    #: in ``COMPOSE_PROFILES`` for its containers to run.
+    compose_profile: str | None = None
     #: Always-on features cannot be disabled — ``scan`` is the product floor.
     always_on: bool = False
 
@@ -65,6 +69,60 @@ FEATURE_CATALOG: Dict[str, Feature] = {
         name="chat",
         description="Security Advisor chat.",
         depends_on=frozenset({"scan"}),
+    ),
+    "compliance": Feature(
+        name="compliance",
+        description="ASVS / MASVS posture and compliance reports.",
+        depends_on=frozenset({"scan"}),
+    ),
+    "multi_user": Feature(
+        name="multi_user",
+        description="Non-superuser accounts and user management.",
+    ),
+    "user_groups": Feature(
+        name="user_groups",
+        description="Peer visibility scope (H.2) and group management.",
+        depends_on=frozenset({"multi_user"}),
+    ),
+    "sso": Feature(
+        name="sso",
+        description="OIDC / SAML single sign-on and the SSO audit log.",
+        depends_on=frozenset({"multi_user"}),
+    ),
+    "scim": Feature(
+        name="scim",
+        description="SCIM 2.0 provisioning tokens and endpoints.",
+        depends_on=frozenset({"sso"}),
+    ),
+    "multi_tenant": Feature(
+        name="multi_tenant",
+        description="Tenant management and tenant isolation.",
+        depends_on=frozenset({"multi_user"}),
+    ),
+    "email": Feature(
+        name="email",
+        description="SMTP — password-reset and notification email.",
+    ),
+    "log_stack": Feature(
+        name="log_stack",
+        description="LLM log viewer plus the Fluentd / Loki / Grafana stack.",
+        container_backed=True,
+        compose_profile="log_stack",
+    ),
+    "tracing": Feature(
+        name="tracing",
+        description="Per-LLM-call traces via the self-hosted Langfuse stack.",
+        container_backed=True,
+        compose_profile="tracing",
+    ),
+    "mcp": Feature(
+        name="mcp",
+        description="The /mcp tool surface for external agents.",
+        depends_on=frozenset({"scan"}),
+    ),
+    "admin_authoring": Feature(
+        name="admin_authoring",
+        description="Agent / framework / prompt / RAG admin authoring.",
     ),
 }
 

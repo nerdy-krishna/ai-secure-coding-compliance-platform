@@ -7,6 +7,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../../shared/hooks/useAuth";
+import { useFeatures } from "../../../shared/hooks/useFeatures";
 import { type UserLoginData } from "../../../shared/types/api";
 import { Icon } from "../../../shared/ui/Icon";
 import { useToast } from "../../../shared/ui/Toast";
@@ -28,6 +29,7 @@ const LoginPageContent: React.FC = () => {
     isLoading: authLoading,
     clearError,
   } = useAuth();
+  const { isFeatureEnabled } = useFeatures();
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const passkeySupported = webauthnService.isSupported();
   const toast = useToast();
@@ -51,8 +53,14 @@ const LoginPageContent: React.FC = () => {
     }
   }, [authError, clearError, toast]);
 
-  // Load enabled SSO providers on mount.
+  // Load enabled SSO providers on mount — only when the `sso` feature is on
+  // (modular setup). When disabled the SSO routers are not even mounted, so
+  // skipping the request avoids a guaranteed 404.
   useEffect(() => {
+    if (!isFeatureEnabled("sso")) {
+      setProvidersLoaded(true);
+      return;
+    }
     let cancelled = false;
     ssoService
       .listEnabledProviders()
@@ -68,14 +76,14 @@ const LoginPageContent: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isFeatureEnabled]);
 
   // Force-SSO preflight: when the user types an email and tabs out, ask
   // the backend whether their domain requires SSO. If yes, hide the
   // password field and surface the matching SSO button.
   useEffect(() => {
     const trimmed = form.username.trim();
-    if (!trimmed.includes("@") || trimmed.length < 5) {
+    if (!isFeatureEnabled("sso") || !trimmed.includes("@") || trimmed.length < 5) {
       setForcedSso(null);
       return;
     }
@@ -94,7 +102,7 @@ const LoginPageContent: React.FC = () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [form.username]);
+  }, [form.username, isFeatureEnabled]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

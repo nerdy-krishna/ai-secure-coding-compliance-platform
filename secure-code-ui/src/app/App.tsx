@@ -188,14 +188,18 @@ function AppContent() {
             element={<ProjectDetailPage />}
           />
           <Route path="/analysis/results/:scanId" element={<ResultsPage />} />
-          <Route
-            path="/scans/:scanId/llm-logs"
-            element={<LlmLogViewerPage />}
-          />
+          <Route element={<FeatureRoute feature="log_stack" />}>
+            <Route
+              path="/scans/:scanId/llm-logs"
+              element={<LlmLogViewerPage />}
+            />
+          </Route>
           <Route element={<FeatureRoute feature="chat" />}>
             <Route path="/advisor" element={<SecurityAdvisorPage />} />
           </Route>
-          <Route path="/compliance" element={<CompliancePage />} />
+          <Route element={<FeatureRoute feature="compliance" />}>
+            <Route path="/compliance" element={<CompliancePage />} />
+          </Route>
           <Route path="/account/history" element={<SubmissionHistoryPage />} />
           <Route
             path="/account/settings/appearance"
@@ -209,22 +213,36 @@ function AppContent() {
 
         <Route element={<RouteGuard requires="superuser" />}>
           <Route path="/admin/system" element={<SystemConfigTab />} />
-          <Route path="/admin/users" element={<UserManagementTab />} />
-          <Route path="/admin/user-groups" element={<UserGroupsPage />} />
           <Route path="/admin/findings" element={<AdminFindingsPage />} />
           <Route path="/admin/appearance" element={<AppearanceSettingsPage />} />
-          <Route path="/admin/smtp" element={<SMTPSettingsTab />} />
-          <Route path="/admin/sso/providers" element={<SsoProvidersPage />} />
-          <Route path="/admin/sso/audit" element={<SsoAuditPage />} />
-          <Route path="/admin/scim/tokens" element={<ScimTokensPage />} />
-          <Route path="/admin/tenants" element={<TenantsPage />} />
           <Route path="/account/settings/llm" element={<LLMSettingsPage />} />
-          <Route path="/admin/agents" element={<AgentManagementPage />} />
-          <Route
-            path="/admin/frameworks"
-            element={<FrameworkManagementPage />}
-          />
-          <Route path="/admin/prompts" element={<PromptManagementPage />} />
+          <Route element={<FeatureRoute feature="multi_user" />}>
+            <Route path="/admin/users" element={<UserManagementTab />} />
+          </Route>
+          <Route element={<FeatureRoute feature="user_groups" />}>
+            <Route path="/admin/user-groups" element={<UserGroupsPage />} />
+          </Route>
+          <Route element={<FeatureRoute feature="email" />}>
+            <Route path="/admin/smtp" element={<SMTPSettingsTab />} />
+          </Route>
+          <Route element={<FeatureRoute feature="sso" />}>
+            <Route path="/admin/sso/providers" element={<SsoProvidersPage />} />
+            <Route path="/admin/sso/audit" element={<SsoAuditPage />} />
+          </Route>
+          <Route element={<FeatureRoute feature="scim" />}>
+            <Route path="/admin/scim/tokens" element={<ScimTokensPage />} />
+          </Route>
+          <Route element={<FeatureRoute feature="multi_tenant" />}>
+            <Route path="/admin/tenants" element={<TenantsPage />} />
+          </Route>
+          <Route element={<FeatureRoute feature="admin_authoring" />}>
+            <Route path="/admin/agents" element={<AgentManagementPage />} />
+            <Route
+              path="/admin/frameworks"
+              element={<FrameworkManagementPage />}
+            />
+            <Route path="/admin/prompts" element={<PromptManagementPage />} />
+          </Route>
           {/* /admin/rag has been merged into /compliance; redirect any
               bookmarks and the ?framework=…&action=git-ingest deep-link
               (now unused — the Compliance page handles ingestion inline). */}

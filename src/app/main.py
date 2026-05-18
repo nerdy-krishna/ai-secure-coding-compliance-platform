@@ -150,6 +150,30 @@ async def lifespan(app: FastAPI):
                     "lifespan.features.loaded",
                     extra={"enabled": sorted(enabled_features)},
                 )
+                # Consistency check: a container-backed feature is enabled but
+                # its docker-compose profile is absent from COMPOSE_PROFILES,
+                # so its containers were never started. Skipped entirely when
+                # COMPOSE_PROFILES is unset (installs predating modular setup).
+                _profiles_env = os.getenv("COMPOSE_PROFILES")
+                if _profiles_env is not None:
+                    from app.core.features import FEATURE_CATALOG
+
+                    _active = {p.strip() for p in _profiles_env.split(",") if p.strip()}
+                    for _fname in enabled_features:
+                        _feat = FEATURE_CATALOG.get(_fname)
+                        if (
+                            _feat
+                            and _feat.container_backed
+                            and _feat.compose_profile
+                            and _feat.compose_profile not in _active
+                        ):
+                            logger.warning(
+                                "lifespan.features.container_profile_missing",
+                                extra={
+                                    "feature": _fname,
+                                    "required_profile": _feat.compose_profile,
+                                },
+                            )
             except Exception:
                 logger.error("lifespan.features.load_failed", exc_info=True)
 
@@ -688,9 +712,25 @@ app = FastAPI(
     redoc_url=None if _is_production else "/redoc",
     openapi_url=None if _is_production else "/openapi.json",
 )
-# Mount the MCP sub-app. MCP clients connect to /mcp; the REST API keeps
-# its /api/v1/* routes.
-app.mount("/mcp", _mcp_app)
+# Feature flags (modular setup — issue #103/#104). Computed here, before any
+# router or sub-app is mounted, so a disabled feature can be skipped entirely
+# (its endpoints 404 and it is absent from the OpenAPI schema). The read is a
+# synchronous psycopg query — uvicorn imports this module from inside its own
+# event loop, so an async query is not an option. The lifespan re-loads the
+# flag set authoritatively (and seeds-if-empty) once the DB is fully up.
+from app.core.config_cache import SystemConfigCache as _SCC_BOOT  # noqa: E402
+from app.core.features import bootstrap_enabled_features_sync  # noqa: E402
+
+_enabled_features = bootstrap_enabled_features_sync()
+_SCC_BOOT.set_enabled_features(_enabled_features)
+logger.info("startup.features.bootstrap", extra={"enabled": sorted(_enabled_features)})
+
+# Mount the MCP sub-app — gated by `mcp`. MCP clients connect to /mcp; the
+# REST API keeps its /api/v1/* routes.
+if "mcp" in _enabled_features:
+    app.mount("/mcp", _mcp_app)
+else:
+    logger.info("startup.features.router_skipped", extra={"feature": "mcp"})
 
 
 _CORR_ID_RE = __import__("re").compile(r"[A-Za-z0-9._:\-]{1,128}")
@@ -882,64 +922,75 @@ async def _last_resort_handler(request: Request, exc: Exception):
 
 # --- Include API Routers ---
 
-# Feature flags (modular setup — issue #103). Router mounting is a
-# process-start decision made before the lifespan runs: a disabled feature's
-# router is not included at all, so its endpoints 404 and are absent from
-# /docs. This import-time bootstrap reads the flag set over a synchronous
-# connection; the lifespan re-loads it (and seeds-if-empty) once the DB is up.
-# Fail-open — a boot-time DB hiccup falls back to all features enabled.
-from app.core.features import bootstrap_enabled_features_sync  # noqa: E402
-
-_enabled_features = bootstrap_enabled_features_sync()
-SystemConfigCache.set_enabled_features(_enabled_features)
-logger.info(
-    "startup.features.bootstrap", extra={"enabled": sorted(_enabled_features)}
-)
-
 # Main application router for submissions and results
 app.include_router(projects_router, prefix="/api/v1", tags=["Submissions"])
 
 # Public feature-flag discovery endpoint (unauthenticated).
 app.include_router(features_router, prefix="/api/v1", tags=["Features"])
 
+
+def _include_if_enabled(feature: str, *args, **kwargs) -> None:
+    """Mount a router only when its backing feature is enabled (modular setup).
+
+    A disabled feature's router is not registered at all — its endpoints 404
+    and are absent from the OpenAPI schema. Mirrors the ``chat`` gate.
+    """
+    if feature in _enabled_features:
+        app.include_router(*args, **kwargs)
+    else:
+        logger.info("startup.features.router_skipped", extra={"feature": feature})
+
+
 # Router for managing LLM Configurations
 app.include_router(
     llm_router, prefix="/api/v1/admin", tags=["Admin: LLM Configurations"]
 )
 
-# Router for managing Frameworks
-app.include_router(framework_router, prefix="/api/v1/admin", tags=["Admin: Frameworks"])
-
-# Router for managing Agents
-app.include_router(agent_router, prefix="/api/v1/admin", tags=["Admin: Agents"])
-
-# Router for managing Prompt Templates
-app.include_router(
-    prompt_router, prefix="/api/v1/admin", tags=["Admin: Prompt Templates"]
+# Agent / framework / prompt / RAG authoring — gated by `admin_authoring`.
+_include_if_enabled(
+    "admin_authoring",
+    framework_router,
+    prefix="/api/v1/admin",
+    tags=["Admin: Frameworks"],
+)
+_include_if_enabled(
+    "admin_authoring", agent_router, prefix="/api/v1/admin", tags=["Admin: Agents"]
+)
+_include_if_enabled(
+    "admin_authoring",
+    prompt_router,
+    prefix="/api/v1/admin",
+    tags=["Admin: Prompt Templates"],
+)
+_include_if_enabled(
+    "admin_authoring",
+    rag_router,
+    prefix="/api/v1/admin",
+    tags=["Admin: RAG Management"],
 )
 
-# Router for managing RAG
-app.include_router(rag_router, prefix="/api/v1/admin", tags=["Admin: RAG Management"])
+# System Logs (LLM log viewer) — gated by the container-backed `log_stack`.
+_include_if_enabled(
+    "log_stack", logs_router, prefix="/api/v1/admin", tags=["Admin: System Logs"]
+)
 
-# Router for System Logs
-app.include_router(logs_router, prefix="/api/v1/admin", tags=["Admin: System Logs"])
+# Chat / Security Advisor — gated by `chat`.
+_include_if_enabled("chat", chat_router, prefix="/api/v1/chat", tags=["Chat"])
 
-# Router for Chat — gated by the `chat` feature flag (modular setup). When
-# disabled the router is not mounted at all: /api/v1/chat/* 404s and is
-# absent from the OpenAPI schema.
-if "chat" in _enabled_features:
-    app.include_router(chat_router, prefix="/api/v1/chat", tags=["Chat"])
-else:
-    logger.info("startup.features.router_skipped", extra={"feature": "chat"})
+# Compliance (per-framework rollups for the Compliance page) — gated by `compliance`.
+_include_if_enabled(
+    "compliance", compliance_router, prefix="/api/v1", tags=["Compliance"]
+)
 
-# Router for Compliance (per-framework rollups for the Compliance page)
-app.include_router(compliance_router, prefix="/api/v1", tags=["Compliance"])
+# Admin seed/restore-defaults — part of the authoring surface.
+_include_if_enabled(
+    "admin_authoring", admin_seed_router, prefix="/api/v1", tags=["Admin: Seed"]
+)
 
-# Router for admin seed/restore-defaults
-app.include_router(admin_seed_router, prefix="/api/v1", tags=["Admin: Seed"])
-
-# Router for admin user-group CRUD (scan-scope membership)
-app.include_router(admin_groups_router, prefix="/api/v1", tags=["Admin: User Groups"])
+# Admin user-group CRUD (scan-scope membership) — gated by `user_groups`.
+_include_if_enabled(
+    "user_groups", admin_groups_router, prefix="/api/v1", tags=["Admin: User Groups"]
+)
 # Cross-tenant findings list with source filter (sast-prescan-followups Group D1).
 app.include_router(admin_findings_router, prefix="/api/v1", tags=["Admin: Findings"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])
@@ -954,9 +1005,14 @@ from app.api.v1.routers.scan_coverage import (  # noqa: E402
     router as scan_coverage_router,
 )
 
-app.include_router(admin_users_router, prefix="/api/v1")
-app.include_router(
-    rule_sources_router, prefix="/api/v1/admin", tags=["Admin: Rule Sources"]
+# User management — gated by `multi_user`.
+_include_if_enabled("multi_user", admin_users_router, prefix="/api/v1")
+# Rule-source authoring — part of the authoring surface.
+_include_if_enabled(
+    "admin_authoring",
+    rule_sources_router,
+    prefix="/api/v1/admin",
+    tags=["Admin: Rule Sources"],
 )
 app.include_router(scan_coverage_router, prefix="/api/v1", tags=["Scan Coverage"])
 
@@ -984,10 +1040,13 @@ from app.api.v1.routers.auth_login_guard import (  # noqa: E402
     ForceSsoMiddleware,
 )
 
-app.include_router(sso_router, prefix="/api/v1")
-app.include_router(admin_sso_router, prefix="/api/v1")
-app.include_router(login_guard_router, prefix="/api/v1")
-app.add_middleware(ForceSsoMiddleware)
+# Enterprise SSO — gated by `sso`. The force-SSO middleware is only added
+# when SSO is enabled (otherwise there is nothing to enforce).
+_include_if_enabled("sso", sso_router, prefix="/api/v1")
+_include_if_enabled("sso", admin_sso_router, prefix="/api/v1")
+_include_if_enabled("sso", login_guard_router, prefix="/api/v1")
+if "sso" in _enabled_features:
+    app.add_middleware(ForceSsoMiddleware)
 
 # WebAuthn / passkey endpoints (Chunk 5).
 from app.api.v1.routers.webauthn import router as webauthn_router  # noqa: E402
@@ -1000,8 +1059,9 @@ app.include_router(webauthn_router, prefix="/api/v1")
 from app.api.v1.routers.scim import router as scim_router  # noqa: E402
 from app.api.v1.routers.admin_scim import router as admin_scim_router  # noqa: E402
 
-app.include_router(scim_router)
-app.include_router(admin_scim_router, prefix="/api/v1")
+# SCIM 2.0 — gated by `scim` (which depends on `sso`).
+_include_if_enabled("scim", scim_router)
+_include_if_enabled("scim", admin_scim_router, prefix="/api/v1")
 
 # Tenant CRUD admin surface (Chunk 7) — superuser-only.
 from app.api.v1.routers.admin_tenants import (  # noqa: E402
@@ -1011,10 +1071,13 @@ from app.api.v1.routers.admin_users_tenant import (  # noqa: E402
     router as admin_users_tenant_router,
 )
 
-app.include_router(admin_tenants_router, prefix="/api/v1")
-app.include_router(admin_users_tenant_router, prefix="/api/v1")
+# Tenant management — gated by `multi_tenant`.
+_include_if_enabled("multi_tenant", admin_tenants_router, prefix="/api/v1")
+_include_if_enabled("multi_tenant", admin_users_tenant_router, prefix="/api/v1")
 
-app.include_router(
+# Password-reset — gated by `email` (reset relies on SMTP delivery).
+_include_if_enabled(
+    "email",
     fastapi_users.get_reset_password_router(),
     prefix="/api/v1/auth",
     tags=["Authentication"],
@@ -1039,8 +1102,8 @@ app.include_router(
     prefix="/api/v1",  # Prefix is defined in the router itself as /admin/system-config
 )
 
-# Router for SMTP profile management (multi-profile, separate from generic system-config)
-app.include_router(admin_smtp_router, prefix="/api/v1")
+# SMTP profile management — gated by `email`.
+_include_if_enabled("email", admin_smtp_router, prefix="/api/v1")
 
 
 # --- Root Endpoint ---

@@ -29,7 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", match: "/account/dashboard", to: "/account/dashboard" },
   { id: "submit", label: "Submit", match: "/submission", to: "/submission/submit" },
   { id: "projects", label: "Projects", match: "/analysis", to: "/analysis/results" },
-  { id: "compliance", label: "Compliance", match: "/compliance", to: "/compliance" },
+  { id: "compliance", label: "Compliance", match: "/compliance", to: "/compliance", feature: "compliance" },
   { id: "advisor", label: "Advisor", match: "/advisor", to: "/advisor", feature: "chat" },
   { id: "history", label: "History", match: "/account/history", to: "/account/history" },
 ];
