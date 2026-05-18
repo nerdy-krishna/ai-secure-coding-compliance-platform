@@ -595,6 +595,15 @@ class BulkFindingDispositionResponse(BaseModel):
     scan_risk_score: Optional[int] = None
 
 
+class BulkFindingDispositionClearRequest(BaseModel):
+    """Body of the bulk disposition-delete (PRD #96) — superuser-only.
+    Resets the listed findings to untriaged and wipes their history."""
+
+    finding_ids: List[int] = Field(
+        ..., min_length=1, max_length=2000, description="Findings to clear."
+    )
+
+
 class FindingDispositionEventResponse(BaseModel):
     """One entry in a finding's disposition-change history (PRD #96)."""
 

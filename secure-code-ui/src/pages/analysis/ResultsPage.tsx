@@ -1657,8 +1657,105 @@ function dispositionMeta(d: FindingDisposition) {
   return DISPOSITIONS.find((x) => x.value === d) ?? DISPOSITIONS[0];
 }
 
-/** Inline finding-triage control: a state row + a note input that
- *  appears when the chosen state requires a justification. */
+// A triage action awaiting confirmation — marking findings with a
+// disposition, or deleting their disposition. `count` is how many
+// findings it applies to (1 for the per-finding control, N for bulk).
+type DispositionAction =
+  | { kind: "set"; disposition: FindingDisposition; count: number }
+  | { kind: "delete"; count: number };
+
+/** "Are you sure?" dialog for every triage write — marking or deleting,
+ *  single or bulk. Carries the justification-note field when the target
+ *  disposition requires one, so confirm + note are one step. */
+const DispositionConfirmModal: React.FC<{
+  action: DispositionAction | null;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (note: string) => void;
+}> = ({ action, busy, onCancel, onConfirm }) => {
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    setNote("");
+  }, [action]);
+  if (!action) return null;
+  const isDelete = action.kind === "delete";
+  const needsNote =
+    action.kind === "set" && NOTE_REQUIRED.includes(action.disposition);
+  const noun = `${action.count} finding${action.count === 1 ? "" : "s"}`;
+  const canConfirm = !busy && (!needsNote || note.trim().length > 0);
+  return (
+    <Modal
+      open
+      onClose={busy ? () => undefined : onCancel}
+      title={isDelete ? "Delete disposition" : "Confirm triage"}
+      width={460}
+      footer={
+        <>
+          <button
+            className="sccap-btn"
+            disabled={busy}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            className="sccap-btn sccap-btn-primary"
+            disabled={!canConfirm}
+            onClick={() => onConfirm(note.trim())}
+            style={isDelete ? { background: "var(--critical)" } : undefined}
+          >
+            {busy ? "Working…" : isDelete ? "Delete" : "Confirm"}
+          </button>
+        </>
+      }
+    >
+      <div style={{ fontSize: 13.5, color: "var(--fg)", lineHeight: 1.55 }}>
+        {action.kind === "delete" ? (
+          <>
+            Delete the triage disposition for <strong>{noun}</strong>? This
+            resets {action.count === 1 ? "it" : "them"} to untriaged and
+            permanently wipes the disposition history.
+          </>
+        ) : (
+          <>
+            Mark <strong>{noun}</strong> as{" "}
+            <strong>{dispositionMeta(action.disposition).label}</strong>?
+          </>
+        )}
+      </div>
+      {needsNote && (
+        <div style={{ marginTop: 12, display: "grid", gap: 6 }}>
+          <label style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+            A justification note is required.
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            maxLength={4000}
+            autoFocus
+            placeholder="Why is this the correct disposition?"
+            style={{
+              width: "100%",
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--fg)",
+              fontSize: 13,
+              fontFamily: "inherit",
+              resize: "vertical",
+            }}
+          />
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+/** Inline finding-triage control: the four actionable disposition
+ *  pills plus (for superusers) a delete action — every click routes
+ *  through a confirm dialog. */
 const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
   scanId,
   f,
@@ -1668,9 +1765,10 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
   const { user } = useAuth();
   const isSuperuser = user?.is_superuser === true;
   const current: FindingDisposition = f.disposition ?? "open";
-  // A state the user picked that needs a note before it can be saved.
-  const [pending, setPending] = useState<FindingDisposition | null>(null);
-  const [note, setNote] = useState("");
+  // The triage action awaiting confirmation in the dialog.
+  const [pendingAction, setPendingAction] = useState<DispositionAction | null>(
+    null,
+  );
 
   const mutation = useMutation({
     mutationFn: (vars: { disposition: FindingDisposition; note?: string }) =>
@@ -1685,8 +1783,7 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
       qc.invalidateQueries({
         queryKey: ["disposition-events", scanId, f.id],
       });
-      setPending(null);
-      setNote("");
+      setPendingAction(null);
       toast.success("Disposition updated");
     },
     onError: (e: unknown) => {
@@ -1711,6 +1808,7 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
       qc.invalidateQueries({
         queryKey: ["disposition-events", scanId, f.id],
       });
+      setPendingAction(null);
       toast.success("Disposition deleted");
     },
     onError: (e: unknown) => {
@@ -1728,14 +1826,16 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
 
   const busy = mutation.isPending || clearMutation.isPending;
 
-  const choose = (d: FindingDisposition) => {
-    if (d === current || busy) return;
-    if (NOTE_REQUIRED.includes(d)) {
-      setPending(d);
-      setNote("");
+  // The confirm dialog fires the actual mutation.
+  const confirm = (note: string) => {
+    if (!pendingAction) return;
+    if (pendingAction.kind === "delete") {
+      clearMutation.mutate();
     } else {
-      setPending(null);
-      mutation.mutate({ disposition: d });
+      mutation.mutate({
+        disposition: pendingAction.disposition,
+        note: note || undefined,
+      });
     }
   };
 
@@ -1786,7 +1886,15 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
             <button
               key={d.value}
               type="button"
-              onClick={() => choose(d.value)}
+              onClick={() => {
+                if (d.value !== current && !busy) {
+                  setPendingAction({
+                    kind: "set",
+                    disposition: d.value,
+                    count: 1,
+                  });
+                }
+              }}
               disabled={busy}
               aria-pressed={active}
               style={{
@@ -1816,7 +1924,7 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
           <button
             type="button"
             onClick={() => {
-              if (!busy) clearMutation.mutate();
+              if (!busy) setPendingAction({ kind: "delete", count: 1 });
             }}
             disabled={busy}
             title="Delete this disposition — reset to untriaged and wipe its history"
@@ -1837,60 +1945,8 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
         )}
       </div>
 
-      {/* Note prompt — shown only while a note-required state is pending. */}
-      {pending && (
-        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          <label style={{ fontSize: 12, color: "var(--fg-muted)" }}>
-            A justification note is required to mark this finding{" "}
-            <strong>{dispositionMeta(pending).label}</strong>.
-          </label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={3}
-            maxLength={4000}
-            autoFocus
-            placeholder="Why is this the correct disposition?"
-            style={{
-              width: "100%",
-              padding: "8px 10px",
-              borderRadius: 8,
-              border: "1px solid var(--border)",
-              background: "var(--bg)",
-              color: "var(--fg)",
-              fontSize: 13,
-              fontFamily: "inherit",
-              resize: "vertical",
-            }}
-          />
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              className="sccap-btn sccap-btn-primary"
-              disabled={!note.trim() || mutation.isPending}
-              onClick={() =>
-                mutation.mutate({ disposition: pending, note: note.trim() })
-              }
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              className="sccap-btn sccap-btn-ghost"
-              disabled={mutation.isPending}
-              onClick={() => {
-                setPending(null);
-                setNote("");
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Current disposition provenance. */}
-      {current !== "open" && !pending && (
+      {current !== "open" && (
         <div style={{ marginTop: 8, fontSize: 12, color: "var(--fg-muted)" }}>
           {f.disposition_at && (
             <>
@@ -1915,6 +1971,13 @@ const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
       )}
 
       <DispositionHistory scanId={scanId} findingId={f.id} />
+
+      <DispositionConfirmModal
+        action={pendingAction}
+        busy={busy}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={confirm}
+      />
     </div>
   );
 };
@@ -1929,18 +1992,28 @@ const BulkDispositionBar: React.FC<{
 }> = ({ scanId, findingIds, onClear, onApplied }) => {
   const qc = useQueryClient();
   const toast = useToast();
+  const { user } = useAuth();
+  const isSuperuser = user?.is_superuser === true;
   const [disp, setDisp] = useState<FindingDisposition | "">("");
-  const [note, setNote] = useState("");
-  const needsNote =
-    disp !== "" && NOTE_REQUIRED.includes(disp as FindingDisposition);
+  const [pendingAction, setPendingAction] = useState<DispositionAction | null>(
+    null,
+  );
 
-  const mutation = useMutation({
-    mutationFn: () =>
+  const onErr = (e: unknown, fallback: string) => {
+    const err = e as {
+      response?: { data?: { detail?: string } };
+      message?: string;
+    };
+    toast.error(err?.response?.data?.detail ?? err?.message ?? fallback);
+  };
+
+  const bulkSet = useMutation({
+    mutationFn: (vars: { disposition: FindingDisposition; note?: string }) =>
       scanService.setFindingDispositionsBulk(
         scanId,
         findingIds,
-        disp as FindingDisposition,
-        note.trim() || undefined,
+        vars.disposition,
+        vars.note,
       ),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["disposition-events", scanId] });
@@ -1950,21 +2023,41 @@ const BulkDispositionBar: React.FC<{
         }`,
       );
       setDisp("");
-      setNote("");
+      setPendingAction(null);
       onApplied();
     },
-    onError: (e: unknown) => {
-      const err = e as {
-        response?: { data?: { detail?: string } };
-        message?: string;
-      };
-      toast.error(
-        err?.response?.data?.detail ??
-          err?.message ??
-          "Bulk update failed",
-      );
-    },
+    onError: (e) => onErr(e, "Bulk update failed"),
   });
+
+  const bulkClear = useMutation({
+    mutationFn: () =>
+      scanService.clearFindingDispositionsBulk(scanId, findingIds),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["disposition-events", scanId] });
+      toast.success(
+        `Deleted disposition for ${res.updated_count} finding${
+          res.updated_count === 1 ? "" : "s"
+        }`,
+      );
+      setPendingAction(null);
+      onApplied();
+    },
+    onError: (e) => onErr(e, "Bulk delete failed"),
+  });
+
+  const busy = bulkSet.isPending || bulkClear.isPending;
+
+  const confirm = (note: string) => {
+    if (!pendingAction) return;
+    if (pendingAction.kind === "delete") {
+      bulkClear.mutate();
+    } else {
+      bulkSet.mutate({
+        disposition: pendingAction.disposition,
+        note: note || undefined,
+      });
+    }
+  };
 
   return (
     <div
@@ -1973,70 +2066,74 @@ const BulkDispositionBar: React.FC<{
         background: "var(--primary-weak)",
         border: "1px solid var(--primary)",
         borderRadius: 8,
-        display: "grid",
+        display: "flex",
+        alignItems: "center",
         gap: 8,
+        flexWrap: "wrap",
       }}
     >
-      <div
-        style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+      <strong style={{ fontSize: 12, color: "var(--fg)" }}>
+        {findingIds.length} selected
+      </strong>
+      <select
+        className="sccap-input"
+        value={disp}
+        onChange={(e) => setDisp(e.target.value as FindingDisposition | "")}
+        disabled={busy}
+        style={{ height: 30, fontSize: 12, flex: 1, minWidth: 140 }}
       >
-        <strong style={{ fontSize: 12, color: "var(--fg)" }}>
-          {findingIds.length} selected
-        </strong>
-        <select
-          className="sccap-input"
-          value={disp}
-          onChange={(e) => setDisp(e.target.value as FindingDisposition | "")}
-          style={{ height: 30, fontSize: 12, flex: 1, minWidth: 150 }}
-        >
-          <option value="">Set disposition…</option>
-          {ACTIONABLE_DISPOSITIONS.map((d) => (
-            <option key={d.value} value={d.value}>
-              {d.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="sccap-btn sccap-btn-primary"
-          disabled={
-            !disp || (needsNote && !note.trim()) || mutation.isPending
+        <option value="">Set disposition…</option>
+        {ACTIONABLE_DISPOSITIONS.map((d) => (
+          <option key={d.value} value={d.value}>
+            {d.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="sccap-btn sccap-btn-primary"
+        disabled={!disp || busy}
+        onClick={() => {
+          if (disp) {
+            setPendingAction({
+              kind: "set",
+              disposition: disp,
+              count: findingIds.length,
+            });
           }
-          onClick={() => mutation.mutate()}
-        >
-          Apply
-        </button>
+        }}
+      >
+        Apply
+      </button>
+      {/* Bulk delete is superuser-only (PRD #96). */}
+      {isSuperuser && (
         <button
           type="button"
-          className="sccap-btn sccap-btn-ghost"
-          disabled={mutation.isPending}
-          onClick={onClear}
+          className="sccap-btn"
+          disabled={busy}
+          onClick={() =>
+            setPendingAction({ kind: "delete", count: findingIds.length })
+          }
+          style={{ color: "var(--critical)", borderColor: "var(--critical)" }}
         >
-          Clear
+          Delete disposition
         </button>
-      </div>
-      {needsNote && (
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          rows={2}
-          maxLength={4000}
-          placeholder={`Justification (required for ${
-            disp === "false_positive" ? "False Positive" : "Risk Accepted"
-          })`}
-          style={{
-            width: "100%",
-            padding: "7px 9px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--bg)",
-            color: "var(--fg)",
-            fontSize: 12.5,
-            fontFamily: "inherit",
-            resize: "vertical",
-          }}
-        />
       )}
+      <button
+        type="button"
+        className="sccap-btn sccap-btn-ghost"
+        disabled={busy}
+        onClick={onClear}
+      >
+        Deselect
+      </button>
+
+      <DispositionConfirmModal
+        action={pendingAction}
+        busy={busy}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={confirm}
+      />
     </div>
   );
 };

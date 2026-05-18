@@ -570,3 +570,48 @@ class ScanLifecycleService:
             disposition_note=updated.disposition_note,
             scan_risk_score=new_score,
         )
+
+    async def clear_finding_dispositions_bulk(
+        self,
+        scan_id: uuid.UUID,
+        finding_ids: list[int],
+        user: db_models.User,
+    ) -> "api_models.BulkFindingDispositionResponse":
+        """Bulk-delete triage dispositions — reset many findings of a
+        scan to untriaged and wipe their history (PRD #96). Superuser-
+        only; the router enforces that. All-or-nothing: every requested
+        id must belong to the scan. Findings already untriaged are
+        skipped (nothing to delete) but are not an error."""
+        await self._get_scan_or_404(scan_id)
+
+        requested_ids = list(dict.fromkeys(finding_ids))
+        findings = await self.repo.get_findings_by_ids(scan_id, requested_ids)
+        if len(findings) != len(requested_ids):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="One or more findings were not found for this scan.",
+            )
+
+        to_clear = [f for f in findings if (f.disposition or "open") != "open"]
+        if not to_clear:
+            scan = await self._get_scan_or_404(scan_id)
+            return api_models.BulkFindingDispositionResponse(
+                updated_count=0,
+                disposition="open",
+                scan_risk_score=scan.risk_score,
+            )
+
+        count, new_score = await self.repo.clear_finding_dispositions(scan_id, to_clear)
+        logger.info(
+            "scan: bulk finding disposition cleared",
+            extra={
+                "scan_id": str(scan_id),
+                "actor_user_id": user.id,
+                "cleared_count": count,
+            },
+        )
+        return api_models.BulkFindingDispositionResponse(
+            updated_count=count,
+            disposition="open",
+            scan_risk_score=new_score,
+        )

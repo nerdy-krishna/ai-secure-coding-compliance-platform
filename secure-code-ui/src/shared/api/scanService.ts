@@ -341,6 +341,21 @@ export const scanService = {
   },
 
   /**
+   * Bulk-deletes triage dispositions for many findings of a scan
+   * (PRD #96). Superuser-only on the backend.
+   */
+  clearFindingDispositionsBulk: async (
+    scanId: string,
+    findingIds: number[],
+  ): Promise<BulkFindingDispositionResponse> => {
+    const response = await apiClient.delete<BulkFindingDispositionResponse>(
+      `/scans/${encodeURIComponent(scanId)}/findings/disposition`,
+      { data: { finding_ids: findingIds } },
+    );
+    return response.data;
+  },
+
+  /**
    * Downloads the scan's findings report in the given format and
    * triggers a browser save. Goes through apiClient so the request
    * carries the Authorization header (a plain <a download> would not).

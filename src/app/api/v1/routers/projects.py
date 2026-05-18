@@ -919,6 +919,23 @@ async def delete_finding_disposition(
     return await service.clear_finding_disposition(scan_id, finding_id, user)
 
 
+@router.delete(
+    "/scans/{scan_id}/findings/disposition",
+    response_model=api_models.BulkFindingDispositionResponse,
+)
+async def delete_finding_dispositions_bulk(
+    scan_id: uuid.UUID,
+    request: api_models.BulkFindingDispositionClearRequest,
+    user: db_models.User = Depends(current_superuser),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+):
+    """Bulk-delete triage dispositions for many of a scan's findings
+    (PRD #96). Superuser-only. All-or-nothing on finding ids."""
+    return await service.clear_finding_dispositions_bulk(
+        scan_id, request.finding_ids, user
+    )
+
+
 @router.delete("/scans/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_scan(
     scan_id: uuid.UUID,

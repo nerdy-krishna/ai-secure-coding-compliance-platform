@@ -859,6 +859,37 @@ class ScanRepository:
         await self.db.refresh(finding)
         return finding, new_score
 
+    async def clear_finding_dispositions(
+        self, scan_id: uuid.UUID, findings: List[db_models.Finding]
+    ) -> tuple[int, int]:
+        """Bulk version of `clear_finding_disposition` — reset many
+        findings of a scan to untriaged, wipe their disposition-event
+        history, and recompute the risk score (PRD #96, superuser-only).
+        One transaction. Returns `(count_cleared, new_risk_score)`."""
+        ids = [f.id for f in findings]
+        for finding in findings:
+            finding.disposition = "open"
+            finding.disposition_by = None
+            finding.disposition_at = None
+            finding.disposition_note = None
+        if ids:
+            await self.db.execute(
+                delete(db_models.FindingDispositionEvent).where(
+                    db_models.FindingDispositionEvent.finding_id.in_(ids)
+                )
+            )
+        new_score = await self._recompute_risk_score(scan_id)
+        try:
+            await self.db.commit()
+        except SQLAlchemyError:
+            await self.db.rollback()
+            logger.error(
+                "scan_repo.clear_finding_dispositions.commit_failed",
+                extra={"scan_id": str(scan_id), "count": len(findings)},
+            )
+            raise
+        return len(findings), new_score
+
     async def query_findings(
         self,
         *,
