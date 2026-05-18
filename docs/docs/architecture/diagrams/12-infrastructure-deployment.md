@@ -196,7 +196,7 @@ All containers join the `scpnetwork` bridge. Internal DNS resolves `app`, `db`, 
 |-------------------------------------------------------|--------------------------------------------------------------------------|
 | `POSTGRES_HOST`, `POSTGRES_HOST_ALEMBIC`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER` | DB DSN                                                |
 | `RABBITMQ_HOST`, `RABBITMQ_DEFAULT_USER`              | Broker DSN                                                               |
-| `RABBITMQ_SUBMISSION_QUEUE`, `RABBITMQ_APPROVAL_QUEUE`, `RABBITMQ_REMEDIATION_QUEUE` | Queue names                                          |
+| `RABBITMQ_SUBMISSION_QUEUE`, `RABBITMQ_APPROVAL_QUEUE` | Queue names                                                             |
 | `QDRANT_HOST`, `QDRANT_PORT`, `QDRANT_USE_TLS`        | Vector DB                                                                |
 | `ALLOWED_ORIGINS`, `FRONTEND_BASE_URL`, `API_BASE_URL`, `TRUSTED_PROXY_CIDRS` | CORS & proxy                                              |
 | `ACCESS_TOKEN_LIFETIME_SECONDS`, `REFRESH_TOKEN_LIFETIME_SECONDS`, `SESSION_ABSOLUTE_LIFETIME_SECONDS` | JWT lifetimes                  |

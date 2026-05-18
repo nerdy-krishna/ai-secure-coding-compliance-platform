@@ -27,7 +27,7 @@ flowchart LR
       API["FastAPI 0.115 / Uvicorn<br/>sccap_app · /api/v1/*"]:::app
       MCP["MCP Server<br/>app/api/mcp/server.py<br/>(tools for Claude Code / Cursor)"]:::app
       Worker["LangGraph Worker<br/>sccap_worker · aio-pika consumer"]:::app
-      RMQ[/"RabbitMQ 3.12 · AMQP 0-9-1<br/>code_submission_queue<br/>analysis_approved_queue<br/>remediation_trigger_queue"/]:::data
+      RMQ[/"RabbitMQ 3.12 · AMQP 0-9-1<br/>code_submission_queue<br/>analysis_approved_queue"/]:::data
       PG[("PostgreSQL 16<br/>30+ domain tables<br/>+ LangGraph checkpoints<br/>+ scan_outbox")]:::data
       QD[("Qdrant Vector DB<br/>SHA-pinned<br/>SECURITY_GUIDELINES<br/>CWE_COLLECTION")]:::data
       FB["fastembed (ONNX)<br/>all-MiniLM-L6-v2 · 384-dim"]:::app

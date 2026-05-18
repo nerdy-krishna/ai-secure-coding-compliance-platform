@@ -214,9 +214,8 @@ stateDiagram-v2
 |--------------------------------|--------------------|---------------|----------------------------------------------------------------------|
 | `code_submission_queue`        | API → Worker       | same          | Start of every scan                                                  |
 | `analysis_approved_queue`      | API → Worker       | same          | Resume after a `*_APPROVAL` interrupt                                |
-| `remediation_trigger_queue`    | API → Worker       | same          | Apply-fixes job (diagram 05)                                         |
 
-All three carry `DeliveryMode.PERSISTENT`; the `sccap-bounded-queues` RabbitMQ policy caps each at 100k messages with `overflow=drop-head` so a runaway producer cannot exhaust disk.
+Both carry `DeliveryMode.PERSISTENT`; the `sccap-bounded-queues` RabbitMQ policy caps each at 100k messages with `overflow=drop-head` so a runaway producer cannot exhaust disk.
 
 ### Interrupt payloads (`Command(resume=...)`)
 

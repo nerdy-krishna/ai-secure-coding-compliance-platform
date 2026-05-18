@@ -8,7 +8,7 @@ Deep dive into `sccap_worker` — the heart of every scan. Built on **LangGraph 
 
 ```mermaid
 flowchart TB
-    Start([RabbitMQ message<br/>code_submission_queue<br/>or remediation_trigger_queue]):::edge
+    Start([RabbitMQ message<br/>code_submission_queue new scan<br/>or analysis_approved_queue resume]):::edge
 
     Consumer["consumer.py<br/>aio_pika robust connection<br/>· idempotency precheck on scans.status<br/>· SCAN_WORKFLOW_TIMEOUT_SECONDS bound<br/>· LangGraph thread_id = scan_id"]:::app
 
@@ -65,9 +65,9 @@ flowchart TB
     N7 -. fan-out RAG search .-> RAG
     N7 -. fan-out LLM calls .-> LLM
     N7 --> N8
-    N8 -->|scan_type=AUDIT| N11
-    N8 -->|scan_type=REMEDIATE or apply-fixes| N9
-    N9 -. editor / merge LLM .-> LLM
+    N8 -->|scan_type=AUDIT or SUGGEST| N11
+    N8 -->|scan_type=REMEDIATE| N9
+    N9 -. merge-agent LLM .-> LLM
     N9 --> N10
     N10 -. subprocess .-> SC
     N10 --> N11
@@ -202,7 +202,7 @@ classDiagram
 ### Concurrency
 
 - **CONCURRENT_LLM_LIMIT**: 16 (env var) — `analyze_files_parallel_node` fans out up to this many concurrent agent calls. Backpressure is enforced by the per-provider rate limiter token bucket (`*_TOKENS_PER_MINUTE`).
-- **Editor 3-retry loop**: if SEARCH text doesn't match, the editor agent is re-prompted with widened context. After three failures the patch is marked INVALID — no infinite loop.
+- **Merge agent (REMEDIATE)**: when proposed fixes overlap within a file, `consolidate_and_patch_node` makes a single reasoning-LLM call (`_run_merge_agent`) to unify them; the merged file is tree-sitter parse-checked, and on a parse failure the file is left unpatched rather than emitting broken code (see diagram 05).
 - **`SCAN_WORKFLOW_TIMEOUT_SECONDS`**: 7200 (2 h default). The consumer wraps the entire workflow run in `asyncio.wait_for()` — exceeding the bound forces a `handle_error_node` transition.
 
 ### Resume semantics
@@ -283,7 +283,7 @@ Every LLM call goes through `LLMClient`, which:
 - `src/app/infrastructure/workflows/callbacks/scan_progress_notifier.py`
 - `src/app/infrastructure/messaging/{publisher,outbox_sweeper}.py`
 - `src/app/infrastructure/llm_client.py`, `llm_client_rate_limiter.py`
-- `src/app/infrastructure/agents/{specialized_agents,chat_agent,editor_agent,merge_agent,types}.py`
+- `src/app/infrastructure/agents/{generic_specialized_agent,chat_agent,finding_consolidator,file_profiler,cross_file_validator}.py`
 - `src/app/infrastructure/scanners/{bandit_runner,semgrep_runner,gitleaks_runner,osv_runner,staging,registry}.py`
 - `src/app/shared/lib/agent_routing.py`
 - `src/app/infrastructure/database/models.py` (`Scan`, `ScanEvent`, `Finding`, `LLMInteraction`)
