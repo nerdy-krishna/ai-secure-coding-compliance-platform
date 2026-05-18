@@ -142,7 +142,7 @@ const LlmLogViewerPage: React.FC = () => {
       <PageHeader
         crumbs={[
           {
-            label: `Scan ${scanId?.slice(0, 12) ?? "…"}`,
+            label: `Scan ${scanId?.slice(0, 8) ?? "…"}`,
             to: `/analysis/results/${scanId}`,
           },
           { label: "LLM cost & interactions" },

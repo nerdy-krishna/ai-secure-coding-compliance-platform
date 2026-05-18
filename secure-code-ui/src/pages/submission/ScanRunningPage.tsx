@@ -865,7 +865,7 @@ const ScanRunningPage: React.FC = () => {
                 to: fromPath,
                 onClick: !fromPath ? () => navigate(-1) : undefined,
               },
-              { label: `Scan ${scanId?.slice(0, 12) ?? "…"}` },
+              { label: `Scan ${scanId?.slice(0, 8) ?? "…"}` },
             ];
           }
           return [
@@ -878,7 +878,7 @@ const ScanRunningPage: React.FC = () => {
                   },
                 ]
               : []),
-            { label: `Scan ${scanId?.slice(0, 12) ?? "…"}` },
+            { label: `Scan ${scanId?.slice(0, 8) ?? "…"}` },
           ];
         })()}
         chip={
@@ -909,7 +909,7 @@ const ScanRunningPage: React.FC = () => {
             {isError ? <Icon.Alert size={11} /> : null}
             Scan{" "}
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
-              {scanId?.slice(0, 12)}
+              {scanId?.slice(0, 8)}
             </span>{" "}
             · {isTerminal ? displayStatus(status) : scanProgress.badge}
           </div>

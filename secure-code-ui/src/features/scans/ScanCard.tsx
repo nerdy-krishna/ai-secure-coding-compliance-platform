@@ -87,7 +87,7 @@ export const ScanCard: React.FC<ScanCardProps> = ({
         <div style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}>
           {scan.scan_type.toUpperCase()} ·{" "}
           <span style={{ fontFamily: "var(--font-mono)" }}>
-            {scan.id.slice(0, 12)}
+            {scan.id.slice(0, 8)}
           </span>
         </div>
 
