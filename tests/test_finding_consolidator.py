@@ -15,6 +15,7 @@ from app.infrastructure.agents.finding_consolidator import (
     FindingConsolidator,
     _ConsolidatedLocation,
     _ConsolidationResponse,
+    _DroppedFinding,
     _MergedFinding,
 )
 
@@ -78,7 +79,7 @@ def test_duplicates_merge_into_one_root_finding():
                 affected_locations=[_ConsolidatedLocation(line_number=2)],
             )
         ],
-        dropped_finding_numbers=[],
+        dropped_findings=[],
     )
     result = _consolidate(_FakeClient(response=response), raw)
     assert len(result) == 1
@@ -105,7 +106,7 @@ def test_cvss_is_reassessed_and_severity_follows_the_band():
                 affected_locations=[],
             )
         ],
-        dropped_finding_numbers=[],
+        dropped_findings=[],
     )
     result = _consolidate(_FakeClient(response=response), raw)
     assert len(result) == 1
@@ -128,7 +129,12 @@ def test_false_positive_is_dropped():
                 affected_locations=[],
             )
         ],
-        dropped_finding_numbers=[2],
+        dropped_findings=[
+            _DroppedFinding(
+                finding_number=2,
+                false_positive_reason="Input is a compile-time constant; not attacker-controlled.",
+            )
+        ],
     )
     result = _consolidate(_FakeClient(response=response), raw)
     assert len(result) == 1
@@ -153,7 +159,7 @@ def test_affected_locations_is_populated():
                 ],
             )
         ],
-        dropped_finding_numbers=[],
+        dropped_findings=[],
     )
     result = _consolidate(_FakeClient(response=response), raw)
     locs = result[0].affected_locations
@@ -175,7 +181,7 @@ def test_finding_neither_merged_nor_dropped_is_kept_as_orphan():
                 affected_locations=[],
             )
         ],
-        dropped_finding_numbers=[],
+        dropped_findings=[],
     )
     result = _consolidate(_FakeClient(response=response), raw)
     assert {f.title for f in result} == {"merged", "orphan"}
@@ -223,7 +229,7 @@ def test_detected_by_llms_is_unioned_across_merged_findings():
                 affected_locations=[_ConsolidatedLocation(line_number=2)],
             )
         ],
-        dropped_finding_numbers=[],
+        dropped_findings=[],
     )
     result = _consolidate(_FakeClient(response=response), raw)
     assert len(result) == 1
@@ -256,7 +262,7 @@ def test_detected_by_llms_none_for_scanner_findings():
                 affected_locations=[_ConsolidatedLocation(line_number=2)],
             )
         ],
-        dropped_finding_numbers=[],
+        dropped_findings=[],
     )
     result = _consolidate(_FakeClient(response=response), raw)
     assert len(result) == 1

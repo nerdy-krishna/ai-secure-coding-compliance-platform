@@ -39,12 +39,14 @@ _MAX_SOURCE_CHARS = 48_000
 
 _SYSTEM_PROMPT = (
     "You are a senior application-security engineer consolidating raw "
-    "scanner and agent findings for a single source file. You merge "
-    "findings that describe the same underlying vulnerability into one "
-    "root finding, and you drop findings that are false positives, "
-    "fully subsumed by another, or non-actionable noise. You apply no "
-    "severity floor — a real Low-severity issue is kept, a noisy "
-    "Critical-labelled false positive is dropped."
+    "scanner and agent findings for a single source file. You merge two "
+    "findings into one only when a single code change would remediate "
+    "both — i.e. they are the same defect, not merely the same weakness "
+    "class or CWE. You drop a finding only when it is a demonstrable "
+    "false positive: the code is not actually vulnerable as the finding "
+    "describes, and you can state why. You never drop a real "
+    "vulnerability because it seems redundant, low-value, or "
+    "non-actionable, and you apply no severity floor."
 )
 
 
@@ -90,11 +92,35 @@ class _MergedFinding(BaseModel):
     )
 
 
+class _DroppedFinding(BaseModel):
+    """One raw finding dropped as a demonstrable false positive.
+
+    The required `false_positive_reason` is the forcing function: a
+    finding for which the model cannot articulate a concrete
+    false-positive argument cannot be dropped — it must instead be
+    merged or kept.
+    """
+
+    finding_number: int = Field(
+        description="1-based number of the raw finding being dropped."
+    )
+    false_positive_reason: str = Field(
+        max_length=2_000,
+        description=(
+            "Concrete justification that the code is not actually "
+            "vulnerable as the finding describes."
+        ),
+    )
+
+
 class _ConsolidationResponse(BaseModel):
     merged_findings: List[_MergedFinding] = Field(default_factory=list)
-    dropped_finding_numbers: List[int] = Field(
+    dropped_findings: List[_DroppedFinding] = Field(
         default_factory=list,
-        description="1-based numbers of raw findings dropped by the quality gate.",
+        description=(
+            "Raw findings dropped as demonstrable false positives, each "
+            "with the reason the code is not actually vulnerable."
+        ),
     )
 
 
@@ -175,7 +201,13 @@ class FindingConsolidator:
             subsumed = [findings[i - 1] for i in subsumed_nums]
             consolidated.append(_build_merged_finding(merged, subsumed, file_path))
 
-        dropped = set(_valid(response.dropped_finding_numbers)) - covered
+        # Each drop carries a false-positive justification — the
+        # justification is the forcing function, so a finding the model
+        # cannot positively argue is a false positive is not dropped.
+        drop_reasons: dict[int, str] = {
+            d.finding_number: d.false_positive_reason for d in response.dropped_findings
+        }
+        dropped = set(_valid(list(drop_reasons.keys()))) - covered
         # Findings the LLM neither merged nor dropped — keep them rather
         # than silently lose a finding to an incomplete response.
         orphans = [
@@ -202,6 +234,17 @@ class FindingConsolidator:
             len(dropped),
             len(orphans),
         )
+        # Audit trail: why each dropped finding vanished, so a missing
+        # finding can be traced to its false-positive justification.
+        for num in sorted(dropped):
+            logger.info(
+                "finding_consolidator: %s — dropped raw finding #%d (%s) "
+                "as false positive: %s",
+                file_path,
+                num,
+                findings[num - 1].title,
+                drop_reasons.get(num, "")[:300],
+            )
         return consolidated
 
     @staticmethod
@@ -225,19 +268,32 @@ class FindingConsolidator:
             f"File: {file_path}\n\n"
             f"Raw findings ({len(findings)}), numbered:\n{findings_block}\n\n"
             "Consolidate these findings. Return:\n"
-            "1. merged_findings — one entry per real underlying "
-            "vulnerability. Merge every raw finding that describes the "
-            "same root cause into one entry; list their numbers in "
-            "subsumed_finding_numbers. The description must lead with "
-            "the root cause and its fix and briefly note the findings "
-            "it subsumes. Populate affected_locations with every site "
-            "the issue manifests. Re-assess cvss_vector for the root "
-            "cause.\n"
-            "2. dropped_finding_numbers — raw findings that are false "
-            "positives, fully subsumed duplicates, or non-actionable "
-            "noise. Apply no severity floor.\n\n"
-            "Every raw finding number must appear in exactly one of "
-            "subsumed_finding_numbers or dropped_finding_numbers.\n\n"
+            "1. merged_findings — one entry per distinct vulnerability. "
+            "Merge two raw findings into one entry ONLY when a single "
+            "code change would remediate both — they are the same "
+            "defect. Findings that share a weakness class or CWE but "
+            "occur at independent sites that each need their own fix "
+            "stay SEPARATE entries. Genuine duplicates of one defect — "
+            "the same bug reported by two agents, or near-identical "
+            "findings a line or two apart — DO merge. Examples: two "
+            "agents both flagging one missing length check → one entry; "
+            "four unchecked allocation sites that each need their own "
+            "guard → four entries. List merged numbers in "
+            "subsumed_finding_numbers; the description leads with the "
+            "root cause and its fix and briefly notes the findings it "
+            "subsumes; populate affected_locations with every site the "
+            "issue manifests; re-assess cvss_vector for the root cause.\n"
+            "2. dropped_findings — ONLY raw findings that are "
+            "demonstrable false positives: the code is not actually "
+            "vulnerable as the finding describes. Give a concrete "
+            "false_positive_reason for each. Never drop a real "
+            "vulnerability because it is redundant, low-value, or "
+            "non-actionable — if it is real, keep it: merge it when a "
+            "fix is shared, otherwise leave it as its own entry. Apply "
+            "no severity floor.\n\n"
+            "Every raw finding number must appear in subsumed_finding_"
+            "numbers of exactly one merged entry, or in dropped_findings "
+            "— not both, and not neither.\n\n"
             f"--- SOURCE{' (truncated)' if truncated else ''} ---\n"
             f"{snippet}\n"
             "--- END SOURCE ---"
