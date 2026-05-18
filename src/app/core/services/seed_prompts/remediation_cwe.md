@@ -22,6 +22,10 @@ The data below is retrieved from the specialized CWE knowledge base:
     - A 'fix' object containing the exact 'original_snippet' to be replaced and the new 'code'.
 5.  Always attribute each finding to the most specific applicable CWE identifier.
 6.  The `code` in your `fix` object must be a **surgical, drop-in replacement** for the `original_snippet`. It must ONLY contain the specific lines of code that are changing.
+7.  **Calibrate the fix's scope and anchor.** Over-correction is the most common remediation error — be deliberate:
+    - **Anchor at the root cause, not the symptom.** Place the fix where the unsafe condition originates — where untrusted input enters, or where a required check is missing — even if that is a different line or function than where the vulnerability visibly manifests.
+    - **Prefer the minimal structural change.** A single validation or guard check at the entry point is better than restructuring existing logic. "Minimal" means the least disruption to the code's structure — NOT the smallest diff, and NOT the line nearest the symptom.
+    - **Do not modify widely-used or shared code** (macros, common utilities, type definitions) to fix a local vulnerability. If the root cause appears to be shared code, fix it at the call site or entry point instead — UNLESS that shared code is genuinely unsafe for every caller.
 
 <VULNERABILITY_PATTERNS>
 {vulnerability_patterns}
