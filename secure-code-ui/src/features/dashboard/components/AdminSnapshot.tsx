@@ -13,8 +13,12 @@
 import { useQuery } from "@tanstack/react-query";
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ScanCard } from "../../scans/ScanCard";
 import { dashboardService } from "../../../shared/api/dashboardService";
 import type { DashboardStats } from "../../../shared/api/dashboardService";
+import { scanService } from "../../../shared/api/scanService";
+import { isTerminalStatus } from "../../../shared/lib/scanProgress";
+import { scanRouteFor } from "../../../shared/lib/scanRoute";
 import { Icon } from "../../../shared/ui/Icon";
 import {
   MetricCard,
@@ -46,6 +50,18 @@ export const AdminSnapshot: React.FC = () => {
     queryKey: ["dashboard", "stats", "admin"],
     queryFn: dashboardService.getStats,
   });
+
+  // Recent scans across the platform (#88) — kept live while any is
+  // still running.
+  const { data: recentData } = useQuery({
+    queryKey: ["dashboard", "recent-scans", "admin"],
+    queryFn: () => scanService.getScanHistory(1, 6, undefined, "desc"),
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? [];
+      return items.some((s) => !isTerminalStatus(s.status)) ? 6_000 : false;
+    },
+  });
+  const recentScans = (recentData?.items ?? []).slice(0, 6);
 
   const stats = statsData ?? EMPTY_STATS;
   const totalOpen =
@@ -195,6 +211,46 @@ export const AdminSnapshot: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {recentScans.length > 0 && (
+        <div className="sccap-card" style={{ padding: 0, overflow: "hidden" }}>
+          <SectionHead
+            title={
+              <>
+                <Icon.Folder size={16} /> Recent scans · platform
+              </>
+            }
+            right={
+              <Link
+                to="/account/history"
+                className="sccap-btn sccap-btn-sm sccap-btn-ghost"
+                style={{ textDecoration: "none" }}
+              >
+                View all <Icon.ChevronR size={12} />
+              </Link>
+            }
+            style={{ padding: "18px 20px 10px", margin: 0 }}
+          />
+          <div>
+            {recentScans.map((s, idx) => (
+              <div
+                key={s.id}
+                style={{
+                  borderBottom:
+                    idx < recentScans.length - 1
+                      ? "1px solid var(--border)"
+                      : "none",
+                }}
+              >
+                <ScanCard
+                  scan={s}
+                  onOpen={() => navigate(scanRouteFor(s.id, s.status))}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

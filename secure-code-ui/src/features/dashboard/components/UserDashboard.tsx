@@ -10,11 +10,12 @@ import React, { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { dashboardService } from "../../../shared/api/dashboardService";
 import type { DashboardStats } from "../../../shared/api/dashboardService";
+import { ScanCard } from "../../scans/ScanCard";
 import { scanService } from "../../../shared/api/scanService";
 import type { ScanHistoryItem } from "../../../shared/types/api";
 import { useAuth } from "../../../shared/hooks/useAuth";
+import { isTerminalStatus } from "../../../shared/lib/scanProgress";
 import { scanRouteFor } from "../../../shared/lib/scanRoute";
-import { displayStatus, statusKind } from "../../../shared/lib/scanStatus";
 import { Icon } from "../../../shared/ui/Icon";
 import {
   MetricCard,
@@ -33,62 +34,6 @@ const IN_PROGRESS_STATUSES = new Set([
   "PENDING_COST_APPROVAL",
   "PENDING_PRESCAN_APPROVAL",
 ]);
-
-function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const then = new Date(iso).getTime();
-  const diffMs = Date.now() - then;
-  if (diffMs < 60_000) return "just now";
-  const mins = Math.floor(diffMs / 60_000);
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-function statusChip(status: string): React.ReactNode {
-  // Mirror ProjectDetailPage / ScanRunningPage by routing through the
-  // shared `statusKind` taxonomy. Crucially: `stopped` (CANCELLED,
-  // BLOCKED_USER_DECLINE) and `expired` are neutral, NOT critical —
-  // a user pressing Stop is not a failure.
-  const kind = statusKind(status);
-  const label = displayStatus(status);
-  if (kind === "completed") {
-    return (
-      <span className="chip chip-success">
-        <Icon.Check size={10} /> {label}
-      </span>
-    );
-  }
-  if (kind === "failed") {
-    return <span className="chip chip-critical">{label}</span>;
-  }
-  if (kind === "blocked") {
-    return <span className="chip chip-warn">{label}</span>;
-  }
-  if (kind === "stopped" || kind === "expired") {
-    return <span className="chip">{label}</span>;
-  }
-  if (kind === "needs-input") {
-    return (
-      <span className="chip chip-info">
-        <Icon.Clock size={10} /> {label}
-      </span>
-    );
-  }
-  return (
-    <span className="chip chip-info">
-      <span
-        className="pulse-dot dot"
-        style={{ background: "currentColor" }}
-      />{" "}
-      {label}
-    </span>
-  );
-}
 
 const EMPTY_STATS: DashboardStats = {
   risk_score: 100,
@@ -117,6 +62,11 @@ export const UserDashboard: React.FC = () => {
   const { data: recentData, isLoading: recentLoading } = useQuery({
     queryKey: ["dashboard", "recent-scans"],
     queryFn: () => scanService.getScanHistory(1, 10, undefined, "desc"),
+    // Keep the widget live while a recent scan is still running (#88).
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? [];
+      return items.some((s) => !isTerminalStatus(s.status)) ? 6_000 : false;
+    },
   });
 
   const stats = statsData ?? EMPTY_STATS;
@@ -273,93 +223,24 @@ export const UserDashboard: React.FC = () => {
               to get started.
             </div>
           ) : (
-            <table className="sccap-t">
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>When</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {recent.map((s) => {
-                  return (
-                    <tr
-                      key={s.id}
-                      onClick={() => navigate(scanRouteFor(s.id, s.status))}
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td>
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 6,
-                              background: "var(--bg-soft)",
-                              display: "grid",
-                              placeItems: "center",
-                              color: "var(--fg-muted)",
-                            }}
-                          >
-                            <Icon.Folder size={14} />
-                          </div>
-                          <div>
-                            <div
-                              style={{ fontWeight: 500, color: "var(--fg)" }}
-                            >
-                              {s.project_name}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11.5,
-                                color: "var(--fg-subtle)",
-                                fontFamily: "var(--font-mono)",
-                              }}
-                            >
-                              {s.id.slice(0, 12)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td
-                        style={{
-                          color: "var(--fg-muted)",
-                          fontSize: 12.5,
-                        }}
-                      >
-                        {s.scan_type}
-                      </td>
-                      <td>{statusChip(s.status)}</td>
-                      <td
-                        style={{
-                          color: "var(--fg-muted)",
-                          fontSize: 12.5,
-                        }}
-                      >
-                        {relativeTime(s.created_at)}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: "right",
-                          color: "var(--fg-subtle)",
-                        }}
-                      >
-                        <Icon.ChevronR size={14} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div>
+              {recent.map((s, idx) => (
+                <div
+                  key={s.id}
+                  style={{
+                    borderBottom:
+                      idx < recent.length - 1
+                        ? "1px solid var(--border)"
+                        : "none",
+                  }}
+                >
+                  <ScanCard
+                    scan={s}
+                    onOpen={() => navigate(scanRouteFor(s.id, s.status))}
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
