@@ -103,6 +103,20 @@ async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
                 return
         if scan is None or scan.status not in _TERMINAL_STATUSES_FOR_CLEANUP:
             return
+        # Scan is terminal — fire the scan-completion Web Push so the
+        # owner is notified even with the SCCAP tab closed (#90). Best-
+        # effort: no-op when Web Push is unconfigured, never raises.
+        try:
+            from app.infrastructure.messaging.web_push import (
+                notify_scan_completed,
+            )
+
+            await notify_scan_completed(scan.id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "WORKFLOW: scan-completion Web Push failed for %s " "(non-fatal).",
+                scan_id_str,
+            )
         wf = await get_workflow()
         ckp = getattr(wf, "checkpointer", None)
         if ckp is None or not hasattr(ckp, "adelete_thread"):
@@ -401,6 +415,7 @@ async def _build_initial_state(
         "reasoning_llm_config_id": None,
         "utility_llm_config_id": None,
         "stage_temperatures": None,
+        "disable_temperature": None,
         "cross_file_validation": None,
         "files": None,
         "initial_file_map": None,

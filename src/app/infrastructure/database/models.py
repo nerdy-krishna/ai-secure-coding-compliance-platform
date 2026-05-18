@@ -145,6 +145,14 @@ class Scan(Base):
     # {profiler, analysis, consolidation, merge} → float map. Nullable;
     # `resolve_temperature` falls back to 0.2 per stage when absent.
     stage_temperatures: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
+    # Opt-in: disable SCCAP's temperature entirely (#92 / PRD #91). When
+    # true, no temperature is sent on any LLM call in the scan and each
+    # model runs at its own provider default — `resolve_temperature`
+    # returns None for every stage, overriding `stage_temperatures`.
+    # Off by default — today's per-stage-temperature behaviour.
+    disable_temperature: Mapped[bool] = mapped_column(
+        sa.Boolean, server_default="false", nullable=False
+    )
     # Opt-in cross-file finding validation (#81 / PRD #75). When true the
     # `validate_cross_file` node re-judges each eligible consolidated
     # finding against the code it is connected to across other files.
@@ -1152,4 +1160,28 @@ class AuthAuditEvent(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="SET NULL"),
         nullable=True,
+    )
+
+
+class PushSubscription(Base):
+    """A browser Web Push subscription for a user (#90).
+
+    One row per (user, browser-endpoint). The push sender delivers
+    scan-completion notifications to every subscription the scan's
+    owner has registered; rows are pruned when the push endpoint
+    reports the subscription is gone (404 / 410).
+    """
+
+    __tablename__ = "push_subscriptions"
+    id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The push service endpoint URL — unique per browser subscription.
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    # RFC 8291 client keys carried in the browser PushSubscription.
+    p256dh: Mapped[str] = mapped_column(Text, nullable=False)
+    auth: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )

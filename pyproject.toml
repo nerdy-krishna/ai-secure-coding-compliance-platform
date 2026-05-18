@@ -84,6 +84,10 @@ uvicorn = {extras = ["standard"], version = ">=0.35.0,<0.40.0"}
 # same range; alignment avoids a resolver split.
 python-multipart = ">=0.0.22,<0.1.0"
 cvss = "^3.4"
+# Web Push (#90) — VAPID-signed, RFC-8291-encrypted push delivery so
+# scan-completion desktop notifications fire even when the SCCAP tab is
+# closed. Pulls in py-vapid + http-ece.
+pywebpush = "^2.0.3"
 # bandit ships in both API + worker images so the deterministic SAST
 # pre-pass node (`infrastructure/scanners/bandit_runner.py`) can invoke
 # `/app/.venv/bin/bandit` as a subprocess in the worker.

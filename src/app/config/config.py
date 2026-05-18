@@ -114,6 +114,16 @@ class Settings(BaseSettings):
         le=60 * 60 * 24 * 7,
     )
 
+    # --- Web Push (#90) ---
+    # VAPID keypair for scan-completion Web Push. Optional: when either
+    # key is empty, Web Push is disabled and the app falls back to the
+    # in-app + tab-open desktop notifications (#89). The private key is
+    # a base64url-encoded raw P-256 scalar; the public key is the
+    # base64url uncompressed point used as the browser applicationServerKey.
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_PRIVATE_KEY: str = ""
+    VAPID_SUBJECT: str = "mailto:admin@sccap.local"
+
     ALLOWED_ORIGINS_STR: str = Field(alias="ALLOWED_ORIGINS")
 
     @property

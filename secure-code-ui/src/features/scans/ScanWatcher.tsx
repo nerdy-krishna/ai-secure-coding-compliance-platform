@@ -15,6 +15,7 @@ import { scanService } from "../../shared/api/scanService";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { useNotificationPermission } from "../../shared/hooks/useNotificationPermission";
 import { pushNotification } from "../../shared/hooks/useNotifications";
+import { ensureWebPushSubscription } from "../../shared/lib/pushSubscription";
 import { isTerminalStatus } from "../../shared/lib/scanProgress";
 import type { ScanHistoryItem } from "../../shared/types/api";
 
@@ -78,6 +79,15 @@ export const ScanWatcher: React.FC = () => {
 
   const desktopAllowed =
     notificationPerm.supported && notificationPerm.permission === "granted";
+
+  // Register the browser for Web Push (#90) once notification
+  // permission is granted, so scan-completion notifications fire even
+  // when the SCCAP tab is closed. Idempotent + best-effort.
+  useEffect(() => {
+    if (accessToken && desktopAllowed) {
+      void ensureWebPushSubscription();
+    }
+  }, [accessToken, desktopAllowed]);
 
   useEffect(() => {
     const items = data?.items ?? [];

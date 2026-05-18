@@ -28,6 +28,7 @@ from app.api.v1.routers.admin_findings import router as admin_findings_router
 from app.api.v1.routers.admin_groups import router as admin_groups_router
 from app.api.v1.routers.admin_seed import router as admin_seed_router
 from app.api.v1.routers.dashboard import router as dashboard_router
+from app.api.v1.routers.push import router as push_router
 from app.api.v1.routers.search import router as search_router
 from app.infrastructure.auth.backend import auth_backend
 from app.infrastructure.auth.core import fastapi_users
@@ -905,6 +906,7 @@ app.include_router(admin_groups_router, prefix="/api/v1", tags=["Admin: User Gro
 app.include_router(admin_findings_router, prefix="/api/v1", tags=["Admin: Findings"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])
 app.include_router(search_router, prefix="/api/v1", tags=["Search"])
+app.include_router(push_router, prefix="/api/v1", tags=["Push"])
 
 from app.api.v1.routers.admin_users import router as admin_users_router  # noqa: E402
 from app.api.v1.routers.admin_rule_sources import (  # noqa: E402
