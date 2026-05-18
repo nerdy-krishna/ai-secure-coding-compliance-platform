@@ -138,16 +138,27 @@ def test_parse_missing_row_falls_back_to_default():
 # load_or_seed_enabled_features — seed-if-empty guard
 # ----------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_load_or_seed_seeds_when_no_feature_rows():
+async def test_load_or_seed_seeds_from_variant(monkeypatch):
+    monkeypatch.setenv("SCCAP_VARIANT", "vibe_coder")
     repo = FakeSystemConfigRepo()
     enabled = await features.load_or_seed_enabled_features(repo)
-    assert enabled == features.resolve_dependencies(
-        features.DEFAULT_ENABLED_FEATURES
-    )
+    assert enabled == features.expand_variant("vibe_coder")
     # One features.* row written per catalog entry.
     rows = await repo.get_all()
     feature_rows = [r for r in rows if r.key.startswith(features.FEATURE_FLAG_PREFIX)]
     assert len(feature_rows) == len(features.FEATURE_CATALOG)
+    # vibe_coder seeds chat enabled, sso disabled.
+    by_key = {r.key: r.value for r in feature_rows}
+    assert by_key["features.chat"]["enabled"] is True
+    assert by_key["features.sso"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_load_or_seed_unset_variant_falls_back_to_enterprise(monkeypatch):
+    monkeypatch.delenv("SCCAP_VARIANT", raising=False)
+    repo = FakeSystemConfigRepo()
+    enabled = await features.load_or_seed_enabled_features(repo)
+    assert enabled == features.expand_variant("enterprise")
 
 
 @pytest.mark.asyncio
@@ -158,6 +169,48 @@ async def test_load_or_seed_does_not_overwrite_existing_rows():
     assert "chat" not in enabled
     # No extra rows appended — exactly the two we provided remain.
     assert len(await repo.get_all()) == 2
+
+
+# ----------------------------------------------------------------------
+# Variant presets + resolver (issue #105)
+# ----------------------------------------------------------------------
+def test_expand_variant_vibe_coder():
+    assert features.expand_variant("vibe_coder") == {"scan", "chat", "compliance"}
+
+
+def test_expand_variant_developer_excludes_enterprise_features():
+    dev = features.expand_variant("developer")
+    assert {"multi_user", "user_groups", "mcp", "admin_authoring"}.issubset(dev)
+    for enterprise_only in ("sso", "scim", "multi_tenant", "log_stack", "tracing"):
+        assert enterprise_only not in dev
+
+
+def test_expand_variant_enterprise_has_all_but_tracing():
+    ent = features.expand_variant("enterprise")
+    assert ent == features.ALL_FEATURES - {"tracing"}
+
+
+def test_expand_variant_custom_is_everything():
+    assert features.expand_variant("custom") == set(features.ALL_FEATURES)
+
+
+def test_expand_variant_unknown_falls_back_to_enterprise():
+    assert features.expand_variant("") == features.expand_variant("enterprise")
+    assert features.expand_variant("bogus") == features.expand_variant("enterprise")
+
+
+def test_prune_unsatisfied_drops_dependents():
+    # multi_user removed → sso, scim, user_groups, multi_tenant all drop.
+    full = set(features.ALL_FEATURES)
+    pruned = features.prune_unsatisfied(full - {"multi_user"})
+    for dependent in ("sso", "scim", "user_groups", "multi_tenant"):
+        assert dependent not in pruned
+    # Independent features survive.
+    assert {"compliance", "email", "log_stack"}.issubset(pruned)
+
+
+def test_prune_unsatisfied_keeps_always_on():
+    assert "scan" in features.prune_unsatisfied(set())
 
 
 # ----------------------------------------------------------------------

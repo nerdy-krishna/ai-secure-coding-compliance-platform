@@ -4,21 +4,25 @@ A *feature* is a runtime-toggleable platform capability. The enabled-feature
 set is persisted as ``features.<name>`` rows in the ``system_config`` table and
 mirrored into :class:`~app.core.config_cache.SystemConfigCache`.
 
-This module owns three things:
+This module owns four things:
 
-  * the **catalog** — the set of features and their dependency edges;
-  * **dependency resolution** — closing a requested set under its deps;
-  * **persistence** — load / seed-if-empty against ``system_config``.
+  * the **catalog** — the 13 features and their dependency edges;
+  * **dependency resolution** — closing a requested set under its deps
+    (``resolve_dependencies``) and the disable-direction counterpart
+    (``prune_unsatisfied``);
+  * **variants** — the ``vibe_coder`` / ``developer`` / ``enterprise``
+    presets and ``expand_variant``;
+  * **persistence** — variant-seeded load / seed-if-empty against
+    ``system_config``.
 
-Scope of issue #103 is the mechanism plus the first two catalog entries
-(``scan`` and ``chat``). The remaining 11 features and the variant presets
-arrive in issues #104 / #105 — adding a catalog entry here is all that those
-need to participate.
+Adding a catalog entry plus, optionally, a variant-preset membership is all
+a new feature needs to participate in modular setup.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections import namedtuple
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, FrozenSet, Iterable, List, Set
@@ -129,10 +133,60 @@ FEATURE_CATALOG: Dict[str, Feature] = {
 #: Every catalog feature name.
 ALL_FEATURES: FrozenSet[str] = frozenset(FEATURE_CATALOG)
 
-#: Features enabled when nothing has been seeded yet. Until the variant layer
-#: (issue #105) lands, the default is "everything on" so fresh and existing
-#: installs alike behave exactly as they did before the flag system existed.
+#: Fallback membership for a catalog feature that has *no* ``features.*`` row
+#: — used by ``parse_enabled_from_rows`` so a catalog grown in a later release
+#: degrades gracefully (the feature reads as enabled) against a DB seeded by
+#: an earlier one. This is *not* the seed default; seeding is variant-driven.
 DEFAULT_ENABLED_FEATURES: FrozenSet[str] = ALL_FEATURES
+
+
+# --- Variants (modular setup — issue #105) -----------------------------------
+# A variant is a named preset of enabled features chosen at install time
+# (setup.sh writes SCCAP_VARIANT). The three presets below plus `custom`
+# (operator-picked) are the packaging tiers.
+VARIANT_VIBE_CODER = "vibe_coder"
+VARIANT_DEVELOPER = "developer"
+VARIANT_ENTERPRISE = "enterprise"
+VARIANT_CUSTOM = "custom"
+
+#: Per-variant feature presets (pre-dependency-resolution — ``expand_variant``
+#: closes them). ``enterprise`` deliberately omits ``tracing``: the Langfuse
+#: stack is *available* (its compose profile ships) but the flag starts OFF
+#: so a 6-container stack does not boot unasked. ``custom`` has no preset —
+#: it is refined by the setup wizard / admin Features page.
+VARIANT_PRESETS: Dict[str, FrozenSet[str]] = {
+    VARIANT_VIBE_CODER: frozenset({"scan", "chat", "compliance"}),
+    VARIANT_DEVELOPER: frozenset(
+        {
+            "scan",
+            "chat",
+            "compliance",
+            "multi_user",
+            "user_groups",
+            "email",
+            "mcp",
+            "admin_authoring",
+        }
+    ),
+    VARIANT_ENTERPRISE: frozenset(ALL_FEATURES - {"tracing"}),
+}
+
+
+def expand_variant(variant: str) -> Set[str]:
+    """Return the dependency-resolved enabled set for a variant name.
+
+    A known preset expands to its preset; ``custom`` expands to every feature
+    (the wizard / admin Features page then refines it); an empty or unknown
+    value falls back to the ``enterprise`` preset — the non-breaking default
+    for an install with no ``SCCAP_VARIANT`` (e.g. one upgrading from before
+    modular setup).
+    """
+    key = (variant or "").strip().lower()
+    if key in VARIANT_PRESETS:
+        return resolve_dependencies(VARIANT_PRESETS[key])
+    if key == VARIANT_CUSTOM:
+        return resolve_dependencies(ALL_FEATURES)
+    return resolve_dependencies(VARIANT_PRESETS[VARIANT_ENTERPRISE])
 
 
 def is_known_feature(name: str) -> bool:
@@ -159,6 +213,29 @@ def resolve_dependencies(requested: Iterable[str]) -> Set[str]:
         resolved.add(name)
         queue.extend(FEATURE_CATALOG[name].depends_on)
     return resolved
+
+
+def prune_unsatisfied(enabled: Iterable[str]) -> Set[str]:
+    """Drop features whose dependencies are not all present.
+
+    The disable-direction counterpart of ``resolve_dependencies``: where that
+    *adds* dependencies, this *removes* dependents. Turning ``multi_user`` off
+    must also turn ``sso`` / ``user_groups`` / ``multi_tenant`` off. Iterates
+    to a fixed point, so a transitive chain (``scim`` → ``sso`` → ``multi_user``)
+    collapses fully. Always-on features are always kept.
+    """
+    current: Set[str] = {n for n in enabled if n in FEATURE_CATALOG}
+    current |= {n for n, f in FEATURE_CATALOG.items() if f.always_on}
+    changed = True
+    while changed:
+        changed = False
+        for name in list(current):
+            if FEATURE_CATALOG[name].always_on:
+                continue
+            if not FEATURE_CATALOG[name].depends_on.issubset(current):
+                current.discard(name)
+                changed = True
+    return current
 
 
 def parse_enabled_from_rows(rows: Iterable) -> Set[str]:
@@ -194,36 +271,42 @@ def parse_enabled_from_rows(rows: Iterable) -> Set[str]:
 
 
 async def load_or_seed_enabled_features(repo: "SystemConfigRepository") -> Set[str]:
-    """Return the enabled-feature set, seeding default rows when none exist.
+    """Return the enabled-feature set, seeding from the variant when none exist.
 
     On the first call against an un-seeded ``system_config`` (no
-    ``features.*`` rows) this writes one row per catalog feature reflecting
-    ``DEFAULT_ENABLED_FEATURES``, then returns that set. On every later call it
-    just reads and parses the existing rows — the seed never overwrites
-    operator changes (the empty-table guard).
+    ``features.*`` rows) this expands ``SCCAP_VARIANT`` into the preset feature
+    set, writes one ``features.<name>`` row per catalog feature, and returns
+    that set. On every later call it just reads and parses the existing rows —
+    the seed never overwrites operator changes (the empty-table guard).
     """
     rows = await repo.get_all()
     has_feature_rows = any(
         (getattr(r, "key", "") or "").startswith(FEATURE_FLAG_PREFIX) for r in rows
     )
     if not has_feature_rows:
-        await _seed_default_feature_rows(repo)
+        variant = os.environ.get("SCCAP_VARIANT", "")
+        target = expand_variant(variant)
+        await _seed_feature_rows(repo, target)
         logger.info(
-            "features.seeded", extra={"enabled": sorted(DEFAULT_ENABLED_FEATURES)}
+            "features.seeded",
+            extra={
+                "variant": variant or "(unset→enterprise)",
+                "enabled": sorted(target),
+            },
         )
-        return resolve_dependencies(DEFAULT_ENABLED_FEATURES)
+        return target
     return parse_enabled_from_rows(rows)
 
 
-async def _seed_default_feature_rows(repo: "SystemConfigRepository") -> None:
-    """Write one ``features.<name>`` row per catalog feature (default state)."""
+async def _seed_feature_rows(repo: "SystemConfigRepository", enabled: Set[str]) -> None:
+    """Write one ``features.<name>`` row per catalog feature for ``enabled``."""
     from app.api.v1 import models as api_models
 
     for name, feature in FEATURE_CATALOG.items():
         await repo.set_value(
             api_models.SystemConfigurationCreate(
                 key=f"{FEATURE_FLAG_PREFIX}{name}",
-                value={"enabled": name in DEFAULT_ENABLED_FEATURES},
+                value={"enabled": name in enabled},
                 description=f"Feature flag: {feature.description}",
                 is_secret=False,
                 encrypted=False,
@@ -245,21 +328,22 @@ def bootstrap_enabled_features_sync() -> Set[str]:
     connection instead.
 
     Read-only: it never seeds. On a fresh, un-seeded install it finds no
-    ``features.*`` rows and returns ``DEFAULT_ENABLED_FEATURES`` (every router
-    mounted) — seeding is the job of the lifespan / the ``/setup`` endpoint.
-    Fail-open on any error (DB unreachable, table not yet migrated): a
-    boot-time hiccup never strands the app with missing routers, and the
-    lifespan re-loads the flag set authoritatively once the DB is reachable.
+    ``features.*`` rows and falls back to the ``SCCAP_VARIANT`` preset so the
+    first boot already mounts the right routers — actual seeding is the job
+    of the lifespan / the ``/setup`` endpoint. Fail-open on any error (DB
+    unreachable, table not yet migrated): a boot-time hiccup resolves to the
+    variant preset too, and the lifespan re-loads authoritatively later.
     """
     try:
         rows = _read_feature_rows_sync()
     except Exception:
         logger.warning(
-            "features.bootstrap_failed; defaulting to all features", exc_info=True
+            "features.bootstrap_failed; falling back to SCCAP_VARIANT preset",
+            exc_info=True,
         )
-        return resolve_dependencies(DEFAULT_ENABLED_FEATURES)
+        return expand_variant(os.environ.get("SCCAP_VARIANT", ""))
     if not rows:
-        return resolve_dependencies(DEFAULT_ENABLED_FEATURES)
+        return expand_variant(os.environ.get("SCCAP_VARIANT", ""))
     return parse_enabled_from_rows(rows)
 
 
