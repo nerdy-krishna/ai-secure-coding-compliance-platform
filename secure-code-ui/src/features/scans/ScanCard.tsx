@@ -104,24 +104,60 @@ export const ScanCard: React.FC<ScanCardProps> = ({
             >
               {progress.badge}
             </div>
+            {/* Compact stage timeline (#86 follow-up): one dot per
+                pipeline stage, coloured by its derived state. */}
             <div
               style={{
-                height: 4,
-                borderRadius: 99,
-                background: "var(--bg-soft)",
-                overflow: "hidden",
+                display: "flex",
+                alignItems: "center",
+                marginTop: 2,
               }}
             >
-              <div
-                style={{
-                  width: `${progress.progressPct}%`,
-                  height: "100%",
-                  background: progress.isError
-                    ? "var(--critical)"
-                    : "var(--primary)",
-                  transition: "width .3s var(--ease)",
-                }}
-              />
+              {progress.stages.map((s, i) => {
+                const dotColor =
+                  s.state === "done"
+                    ? "var(--success)"
+                    : s.state === "running"
+                      ? "var(--primary)"
+                      : s.state === "paused"
+                        ? "var(--medium)"
+                        : "transparent";
+                const prevDone =
+                  i > 0 && progress.stages[i - 1].state === "done";
+                return (
+                  <React.Fragment key={s.key}>
+                    {i > 0 && (
+                      <span
+                        style={{
+                          flex: 1,
+                          height: 2,
+                          background: prevDone
+                            ? "var(--success)"
+                            : "var(--border)",
+                        }}
+                      />
+                    )}
+                    <span
+                      title={`${s.label} — ${s.state}`}
+                      style={{
+                        width: s.state === "running" ? 10 : 8,
+                        height: s.state === "running" ? 10 : 8,
+                        borderRadius: "50%",
+                        flexShrink: 0,
+                        background: dotColor,
+                        border:
+                          s.state === "pending"
+                            ? "1.5px solid var(--border)"
+                            : "1.5px solid transparent",
+                        boxShadow:
+                          s.state === "running"
+                            ? "0 0 0 3px var(--primary-weak)"
+                            : "none",
+                      }}
+                    />
+                  </React.Fragment>
+                );
+              })}
             </div>
           </div>
         )}
