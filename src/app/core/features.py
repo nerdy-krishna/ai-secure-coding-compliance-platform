@@ -319,6 +319,41 @@ async def _seed_feature_rows(repo: "SystemConfigRepository", enabled: Set[str]) 
 _FeatureRow = namedtuple("_FeatureRow", ["key", "value"])
 
 
+def catalog_metadata() -> List[dict]:
+    """Static per-feature metadata — name, description, dependency edges,
+    container-backed flag. Public (carries no flag state); consumed by the
+    discovery endpoint and the setup wizard's custom-variant picker.
+    """
+    return [
+        {
+            "name": f.name,
+            "description": f.description,
+            "depends_on": sorted(f.depends_on),
+            "container_backed": f.container_backed,
+            "compose_profile": f.compose_profile,
+            "always_on": f.always_on,
+        }
+        for f in (FEATURE_CATALOG[n] for n in sorted(FEATURE_CATALOG))
+    ]
+
+
+async def seed_features(
+    repo: "SystemConfigRepository", requested: Iterable[str]
+) -> Set[str]:
+    """Seed ``features.*`` rows for an explicit requested set (custom variant).
+
+    The request is dependency-resolved then pruned so the persisted set is
+    always consistent. Used by the ``/setup`` endpoint when the wizard ran in
+    custom mode; preset variants go through ``load_or_seed_enabled_features``.
+    """
+    final = prune_unsatisfied(resolve_dependencies(requested))
+    await _seed_feature_rows(repo, final)
+    logger.info(
+        "features.seeded", extra={"variant": "custom", "enabled": sorted(final)}
+    )
+    return final
+
+
 def bootstrap_enabled_features_sync() -> Set[str]:
     """Read the enabled-feature set synchronously at app-import time.
 

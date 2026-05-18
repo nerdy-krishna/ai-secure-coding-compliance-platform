@@ -6,9 +6,22 @@
 
 import apiClient from "./apiClient";
 
+/** Static catalog metadata for one feature (carries no flag state). */
+export interface FeatureCatalogEntry {
+  name: string;
+  description: string;
+  depends_on: string[];
+  container_backed: boolean;
+  compose_profile: string | null;
+  always_on: boolean;
+}
+
 export interface FeaturesResponse {
   enabled_features: string[];
   all_features: string[];
+  variant: string;
+  compose_profiles: string[];
+  catalog: FeatureCatalogEntry[];
 }
 
 /** A catalog feature with its admin-visible state (GET /admin/features). */

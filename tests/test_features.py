@@ -162,6 +162,24 @@ async def test_load_or_seed_unset_variant_falls_back_to_enterprise(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_seed_features_resolves_and_prunes_custom_selection():
+    # A custom selection of {scim} must pull in sso + multi_user (resolve).
+    repo = FakeSystemConfigRepo()
+    enabled = await features.seed_features(repo, ["scim"])
+    assert {"scim", "sso", "multi_user", "scan"}.issubset(enabled)
+    rows = await repo.get_all()
+    assert len(rows) == len(features.FEATURE_CATALOG)
+
+
+def test_catalog_metadata_shape():
+    meta = features.catalog_metadata()
+    assert len(meta) == len(features.FEATURE_CATALOG)
+    entry = next(e for e in meta if e["name"] == "scim")
+    assert entry["depends_on"] == ["sso"]
+    assert {"name", "description", "container_backed", "always_on"} <= set(entry)
+
+
+@pytest.mark.asyncio
 async def test_load_or_seed_does_not_overwrite_existing_rows():
     # An operator has already disabled chat. Seeding must not run again.
     repo = FakeSystemConfigRepo([_flag_row("scan", True), _flag_row("chat", False)])
@@ -436,5 +454,9 @@ async def test_get_features_endpoint_returns_enabled_set():
         assert body["enabled_features"] == ["scan"]
         assert "chat" in body["all_features"]
         assert "scan" in body["all_features"]
+        # Discovery payload also carries variant + catalog (#107).
+        assert "variant" in body
+        assert isinstance(body["compose_profiles"], list)
+        assert len(body["catalog"]) == len(features.ALL_FEATURES)
     finally:
         SystemConfigCache.set_enabled_features(previous)

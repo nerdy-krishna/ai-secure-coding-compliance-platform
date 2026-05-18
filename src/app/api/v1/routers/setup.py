@@ -345,14 +345,23 @@ async def perform_setup(
                 exc_info=True,
             )
 
-    # Seed feature flags (modular setup — issue #103). On a fresh install the
-    # first app boot ran before migrations created `system_config`, so the
-    # lifespan could not seed; do it here, now the table exists. Idempotent —
-    # seeding is a no-op once `features.*` rows exist.
+    # Seed feature flags (modular setup). On a fresh install the first app
+    # boot ran before migrations created `system_config`, so the lifespan
+    # could not seed; do it here. When the wizard ran in custom mode it sends
+    # an explicit `enabled_features` list — seed that (dependency-resolved);
+    # otherwise seed from the SCCAP_VARIANT preset.
     try:
-        from app.core.features import load_or_seed_enabled_features
+        from app.core.features import (
+            load_or_seed_enabled_features,
+            seed_features,
+        )
 
-        enabled_features = await load_or_seed_enabled_features(sys_conf_repo)
+        if request.enabled_features is not None:
+            enabled_features = await seed_features(
+                sys_conf_repo, request.enabled_features
+            )
+        else:
+            enabled_features = await load_or_seed_enabled_features(sys_conf_repo)
         SystemConfigCache.set_enabled_features(enabled_features)
     except Exception:
         logger.error("setup: failed to seed feature flags", exc_info=True)

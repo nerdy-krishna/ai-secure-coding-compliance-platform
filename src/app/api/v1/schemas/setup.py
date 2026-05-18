@@ -1,7 +1,7 @@
 """Setup schemas. admin_password and llm_api_key are SECRET-class (must not be logged or echoed); admin_email is PII (redact in logs). frontend_url is operator-supplied and untrusted; downstream callers must validate URL scheme/host before use."""
 
 from pydantic import AnyHttpUrl, BaseModel, EmailStr, Field, SecretStr, model_validator
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 
 class SetupRequest(BaseModel):
@@ -53,6 +53,14 @@ class SetupRequest(BaseModel):
     frontend_url: Optional[AnyHttpUrl] = Field(
         default=None,
         description="Public URL for cloud deployment (e.g., http://123.45.67.89). Required if deployment_type is 'cloud'.",
+    )
+
+    # Modular setup (#107): the custom-variant feature selection from the
+    # wizard. None for the preset variants — the app seeds from SCCAP_VARIANT.
+    # When present, the server resolves dependencies and prunes before seeding.
+    enabled_features: Optional[List[str]] = Field(
+        default=None,
+        description="Custom-variant feature selection; null for preset variants.",
     )
 
     @model_validator(mode="after")
