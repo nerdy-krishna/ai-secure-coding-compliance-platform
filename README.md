@@ -22,16 +22,25 @@ separate, opt-in step.
   deterministic-prescan review, a profiling-cost approval, and the
   deep-analysis cost approval. Nothing expensive runs without your
   explicit OK.
-- **Per-file profiler + content-based routing** — before analysis,
+- **Per-file profiler + baseline-aware routing** — before analysis,
   every file is profiled (summary, security-relevant operations,
-  applicable security domains) on a cheap *utility* model. Each file
-  is then analysed only by the agents relevant to its content, and the
+  applicable security domains) on a cheap *utility* model, with the
+  prompt grounded in the file's tree-sitter symbol index. Routing then
+  unions a deterministic, human-curated **per-language baseline** of
+  agents with the profiler's content picks — so an agent that should
+  always run for a language can never be silently dropped — and the
   cost estimate reflects that routed set.
 - **Consolidated findings** — a reasoning-model consolidation pass
   merges the raw per-agent findings into one root finding per real
   issue: it leads with the root cause and fix, lists every affected
   location, carries corroborating agents, and drops false positives
   and noise. No more duplicate rows for the same bug.
+- **Opt-in cross-file validation** — enable it at submit time and each
+  eligible finding is re-judged against the code that calls and feeds
+  it across other files. The non-destructive verdict (`confirmed` /
+  `mitigated` / `unconfirmed` + a rationale) collapses upstream-
+  mitigated findings out of the default Results view and badges the
+  confirmed ones — no severity is ever changed.
 - **Downloadable findings report** — export any scan's findings as a
   self-contained HTML page, a CSV (one row per finding), or a
   paginated PDF, straight from the Results page.
@@ -56,8 +65,9 @@ separate, opt-in step.
 - **Multi-provider LLM support** — OpenAI, Anthropic, Google, DeepSeek,
   and xAI. Each scan is configured with two slots: a *utility* (cheap)
   model for profiling and verification, and a *reasoning* (capable)
-  model for analysis and consolidation. API keys are Fernet-encrypted
-  server-side.
+  model for analysis and consolidation, plus a per-stage temperature
+  (profiler / analysis / consolidation / merge) tunable at submit
+  time. API keys are Fernet-encrypted server-side.
 
 ### For security admins
 - **User Groups + scoped visibility** — an admin creates groups and
@@ -99,8 +109,9 @@ separate, opt-in step.
 
 ## How It Works
 
-1. **Submit** code (upload, Git URL, or archive) and pick frameworks +
-   the two LLM slots (utility + reasoning).
+1. **Submit** code (upload, Git URL, or archive) and pick frameworks,
+   the two LLM slots (utility + reasoning), the per-stage temperatures,
+   and — optionally — cross-file finding validation.
 2. **Pre-LLM scan** — deterministic SAST (Bandit · Semgrep · Gitleaks ·
    OSV) builds a repo map + dependency graph and runs first. If it
    finds anything the scan pauses at `PENDING_PRESCAN_APPROVAL` so you
@@ -110,23 +121,28 @@ separate, opt-in step.
    with a profiling-cost estimate. On approval, every file is profiled
    on the utility model: a summary, its security-relevant operations,
    and the security domains that apply to it.
-4. **Cost gate** — a dry run, scoped to each file's content-routed
-   agent set, produces the deep-analysis cost estimate. The scan
-   pauses at `PENDING_COST_APPROVAL`.
+4. **Cost gate** — a dry run, scoped to each file's routed agent set
+   (the per-language baseline unioned with the profiler's picks),
+   produces the deep-analysis cost estimate. The scan pauses at
+   `PENDING_COST_APPROVAL`.
 5. **Approve** (or cancel) each gate in the UI. A live SSE stream
    surfaces estimates and reconnects through token expiry; the worker
    resumes the same LangGraph thread from the checkpoint.
 6. **Analyze** — specialized agents run in parallel (five at a time
-   under `CONCURRENT_LLM_LIMIT`); each file is analysed only by the
-   agents its profile routed to.
+   under `CONCURRENT_LLM_LIMIT`); each file is analysed by its routed
+   agent set.
 7. **Consolidate** — a reasoning-model pass merges same-root-cause
    findings into one root finding per real issue and drops false
    positives and noise.
-8. **Review** findings in the Results page — both deterministic and
+8. **Cross-file validation (opt-in)** — if enabled at submit, each
+   eligible finding is re-judged against its cross-file callers and
+   inputs, attaching a non-destructive `confirmed` / `mitigated` /
+   `unconfirmed` verdict.
+9. **Review** findings in the Results page — both deterministic and
    LLM-emitted, tagged by source — and download the report as HTML,
    CSV, or PDF.
-9. **Remediate** — select findings, apply fixes incrementally with a
-   merge agent to resolve conflicts, then download the patched tree.
+10. **Remediate** — select findings, apply fixes incrementally with a
+    merge agent to resolve conflicts, then download the patched tree.
 
 The full worker graph and state transitions live in
 [`.agent/scanning_flow.md`](.agent/scanning_flow.md).

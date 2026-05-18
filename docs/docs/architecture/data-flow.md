@@ -16,7 +16,9 @@ pointer-heavy summary.
 ### 1. Submit (API)
 
 - UI posts to `POST /api/v1/scans` with files / git URL / archive +
-  framework selection + per-slot LLM ids.
+  framework selection + per-slot LLM ids + per-stage LLM temperatures
+  (`profiler` / `analysis` / `consolidation` / `merge`, default 0.2
+  each) + an optional `cross_file_validation` opt-in flag.
 - `projects.py` router → `scan_service.create_scan_from_uploads`
   (or `from_git` / `from_archive`) dedupes files by hash, creates
   the `Scan` row + an `ORIGINAL_SUBMISSION` code snapshot, and
@@ -70,14 +72,18 @@ pointer-heavy summary.
   file on the utility slot. Each profile carries a summary, the
   file's security-relevant operations, and its **applicable
   domains** — the subset of the scan's agent roster relevant to the
-  file. Profiles are persisted to `Scan.file_profiles`.
+  file. The profiler prompt is grounded in the file's tree-sitter
+  imports + symbol index from the repository map, so the domain picks
+  are anchored to stable structure (#77). Profiles are persisted to
+  `Scan.file_profiles`.
 
 ### 6. Analysis-cost gate
 
 `estimate_cost`:
 
-- For each file, resolves the **content-routed agent set** from its
-  profile's applicable domains (`resolve_agents_for_file`).
+- For each file, resolves the **routed agent set** via
+  `resolve_agents_for_file` — the per-language baseline floor unioned
+  with the profile's applicable domains (see §8).
 - Tokenizes the routed prompt set with `litellm.token_counter` and
   prices it against `litellm.cost_per_token` (honoring any
   per-`LLMConfiguration` override) — the estimate reflects the agents
@@ -107,10 +113,14 @@ the user:
   propagation**. The dependency graph is consulted to inject per-file
   dependency context (symbol signatures from successors) into each
   chunk's prompt.
-- **Content-based routing**: each file is analyzed only by the agents
-  its profile routed to (`resolve_agents_for_file` narrowed by the
-  profile's applicable domains, systems/web gating applied first). A
-  file with no profile falls back to extension-only routing.
+- **Baseline-aware routing**: `resolve_agents_for_file` computes
+  `baseline(language) ∪ (profiler_domains ∩ gating_eligible)`. Every
+  agent declares `baseline_languages`; an agent is force-included for
+  a file in one of its baseline languages regardless of the
+  profiler's pick, so an LLM profiler that drops a relevant agent
+  cannot lose coverage. The profiler's content picks union on top. A
+  file with no baseline and no profile falls back to the full gating
+  roster (#76 / #80).
 - Files larger than `CHUNK_ONLY_IF_LARGER_THAN` (~150 000 chars) are
   split with `semantic_chunker`; small files run as a single chunk.
 - Concurrency is bounded by a single
@@ -131,9 +141,26 @@ CVSS); false positives, fully-subsumed duplicates, and non-actionable
 noise are dropped. `save_results_node` then deletes the raw prescan
 rows and writes the consolidated set fresh.
 
-### 10. Remediation (REMEDIATE only)
+### 10. Cross-file validation (opt-in)
 
-`consolidate_and_patch` runs after `consolidate_findings`:
+`validate_cross_file` runs after `consolidate_findings`. It is wired
+permanently but is a **no-op** — no state change, no timeline event —
+unless the scan set `cross_file_validation`, so an opted-out scan is
+byte-identical to before.
+
+When opted in, the `CrossFileSlicer` runs a deterministic eligibility
+pre-filter (a tree-sitter `calls` query + the repository-map symbol
+index) and, for each eligible finding, the `CrossFileValidator` makes
+one reasoning-LLM call under bounded concurrency. The verdict —
+`cross_file_status` ∈ `confirmed` / `mitigated` / `unconfirmed` plus a
+`cross_file_rationale` — is **non-destructive**: severity is never
+changed and no finding is added or dropped. Empty slices or an LLM
+error fail safe to `unconfirmed`. See
+[Agent System → Cross-file validation](./agent-system.md) (#81 / #82).
+
+### 11. Remediation (REMEDIATE only)
+
+`consolidate_and_patch` runs after `validate_cross_file`:
 
 - Groups `proposed_fixes` by file.
 - Detects line-range conflicts and runs `_run_merge_agent` to
@@ -148,7 +175,7 @@ For AUDIT it's a no-op. For SUGGEST the consolidated findings keep
 their embedded `fixes` field (so the UI shows suggested fixes) but
 no `POST_REMEDIATION` snapshot is built.
 
-### 11. Final report
+### 12. Final report
 
 `save_final_report`:
 

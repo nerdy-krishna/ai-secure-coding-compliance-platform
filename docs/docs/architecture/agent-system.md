@@ -25,7 +25,9 @@ retrieve_and_prepare_data
   → estimate_cost               (interrupt → resume via Command)
   → analyze_files_parallel
   → consolidate_findings        (FindingConsolidator, reasoning slot)
+  → validate_cross_file         (opt-in — no-op unless cross_file_validation)
   → consolidate_and_patch       (no-op for AUDIT / SUGGEST)
+  → verify_patches              (REMEDIATE-only Semgrep re-pass)
   → save_results
   → save_final_report → END
 ```
@@ -52,7 +54,10 @@ Between the profiling-cost gate and the analysis-cost gate,
 *utility* LLM slot. Each profile records a summary, the file's
 security-relevant operations, and its **applicable domains** — the
 agents relevant to the file's content — and is persisted to
-`Scan.file_profiles`.
+`Scan.file_profiles`. The profiler prompt is **grounded in the
+repository map**: the file's tree-sitter imports + symbol index are
+fed alongside the source, so the profile's domain picks are anchored
+to structure that does not vary between runs (#77).
 
 ### Single-pass parallel analysis
 
@@ -63,11 +68,17 @@ When the user approves the analysis-cost gate, the worker resumes the
 - **No topological ordering, no cross-file patch propagation.** Every
   agent sees the original code from the `ORIGINAL_SUBMISSION`
   snapshot.
-- **Content-based routing** — `resolve_agents_for_file` narrows the
-  roster by the file profile's applicable domains (systems/web gating
-  applied first). A file with a narrow profile is analysed by fewer
-  agents than the full framework roster; a file with no profile falls
-  back to extension-only routing.
+- **Baseline-aware routing** — `resolve_agents_for_file` computes
+  `baseline(language) ∪ (profiler_domains ∩ gating_eligible)`. The
+  **baseline** is a deterministic, human-curated floor: every agent
+  declares `baseline_languages` in its `domain_query`, and an agent is
+  **force-included** for a file in one of its baseline languages
+  regardless of what the profiler picked — so an LLM profiler that
+  drops a relevant agent can never silently lose coverage. The
+  profiler's content-based picks union *on top of* that floor. A file
+  with no baseline and no profile falls back to the full gating
+  roster. The curated language → concern-area mapping is documented in
+  [Baseline Language Routing](./baseline-languages.md) (#76 / #80).
 - **Per-file dependency context** is injected from the repository
   map: `build_dep_summary(file_path)` reads symbol signatures from
   successors in the dependency graph and prefixes each chunk with a
@@ -98,6 +109,37 @@ consolidated finding set fresh; `save_final_report` writes the
 CVSS-weighted 0–10 `risk_score` and the `summary` JSON, and sets the
 final status (`COMPLETED` or `REMEDIATION_COMPLETED`).
 
+### Cross-file validation (opt-in)
+
+`validate_cross_file` runs after `consolidate_findings`. It is wired
+into the graph permanently but is a **true no-op** — no state change,
+no timeline event — unless the scan opted in via the
+`cross_file_validation` flag, so an opted-out scan's pipeline is
+byte-identical to before the node existed.
+
+When opted in, the node closes the single-file blind spot of the
+parallel analysis pass — a finding can look real in isolation but be
+neutralised by an upstream caller, or confirmed by how a related file
+feeds it untrusted data. For each consolidated finding:
+
+- The **`CrossFileSlicer`** runs a deterministic eligibility
+  pre-filter — using a tree-sitter `calls` query plus the repository
+  map's symbol index, it extracts the *caller slices* (functions in
+  other files that call the finding's enclosing function) and the
+  *input-context slices* (cross-file functions that function itself
+  calls). Findings with no cross-file connection, or from the secret /
+  dependency-CVE scanners, are skipped.
+- Each eligible finding gets one **`CrossFileValidator`** reasoning-LLM
+  call (bounded concurrency) that returns a non-destructive verdict:
+  `cross_file_status` ∈ `confirmed` / `mitigated` / `unconfirmed` plus
+  a `cross_file_rationale`. Severity is never changed and no finding
+  is added or dropped; empty slices or an LLM error fail safe to
+  `unconfirmed`, never `mitigated`.
+
+The Results page collapses `mitigated` findings out of the default
+view (still expandable), badges `confirmed` ones, and shows the
+rationale on the finding detail (#81 / #82).
+
 ## Specialized agents
 
 Specialized agents live under `src/app/infrastructure/agents/`:
@@ -111,6 +153,9 @@ Specialized agents live under `src/app/infrastructure/agents/`:
   applicable domains.
 - **`finding_consolidator`** — the FindingConsolidator (#72); merges
   and quality-gates raw findings per file on the reasoning slot.
+- **`cross_file_validator`** — the CrossFileValidator (#81); re-judges
+  an eligible finding against its cross-file caller / input-context
+  slices on the reasoning slot, returning a non-destructive verdict.
 - **`chat_agent`** — one-shot LLM call used by the Advisor. Runs RAG
   retrieval scoped to the session's `frameworks`, injects the docs
   into the prompt, and returns a response + usage metadata.
