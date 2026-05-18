@@ -131,6 +131,7 @@ class ScanSubmissionService:
         frameworks: List[str],
         utility_llm_config_id: Optional[uuid.UUID] = None,
         stage_temperatures: Optional[Dict[str, Any]] = None,
+        cross_file_validation: bool = False,
         repo_url: Optional[str] = None,
         selected_files: Optional[List[str]] = None,
     ) -> db_models.Scan:
@@ -236,6 +237,7 @@ class ScanSubmissionService:
                 reasoning_llm_config_id=reasoning_llm_config_id,
                 utility_llm_config_id=utility_llm_config_id,
                 stage_temperatures=stage_temperatures,
+                cross_file_validation=cross_file_validation,
                 frameworks=frameworks,
                 tenant_id=tenant_id,
             )

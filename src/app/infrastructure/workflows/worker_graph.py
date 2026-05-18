@@ -66,6 +66,9 @@ from app.infrastructure.workflows.nodes.results import (
     save_results_node,
 )
 from app.infrastructure.workflows.nodes.retrieve import retrieve_and_prepare_data_node
+from app.infrastructure.workflows.nodes.validate_cross_file import (
+    validate_cross_file_node,
+)
 from app.infrastructure.workflows.nodes.verify import verify_patches_node
 from app.infrastructure.workflows.state import RelevantAgent, WorkerState
 
@@ -111,6 +114,7 @@ __all__ = [
     "estimate_cost_node",
     "analyze_files_parallel_node",
     "consolidate_findings_node",
+    "validate_cross_file_node",
     "consolidate_and_patch_node",
     "verify_patches_node",
     "save_results_node",
@@ -146,6 +150,7 @@ workflow.add_node("profile_files", profile_files_node)
 workflow.add_node("estimate_cost", estimate_cost_node)
 workflow.add_node("analyze_files_parallel", analyze_files_parallel_node)
 workflow.add_node("consolidate_findings", consolidate_findings_node)
+workflow.add_node("validate_cross_file", validate_cross_file_node)
 workflow.add_node("consolidate_and_patch", consolidate_and_patch_node)
 workflow.add_node("verify_patches", verify_patches_node)
 workflow.add_node("save_results", save_results_node)
@@ -357,6 +362,14 @@ workflow.add_conditional_edges(
 )
 workflow.add_conditional_edges(
     "consolidate_findings",
+    should_continue,
+    {"continue": "validate_cross_file", "handle_error": "handle_error"},
+)
+# validate_cross_file is permanently wired but no-ops (no state change,
+# no timeline event) unless the scan opted in to cross-file validation
+# (#81). An opted-out scan's pipeline is unchanged.
+workflow.add_conditional_edges(
+    "validate_cross_file",
     should_continue,
     {"continue": "consolidate_and_patch", "handle_error": "handle_error"},
 )

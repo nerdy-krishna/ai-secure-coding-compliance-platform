@@ -41,6 +41,11 @@ class WorkerState(TypedDict):
     # merge} → float) chosen at submit time (#78). `resolve_temperature`
     # falls back to 0.2 per stage when a stage or the map is missing.
     stage_temperatures: Optional[Dict[str, Any]]
+    # Opt-in cross-file finding validation (#81 / PRD #75). When true,
+    # the `validate_cross_file` node re-judges each eligible consolidated
+    # finding against its cross-file context; when false / None the node
+    # is a no-op. Set from `Scan.cross_file_validation` by `retrieve`.
+    cross_file_validation: Optional[bool]
     files: Optional[Dict[str, str]]
     initial_file_map: Optional[Dict[str, str]]
     final_file_map: Optional[Dict[str, str]]

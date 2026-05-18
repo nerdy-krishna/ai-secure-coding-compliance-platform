@@ -184,6 +184,28 @@ class VulnerabilityFinding(BaseModel):
             "file/line. False when the same Semgrep rule still fires."
         ),
     )
+    cross_file_status: Optional[Literal["confirmed", "mitigated", "unconfirmed"]] = (
+        Field(
+            default=None,
+            description=(
+                "Opt-in cross-file validation verdict (#81 / PRD #75). NULL "
+                "when the scan did not opt in or the finding was skipped by "
+                "the eligibility pre-filter. 'confirmed' = cross-file "
+                "evidence supports the finding; 'mitigated' = an upstream "
+                "caller / sanitiser neutralises it; 'unconfirmed' = "
+                "inconclusive (also the fail-safe on empty slices / LLM "
+                "error). Non-destructive — severity is never changed."
+            ),
+        )
+    )
+    cross_file_rationale: Optional[str] = Field(
+        default=None,
+        max_length=8000,
+        description=(
+            "Plain-language justification for `cross_file_status`, citing "
+            "the cross-file evidence (caller / input-context slices)."
+        ),
+    )
 
     @field_validator("references")
     @classmethod

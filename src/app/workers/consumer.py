@@ -401,6 +401,7 @@ async def _build_initial_state(
         "reasoning_llm_config_id": None,
         "utility_llm_config_id": None,
         "stage_temperatures": None,
+        "cross_file_validation": None,
         "files": None,
         "initial_file_map": None,
         "final_file_map": None,

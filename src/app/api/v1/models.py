@@ -511,6 +511,11 @@ class VulnerabilityFindingResponse(BaseModel):
     fixes: Optional[Dict[str, Any]] = None
     is_applied_in_remediation: bool = False
     fix_verified: Optional[bool] = None
+    # Opt-in cross-file validation verdict (#81 / PRD #75). NULL when the
+    # scan did not opt in or the finding was skipped by the eligibility
+    # pre-filter; otherwise 'confirmed' / 'mitigated' / 'unconfirmed'.
+    cross_file_status: Optional[str] = None
+    cross_file_rationale: Optional[str] = None
 
     @field_validator("fixes", mode="before")
     @classmethod

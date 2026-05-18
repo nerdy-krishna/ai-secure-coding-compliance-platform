@@ -176,6 +176,7 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
                 "reasoning_llm_config_id": scan.reasoning_llm_config_id,
                 "utility_llm_config_id": scan.utility_llm_config_id,
                 "stage_temperatures": scan.stage_temperatures,
+                "cross_file_validation": scan.cross_file_validation,
                 "files": files,
                 "initial_file_map": original_snapshot.file_map,
                 "live_codebase": files.copy(),

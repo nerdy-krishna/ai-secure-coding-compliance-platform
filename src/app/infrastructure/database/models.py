@@ -145,6 +145,14 @@ class Scan(Base):
     # {profiler, analysis, consolidation, merge} → float map. Nullable;
     # `resolve_temperature` falls back to 0.2 per stage when absent.
     stage_temperatures: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
+    # Opt-in cross-file finding validation (#81 / PRD #75). When true the
+    # `validate_cross_file` node re-judges each eligible consolidated
+    # finding against the code it is connected to across other files.
+    # Off by default — it costs one extra reasoning-LLM call per
+    # eligible finding.
+    cross_file_validation: Mapped[bool] = mapped_column(
+        sa.Boolean, server_default="false", nullable=False
+    )
     context_bundles: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB)
     summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     # CycloneDX SBOM emitted by OSV-Scanner during the deterministic
@@ -295,6 +303,15 @@ class Finding(Base):
     fix_verified: Mapped[Optional[bool]] = mapped_column(
         sa.Boolean, nullable=True, default=None
     )
+    # Opt-in cross-file validation verdict (#81 / PRD #75). NULL when the
+    # scan did not opt in, or the finding was skipped by the eligibility
+    # pre-filter. Otherwise one of 'confirmed' / 'mitigated' /
+    # 'unconfirmed', with `cross_file_rationale` citing the evidence.
+    # The verdict is non-destructive — severity is never changed.
+    cross_file_status: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, default=None
+    )
+    cross_file_rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # V02.2.1: enforce maximum string lengths at the DB layer
     __table_args__ = (

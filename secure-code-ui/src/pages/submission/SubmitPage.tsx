@@ -246,6 +246,9 @@ const SubmitPage: React.FC = () => {
     merge: 0.2,
   });
   const [tempsUnlocked, setTempsUnlocked] = useState(false);
+  // Opt-in cross-file finding validation (#81 / PRD #75). Off by
+  // default — it costs one extra reasoning-LLM call per eligible finding.
+  const [crossFileValidation, setCrossFileValidation] = useState(false);
   const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
@@ -518,6 +521,7 @@ const SubmitPage: React.FC = () => {
         String(stageTemps.consolidation),
       );
       payload.append("temperature_merge", String(stageTemps.merge));
+      payload.append("cross_file_validation", String(crossFileValidation));
       // V02.2.1: intersect selectedFrameworks with the loaded allowlist before submitting
       const safeFrameworks = selectedFrameworks.filter((n) => frameworks?.some((f) => f.name === n));
       payload.append("frameworks", safeFrameworks.join(","));
@@ -1231,6 +1235,44 @@ const SubmitPage: React.FC = () => {
               >
                 Lower is more deterministic. Defaults to 0.2 per stage —
                 click Edit to tune.
+              </div>
+
+              {/* Opt-in cross-file finding validation (#81 / PRD #75). */}
+              <div style={{ marginTop: 18 }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    fontSize: 12,
+                    color: "var(--fg-muted)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={crossFileValidation}
+                    onChange={(e) => setCrossFileValidation(e.target.checked)}
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>
+                    <span style={{ fontWeight: 500 }}>
+                      Cross-file finding validation
+                    </span>
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 11,
+                        color: "var(--fg-subtle)",
+                      }}
+                    >
+                      Re-judges each eligible finding against the code that
+                      calls and feeds it across other files. Improves
+                      accuracy but costs one extra LLM call per eligible
+                      finding.
+                    </div>
+                  </span>
+                </label>
               </div>
 
               <label
