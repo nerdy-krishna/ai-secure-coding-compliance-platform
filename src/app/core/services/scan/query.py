@@ -247,6 +247,7 @@ class ScanQueryService:
             fixed_code_map=fixed_code_map or None,
             source_counts=source_counts,
             cost_details=scan.cost_details,
+            cross_file_validation=bool(scan.cross_file_validation),
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )
 

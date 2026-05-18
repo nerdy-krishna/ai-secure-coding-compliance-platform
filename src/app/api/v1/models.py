@@ -768,6 +768,10 @@ class AnalysisResultDetailResponse(BaseModel):
     # the Scan row so it's an opaque dict here. Non-null only when the
     # cost-estimate node has run; null for very-early-status scans.
     cost_details: Optional[Dict[str, Any]] = None
+    # Whether the scan opted in to cross-file finding validation (#82).
+    # Surfaced so ScanRunningPage can show the cross-file-validation
+    # stage in the progress rail only for opted-in scans.
+    cross_file_validation: bool = False
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing

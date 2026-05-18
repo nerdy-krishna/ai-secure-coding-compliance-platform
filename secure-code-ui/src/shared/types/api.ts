@@ -192,6 +192,11 @@ export interface Finding {
   references: string[];
   fixes?: SuggestedFix;
   is_applied_in_remediation?: boolean;
+  // Opt-in cross-file validation verdict (#81 / PRD #75). null when the
+  // scan did not opt in or the finding was skipped by the eligibility
+  // pre-filter; otherwise "confirmed" / "mitigated" / "unconfirmed".
+  cross_file_status?: "confirmed" | "mitigated" | "unconfirmed" | null;
+  cross_file_rationale?: string | null;
 }
 
 export interface SubmittedFile {
@@ -251,6 +256,9 @@ export interface ScanResultResponse {
   // ScanRunningPage so the user sees the number alongside the
   // "Approve & run" button. Null until cost-estimate runs.
   cost_details?: CostDetails | null;
+  // Whether the scan opted in to cross-file finding validation (#82).
+  // Drives the cross-file-validation stage in ScanRunningPage's rail.
+  cross_file_validation?: boolean;
   // Stage-event audit trail. SSE emits these live for in-progress
   // scans; the same list is included here so a terminal scan's page
   // can seed the live-event-log deterministically on mount, instead

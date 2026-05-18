@@ -111,6 +111,9 @@ const ResultsPage: React.FC = () => {
   // "bandit" / "gitleaks" / "semgrep" / "osv" / "agent". Driven by
   // the by-source pill row below the summary card.
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  // Cross-file validation (#82): `mitigated` findings are collapsed out
+  // of the default view — they stay expandable via this toggle.
+  const [showMitigated, setShowMitigated] = useState(false);
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
   const [applyingId, setApplyingId] = useState<number | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -242,8 +245,24 @@ const ResultsPage: React.FC = () => {
     [allFindings, sevFilter, sourceFilter, filePathFilter, search],
   );
 
+  // Cross-file validation (#82): `mitigated` findings are collapsed out
+  // of the default list but stay selectable when revealed.
+  const mitigatedCount = useMemo(
+    () => filtered.filter((f) => f.cross_file_status === "mitigated").length,
+    [filtered],
+  );
+  const displayedFindings = useMemo(
+    () =>
+      showMitigated
+        ? filtered
+        : filtered.filter((f) => f.cross_file_status !== "mitigated"),
+    [filtered, showMitigated],
+  );
+
   const selected =
-    filtered.find((f) => f.id === selectedFindingId) ?? filtered[0] ?? null;
+    filtered.find((f) => f.id === selectedFindingId) ??
+    displayedFindings[0] ??
+    null;
 
   // Prefer the always-present top-level project pointers (backend
   // populates these from the Scan row even when `summary_report` is
@@ -875,7 +894,7 @@ const ResultsPage: React.FC = () => {
             </div>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
-            {filtered.length === 0 ? (
+            {displayedFindings.length === 0 && mitigatedCount === 0 ? (
               <div
                 style={{
                   padding: 40,
@@ -886,7 +905,7 @@ const ResultsPage: React.FC = () => {
                 No findings match this filter.
               </div>
             ) : (
-              filtered.map((f) => {
+              displayedFindings.map((f) => {
                 const sev = (f.severity || "").toUpperCase();
                 const color = SEV_COLOR[sev] ?? "var(--fg-muted)";
                 const isSel = selected?.id === f.id;
@@ -929,6 +948,35 @@ const ResultsPage: React.FC = () => {
                       >
                         {sev}
                       </span>
+                      {f.cross_file_status === "confirmed" && (
+                        <span
+                          className="chip"
+                          style={{
+                            fontSize: 9.5,
+                            padding: "1px 6px",
+                            background: "var(--bg-soft)",
+                            color: "var(--high)",
+                            border: "1px solid var(--high)",
+                          }}
+                          title="Confirmed by cross-file validation"
+                        >
+                          cross-file ✓
+                        </span>
+                      )}
+                      {f.cross_file_status === "mitigated" && (
+                        <span
+                          className="chip"
+                          style={{
+                            fontSize: 9.5,
+                            padding: "1px 6px",
+                            color: "var(--fg-subtle)",
+                            border: "1px solid var(--border)",
+                          }}
+                          title="Mitigated by cross-file validation"
+                        >
+                          mitigated
+                        </span>
+                      )}
                       {f.cwe && (
                         <span
                           style={{
@@ -987,6 +1035,28 @@ const ResultsPage: React.FC = () => {
                   </div>
                 );
               })
+            )}
+            {mitigatedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowMitigated((v) => !v)}
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  textAlign: "left",
+                  background: "transparent",
+                  border: "none",
+                  borderTop: "1px solid var(--border)",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  color: "var(--fg-muted)",
+                }}
+                title="Findings cross-file validation marked as mitigated"
+              >
+                {showMitigated ? "Hide" : "Show"} {mitigatedCount} finding
+                {mitigatedCount === 1 ? "" : "s"} mitigated by cross-file
+                validation
+              </button>
             )}
           </div>
         </>
@@ -1405,6 +1475,55 @@ const FindingDetail: React.FC<{
             >
               {f.description}
             </div>
+          </div>
+        )}
+
+        {/* Cross-file validation verdict (#82). Absent → renders nothing. */}
+        {f.cross_file_status && (
+          <div>
+            <h4
+              style={{
+                marginBottom: 6,
+                color: "var(--fg-muted)",
+                fontSize: 11,
+                textTransform: "uppercase",
+                letterSpacing: ".06em",
+              }}
+            >
+              Cross-file validation
+            </h4>
+            <div style={{ marginBottom: 6 }}>
+              <span
+                className="chip"
+                style={{
+                  fontSize: 11,
+                  padding: "2px 9px",
+                  textTransform: "capitalize",
+                  color:
+                    f.cross_file_status === "confirmed"
+                      ? "var(--high)"
+                      : "var(--fg-muted)",
+                  border:
+                    f.cross_file_status === "confirmed"
+                      ? "1px solid var(--high)"
+                      : "1px solid var(--border)",
+                }}
+              >
+                {f.cross_file_status}
+              </span>
+            </div>
+            {f.cross_file_rationale && (
+              <div
+                style={{
+                  fontSize: 13.5,
+                  lineHeight: 1.6,
+                  color: "var(--fg)",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {f.cross_file_rationale}
+              </div>
+            )}
           </div>
         )}
 

@@ -246,6 +246,7 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 function progressFromStages(
+  stages: Stage[],
   seenStages: Set<string>,
   currentStatus: string | null,
   isPendingPrescan: boolean,
@@ -266,7 +267,7 @@ function progressFromStages(
   // Count "done" using the same state machine the stage list uses, so
   // virtual gate stages (PRESCAN_REVIEW / COST_REVIEW) contribute too.
   const states = computeStageStates(
-    KNOWN_STAGES,
+    stages,
     seenStages,
     false,
     isPendingPrescan,
@@ -276,7 +277,7 @@ function progressFromStages(
   );
   const done = states.filter((s) => s === "done").length;
   // Ensure we don't show 100% while still running.
-  return Math.min(95, Math.round((done / KNOWN_STAGES.length) * 100));
+  return Math.min(95, Math.round((done / stages.length) * 100));
 }
 
 // `fmtStatus` was a raw `BLOCKED_USER_DECLINE → "blocked user decline"`
@@ -299,6 +300,9 @@ const ScanRunningPage: React.FC = () => {
   // Renders a small loading skeleton until the first known status.
   const [status, setStatus] = useState<string | null>(null);
   const [seenStages, setSeenStages] = useState<Set<string>>(new Set());
+  // Whether the scan opted in to cross-file validation (#82). Seeded
+  // from the one-shot getScanResult below; drives the extra stage row.
+  const [crossFileValidation, setCrossFileValidation] = useState(false);
   const [events, setEvents] = useState<ScanEventMsg[]>([]);
   // §3.10b — per-file analysis progress, keyed by file_path so a file
   // showing up multiple times collapses to one row. Renders below the
@@ -365,6 +369,9 @@ const ScanRunningPage: React.FC = () => {
         if (cancelled) return;
         if (typeof r.status === "string" && r.status.length < 64) {
           setStatus(r.status);
+        }
+        if (typeof r.cross_file_validation === "boolean") {
+          setCrossFileValidation(r.cross_file_validation);
         }
         if (r.project_id) {
           setProjectInfo({
@@ -759,9 +766,26 @@ const ScanRunningPage: React.FC = () => {
   const isPendingProfiling =
     status === "PENDING_PROFILING_APPROVAL" && !profilingSubmitted;
 
+  // Stage rail (#82): a scan that opted in to cross-file validation
+  // gets an extra "Cross-file validation" row after consolidation.
+  // Opted-out scans see the unchanged KNOWN_STAGES list.
+  const stages = useMemo<Stage[]>(() => {
+    if (!crossFileValidation) return KNOWN_STAGES;
+    const next = [...KNOWN_STAGES];
+    const idx = next.findIndex((s) => s.key === "CONSOLIDATING");
+    const cfStage: Stage = {
+      key: "CROSS_FILE_VALIDATION",
+      label: "Cross-file validation",
+      icon: <Icon.Search size={14} />,
+    };
+    next.splice(idx >= 0 ? idx + 1 : next.length, 0, cfStage);
+    return next;
+  }, [crossFileValidation]);
+
   const progress = useMemo(
     () =>
       progressFromStages(
+        stages,
         seenStages,
         status,
         isPendingPrescan,
@@ -770,6 +794,7 @@ const ScanRunningPage: React.FC = () => {
         costSubmitted,
       ),
     [
+      stages,
       seenStages,
       status,
       isPendingPrescan,
@@ -1164,7 +1189,7 @@ const ScanRunningPage: React.FC = () => {
           <div style={{ display: "grid", gap: 10, marginTop: 22 }}>
             {(() => {
               const stageStates = computeStageStates(
-                KNOWN_STAGES,
+                stages,
                 seenStages,
                 isTerminal,
                 isPendingPrescan,
@@ -1172,7 +1197,7 @@ const ScanRunningPage: React.FC = () => {
                 prescanSubmitted,
                 costSubmitted,
               );
-              return KNOWN_STAGES.map((s, i) => {
+              return stages.map((s, i) => {
                 const state = stageStates[i];
                 const isHighlighted = state === "active" || state === "paused";
                 return (

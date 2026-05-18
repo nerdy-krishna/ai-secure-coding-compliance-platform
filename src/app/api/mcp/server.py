@@ -158,6 +158,15 @@ class SubmitScanInput(BaseModel):
         description="Public git HTTPS URL (https:// only). Mutually exclusive with files.",
         max_length=2048,
     )
+    cross_file_validation: bool = Field(
+        default=False,
+        description=(
+            "Opt in to cross-file finding validation (PRD #75). When true, "
+            "each eligible finding is re-judged against the code that calls "
+            "and feeds it across other files. Improves accuracy at the cost "
+            "of one extra LLM call per eligible finding. Defaults to false."
+        ),
+    )
 
 
 class AskAdvisorInput(BaseModel):
@@ -294,6 +303,7 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
                 correlation_id=str(uuid.uuid4()),
                 reasoning_llm_config_id=llm_cfg_id,
                 frameworks=payload.frameworks,
+                cross_file_validation=payload.cross_file_validation,
             )
 
             if payload.files:
