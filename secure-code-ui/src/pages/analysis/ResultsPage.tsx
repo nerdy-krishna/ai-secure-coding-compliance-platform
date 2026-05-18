@@ -1079,6 +1079,21 @@ const ResultsPage: React.FC = () => {
                 <Icon.ChevronL size={12} />
               </button>
             </div>
+            {/* Bulk-triage bar sits directly under the select-all
+                checkbox so the action is where the selection is. */}
+            {scanId && selectedIds.size > 0 && (
+              <BulkDispositionBar
+                scanId={scanId}
+                findingIds={Array.from(selectedIds)}
+                onClear={() => setSelectedIds(new Set())}
+                onApplied={() => {
+                  setSelectedIds(new Set());
+                  queryClient.invalidateQueries({
+                    queryKey: ["scan-result", scanId],
+                  });
+                }}
+              />
+            )}
             <div className="input-with-icon">
               <Icon.Search size={14} />
               <input
@@ -1147,19 +1162,6 @@ const ResultsPage: React.FC = () => {
               </select>
             </div>
           </div>
-          {scanId && selectedIds.size > 0 && (
-            <BulkDispositionBar
-              scanId={scanId}
-              findingIds={Array.from(selectedIds)}
-              onClear={() => setSelectedIds(new Set())}
-              onApplied={() => {
-                setSelectedIds(new Set());
-                queryClient.invalidateQueries({
-                  queryKey: ["scan-result", scanId],
-                });
-              }}
-            />
-          )}
           <div style={{ flex: 1, overflow: "auto" }}>
             {displayedFindings.length === 0 && mitigatedCount === 0 ? (
               <div
@@ -1905,7 +1907,8 @@ const BulkDispositionBar: React.FC<{
       style={{
         padding: "10px 12px",
         background: "var(--primary-weak)",
-        borderBottom: "1px solid var(--border)",
+        border: "1px solid var(--primary)",
+        borderRadius: 8,
         display: "grid",
         gap: 8,
       }}
