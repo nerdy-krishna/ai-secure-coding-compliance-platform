@@ -6,13 +6,15 @@
 // in-progress / pending-approval scan opens on ScanRunningPage and a
 // terminal scan opens on ResultsPage.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { ScanCard } from "../../features/scans/ScanCard";
+import { ScanRowControls } from "../../features/scans/ScanRowControls";
 import { scanService } from "../../shared/api/scanService";
 import { useAuth } from "../../shared/hooks/useAuth";
+import { isTerminalStatus } from "../../shared/lib/scanProgress";
 import { scanRouteFor } from "../../shared/lib/scanRoute";
-import { displayStatus, statusKind } from "../../shared/lib/scanStatus";
 import type { ScanHistoryItem } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
@@ -22,61 +24,6 @@ import { useToast } from "../../shared/ui/Toast";
 interface NavState {
   projectName?: string;
   repoUrl?: string | null;
-}
-
-function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return "just now";
-  const m = Math.floor(diff / 60_000);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
-function statusChip(status: string): React.ReactNode {
-  // Drives the chip from the shared `statusKind` taxonomy so wording
-  // and color stay consistent with ScanRunningPage and the dashboard.
-  // CRITICAL: only `failed` (real error) renders red; `stopped` and
-  // `expired` are neutral, `blocked` is amber/warn — those are not
-  // failures.
-  const kind = statusKind(status);
-  const label = displayStatus(status);
-  if (kind === "completed") {
-    return (
-      <span className="chip chip-success">
-        <Icon.Check size={10} /> {label}
-      </span>
-    );
-  }
-  if (kind === "failed") {
-    return <span className="chip chip-critical">{label}</span>;
-  }
-  if (kind === "blocked") {
-    return <span className="chip chip-warn">{label}</span>;
-  }
-  if (kind === "stopped" || kind === "expired") {
-    return <span className="chip">{label}</span>;
-  }
-  if (kind === "needs-input") {
-    return (
-      <span className="chip chip-info">
-        <Icon.Clock size={10} /> {label}
-      </span>
-    );
-  }
-  return (
-    <span className="chip chip-info">
-      <span
-        className="pulse-dot dot"
-        style={{ background: "currentColor" }}
-      />{" "}
-      {label}
-    </span>
-  );
 }
 
 const ProjectDetailPage: React.FC = () => {
@@ -91,12 +38,16 @@ const ProjectDetailPage: React.FC = () => {
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["project-scans", projectId],
     queryFn: () => scanService.getScansForProject(projectId!, 1, 100),
     enabled: !!projectId,
+    // Poll only while a scan in the list is still active (#87).
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? [];
+      return items.some((s) => !isTerminalStatus(s.status)) ? 6_000 : false;
+    },
   });
 
   const scans = useMemo<ScanHistoryItem[]>(
@@ -134,17 +85,6 @@ const ProjectDetailPage: React.FC = () => {
     }
   }, [projectId, navigate, queryClient, toast]);
 
-  const deleteScanMutation = useMutation({
-    mutationFn: (scanId: string) => scanService.deleteScan(scanId),
-    onSuccess: () => {
-      toast.info("Scan deleted.");
-      queryClient.invalidateQueries({ queryKey: ["project-scans", projectId] });
-      setConfirmDeleteScanId(null);
-    },
-    onError: () => {
-      toast.error("Failed to delete scan.");
-    },
-  });
 
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
@@ -252,71 +192,33 @@ const ProjectDetailPage: React.FC = () => {
         </div>
       ) : (
         <div className="sccap-card" style={{ padding: 0, overflow: "hidden" }}>
-          <table className="sccap-t">
-            <thead>
-              <tr>
-                <th>Scan</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>When</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {scans.map((s) => (
-                <tr
-                  key={s.id}
-                  onClick={() =>
-                    navigate(scanRouteFor(s.id, s.status), {
-                      state: {
-                        fromLabel: projectName,
-                        fromPath: `/analysis/projects/${projectId}`,
-                      },
-                    })
-                  }
-                  style={{ cursor: "pointer" }}
-                >
-                  <td>
-                    <div
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 12.5,
-                        color: "var(--fg)",
-                      }}
-                    >
-                      {s.id.slice(0, 12)}
-                    </div>
-                  </td>
-                  <td style={{ color: "var(--fg-muted)", fontSize: 12.5 }}>
-                    {s.scan_type}
-                  </td>
-                  <td>{statusChip(s.status)}</td>
-                  <td style={{ color: "var(--fg-muted)", fontSize: 12.5 }}>
-                    {relativeTime(s.created_at)}
-                  </td>
-                  <td
-                    style={{ textAlign: "right" }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                      <button
-                        className="sccap-btn sccap-btn-icon sccap-btn-ghost"
-                        aria-label="Delete scan"
-                        style={{ color: "var(--critical)" }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDeleteScanId(s.id);
-                        }}
-                      >
-                        <Icon.Trash size={13} />
-                      </button>
-                      <Icon.ChevronR size={14} style={{ color: "var(--fg-subtle)" }} />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {scans.map((s, idx) => (
+            <div
+              key={s.id}
+              style={{
+                borderBottom:
+                  idx < scans.length - 1
+                    ? "1px solid var(--border)"
+                    : "none",
+              }}
+            >
+              <ScanCard
+                scan={s}
+                showProject={false}
+                onOpen={() =>
+                  navigate(scanRouteFor(s.id, s.status), {
+                    state: {
+                      fromLabel: projectName,
+                      fromPath: `/analysis/projects/${projectId}`,
+                    },
+                  })
+                }
+                controls={
+                  <ScanRowControls scan={s} onChanged={() => refetch()} />
+                }
+              />
+            </div>
+          ))}
         </div>
       )}
 
@@ -352,34 +254,6 @@ const ProjectDetailPage: React.FC = () => {
           </b>{" "}
           (with all findings, fixes, and stage events) will be removed. This
           cannot be undone.
-        </div>
-      </Modal>
-      <Modal
-        open={confirmDeleteScanId !== null}
-        onClose={() => !deleteScanMutation.isPending && setConfirmDeleteScanId(null)}
-        title="Delete this scan?"
-        footer={
-          <>
-            <button
-              className="sccap-btn"
-              onClick={() => setConfirmDeleteScanId(null)}
-              disabled={deleteScanMutation.isPending}
-            >
-              Cancel
-            </button>
-            <button
-              className="sccap-btn sccap-btn-sm"
-              style={{ background: "var(--critical)", color: "#fff", border: "none" }}
-              onClick={() => confirmDeleteScanId && deleteScanMutation.mutate(confirmDeleteScanId)}
-              disabled={deleteScanMutation.isPending}
-            >
-              {deleteScanMutation.isPending ? "Deleting…" : "Delete scan"}
-            </button>
-          </>
-        }
-      >
-        <div style={{ color: "var(--fg)", fontSize: 13.5, lineHeight: 1.55 }}>
-          Scan <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{confirmDeleteScanId?.slice(0, 12)}</span> and all its findings, events, and fixes will be permanently removed.
         </div>
       </Modal>
     </div>

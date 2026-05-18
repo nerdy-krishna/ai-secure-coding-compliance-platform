@@ -9,6 +9,7 @@ import React, { useMemo, useState } from "react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { ScanCard } from "../../features/scans/ScanCard";
+import { ScanRowControls } from "../../features/scans/ScanRowControls";
 import { scanService } from "../../shared/api/scanService";
 import { useDebounce } from "../../shared/hooks/useDebounce";
 import { scanRouteFor } from "../../shared/lib/scanRoute";
@@ -65,7 +66,7 @@ const SubmissionHistoryPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState("All");
   const debouncedSearch = useDebounce(searchTerm, 400);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       "scanHistory",
       page,
@@ -245,6 +246,12 @@ const SubmissionHistoryPage: React.FC = () => {
                             fromPath: "/account/history",
                           },
                         })
+                      }
+                      controls={
+                        <ScanRowControls
+                          scan={scan}
+                          onChanged={() => refetch()}
+                        />
                       }
                     />
                   </div>
