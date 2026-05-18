@@ -14,6 +14,8 @@ import pytest
 
 from app.api.v1.models import (
     AnalysisResultDetailResponse,
+    ConsolidationStats,
+    LLMUsageItem,
     SubmittedFileReportItem,
     SummaryReportResponse,
     VulnerabilityFindingResponse,
@@ -141,3 +143,99 @@ def test_pdf_renders_with_no_findings():
     """An empty scan still produces a valid PDF (cover + empty section)."""
     artifact = generate_report(_result([]), "pdf")
     assert artifact.content.startswith(b"%PDF-")
+
+
+# --- Enriched content (#101) + triage layout (#102) ---------------------
+
+
+def test_html_has_risk_panel_with_active_and_raw_scores():
+    result = _result([_finding()])
+    doc = render_html(result)
+    assert "Risk score" in doc
+    assert "active" in doc and "pre-triage" in doc
+
+
+def test_html_has_scan_metadata_and_executive_summary():
+    doc = render_html(_result([_finding()]))
+    assert "Scan ID" in doc and "Cross-file validation" in doc
+    assert "Executive summary" in doc
+
+
+def test_html_remediated_finding_is_compact_not_a_full_card():
+    result = _result(
+        [
+            _finding(id=1, title="ACTIVE-ONE"),
+            _finding(id=2, title="DONE-ONE", disposition="remediated"),
+        ]
+    )
+    doc = render_html(result)
+    assert "Active findings (1)" in doc
+    assert "Remediated (1)" in doc
+    assert "DONE-ONE" in doc  # listed, just compactly
+
+
+def test_html_false_positive_is_counted_not_listed():
+    result = _result(
+        [
+            _finding(id=1, title="REAL-ONE"),
+            _finding(id=2, title="NOISE-ONLY", disposition="false_positive"),
+        ]
+    )
+    doc = render_html(result)
+    assert "REAL-ONE" in doc
+    assert "NOISE-ONLY" not in doc  # false positives are not listed
+    assert "false-positive" in doc  # but they are counted
+
+
+def test_html_models_section_lists_used_llms():
+    result = _result([_finding()])
+    result.llms_used = [
+        LLMUsageItem(
+            category="Reasoning LLM",
+            name="primary-reasoner",
+            provider="openai",
+            model_name="gpt-4o",
+        )
+    ]
+    result.consolidation_stats = ConsolidationStats(
+        raw_count=10, consolidated_count=7, merged_inputs=4, dropped=1
+    )
+    doc = render_html(result)
+    assert "Models &amp; pipeline" in doc
+    assert "primary-reasoner" in doc
+    assert "Consolidation" in doc
+
+
+def test_csv_includes_disposition_columns():
+    result = _result(
+        [
+            _finding(
+                disposition="risk_accepted",
+                disposition_note="accepted by appsec",
+            )
+        ]
+    )
+    rows = list(csv.DictReader(io.StringIO(render_csv(result))))
+    assert rows[0]["disposition"] == "risk_accepted"
+    assert rows[0]["disposition_note"] == "accepted by appsec"
+
+
+def test_pdf_enriched_report_still_valid():
+    """The enriched PDF (metadata, risk panel, models, triage) renders."""
+    result = _result(
+        [
+            _finding(id=1, title="PDF-ACTIVE"),
+            _finding(id=2, title="PDF-DONE", disposition="remediated"),
+        ]
+    )
+    result.llms_used = [
+        LLMUsageItem(
+            category="Reasoning LLM",
+            name="r1",
+            provider="openai",
+            model_name="gpt-4o",
+        )
+    ]
+    artifact = generate_report(result, "pdf")
+    assert artifact.content.startswith(b"%PDF-")
+    assert len(artifact.content) > 1_000

@@ -27,6 +27,9 @@ _COLUMNS = [
     "remediation",
     "corroborating_agents",
     "affected_lines",
+    # Operator triage state + justification (PRD #96 / #102).
+    "disposition",
+    "disposition_note",
 ]
 
 
@@ -54,6 +57,8 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
                 "affected_lines": "; ".join(
                     str(line) for line in affected_lines(finding)
                 ),
+                "disposition": getattr(finding, "disposition", None) or "open",
+                "disposition_note": getattr(finding, "disposition_note", None) or "",
             }
         )
     return buffer.getvalue()

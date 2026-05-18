@@ -1,37 +1,43 @@
 """PDF findings-report generator — a paginated, print-oriented report.
 
 This is a *dedicated print template*, distinct from `html_report.py`:
-paged-media CSS (`@page`) drives a cover/summary page, running
-header/footer with page numbers, and per-finding page-break hints.
-WeasyPrint renders the template HTML+CSS to a PDF byte string.
+paged-media CSS (`@page`) drives a cover page, running header/footer with
+page numbers, and per-finding page-break hints. WeasyPrint renders the
+template HTML+CSS to a PDF byte string.
 
 All finding-derived text is HTML-escaped — descriptions, titles, and
 remediation originate from LLM output and uploaded code and are treated
 as untrusted (see `core/schemas.py`).
+
+PRD #96 / #98 / #101 / #102: print-tuned on-brand palette, plus the
+scan-metadata block, executive summary, risk-score panel, models &
+pipeline section, per-finding provenance, and triage-aware layout.
 """
 
 from __future__ import annotations
 
-import html
-from collections import Counter
-from datetime import datetime, timezone
-
 from app.api.v1.models import AnalysisResultDetailResponse
 from app.core.services.report._common import (
     PALETTE,
+    _e,
     affected_lines,
-    collect_findings,
+    build_report_data,
+    provenance_label,
+    render_compact_findings,
+    render_exec_summary,
+    render_metadata_block,
+    render_models_section,
+    render_risk_panel,
     severity_color,
     severity_text_color,
 )
 
 _P = PALETTE
 
-# Paged-media stylesheet (PRD #96 / #98 restyle). `@page` rules give the
-# running header/footer and page numbers; the first page (the cover)
-# suppresses the header. Print-tuned with the website's light /
-# variant-A palette shared via `_common.PALETTE`. Fonts stay DejaVu —
-# the families WeasyPrint reliably embeds.
+# Paged-media stylesheet. `@page` rules give the running header/footer
+# and page numbers; the first page (the cover) suppresses the header.
+# Shares the class names emitted by `_common.render_*` so the enriched
+# sections render identically to the HTML report, with print sizing.
 _PRINT_STYLE = f"""
 @page {{
   size: A4;
@@ -60,22 +66,60 @@ body {{ font-family: "DejaVu Sans", sans-serif; color: {_P['fg']};
 .cover h1 {{ font-size: 30px; margin: 0 0 6px; color: {_P['fg']}; }}
 .cover .project {{ font-size: 18px; color: {_P['fg_muted']};
   margin: 0 0 24px; }}
-.cover .meta {{ font-size: 11px; color: {_P['fg_muted']}; }}
-.cover .meta div {{ margin-bottom: 3px; }}
-.cover .meta b {{ color: {_P['fg']}; }}
-.counts {{ margin-top: 22px; }}
-.count {{ display: inline-block; border-radius: 5px; padding: 4px 11px;
-  font-size: 10px; font-weight: 700; margin-right: 6px; }}
-h2.section {{ font-size: 15px; border-bottom: 2px solid {_P['accent']};
-  padding-bottom: 4px; margin: 0 0 14px; color: {_P['fg']}; }}
+.cover .cmeta {{ font-size: 11px; color: {_P['fg_muted']}; }}
+.cover .cmeta div {{ margin-bottom: 3px; }}
+.cover .cmeta b {{ color: {_P['fg']}; }}
+h2.section {{ font-size: 14px; border-bottom: 2px solid {_P['accent']};
+  padding-bottom: 4px; margin: 18px 0 10px; color: {_P['fg']};
+  page-break-after: avoid; }}
+.muted {{ color: {_P['fg_muted']}; }}
+/* Scan-metadata block */
+.metablock {{ display: flex; flex-wrap: wrap; border: 1px solid {_P['border']};
+  border-radius: 6px; overflow: hidden; }}
+.meta-cell {{ width: 50%; background: {_P['surface']}; padding: 6px 10px;
+  display: flex; justify-content: space-between; gap: 10px; font-size: 9.5px;
+  border-bottom: 1px solid {_P['border']}; }}
+.meta-cell .k {{ color: {_P['fg_subtle']}; }}
+.meta-cell .v {{ color: {_P['fg']}; font-weight: 700; text-align: right; }}
+/* Executive summary */
+.exec {{ background: {_P['bg_soft']}; border: 1px solid {_P['border']};
+  border-radius: 6px; padding: 10px 12px; font-size: 10px; margin: 0; }}
+/* Risk panel */
+.riskpanel {{ background: {_P['surface']}; border: 1px solid {_P['border']};
+  border-radius: 6px; padding: 12px 14px; }}
+.risk-scores {{ display: flex; gap: 30px; margin-bottom: 9px; }}
+.risk-score {{ display: flex; flex-direction: column; }}
+.risk-score .rs-num {{ font-size: 24px; font-weight: 800;
+  color: {_P['accent']}; }}
+.risk-score.raw .rs-num {{ color: {_P['fg_subtle']}; }}
+.risk-score .rs-cap {{ font-size: 8px; color: {_P['fg_muted']};
+  text-transform: uppercase; letter-spacing: .04em; }}
+.resolved {{ font-size: 9px; color: {_P['fg_muted']}; margin-top: 8px; }}
+/* Models & pipeline */
+.models {{ display: flex; flex-wrap: wrap; gap: 8px; }}
+.model-card {{ width: 48%; background: {_P['surface']};
+  border: 1px solid {_P['border']}; border-radius: 6px; padding: 8px 10px;
+  page-break-inside: avoid; }}
+.model-cat {{ font-size: 7.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: {_P['fg_subtle']}; }}
+.model-name {{ font-size: 10.5px; font-weight: 700; color: {_P['fg']}; }}
+.model-meta {{ font-size: 8.5px; color: {_P['fg_muted']};
+  font-family: "DejaVu Sans Mono", monospace; }}
+.model-stat {{ font-size: 8.5px; color: {_P['fg_muted']}; margin-top: 3px; }}
+/* Counts + chips */
+.counts {{ margin-top: 4px; }}
+.count {{ display: inline-block; border-radius: 5px; padding: 3px 9px;
+  font-size: 9px; font-weight: 700; margin-right: 5px; }}
+/* Finding card */
 .finding {{ page-break-inside: avoid; background: {_P['surface']};
-  border: 1px solid {_P['border']}; border-radius: 7px;
-  padding: 12px 14px; margin-bottom: 12px; }}
-.finding h3 {{ font-size: 12.5px; margin: 0 0 5px; color: {_P['fg']}; }}
+  border: 1px solid {_P['border']}; border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 10px; }}
+.finding h3 {{ font-size: 12px; margin: 0 0 4px; color: {_P['fg']}; }}
 .sev {{ display: inline-block; font-size: 8.5px; font-weight: 700;
   padding: 1.5px 7px; border-radius: 4px; margin-right: 6px; }}
 .loc {{ font-family: "DejaVu Sans Mono", monospace; font-size: 9px;
-  color: {_P['fg_muted']}; margin-bottom: 6px; }}
+  color: {_P['fg_muted']}; }}
+.prov {{ font-size: 8.5px; color: {_P['fg_subtle']}; margin: 3px 0; }}
 .label {{ font-size: 8.5px; font-weight: 700; text-transform: uppercase;
   color: {_P['fg_subtle']}; letter-spacing: .05em; margin: 8px 0 2px; }}
 .body {{ white-space: pre-wrap; overflow-wrap: anywhere; color: {_P['fg']}; }}
@@ -86,37 +130,39 @@ pre {{ background: {_P['bg_soft']}; border: 1px solid {_P['border']};
 .also {{ font-family: "DejaVu Sans Mono", monospace; font-size: 9px;
   color: {_P['fg_subtle']}; margin-top: 6px; }}
 .empty {{ color: {_P['fg_muted']}; }}
+/* Compact disposition lists */
+.compact {{ list-style: none; margin: 0; padding: 0; }}
+.cf-row {{ background: {_P['surface']}; border: 1px solid {_P['border']};
+  border-radius: 5px; padding: 6px 9px; margin-bottom: 5px; font-size: 9px;
+  page-break-inside: avoid; }}
+.cf-title {{ font-weight: 700; color: {_P['fg']}; }}
+.cf-loc {{ font-family: "DejaVu Sans Mono", monospace; font-size: 8px;
+  color: {_P['fg_muted']}; }}
+.cf-note {{ display: block; margin-top: 3px; color: {_P['fg_muted']}; }}
 """
-
-
-def _e(value: object) -> str:
-    """HTML-escape any value; empty string for None."""
-    return html.escape(str(value)) if value is not None else ""
 
 
 def _print_html(result: AnalysisResultDetailResponse) -> str:
     """Build the print-oriented HTML document WeasyPrint renders."""
-    report = result.summary_report
-    findings = collect_findings(result)
+    data = build_report_data(result)
+    project = _e(data.project)
 
-    project = _e(report.project_name if report else result.project_name)
-    scan_type = _e(report.scan_type if report else "audit")
-    frameworks = _e(", ".join(report.selected_frameworks)) if report else ""
-    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    counts = Counter(f.severity for f in findings)
-    count_chips = "".join(
-        f'<span class="count" style="background:{severity_color(sev)};'
-        f'color:{severity_text_color(sev)}">'
-        f"{_e(sev)}: {counts[sev]}</span>"
-        for sev in ("Critical", "High", "Medium", "Low", "Informational")
-        if counts.get(sev)
-    )
-
-    if findings:
-        cards = "".join(_finding_card(f) for f in findings)
+    if data.active:
+        cards = "".join(_finding_card(f) for f in data.active)
     else:
-        cards = '<p class="empty">No findings were reported for this scan.</p>'
+        cards = '<p class="empty">No active findings for this scan.</p>'
+
+    body = (
+        '<h2 class="section">Scan metadata</h2>'
+        + render_metadata_block(data)
+        + render_exec_summary(data)
+        + render_risk_panel(data)
+        + render_models_section(data)
+        + f'<h2 class="section">Active findings ({len(data.active)})</h2>'
+        + cards
+        + render_compact_findings("Remediated", data.remediated)
+        + render_compact_findings("Risk Accepted", data.risk_accepted)
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -128,16 +174,15 @@ def _print_html(result: AnalysisResultDetailResponse) -> str:
     <span class="name">SCCAP &middot; Secure Coding &amp; Compliance</span></div>
   <h1>Security Scan Report</h1>
   <div class="project">{project}</div>
-  <div class="meta">
-    <div><b>Scan type:</b> {scan_type}</div>
-    <div><b>Frameworks:</b> {frameworks or "&mdash;"}</div>
-    <div><b>Findings:</b> {len(findings)}</div>
-    <div><b>Generated:</b> {generated}</div>
+  <div class="cmeta">
+    <div><b>Scan type:</b> {_e(data.scan_type)}</div>
+    <div><b>Findings:</b> {data.total_findings}</div>
+    <div><b>Risk score:</b> {data.active_score:.1f} / 10 (active)
+      &middot; {data.raw_score:.1f} / 10 (pre-triage)</div>
+    <div><b>Generated:</b> {_e(data.generated)}</div>
   </div>
-  <div class="counts">{count_chips}</div>
 </section>
-<h2 class="section">Findings</h2>
-{cards}
+{body}
 </body></html>"""
 
 
@@ -149,6 +194,8 @@ def _finding_card(finding) -> str:
         f" &middot; CVSS {finding.cvss_score}" if finding.cvss_score is not None else ""
     )
     cwe = f" &middot; {_e(finding.cwe)}" if finding.cwe else ""
+    prov = provenance_label(finding)
+    prov_row = f'<div class="prov">Detected by {_e(prov)}</div>' if prov else ""
     snippet_row = (
         f'<div class="label">Vulnerable code</div>'
         f"<pre>{_e(finding.vulnerable_snippet)}</pre>"
@@ -172,6 +219,7 @@ def _finding_card(finding) -> str:
     return f"""<div class="finding">
   <h3><span class="sev" style="background:{color};color:{sev_fg}">{_e(sev)}</span>{_e(finding.title)}</h3>
   <div class="loc">{_e(finding.file_path)}:{finding.line_number}{cvss}{cwe}</div>
+  {prov_row}
   <div class="label">Description</div>
   <div class="body">{_e(finding.description)}</div>
   {snippet_row}
