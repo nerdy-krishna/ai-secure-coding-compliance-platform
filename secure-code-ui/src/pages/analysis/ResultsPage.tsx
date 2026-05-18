@@ -23,6 +23,7 @@ import { isTerminalStatus } from "../../shared/lib/scanRoute";
 import { displayStatus, statusKind } from "../../shared/lib/scanStatus";
 import { Icon } from "../../shared/ui/Icon";
 import { SevBar } from "../../shared/ui/DashboardPrimitives";
+import { CopyButton } from "../../shared/ui/CopyButton";
 import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
@@ -456,6 +457,22 @@ const ResultsPage: React.FC = () => {
                 · {report.selected_frameworks.join(", ")}
               </span>
             ) : null}
+            {scanId && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 2,
+                  color: "var(--fg-subtle)",
+                }}
+              >
+                · Scan{" "}
+                <span className="mono" style={{ fontSize: 11 }}>
+                  {scanId}
+                </span>
+                <CopyButton value={scanId} title="Copy scan ID" />
+              </span>
+            )}
           </>
         }
         actions={
@@ -1357,7 +1374,7 @@ const DiffViewer: React.FC<{
   return (
     <div className="diff" style={{ maxHeight, overflowY: "auto" }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr", background: "var(--bg-soft)", borderBottom: "1px solid var(--border)", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-muted)" }}>
-        <div style={{ padding: "7px 12px", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ padding: "3px 12px", display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ color: "var(--critical)", fontWeight: 700 }}>−</span>
           <span>before · <span style={{ color: "var(--fg)" }}>{filePath}</span></span>
           {approx && (
@@ -1365,11 +1382,17 @@ const DiffViewer: React.FC<{
               · line numbers approximate
             </span>
           )}
+          <span style={{ marginLeft: "auto" }}>
+            <CopyButton value={original} title="Copy the original code" />
+          </span>
         </div>
         <div style={{ background: "var(--border)" }} />
-        <div style={{ padding: "7px 12px", display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ padding: "3px 12px", display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ color: "var(--success)", fontWeight: 700 }}>+</span>
           <span>after · <span style={{ color: "var(--fg)" }}>{filePath}</span></span>
+          <span style={{ marginLeft: "auto" }}>
+            <CopyButton value={fixed} title="Copy the fixed code" />
+          </span>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1px 1fr" }}>
@@ -2229,14 +2252,19 @@ const CodeSnippet: React.FC<{
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>{filePath}</span>
         <span style={{ color: "var(--fg-subtle)" }}>·</span>
         <span style={{ color: severityColor, fontWeight: 600 }}>{lineLabel}</span>
-        <button
-          className="sccap-btn sccap-btn-sm"
-          style={{ marginLeft: "auto" }}
-          onClick={() => setExpanded(true)}
-          title="Open this code in a full-screen view"
-        >
-          <Icon.Eye size={12} /> Expand
-        </button>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          <CopyButton
+            value={displayLines.join("\n")}
+            title="Copy this code"
+          />
+          <button
+            className="sccap-btn sccap-btn-sm"
+            onClick={() => setExpanded(true)}
+            title="Open this code in a full-screen view"
+          >
+            <Icon.Eye size={12} /> Expand
+          </button>
+        </span>
       </div>
       {codeBlock(220)}
 
