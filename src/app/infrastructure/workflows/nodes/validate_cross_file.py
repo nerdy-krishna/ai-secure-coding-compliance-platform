@@ -39,6 +39,7 @@ from app.shared.lib.llm_slots import (
     resolve_llm_config_id,
     resolve_temperature,
 )
+from app.shared.lib.scan_progress import EV_STARTED
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,11 @@ async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
     if not state.get("cross_file_validation"):
         # Opted out — byte-identical to a pipeline without this node.
         return {}
+
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            state["scan_id"], "CROSS_FILE_VALIDATION", EV_STARTED
+        )
 
     findings: List[VulnerabilityFinding] = state.get("findings") or []
     if not findings:

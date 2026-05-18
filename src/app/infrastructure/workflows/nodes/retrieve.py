@@ -23,7 +23,7 @@ from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import RelevantAgent, WorkerState
 from app.shared.analysis_tools.context_bundler import ContextBundlingEngine
 from app.shared.analysis_tools.repository_map import RepositoryMappingEngine
-from app.shared.lib.scan_status import STATUS_ANALYZING_CONTEXT
+from app.shared.lib.scan_progress import EV_COMPLETED, EV_STARTED
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +58,9 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
             # Capture the status before updating the DB
             current_status = scan.status
 
-            # Now, update the status to show progress
-            await repo.update_status(scan_id, STATUS_ANALYZING_CONTEXT)
+            # Stage STARTED — records the event and advances the
+            # scans.status cache to ANALYZING_CONTEXT (#84).
+            await repo.record_scan_event(scan_id, "ANALYZING_CONTEXT", EV_STARTED)
 
             original_snapshot = next(
                 (s for s in scan.snapshots if s.snapshot_type == "ORIGINAL_SUBMISSION"),
@@ -160,15 +161,9 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
             )
             # --- End of FIX ---
 
-            # Stage-event audit trail. The frontend's KNOWN_STAGES
-            # list expects an ANALYZING_CONTEXT row to mark this
-            # phase as complete; without it the timeline shows the
-            # stage as never-started even after the worker advanced.
-            await repo.create_scan_event(
-                scan_id=scan_id,
-                stage_name="ANALYZING_CONTEXT",
-                status="COMPLETED",
-            )
+            # Stage COMPLETED — closes out the ANALYZING_CONTEXT stage
+            # on the event-sourced timeline (#84).
+            await repo.record_scan_event(scan_id, "ANALYZING_CONTEXT", EV_COMPLETED)
 
             return {
                 "scan_type": scan.scan_type,

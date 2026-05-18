@@ -34,6 +34,12 @@ from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
 from app.shared.lib import cost_estimation
 from app.shared.lib.agent_routing import resolve_agents_for_file
+from app.shared.lib.scan_progress import (
+    EV_COMPLETED,
+    EV_STARTED,
+    EV_WAITING,
+    STAGE_COST_REVIEW,
+)
 from app.shared.lib.scan_status import (
     STATUS_PENDING_APPROVAL,
     STATUS_QUEUED_FOR_SCAN,
@@ -59,6 +65,11 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
     """
     scan_id = state["scan_id"]
     logger.info("Performing cost estimation dry run for scan %s.", scan_id)
+
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            scan_id, "ESTIMATING_COST", EV_STARTED
+        )
 
     # --- REVISED GUARD CLAUSE BLOCK ---
     repository_map = state.get("repository_map")
@@ -167,44 +178,51 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
         utility_input_tokens=0,
     )
 
+    # V02.3.5 — flag high-value scans for the lifecycle service's
+    # dual-control check; carried in the gate's interrupt payload.
+    estimated_cost_usd = cost_details.get("estimated_cost_usd", 0.0)
+    requires_dual_approval = estimated_cost_usd >= HIGH_VALUE_COST_USD
+
     async with AsyncSessionLocal() as db:
         repo = ScanRepository(db)
         await repo.update_cost_and_status(
             scan_id, STATUS_PENDING_APPROVAL, cost_details
         )
-        # Stage-event audit trail — surfaces ESTIMATING_COST as
-        # complete on the timeline. Prior to this the timeline went
-        # QUEUED → QUEUED_FOR_SCAN with no breadcrumb that the cost
-        # node had run.
-        await repo.create_scan_event(
-            scan_id=scan_id,
-            stage_name="ESTIMATING_COST",
-            status="COMPLETED",
-            details=cost_details,
+        await repo.record_scan_event(
+            scan_id, "ESTIMATING_COST", EV_COMPLETED, details=cost_details
+        )
+        # The gate's WAITING event — parks `scans.status` at
+        # PENDING_COST_APPROVAL. The bare `cost_gate` node owns the
+        # interrupt(), so this work node runs exactly once (#84).
+        await repo.record_scan_event(
+            scan_id,
+            STAGE_COST_REVIEW,
+            EV_WAITING,
+            details={"requires_dual_approval": requires_dual_approval},
         )
 
-    # V02.3.5 — flag high-value scans so the lifecycle service can enforce
-    # dual-control: two distinct approver user-ids must be recorded before
-    # the LangGraph thread is resumed.  Lower-cost scans use the existing
-    # single-approver path.
-    estimated_cost_usd = cost_details.get("estimated_cost_usd", 0.0)
-    requires_dual_approval = estimated_cost_usd >= HIGH_VALUE_COST_USD
+    logger.info("Cost-estimate work node complete for scan %s — gated.", scan_id)
+    return {}
 
-    # Native LangGraph human-in-the-loop gate. The checkpointer persists
-    # state here; execution resumes from this point when the approval
-    # handler calls ainvoke(Command(resume=...)) on the same thread_id.
-    # The resume payload lands as the return value of interrupt().
-    approval_payload = interrupt(
-        {
-            "scan_id": str(scan_id),
-            "estimated_cost": cost_details,
-            "requires_dual_approval": requires_dual_approval,
-        }
-    )
 
+async def cost_gate_node(state: WorkerState) -> Dict[str, Any]:
+    """Bare analysis-cost interrupt gate (#84).
+
+    Contains only `interrupt()` plus the gate's `COMPLETED` event — no
+    pre-interrupt side effects — so a LangGraph resume re-runs nothing
+    that could duplicate an event or clobber `scans.status`. The
+    `estimate_cost` work node already emitted the `COST_REVIEW/WAITING`
+    event and set the pause status.
+    """
+    scan_id = state["scan_id"]
+    approval_payload = interrupt({"scan_id": str(scan_id), "kind": "cost_approval"})
     logger.info(
         "Cost-approval gate resumed for scan %s with payload: %s",
         scan_id,
         approval_payload,
     )
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            scan_id, STAGE_COST_REVIEW, EV_COMPLETED
+        )
     return {"current_scan_status": STATUS_QUEUED_FOR_SCAN}

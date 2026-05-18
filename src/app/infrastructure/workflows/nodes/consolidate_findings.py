@@ -29,6 +29,7 @@ from app.shared.lib.llm_slots import (
     resolve_llm_config_id,
     resolve_temperature,
 )
+from app.shared.lib.scan_progress import EV_STARTED
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,10 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
     fresh.
     """
     findings: List[VulnerabilityFinding] = state.get("findings") or []
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            state["scan_id"], "CONSOLIDATING", EV_STARTED
+        )
     if not findings:
         await _emit_event(state["scan_id"], 0)
         return {"findings": []}

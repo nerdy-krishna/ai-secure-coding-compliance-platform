@@ -35,6 +35,12 @@ from app.shared.lib.llm_slots import (
     resolve_llm_config_id,
     resolve_temperature,
 )
+from app.shared.lib.scan_progress import (
+    EV_COMPLETED,
+    EV_STARTED,
+    EV_WAITING,
+    STAGE_PROFILING_REVIEW,
+)
 from app.shared.lib.scan_status import (
     STATUS_ANALYZING_CONTEXT,
     STATUS_PENDING_PROFILING_APPROVAL,
@@ -58,6 +64,11 @@ async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
     """
     scan_id = state["scan_id"]
     files: Dict[str, str] = state.get("files") or {}
+
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            scan_id, "ESTIMATING_PROFILING_COST", EV_STARTED
+        )
 
     utility_llm_config_id = resolve_llm_config_id(LLMStep.PROFILER, state)
     if not utility_llm_config_id:
@@ -91,35 +102,50 @@ async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
         await repo.update_cost_and_status(
             scan_id, STATUS_PENDING_PROFILING_APPROVAL, cost_details
         )
-        await repo.create_scan_event(
-            scan_id=scan_id,
-            stage_name="ESTIMATING_PROFILING_COST",
-            status="COMPLETED",
+        await repo.record_scan_event(
+            scan_id,
+            "ESTIMATING_PROFILING_COST",
+            EV_COMPLETED,
             details=cost_details,
         )
+        # The gate's WAITING event — parks `scans.status` at
+        # PENDING_PROFILING_APPROVAL. The bare `profiling_cost_gate`
+        # node owns the interrupt(), so this work node runs exactly once
+        # and never re-fires these writes on resume (#84).
+        await repo.record_scan_event(scan_id, STAGE_PROFILING_REVIEW, EV_WAITING)
 
     logger.info(
-        "estimate_profiling_cost: scan_id=%s files=%d tokens=%d est=$%.4f — pausing",
+        "estimate_profiling_cost: scan_id=%s files=%d tokens=%d est=$%.4f — gated",
         scan_id,
         len(files),
         total_input_tokens,
         cost_details.get("total_estimated_cost", 0.0),
     )
+    return {}
 
-    # Native LangGraph human-in-the-loop gate. The resume payload from
-    # `Command(resume={"kind": "profiling_approval", ...})` lands here.
+
+async def profiling_cost_gate_node(state: WorkerState) -> Dict[str, Any]:
+    """Bare profiling-cost interrupt gate (#84).
+
+    Contains only `interrupt()` plus the gate's `COMPLETED` event — no
+    pre-interrupt side effects — so a LangGraph resume re-runs nothing
+    that could duplicate an event or clobber `scans.status`. The
+    `estimate_profiling_cost` work node already emitted the
+    `PROFILING_REVIEW/WAITING` event and set the pause status.
+    """
+    scan_id = state["scan_id"]
     approval_payload = interrupt(
-        {
-            "scan_id": str(scan_id),
-            "kind": "profiling_approval",
-            "estimated_cost": cost_details,
-        }
+        {"scan_id": str(scan_id), "kind": "profiling_approval"}
     )
     logger.info(
-        "estimate_profiling_cost: scan_id=%s resumed payload=%s",
+        "profiling_cost_gate: scan_id=%s resumed payload=%s",
         scan_id,
         approval_payload,
     )
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            scan_id, STAGE_PROFILING_REVIEW, EV_COMPLETED
+        )
     return {"profiling_approval": approval_payload or {}}
 
 
@@ -132,6 +158,11 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     """
     scan_id = state["scan_id"]
     files: Dict[str, str] = state.get("files") or {}
+
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            scan_id, "PROFILING_FILES", EV_STARTED
+        )
 
     utility_llm_config_id = resolve_llm_config_id(LLMStep.PROFILER, state)
     if not utility_llm_config_id:
@@ -196,11 +227,7 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     async with AsyncSessionLocal() as db:
         repo = ScanRepository(db)
         await repo.update_scan_artifacts(scan_id, {"file_profiles": file_profiles})
-        await repo.create_scan_event(
-            scan_id=scan_id,
-            stage_name="PROFILING_FILES",
-            status="COMPLETED",
-        )
+        await repo.record_scan_event(scan_id, "PROFILING_FILES", EV_COMPLETED)
 
     logger.info(
         "profile_files: scan_id=%s profiled %d/%d file(s)",

@@ -409,6 +409,61 @@ class ScanRepository:
             )
             raise
 
+    async def record_scan_event(
+        self,
+        scan_id: uuid.UUID,
+        stage_name: str,
+        status: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Record a scan-progress event and sync the ``scans.status`` cache.
+
+        The single writer for the event-sourced scan model (#84): it
+        inserts one ``ScanEvent`` row and, in the **same transaction**,
+        updates ``scans.status`` to the cache value derived from the
+        event via :func:`scan_progress.cache_status_for`. ``scan_events``
+        is the source of truth; ``scans.status`` is a cache that can
+        never drift because both writes commit together. When the event
+        implies no status change (a non-gate ``COMPLETED``, a
+        sub-event), only the event row is written.
+        """
+        from app.infrastructure.messaging.scan_progress_notifier import (
+            KIND_EVENT,
+            KIND_STATUS,
+            notify_scan_progress,
+        )
+        from app.shared.lib.scan_progress import cache_status_for
+
+        self.db.add(
+            db_models.ScanEvent(
+                scan_id=scan_id,
+                stage_name=stage_name,
+                status=status,
+                details=details,
+            )
+        )
+        cache_status = cache_status_for(stage_name, status)
+        if cache_status is not None:
+            await self.db.execute(
+                update(db_models.Scan)
+                .where(db_models.Scan.id == scan_id)
+                .values(status=cache_status)
+            )
+        # One NOTIFY per kind so SSE subscribers refresh both the event
+        # log and the status badge from a single committed transaction.
+        await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_EVENT)
+        if cache_status is not None:
+            await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_STATUS)
+        try:
+            await self.db.commit()
+        except SQLAlchemyError as e:
+            logger.error(
+                "scan_repo.record_scan_event.commit_failed",
+                extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
+                exc_info=True,
+            )
+            raise
+
     async def save_llm_interaction(
         self, interaction_data: agent_schemas.LLMInteraction
     ):

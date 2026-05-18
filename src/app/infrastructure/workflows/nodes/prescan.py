@@ -39,10 +39,14 @@ from app.infrastructure.scanners.registry import (
 from app.infrastructure.scanners.semgrep_runner import run_semgrep
 from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.workflows.state import WorkerState
+from app.shared.lib.scan_progress import (
+    EV_COMPLETED,
+    EV_WAITING,
+    STAGE_PRESCAN_REVIEW,
+)
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
-    STATUS_PENDING_PRESCAN_APPROVAL,
 )
 
 logger = logging.getLogger(__name__)
@@ -319,7 +323,14 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     # detect "already persisted" rows and skip re-inserting them.
     if prescan_findings:
         async with AsyncSessionLocal() as db:
-            await ScanRepository(db).save_findings(scan_id, prescan_findings)
+            repo = ScanRepository(db)
+            await repo.save_findings(scan_id, prescan_findings)
+            # Emit the prescan-gate WAITING event here — this node runs
+            # exactly once and never re-enters, so the gate marker is
+            # written before the bare `pending_prescan_approval` node
+            # owns the interrupt() (#84). Parks status at
+            # PENDING_PRESCAN_APPROVAL.
+            await repo.record_scan_event(scan_id, STAGE_PRESCAN_REVIEW, EV_WAITING)
 
     return {"findings": prescan_findings, "bom_cyclonedx": bom_cyclonedx}
 
@@ -415,18 +426,15 @@ async def pending_prescan_approval_node(state: WorkerState) -> Dict[str, Any]:
         for f in findings
     )
 
-    # Findings were already persisted by `deterministic_prescan_node`
-    # (which runs once per scan and never re-enters). This node IS
-    # re-entered on every resume — its body executes again when the
-    # operator clicks Continue / Stop — so a `save_findings` call
-    # here would insert the same rows a second time. Update status
-    # only; the prescan card on the UI already sees the persisted
-    # findings via the standard scans/{id}/result endpoint.
-    async with AsyncSessionLocal() as db:
-        await ScanRepository(db).update_status(scan_id, STATUS_PENDING_PRESCAN_APPROVAL)
-
+    # Bare interrupt gate (#84). The `deterministic_prescan` work node
+    # already persisted the findings and emitted the
+    # `PRESCAN_REVIEW/WAITING` event (parking status at
+    # PENDING_PRESCAN_APPROVAL). This node has NO pre-interrupt side
+    # effects, so a LangGraph resume — which re-runs the interrupted
+    # node from the top — re-fires nothing that could duplicate an
+    # event or clobber `scans.status`.
     logger.info(
-        "pending_prescan_approval: scan_id=%s findings=%d critical_secret=%s — pausing for operator",
+        "pending_prescan_approval: scan_id=%s findings=%d critical_secret=%s — gated",
         scan_id,
         len(findings),
         has_critical_secret,
@@ -447,6 +455,10 @@ async def pending_prescan_approval_node(state: WorkerState) -> Dict[str, Any]:
         scan_id,
         approval_payload,
     )
+    async with AsyncSessionLocal() as db:
+        await ScanRepository(db).record_scan_event(
+            scan_id, STAGE_PRESCAN_REVIEW, EV_COMPLETED
+        )
     # V02.4.1 anti-automation: bump the persisted resume-attempt counter on
     # every resume from this gate. The cap is enforced in
     # `_route_after_prescan_approval`. The increment must happen in this node

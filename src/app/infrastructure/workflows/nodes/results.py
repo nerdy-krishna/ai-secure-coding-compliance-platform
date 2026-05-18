@@ -18,6 +18,7 @@ from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.risk_score import compute_cvss_aggregate
+from app.shared.lib.scan_progress import EV_STARTED
 from app.shared.lib.scan_status import (
     STATUS_COMPLETED,
     STATUS_REMEDIATION_COMPLETED,
@@ -70,6 +71,13 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
 async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
     scan_id, findings = state["scan_id"], state.get("findings", [])
     logger.info("Saving final reports and risk score for scan %s.", scan_id)
+    try:
+        async with AsyncSessionLocal() as _db_start:
+            await ScanRepository(_db_start).record_scan_event(
+                scan_id, "GENERATING_REPORTS", EV_STARTED
+            )
+    except Exception as _e:  # noqa: BLE001
+        logger.warning("GENERATING_REPORTS started-event emit failed: %s", _e)
     severity_map = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFORMATIONAL": 0}
     for f in findings:
         sev = (f.severity or "LOW").upper()

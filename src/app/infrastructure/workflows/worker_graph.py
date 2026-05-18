@@ -46,6 +46,7 @@ from app.infrastructure.workflows.nodes.consolidate_findings import (
 )
 from app.infrastructure.workflows.nodes.cost import (
     CHUNK_ONLY_IF_LARGER_THAN,
+    cost_gate_node,
     estimate_cost_node,
 )
 from app.infrastructure.workflows.nodes.error import handle_error_node
@@ -60,6 +61,7 @@ from app.infrastructure.workflows.nodes.prescan import (
 from app.infrastructure.workflows.nodes.profile import (
     estimate_profiling_cost_node,
     profile_files_node,
+    profiling_cost_gate_node,
 )
 from app.infrastructure.workflows.nodes.results import (
     save_final_report_node,
@@ -110,8 +112,10 @@ __all__ = [
     "user_decline_node",
     "blocked_pre_llm_node",
     "estimate_profiling_cost_node",
+    "profiling_cost_gate_node",
     "profile_files_node",
     "estimate_cost_node",
+    "cost_gate_node",
     "analyze_files_parallel_node",
     "consolidate_findings_node",
     "validate_cross_file_node",
@@ -146,8 +150,10 @@ workflow.add_node("pending_prescan_approval", pending_prescan_approval_node)
 workflow.add_node("blocked_pre_llm", blocked_pre_llm_node)
 workflow.add_node("user_decline", user_decline_node)
 workflow.add_node("estimate_profiling_cost", estimate_profiling_cost_node)
+workflow.add_node("profiling_cost_gate", profiling_cost_gate_node)
 workflow.add_node("profile_files", profile_files_node)
 workflow.add_node("estimate_cost", estimate_cost_node)
+workflow.add_node("cost_gate", cost_gate_node)
 workflow.add_node("analyze_files_parallel", analyze_files_parallel_node)
 workflow.add_node("consolidate_findings", consolidate_findings_node)
 workflow.add_node("validate_cross_file", validate_cross_file_node)
@@ -325,12 +331,18 @@ workflow.add_conditional_edges(
 workflow.add_edge("blocked_pre_llm", END)
 workflow.add_edge("user_decline", END)
 
-# estimate_profiling_cost_node calls interrupt() — the graph pauses at
-# the profiling-cost gate (status PENDING_PROFILING_APPROVAL). On
-# resume the post-resume router sends the scan to the profiler or to a
-# terminal user-decline. (#71)
+# Profiling-cost gate split (#84): `estimate_profiling_cost` is a work
+# node that runs once (estimate + events), then hands to the bare
+# `profiling_cost_gate` node which owns the interrupt(). On resume the
+# post-resume router sends the scan to the profiler or to a terminal
+# user-decline.
 workflow.add_conditional_edges(
     "estimate_profiling_cost",
+    should_continue,
+    {"continue": "profiling_cost_gate", "handle_error": "handle_error"},
+)
+workflow.add_conditional_edges(
+    "profiling_cost_gate",
     _route_after_profiling_approval,
     {
         "profile_files": "profile_files",
@@ -344,13 +356,18 @@ workflow.add_conditional_edges(
     {"continue": "estimate_cost", "handle_error": "handle_error"},
 )
 
-# estimate_cost_node calls interrupt(); the graph pauses there, persists
-# state in the checkpointer, and yields. On approval, the worker calls
-# ainvoke(Command(resume=...)) and execution continues directly to
-# analyze_files_parallel. No DB-status-based routing — the graph shape
-# encodes the pause/resume contract.
+# Analysis-cost gate split (#84): `estimate_cost` is a work node that
+# runs once (dry-run estimate + events), then hands to the bare
+# `cost_gate` node which owns the interrupt(). On approval the worker
+# calls ainvoke(Command(resume=...)) and execution continues to
+# analyze_files_parallel.
 workflow.add_conditional_edges(
     "estimate_cost",
+    should_continue,
+    {"continue": "cost_gate", "handle_error": "handle_error"},
+)
+workflow.add_conditional_edges(
+    "cost_gate",
     should_continue,
     {"continue": "analyze_files_parallel", "handle_error": "handle_error"},
 )

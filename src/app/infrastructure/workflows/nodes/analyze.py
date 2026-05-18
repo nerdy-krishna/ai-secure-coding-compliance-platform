@@ -29,6 +29,7 @@ from app.infrastructure.workflows.nodes.cost import CHUNK_ONLY_IF_LARGER_THAN
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
 from app.shared.lib.agent_routing import resolve_agents_for_file
+from app.shared.lib.scan_progress import EV_COMPLETED, EV_STARTED
 from app.shared.lib.llm_slots import (
     LLMStep,
     resolve_llm_config_id,
@@ -88,13 +89,11 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         )
 
         async with _AsyncSessionLocal_start() as _db_start:
-            await _ScanRepository_start(_db_start).create_scan_event(
-                scan_id=scan_id,
-                stage_name="RUNNING_AGENTS",
-                status="COMPLETED",
+            await _ScanRepository_start(_db_start).record_scan_event(
+                scan_id, "RUNNING_AGENTS", EV_STARTED
             )
     except Exception as _e:
-        logger.warning("RUNNING_AGENTS event emit failed: %s", _e)
+        logger.warning("RUNNING_AGENTS started-event emit failed: %s", _e)
 
     # --- REVISED GUARD CLAUSE BLOCK ---
     live_codebase = state.get("live_codebase")
@@ -456,6 +455,21 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                 "Check worker logs for `agent: ainvoke raised` entries."
             ),
         }
+
+    try:
+        from app.infrastructure.database import (
+            AsyncSessionLocal as _AsyncSessionLocal_end,
+        )
+        from app.infrastructure.database.repositories.scan_repo import (
+            ScanRepository as _ScanRepository_end,
+        )
+
+        async with _AsyncSessionLocal_end() as _db_end:
+            await _ScanRepository_end(_db_end).record_scan_event(
+                scan_id, "RUNNING_AGENTS", EV_COMPLETED
+            )
+    except Exception as _e:
+        logger.warning("RUNNING_AGENTS completed-event emit failed: %s", _e)
 
     return {
         "findings": prior_findings + all_scan_findings,
