@@ -127,3 +127,49 @@ def test_resolve_temperature_rejects_out_of_range_and_garbage():
 def test_resolve_temperature_default_for_non_llm_step():
     # FIX_VERIFICATION is tree-sitter, not an LLM call — no temp key.
     assert resolve_temperature(LLMStep.FIX_VERIFICATION, {}) == DEFAULT_TEMPERATURE
+
+
+# ---------------------------------------------------------------------------
+# Opt-in temperature disable — #92 / PRD #91
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("step", list(LLMStep))
+def test_disable_temperature_returns_none_for_every_step(step):
+    """With the opt-out flag set, every step resolves to None — meaning
+    'send no temperature, let the model use its provider default'."""
+    state = {"disable_temperature": True}
+    assert resolve_temperature(step, state) is None
+
+
+def test_disable_temperature_overrides_stage_temperatures():
+    """The global opt-out wins over any per-stage value in the map."""
+    state = {
+        "disable_temperature": True,
+        "stage_temperatures": {
+            "profiler": 0.0,
+            "analysis": 0.3,
+            "consolidation": 0.5,
+            "merge": 0.7,
+        },
+    }
+    for step in LLMStep:
+        assert resolve_temperature(step, state) is None
+
+
+def test_disable_temperature_false_keeps_today_behaviour():
+    """An explicit False is the same as the flag being absent — per-stage
+    values and the 0.2 default still apply."""
+    state = {
+        "disable_temperature": False,
+        "stage_temperatures": {"analysis": 0.3},
+    }
+    assert resolve_temperature(LLMStep.ANALYSIS, state) == 0.3
+    assert resolve_temperature(LLMStep.PROFILER, state) == DEFAULT_TEMPERATURE
+
+
+def test_resolve_temperature_unchanged_when_flag_absent():
+    """Scans created before #92 have no disable_temperature key at all."""
+    state = {"stage_temperatures": {"merge": 0.9}}
+    assert resolve_temperature(LLMStep.MERGE_AGENT, state) == 0.9
+    assert resolve_temperature(LLMStep.ANALYSIS, state) == DEFAULT_TEMPERATURE

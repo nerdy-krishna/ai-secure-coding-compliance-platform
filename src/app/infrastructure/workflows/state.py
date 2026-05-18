@@ -41,6 +41,11 @@ class WorkerState(TypedDict):
     # merge} → float) chosen at submit time (#78). `resolve_temperature`
     # falls back to 0.2 per stage when a stage or the map is missing.
     stage_temperatures: Optional[Dict[str, Any]]
+    # Opt-in (#92 / PRD #91): when true, `resolve_temperature` returns
+    # None for every stage so no temperature is sent on any LLM call and
+    # each model runs at its provider default. Set from
+    # `Scan.disable_temperature` by `retrieve`.
+    disable_temperature: Optional[bool]
     # Opt-in cross-file finding validation (#81 / PRD #75). When true,
     # the `validate_cross_file` node re-judges each eligible consolidated
     # finding against its cross-file context; when false / None the node

@@ -263,6 +263,7 @@ async def create_scan(
     temperature_analysis: float = Form(0.2, ge=0.0, le=1.0),
     temperature_consolidation: float = Form(0.2, ge=0.0, le=1.0),
     temperature_merge: float = Form(0.2, ge=0.0, le=1.0),
+    disable_temperature: bool = Form(False),
     cross_file_validation: bool = Form(False),
     frameworks: str = Form(
         ..., min_length=1, max_length=2048
@@ -359,6 +360,7 @@ async def create_scan(
         "reasoning_llm_config_id": reasoning_llm_config_id,
         "utility_llm_config_id": utility_llm_config_id,
         "stage_temperatures": stage_temperatures,
+        "disable_temperature": disable_temperature,
         "cross_file_validation": cross_file_validation,
         "frameworks": [fw.strip() for fw in frameworks.split(",")],
         "selected_files": selected_files_list,

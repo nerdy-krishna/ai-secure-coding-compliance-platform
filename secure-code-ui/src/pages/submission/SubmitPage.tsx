@@ -246,6 +246,10 @@ const SubmitPage: React.FC = () => {
     merge: 0.2,
   });
   const [tempsUnlocked, setTempsUnlocked] = useState(false);
+  // Opt-in (#92 / PRD #91): when true, no temperature is sent on any
+  // LLM call — each model runs at its own provider default — and the
+  // per-stage temperature inputs are disabled.
+  const [disableTemperature, setDisableTemperature] = useState(false);
   // Opt-in cross-file finding validation (#81 / PRD #75). Off by
   // default — it costs one extra reasoning-LLM call per eligible finding.
   const [crossFileValidation, setCrossFileValidation] = useState(false);
@@ -521,6 +525,7 @@ const SubmitPage: React.FC = () => {
         String(stageTemps.consolidation),
       );
       payload.append("temperature_merge", String(stageTemps.merge));
+      payload.append("disable_temperature", String(disableTemperature));
       payload.append("cross_file_validation", String(crossFileValidation));
       // V02.2.1: intersect selectedFrameworks with the loaded allowlist before submitting
       const safeFrameworks = selectedFrameworks.filter((n) => frameworks?.some((f) => f.name === n));
@@ -1169,7 +1174,7 @@ const SubmitPage: React.FC = () => {
                 >
                   Model temperature
                 </span>
-                {!tempsUnlocked && (
+                {!tempsUnlocked && !disableTemperature && (
                   <button
                     type="button"
                     className="sccap-btn sccap-btn-sm"
@@ -1179,11 +1184,47 @@ const SubmitPage: React.FC = () => {
                   </button>
                 )}
               </div>
+              {/* Opt-in: disable temperature entirely (#92 / PRD #91). */}
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  fontSize: 12,
+                  color: "var(--fg-muted)",
+                  cursor: "pointer",
+                  marginBottom: 10,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={disableTemperature}
+                  onChange={(e) => setDisableTemperature(e.target.checked)}
+                  style={{ marginTop: 2 }}
+                />
+                <span>
+                  <span style={{ fontWeight: 500 }}>
+                    Disable temperature (use model defaults)
+                  </span>
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 11,
+                      color: "var(--fg-subtle)",
+                    }}
+                  >
+                    Sends no temperature on any LLM call — each model runs at
+                    its own provider default instead of the per-stage values
+                    below.
+                  </div>
+                </span>
+              </label>
               <div
                 style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 1fr",
                   gap: 8,
+                  opacity: disableTemperature ? 0.45 : 1,
                 }}
               >
                 {(
@@ -1213,7 +1254,7 @@ const SubmitPage: React.FC = () => {
                       max={1}
                       step={0.1}
                       value={stageTemps[key]}
-                      disabled={!tempsUnlocked}
+                      disabled={!tempsUnlocked || disableTemperature}
                       onChange={(e) => {
                         const v = Math.min(
                           1,
@@ -1233,8 +1274,9 @@ const SubmitPage: React.FC = () => {
                   color: "var(--fg-subtle)",
                 }}
               >
-                Lower is more deterministic. Defaults to 0.2 per stage —
-                click Edit to tune.
+                {disableTemperature
+                  ? "Temperature disabled — each model uses its own provider default."
+                  : "Lower is more deterministic. Defaults to 0.2 per stage — click Edit to tune."}
               </div>
 
               {/* Opt-in cross-file finding validation (#81 / PRD #75). */}

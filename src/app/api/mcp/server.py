@@ -167,6 +167,15 @@ class SubmitScanInput(BaseModel):
             "of one extra LLM call per eligible finding. Defaults to false."
         ),
     )
+    disable_temperature: bool = Field(
+        default=False,
+        description=(
+            "Opt in to disabling SCCAP's temperature setting (PRD #91). When "
+            "true, no temperature is sent on any LLM call in the scan and each "
+            "model runs at its own provider default instead of SCCAP's 0.2. "
+            "Defaults to false."
+        ),
+    )
 
 
 class AskAdvisorInput(BaseModel):
@@ -304,6 +313,7 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
                 reasoning_llm_config_id=llm_cfg_id,
                 frameworks=payload.frameworks,
                 cross_file_validation=payload.cross_file_validation,
+                disable_temperature=payload.disable_temperature,
             )
 
             if payload.files:

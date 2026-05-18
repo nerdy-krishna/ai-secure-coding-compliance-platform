@@ -103,6 +103,7 @@ class ScanRepository:
         frameworks: List[str],
         utility_llm_config_id: Optional[uuid.UUID] = None,
         stage_temperatures: Optional[Dict[str, Any]] = None,
+        disable_temperature: bool = False,
         cross_file_validation: bool = False,
         tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Scan:
@@ -121,6 +122,7 @@ class ScanRepository:
             reasoning_llm_config_id=reasoning_llm_config_id,
             utility_llm_config_id=utility_llm_config_id,
             stage_temperatures=stage_temperatures,
+            disable_temperature=disable_temperature,
             cross_file_validation=cross_file_validation,
             frameworks=frameworks,
             tenant_id=tenant_id,

@@ -69,14 +69,23 @@ _STEP_TO_TEMP_KEY: dict[LLMStep, str] = {
 }
 
 
-def resolve_temperature(step: LLMStep, state: Mapping[str, Any]) -> float:
+def resolve_temperature(step: LLMStep, state: Mapping[str, Any]) -> Optional[float]:
     """Pick the LLM temperature for a step from the scan's per-stage map.
 
-    Reads `stage_temperatures` from *state* — a ``{stage: float}`` map
-    set on the scan at submit time. Falls back to `DEFAULT_TEMPERATURE`
-    when the step, the map, or a sane value (0.0–2.0) is missing — the
-    twin of `resolve_llm_config_id`, keyed on the same `LLMStep` enum.
+    Returns ``None`` — meaning "send no temperature, let the model use
+    its own provider default" — when the scan opted out of temperature
+    entirely via ``disable_temperature`` (#92 / PRD #91). That opt-out
+    is global: it overrides ``stage_temperatures`` for every step.
+
+    Otherwise reads `stage_temperatures` from *state* — a
+    ``{stage: float}`` map set on the scan at submit time. Falls back to
+    `DEFAULT_TEMPERATURE` when the step, the map, or a sane value
+    (0.0–2.0) is missing — the twin of `resolve_llm_config_id`, keyed on
+    the same `LLMStep` enum. The LLM client treats a ``None`` return as
+    "omit the temperature parameter".
     """
+    if state.get("disable_temperature"):
+        return None
     key = _STEP_TO_TEMP_KEY.get(step)
     if key is None:
         return DEFAULT_TEMPERATURE
