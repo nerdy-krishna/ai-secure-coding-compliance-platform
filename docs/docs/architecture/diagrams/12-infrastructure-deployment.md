@@ -30,14 +30,14 @@ flowchart TB
         QD["sccap_qdrant<br/>qdrant/qdrant@sha256:9472…<br/>:6333 internal only"]:::data
       end
 
-      subgraph ObsT["Observability tier"]
+      subgraph ObsT["Observability tier — runs only with COMPOSE_PROFILES=log_stack"]
         FD["sccap_fluentd<br/>fluentd/Dockerfile (v1.18)<br/>:24224 tcp/udp"]:::obs
         Loki["sccap_loki<br/>grafana/loki:3.4.2<br/>:3100 (127.0.0.1 only)"]:::obs
         Graf["sccap_grafana<br/>grafana/grafana:11.5.2<br/>:3000 (127.0.0.1 only)"]:::obs
         Disk["sccap_disk_monitor<br/>tools/df-emitter (busybox)<br/>uid 65534 · cap_drop ALL"]:::obs
       end
 
-      subgraph LF["Optional Langfuse v3 stack (LANGFUSE_ENABLED=true)"]
+      subgraph LF["Langfuse v3 stack — runs only with COMPOSE_PROFILES=tracing"]
         direction LR
         LFPG["langfuse-postgres<br/>postgres@sha"]:::data
         LFCH["langfuse-clickhouse<br/>clickhouse-server@sha"]:::data
@@ -119,7 +119,7 @@ flowchart TB
     S2["Lock + copy .env.example → .env<br/>(flock prevents concurrent runs)"]:::app
     S3["Generate secrets via scripts/generate_secrets.py<br/>SECRET_KEY · ENCRYPTION_KEY (Fernet)<br/>POSTGRES_PASSWORD · RABBITMQ_DEFAULT_PASS<br/>QDRANT_API_KEY"]:::app
     S4["Upgrade fix-ups<br/>· replace placeholder QDRANT_API_KEY<br/>· remove retired RAG_VECTOR_STORE"]:::app
-    S5["Deployment wizard<br/>Local / Cloud<br/>(if Cloud) Let's Encrypt Y/N<br/>(if LE) domain validation [a-zA-Z0-9.-]{1,253}"]:::gate
+    S5["Setup wizard<br/>· install variant: vibe_coder / developer / enterprise / custom<br/>  → write SCCAP_VARIANT + matching COMPOSE_PROFILES<br/>· Local / Cloud → (if Cloud) Let's Encrypt Y/N<br/>· (if LE) domain validation [a-zA-Z0-9.-]{1,253}"]:::gate
     S6["Optional: write /etc/docker/daemon.json<br/>(max-size 50m, max-file 5)<br/>backup .bak.sccap-<ts><br/>restart Docker daemon"]:::app
     S7["docker compose up -d --build"]:::app
     S8["Wait for sccap_db healthcheck<br/>(max 30 × 2 s)"]:::app
@@ -207,6 +207,7 @@ All containers join the `scpnetwork` bridge. Internal DNS resolves `app`, `db`, 
 | `LOKI_RETENTION_DAYS`                                 | Log retention (default 30 d; set 365 d for PCI/HIPAA)                    |
 | `SSL_ENABLED`, `SSL_DOMAIN`, `SSL_DEV_INSECURE`       | TLS profile                                                              |
 | `DEPLOYMENT_TYPE=local|cloud`                         | Drives Certbot offer + UI banners                                        |
+| `SCCAP_VARIANT`, `COMPOSE_PROFILES`                   | Modular setup (#103–#106) — install variant + which optional container profiles (`log_stack`, `tracing`) docker-compose starts |
 | `LITELLM_LOCAL_MODEL_COST_MAP=true`                   | Pin cost lookups to bundled JSON (no network on cost math)               |
 
 ### Migrations

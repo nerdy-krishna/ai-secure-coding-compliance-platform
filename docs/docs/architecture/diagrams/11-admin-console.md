@@ -13,6 +13,7 @@ flowchart TB
     subgraph UI["Admin UI surfaces (DashboardLayout + AdminSubNav)"]
       direction LR
       SCfg["SystemConfigTab<br/>/admin/system"]:::edge
+      Feat["FeaturesPage<br/>/admin/features"]:::edge
       UMgmt["UserManagement<br/>/admin/users"]:::edge
       UG["UserGroupsPage<br/>/admin/user-groups"]:::edge
       Ten["TenantsPage<br/>/admin/tenants"]:::edge
@@ -33,6 +34,7 @@ flowchart TB
     subgraph API["Admin routers (/api/v1/admin/*)"]
       direction LR
       RCfg["admin_config<br/>+ admin_smtp"]:::app
+      RFeat["admin_features<br/>(feature flags)"]:::app
       RU["admin_users<br/>+ admin_groups"]:::app
       RT["admin_tenants"]:::app
       RF["admin_frameworks"]:::app
@@ -58,6 +60,8 @@ flowchart TB
 
     RCfg -- "system_configurations<br/>(encrypted JSONB)" --> PG
     RCfg --> Cache
+    RFeat -- "features.* rows" --> PG
+    RFeat --> Cache
     RU -- "user · oauth_accounts · saml_subjects · webauthn_credentials" --> PG
     RT -- "tenants" --> PG
     RF -- "frameworks · framework_agent_mappings" --> PG
@@ -109,6 +113,24 @@ Notable keys:
 | `features.*`                         | various  | Feature flags                                                                       |
 | `RETENTION_DAYS_*`                   | int      | Retention sweeper inputs                                                            |
 | `LOKI_RETENTION_DAYS`                | str      | Read by Loki container; needs container restart                                    |
+
+#### Feature flags (`admin_features.py`)
+
+Modular setup (#103): the install's enabled capability set is 13 catalogued
+features (`scan`, `chat`, `compliance`, `multi_user`, `user_groups`, `sso`,
+`scim`, `multi_tenant`, `email`, `log_stack`, `tracing`, `mcp`,
+`admin_authoring`), persisted as `features.*` rows in `system_configurations`
+and mirrored into `SystemConfigCache`.
+
+| Method & path           | Effect                                                                                          |
+|-------------------------|-------------------------------------------------------------------------------------------------|
+| `GET /admin/features`   | List every catalogued feature with its enabled state + dependency edges                         |
+| `PUT /admin/features`   | Replace the enabled set. Dependencies are resolved/pruned automatically; turning `multi_user` OFF is a destructive transition that deactivates all non-superuser accounts |
+| `GET /features`         | Unauthenticated read of the enabled set — the SPA gates routes/menus off it                     |
+
+`log_stack` and `tracing` are container-backed: their docker-compose profiles
+must be in `COMPOSE_PROFILES` for the feature to actually function (the
+lifespan warns on a mismatch).
 
 #### Users & access (`admin_users.py`, `admin_groups.py`, `admin_tenants.py`)
 
@@ -214,14 +236,20 @@ Every blocked attempt writes an `auth_audit_events` row with event `master_admin
 
 ### Setup wizard (`/setup`)
 
-Pre-auth surface (no JWT required for `GET /setup/status`). Four steps:
+Pre-auth surface (no JWT required for `GET /setup/status`). Steps:
 
-1. **Deployment mode** — local / cloud (drives Let's Encrypt offer in `setup.sh`)
+1. **Variant** — `setup.sh` / `setup.bat` first prompt for an install variant
+   (`vibe_coder`, `developer`, `enterprise`, or `custom`) and write
+   `SCCAP_VARIANT` + the matching `COMPOSE_PROFILES` into `.env`. The variant
+   preset (closed under feature dependencies) becomes the initial enabled set.
 2. **Admin user** — creates the first superuser (becomes master admin via `security.master_admin_user_id`)
-3. **LLM mode** — pick built-in provider mix (Anthropic-only, OpenAI-only, multi-provider)
-4. **LLM config** — paste API key(s) for the selected providers; values are immediately Fernet-encrypted into `llm_configurations`
+3. **LLM mode + config** — pick a provider mix and paste API key(s); values are immediately Fernet-encrypted into `llm_configurations`
+4. **Custom feature wizard** — for the `custom` variant, the operator hand-picks
+   features; dependency resolution closes the set.
 
-After step 4, `POST /admin/seed/defaults` is called automatically to populate frameworks, agents, prompts. `/setup` then redirects to `/account/dashboard`.
+`POST /admin/seed/defaults` then populates frameworks, agents, prompts, and the
+`features.*` rows are seeded from the variant. After setup, *Admin → Features*
+(`admin_features.py`) toggles the enabled set live.
 
 ---
 

@@ -37,8 +37,8 @@ flowchart TB
         R5["/chat/sessions/*"]:::app
         R6["/compliance/*"]:::app
         R7["/dashboard/stats · /search"]:::app
-        R8["/setup · /refresh"]:::app
-        R9["/admin/* (LLM, frameworks, agents, prompts,<br/>users, tenants, sso, scim, smtp,<br/>config, logs, findings, rule-sources, seed)"]:::app
+        R8["/setup · /refresh · /features"]:::app
+        R9["/admin/* (LLM, frameworks, agents, prompts,<br/>users, tenants, sso, scim, smtp, config,<br/>logs, findings, rule-sources, seed, features)"]:::app
         RMCP["MCP server (mounted)<br/>app/api/mcp/server.py"]:::app
       end
 
@@ -71,8 +71,8 @@ flowchart TB
       Consumer["aio_pika consumer<br/>connect_robust + backoff<br/>thread cleanup on terminal"]:::app
       WF["LangGraph StateGraph<br/>AsyncPostgresSaver (checkpoints)"]:::app
       Scanners["Deterministic scanners<br/>Bandit · Semgrep 1.95 · Gitleaks 8.21 · OSV-Scanner 2.3"]:::app
-      Agents["16+ Specialized Agents<br/>Auth · AccessCtl · Crypto · Validation · …<br/>+ generic_specialized_agent · chat_agent"]:::app
-      Editor["Aider-style editor<br/>SEARCH/REPLACE · 3-retry loop<br/>tree-sitter syntax check"]:::app
+      Agents["Per-framework analysis agents<br/>ASVS · CWE · ISVS · MASVS · Proactive · …<br/>generic_specialized_agent · finding_consolidator"]:::app
+      Merge["consolidate_and_patch (REMEDIATE)<br/>_run_merge_agent · single-shot<br/>tree-sitter syntax verify"]:::app
     end
 
     %% ===== Data tier =====
@@ -135,7 +135,7 @@ flowchart TB
     WF --> Scanners
     Scanners -- "subprocess · stdin/stdout JSON" --> Agents
     WF --> Agents
-    Agents --> Editor
+    Agents --> Merge
     Agents -- "Pydantic AI structured output" --> LLM
     Scanners -- "OSV DB sync at build" --> OSVDB
     Routers -- "rule_source sync" --> SEMGCLD
@@ -182,9 +182,11 @@ flowchart TB
 | `/projects`                             | `projects.py`                                 | List, history, delete                                                      |
 | `/chat/sessions`                        | `chat.py`                                     | Create, list, ask, delete, context (RAG-driven)                            |
 | `/compliance`                           | `compliance.py`                               | `/stats`, `/frameworks/{name}/controls`                                    |
-| `/admin/*`                              | `admin_*.py` (12 files)                       | Full admin console — see diagram 11                                        |
+| `/admin/*`                              | `admin_*.py`                                  | Full admin console — see diagram 11                                        |
+| `/features`                             | `features.py`                                 | Read-only: the install's enabled feature set, consumed by the SPA          |
+| `/admin/features`                       | `admin_features.py`                           | Superuser GET/PUT of the enabled feature set (modular setup, #103)         |
 | `/refresh`                              | `auth_*.py`                                   | Refresh-token cookie ↔ access JWT mint                                     |
-| `/setup`                                | `setup.py`                                    | First-run wizard (admin user, LLM mode, default LLM config)                |
+| `/setup`                                | `setup.py`                                    | First-run wizard (variant pick, admin user, LLM mode, default LLM config)  |
 | MCP server                              | `app/api/mcp/server.py`                       | Exposes scan + chat tools to Claude Code / Cursor; reuses JWT auth         |
 
 ### Core services
@@ -235,7 +237,7 @@ flowchart TB
 | Store         | Notes                                                                                                                          |
 |---------------|--------------------------------------------------------------------------------------------------------------------------------|
 | PostgreSQL 16 | `postgresql+asyncpg://`; Alembic migrations under `/alembic/versions/`. Holds business state **and** LangGraph `checkpoints` table |
-| RabbitMQ 3.12 | Three named queues; `sccap-bounded-queues` policy enforces `max-length=100000` + `overflow=drop-head`                          |
+| RabbitMQ 3.12 | Two named queues (`code_submission_queue`, `analysis_approved_queue`); `sccap-bounded-queues` policy enforces `max-length=100000` + `overflow=drop-head` |
 | Qdrant        | SHA256-pinned, mandatory `QDRANT_API_KEY`, internal-only (no host port)                                                        |
 | Volumes       | Persistent Docker named volumes — see diagram 12                                                                               |
 
@@ -251,7 +253,11 @@ flowchart TB
 
 ### Worker tier (full detail in diagram 14)
 
-The worker runs the same Python package but a different entrypoint: `python -m app.workers.consumer`. It consumes a RabbitMQ message, looks up the scan row, then drives a LangGraph `StateGraph` whose 13 nodes do **prescan → cost gate → analyze → correlate → consolidate → verify → persist**. Each LLM call goes back through the same `LLMClient` used by the app tier so cost math, rate limits and prompt caching are unified.
+The worker runs the same Python package but a different entrypoint: `python -m app.workers.consumer`. It consumes a RabbitMQ message, looks up the scan row, then drives a LangGraph `StateGraph` whose nodes do **prescan → profiling-cost gate → cost gate → analyze → consolidate-findings → cross-file validation → patch (REMEDIATE) → verify → persist**. Each LLM call goes back through the same `LLMClient` used by the app tier so cost math, rate limits and prompt caching are unified.
+
+### Modular feature flags (#103)
+
+The install's enabled capability set (13 features — `scan`, `chat`, `compliance`, `multi_user`, `user_groups`, `sso`, `scim`, `multi_tenant`, `email`, `log_stack`, `tracing`, `mcp`, `admin_authoring`) is catalogued in `src/app/core/features.py` and persisted as `features.*` rows in `system_configurations`. At startup `main.py`'s lifespan calls `load_or_seed_enabled_features()` and mirrors the set into `SystemConfigCache`; routers and the SPA gate surfaces off it. `log_stack` and `tracing` are container-backed — their docker-compose profiles must also be in `COMPOSE_PROFILES`, and the lifespan logs a warning when they are not.
 
 ---
 
