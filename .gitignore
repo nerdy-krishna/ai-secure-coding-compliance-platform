@@ -185,6 +185,9 @@ trigger_chat.py
 .agent/
 CLAUDE.md
 
+# Securecoder tool runtime config + state — local and per-developer.
+.securecoder/
+
 # Diagram + log output from the swark generator — generated artefacts.
 swark-output/
 
