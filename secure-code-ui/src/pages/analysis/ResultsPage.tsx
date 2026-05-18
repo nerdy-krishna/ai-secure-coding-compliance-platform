@@ -1400,6 +1400,9 @@ const FindingDetail: React.FC<{
   const hasFix = !!f.fixes?.code;
   const alreadyApplied = f.is_applied_in_remediation;
   const fileContent = originalCodeMap?.[f.file_path] ?? null;
+  // Full-screen diff view (#83 follow-up) — the inline pane is narrow;
+  // this opens the before/after diff in a near-fullscreen modal.
+  const [diffExpanded, setDiffExpanded] = useState(false);
 
   return (
     <div
@@ -1679,6 +1682,13 @@ const FindingDetail: React.FC<{
               </h4>
               <div style={{ display: "flex", gap: 6 }}>
                 <button
+                  className="sccap-btn sccap-btn-sm"
+                  onClick={() => setDiffExpanded(true)}
+                  title="Open this diff in a full-screen view"
+                >
+                  <Icon.Eye size={12} /> Expand
+                </button>
+                <button
                   className="sccap-btn sccap-btn-sm sccap-btn-primary"
                   onClick={onApply}
                   disabled={applying || alreadyApplied}
@@ -1726,6 +1736,33 @@ const FindingDetail: React.FC<{
               fileContent={fileContent}
               filePath={f.file_path}
             />
+
+            {/* Full-screen diff view — takes nearly the whole viewport
+                so wide before/after code is clearly readable. */}
+            <Modal
+              open={diffExpanded}
+              onClose={() => setDiffExpanded(false)}
+              width="96vw"
+              title={
+                <span
+                  style={{ display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <Icon.Sparkle size={13} /> AI-suggested fix ·{" "}
+                  <span className="mono" style={{ fontSize: 13 }}>
+                    {f.file_path}
+                  </span>
+                </span>
+              }
+            >
+              <DiffViewer
+                original={f.fixes?.original_snippet ?? ""}
+                fixed={f.fixes?.code ?? ""}
+                startLine={f.line_number ?? 1}
+                fileContent={fileContent}
+                filePath={f.file_path}
+                maxHeight="calc(86vh - 80px)"
+              />
+            </Modal>
           </div>
         )}
 
