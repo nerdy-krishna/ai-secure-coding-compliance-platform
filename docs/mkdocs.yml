@@ -166,6 +166,7 @@ nav:
       - Data Flow: architecture/data-flow.md
       - LLM Integration: architecture/llm-integration.md
       - RAG System: architecture/rag-system.md
+      - Modular Setup: architecture/modular-setup.md
   - Development:
       - Contributing: development/contributing.md
       - Coding Standards: development/coding-standards.md
