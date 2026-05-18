@@ -8,6 +8,7 @@
 #
 from datetime import datetime, timezone
 from typing import Any, Dict, List, TypedDict, Optional, Literal
+import re
 import uuid
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -216,19 +217,44 @@ class VulnerabilityFinding(BaseModel):
         ),
     )
 
-    @field_validator("references")
+    @field_validator("references", mode="before")
     @classmethod
-    def validate_references(cls, v: List[str]) -> List[str]:
+    def _sanitise_references(cls, v: object) -> List[str]:
+        """Sanitise the references list instead of rejecting the whole finding.
+
+        An LLM agent sometimes emits a bare identifier (e.g. ``CWE-22``)
+        instead of a URL. Raising here aborted the *entire* agent invocation
+        (observed on ``CweExternalResourceAccessAgent``), so this runs in
+        ``before`` mode and coerces rather than rejects:
+
+          * a recognisable ``CWE-<n>`` token becomes its MITRE URL;
+          * valid ``http(s)://`` URLs up to 2048 chars are kept as-is;
+          * anything else (other non-URL text, over-long URLs) is dropped;
+          * the list is capped at 20 entries.
+
+        References are a supplementary field, so dropping unusable entries is
+        preferable to losing the whole finding.
+        """
+        if not isinstance(v, (list, tuple)):
+            return []
+        cleaned: List[str] = []
         for ref in v:
-            if len(ref) > 2048:
-                raise ValueError(
-                    f"Reference URL exceeds 2048 characters: {ref[:80]}..."
+            if not isinstance(ref, str):
+                continue
+            ref = ref.strip()
+            if not ref:
+                continue
+            if ref.startswith(("http://", "https://")):
+                if len(ref) <= 2048:
+                    cleaned.append(ref)
+                continue
+            cwe_match = re.fullmatch(r"CWE-(\d+)", ref, re.IGNORECASE)
+            if cwe_match:
+                cleaned.append(
+                    "https://cwe.mitre.org/data/definitions/"
+                    f"{cwe_match.group(1)}.html"
                 )
-            if not ref.startswith(("http://", "https://")):
-                raise ValueError(
-                    f"Reference must start with http:// or https://: {ref[:80]}"
-                )
-        return v
+        return cleaned[:20]
 
     @field_validator("file_path")
     @classmethod
