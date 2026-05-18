@@ -673,6 +673,54 @@ class ScanRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_finding(
+        self, finding_id: int
+    ) -> Optional[db_models.Finding]:
+        """Retrieve a single finding by its primary key."""
+        result = await self.db.execute(
+            select(db_models.Finding).where(
+                db_models.Finding.id == finding_id
+            )
+        )
+        return result.scalars().first()
+
+    async def apply_finding_disposition(
+        self,
+        finding: db_models.Finding,
+        *,
+        new_disposition: str,
+        actor_user_id: int,
+        note: Optional[str],
+    ) -> db_models.Finding:
+        """Set a finding's disposition and append an audit event in one
+        transaction (PRD #96 / #97). The caller is responsible for
+        transition validation — this method only persists."""
+        old = finding.disposition or "open"
+        finding.disposition = new_disposition
+        finding.disposition_by = actor_user_id
+        finding.disposition_at = datetime.datetime.now(datetime.timezone.utc)
+        finding.disposition_note = note
+        self.db.add(
+            db_models.FindingDispositionEvent(
+                finding_id=finding.id,
+                old_disposition=old,
+                new_disposition=new_disposition,
+                actor_user_id=actor_user_id,
+                note=note,
+            )
+        )
+        try:
+            await self.db.commit()
+        except SQLAlchemyError:
+            await self.db.rollback()
+            logger.error(
+                "scan_repo.apply_finding_disposition.commit_failed",
+                extra={"finding_id": finding.id},
+            )
+            raise
+        await self.db.refresh(finding)
+        return finding
+
     async def query_findings(
         self,
         *,

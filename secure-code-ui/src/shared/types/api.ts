@@ -196,11 +196,36 @@ export interface Finding {
   references: string[];
   fixes?: SuggestedFix;
   is_applied_in_remediation?: boolean;
+  // Patch-verifier result (§3.9). true ⇒ a scanner re-run no longer
+  // reports this finding; the tool's fix worked. null ⇒ not verified.
+  fix_verified?: boolean | null;
   // Opt-in cross-file validation verdict (#81 / PRD #75). null when the
   // scan did not opt in or the finding was skipped by the eligibility
   // pre-filter; otherwise "confirmed" / "mitigated" / "unconfirmed".
   cross_file_status?: "confirmed" | "mitigated" | "unconfirmed" | null;
   cross_file_rationale?: string | null;
+  // Operator triage disposition (PRD #96 / #97). Defaults to "open".
+  disposition?: FindingDisposition;
+  disposition_by?: number | null;
+  disposition_at?: string | null;
+  disposition_note?: string | null;
+}
+
+// The five operator triage states. `false_positive`, `remediated`, and
+// `risk_accepted` drop a finding out of the risk score.
+export type FindingDisposition =
+  | "open"
+  | "confirmed"
+  | "false_positive"
+  | "remediated"
+  | "risk_accepted";
+
+export interface FindingDispositionResponse {
+  finding_id: number;
+  disposition: FindingDisposition;
+  disposition_by?: number | null;
+  disposition_at?: string | null;
+  disposition_note?: string | null;
 }
 
 export interface SubmittedFile {

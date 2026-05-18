@@ -844,6 +844,28 @@ async def get_llm_interactions_for_scan(
     return await service.get_llm_interactions_for_scan(scan_id, user)
 
 
+@router.patch(
+    "/scans/{scan_id}/findings/{finding_id}/disposition",
+    response_model=api_models.FindingDispositionResponse,
+)
+async def set_finding_disposition(
+    scan_id: uuid.UUID,
+    finding_id: int,
+    request: api_models.FindingDispositionUpdateRequest,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+):
+    """Set a finding's operator triage disposition (PRD #96 / #97).
+
+    Any user who can view the scan may triage its findings (H.2). A
+    justification note is required for `false_positive` / `risk_accepted`.
+    """
+    return await service.set_finding_disposition(
+        scan_id, finding_id, user, request, visible_user_ids=visible_user_ids
+    )
+
+
 @router.delete("/scans/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_scan(
     scan_id: uuid.UUID,

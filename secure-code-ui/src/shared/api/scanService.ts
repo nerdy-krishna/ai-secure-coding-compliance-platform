@@ -1,4 +1,6 @@
 import {
+  type FindingDisposition,
+  type FindingDispositionResponse,
   type GitRepoPreviewRequest,
   type LLMInteractionResponse,
   type PaginatedProjectHistoryResponse,
@@ -274,6 +276,23 @@ export const scanService = {
    */
   getLlmInteractionsForScan: async (scanId: string): Promise<LLMInteractionResponse[]> => {
     const response = await apiClient.get<LLMInteractionResponse[]>(`/scans/${encodeURIComponent(scanId)}/llm-interactions`);
+    return response.data;
+  },
+
+  /**
+   * Sets a finding's operator triage disposition (PRD #96 / #97).
+   * `note` is required by the backend for false_positive / risk_accepted.
+   */
+  setFindingDisposition: async (
+    scanId: string,
+    findingId: number,
+    disposition: FindingDisposition,
+    note?: string,
+  ): Promise<FindingDispositionResponse> => {
+    const response = await apiClient.patch<FindingDispositionResponse>(
+      `/scans/${encodeURIComponent(scanId)}/findings/${findingId}/disposition`,
+      { disposition, note: note ?? null },
+    );
     return response.data;
   },
 

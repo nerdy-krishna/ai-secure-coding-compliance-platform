@@ -14,7 +14,7 @@
 // navigate to LLM logs.
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { scanService } from "../../shared/api/scanService";
 import { useAuth } from "../../shared/hooks/useAuth";
@@ -29,6 +29,7 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
 import type {
   Finding,
+  FindingDisposition,
   PrescanFindingItem,
   ScanResultResponse,
   SubmittedFile,
@@ -1161,6 +1162,20 @@ const ResultsPage: React.FC = () => {
                           mitigated
                         </span>
                       )}
+                      {f.disposition && f.disposition !== "open" && (
+                        <span
+                          className="chip"
+                          style={{
+                            fontSize: 9.5,
+                            padding: "1px 6px",
+                            color: dispositionMeta(f.disposition).color,
+                            border: `1px solid ${dispositionMeta(f.disposition).color}`,
+                          }}
+                          title={`Triage: ${dispositionMeta(f.disposition).label}`}
+                        >
+                          {dispositionMeta(f.disposition).label}
+                        </span>
+                      )}
                       {f.cwe && (
                         <span
                           style={{
@@ -1251,6 +1266,7 @@ const ResultsPage: React.FC = () => {
         {selected ? (
           <FindingDetail
             f={selected}
+            scanId={scanId}
             originalCodeMap={data?.original_code_map ?? undefined}
           />
         ) : (
@@ -1516,10 +1532,228 @@ const DiffViewer: React.FC<{
 // Detail pane
 // ============================================================================
 
+// Operator triage states (PRD #96 / #97). Order = the row order in the
+// disposition control. Colors borrow the app's semantic tokens.
+const DISPOSITIONS: {
+  value: FindingDisposition;
+  label: string;
+  color: string;
+}[] = [
+  { value: "open", label: "Open", color: "var(--fg-muted)" },
+  { value: "confirmed", label: "Confirmed", color: "var(--high)" },
+  { value: "false_positive", label: "False Positive", color: "var(--fg-subtle)" },
+  { value: "remediated", label: "Remediated", color: "var(--success)" },
+  { value: "risk_accepted", label: "Risk Accepted", color: "var(--info)" },
+];
+const NOTE_REQUIRED: FindingDisposition[] = ["false_positive", "risk_accepted"];
+
+function dispositionMeta(d: FindingDisposition) {
+  return DISPOSITIONS.find((x) => x.value === d) ?? DISPOSITIONS[0];
+}
+
+/** Inline finding-triage control: a state row + a note input that
+ *  appears when the chosen state requires a justification. */
+const DispositionControl: React.FC<{ scanId: string; f: Finding }> = ({
+  scanId,
+  f,
+}) => {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const current: FindingDisposition = f.disposition ?? "open";
+  // A state the user picked that needs a note before it can be saved.
+  const [pending, setPending] = useState<FindingDisposition | null>(null);
+  const [note, setNote] = useState("");
+
+  const mutation = useMutation({
+    mutationFn: (vars: { disposition: FindingDisposition; note?: string }) =>
+      scanService.setFindingDisposition(
+        scanId,
+        f.id,
+        vars.disposition,
+        vars.note,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["scan-result", scanId] });
+      setPending(null);
+      setNote("");
+      toast.success("Disposition updated");
+    },
+    onError: (e: unknown) => {
+      const err = e as {
+        response?: { data?: { detail?: string } };
+        message?: string;
+      };
+      toast.error(
+        err?.response?.data?.detail ??
+          err?.message ??
+          "Failed to update disposition",
+      );
+    },
+  });
+
+  const choose = (d: FindingDisposition) => {
+    if (d === current || mutation.isPending) return;
+    if (NOTE_REQUIRED.includes(d)) {
+      setPending(d);
+      setNote("");
+    } else {
+      setPending(null);
+      mutation.mutate({ disposition: d });
+    }
+  };
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        <h4
+          style={{
+            color: "var(--fg-muted)",
+            fontSize: 11,
+            textTransform: "uppercase",
+            letterSpacing: ".06em",
+            margin: 0,
+          }}
+        >
+          Triage disposition
+        </h4>
+        {/* Tool-verified fix is a separate signal from operator triage. */}
+        {f.fix_verified === true && (
+          <span
+            className="chip"
+            style={{
+              fontSize: 10,
+              padding: "1px 7px",
+              background: "var(--success-weak)",
+              color: "var(--success)",
+              border: "none",
+            }}
+            title="A re-run of the scanner no longer reports this finding."
+          >
+            <Icon.Check size={9} /> fix verified by tool
+          </span>
+        )}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {DISPOSITIONS.map((d) => {
+          const active = d.value === current;
+          return (
+            <button
+              key={d.value}
+              type="button"
+              onClick={() => choose(d.value)}
+              disabled={mutation.isPending}
+              aria-pressed={active}
+              style={{
+                padding: "4px 11px",
+                borderRadius: 12,
+                border: `1px solid ${d.color}`,
+                background: active ? d.color : "transparent",
+                color: active ? "#fff" : d.color,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: mutation.isPending ? "default" : "pointer",
+                fontFamily: "inherit",
+                opacity: mutation.isPending && !active ? 0.5 : 1,
+              }}
+            >
+              {d.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Note prompt — shown only while a note-required state is pending. */}
+      {pending && (
+        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+          <label style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+            A justification note is required to mark this finding{" "}
+            <strong>{dispositionMeta(pending).label}</strong>.
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            maxLength={4000}
+            autoFocus
+            placeholder="Why is this the correct disposition?"
+            style={{
+              width: "100%",
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--fg)",
+              fontSize: 13,
+              fontFamily: "inherit",
+              resize: "vertical",
+            }}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              className="sccap-btn sccap-btn-primary"
+              disabled={!note.trim() || mutation.isPending}
+              onClick={() =>
+                mutation.mutate({ disposition: pending, note: note.trim() })
+              }
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="sccap-btn sccap-btn-ghost"
+              disabled={mutation.isPending}
+              onClick={() => {
+                setPending(null);
+                setNote("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Current disposition provenance. */}
+      {current !== "open" && !pending && (
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--fg-muted)" }}>
+          {f.disposition_at && (
+            <>
+              Set {new Date(f.disposition_at).toLocaleString()}
+              {f.disposition_by != null && <> by user #{f.disposition_by}</>}
+            </>
+          )}
+          {f.disposition_note && (
+            <div
+              style={{
+                marginTop: 4,
+                padding: "6px 9px",
+                borderLeft: "2px solid var(--border-strong)",
+                color: "var(--fg)",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {f.disposition_note}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const FindingDetail: React.FC<{
   f: Finding;
+  scanId?: string;
   originalCodeMap?: Record<string, string>;
-}> = ({ f, originalCodeMap }) => {
+}> = ({ f, scanId, originalCodeMap }) => {
   const sev = (f.severity || "").toUpperCase();
   const sevColor = SEV_COLOR[sev] ?? "var(--fg-muted)";
   const hasFix = !!f.fixes?.code;
@@ -1667,6 +1901,8 @@ const FindingDetail: React.FC<{
       )}
 
       <div style={{ display: "grid", gap: 18 }}>
+        {scanId && <DispositionControl scanId={scanId} f={f} />}
+
         {f.description && (
           <div>
             <h4

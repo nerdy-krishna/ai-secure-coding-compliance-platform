@@ -520,6 +520,14 @@ class VulnerabilityFindingResponse(BaseModel):
     # pre-filter; otherwise 'confirmed' / 'mitigated' / 'unconfirmed'.
     cross_file_status: Optional[str] = None
     cross_file_rationale: Optional[str] = None
+    # Operator triage disposition (PRD #96 / #97). One of open /
+    # confirmed / false_positive / remediated / risk_accepted. `_by` /
+    # `_at` / `_note` record who last set it, when, and the
+    # justification. See `app.shared.lib.finding_disposition`.
+    disposition: str = "open"
+    disposition_by: Optional[int] = None
+    disposition_at: Optional[datetime] = None
+    disposition_note: Optional[str] = None
 
     @field_validator("fixes", mode="before")
     @classmethod
@@ -527,6 +535,33 @@ class VulnerabilityFindingResponse(BaseModel):
         if v is None:
             return None
         return v
+
+    class Config:
+        from_attributes = True
+
+
+class FindingDispositionUpdateRequest(BaseModel):
+    """Body of the per-finding disposition PATCH (PRD #96 / #97)."""
+
+    disposition: str = Field(..., description="Target disposition state.")
+    note: Optional[str] = Field(
+        None,
+        max_length=4000,
+        description=(
+            "Justification note. Required when the target disposition is "
+            "false_positive or risk_accepted."
+        ),
+    )
+
+
+class FindingDispositionResponse(BaseModel):
+    """The triage state of a finding after a disposition change."""
+
+    finding_id: int
+    disposition: str
+    disposition_by: Optional[int] = None
+    disposition_at: Optional[datetime] = None
+    disposition_note: Optional[str] = None
 
     class Config:
         from_attributes = True

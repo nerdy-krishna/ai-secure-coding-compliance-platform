@@ -325,3 +325,76 @@ class ScanLifecycleService:
         logger.info(
             "scan: cancelled", extra={"scan_id": str(scan_id), "actor_user_id": user.id}
         )
+
+    async def set_finding_disposition(
+        self,
+        scan_id: uuid.UUID,
+        finding_id: int,
+        user: db_models.User,
+        request: "api_models.FindingDispositionUpdateRequest",
+        visible_user_ids: Optional[list[int]] = None,
+    ) -> "api_models.FindingDispositionResponse":
+        """Set a finding's triage disposition (PRD #96 / #97).
+
+        Authorization follows the H.2 visibility model: any user who can
+        view the scan can triage its findings (`visible_user_ids is None`
+        ⇒ admin, sees everything). The transition is validated against
+        `finding_disposition`; the change + an audit event are persisted
+        atomically by the repository.
+        """
+        from app.shared.lib import finding_disposition as fd
+
+        scan = await self._get_scan_or_404(scan_id)
+        if visible_user_ids is not None and scan.user_id not in visible_user_ids:
+            logger.warning(
+                "scan: authorization denied",
+                extra={
+                    "scan_id": str(scan_id),
+                    "actor_user_id": user.id,
+                    "action": "set_finding_disposition",
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan not found or not authorized.",
+            )
+
+        finding = await self.repo.get_finding(finding_id)
+        if finding is None or finding.scan_id != scan_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Finding not found for this scan.",
+            )
+
+        current = finding.disposition or fd.DEFAULT_DISPOSITION
+        try:
+            fd.validate_transition(current, request.disposition, request.note)
+        except fd.DispositionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            )
+
+        note = request.note.strip() if request.note else None
+        updated = await self.repo.apply_finding_disposition(
+            finding,
+            new_disposition=request.disposition,
+            actor_user_id=user.id,
+            note=note,
+        )
+        logger.info(
+            "scan: finding disposition set",
+            extra={
+                "scan_id": str(scan_id),
+                "finding_id": finding_id,
+                "actor_user_id": user.id,
+                "old_disposition": current,
+                "new_disposition": request.disposition,
+            },
+        )
+        return api_models.FindingDispositionResponse(
+            finding_id=updated.id,
+            disposition=updated.disposition,
+            disposition_by=updated.disposition_by,
+            disposition_at=updated.disposition_at,
+            disposition_note=updated.disposition_note,
+        )

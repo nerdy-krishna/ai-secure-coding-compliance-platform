@@ -336,6 +336,25 @@ class Finding(Base):
     )
     cross_file_rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Operator-controlled triage disposition (PRD #96 / #97). One of
+    # open / confirmed / false_positive / remediated / risk_accepted —
+    # see `app.shared.lib.finding_disposition`. `open` is the default;
+    # false_positive / remediated / risk_accepted drop the finding out
+    # of all risk math. `disposition_by` / `_at` / `_note` record who
+    # last set it, when, and the justification (required for
+    # false_positive / risk_accepted). Full change history lives in
+    # `finding_disposition_events`.
+    disposition: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="open", index=True
+    )
+    disposition_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    disposition_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    disposition_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # V02.2.1: enforce maximum string lengths at the DB layer
     __table_args__ = (
         sa.CheckConstraint(
@@ -346,9 +365,40 @@ class Finding(Base):
             "length(remediation) <= 65535",
             name="ck_findings_remediation_maxlen",
         ),
+        sa.CheckConstraint(
+            "disposition IN "
+            "('open', 'confirmed', 'false_positive', 'remediated', "
+            "'risk_accepted')",
+            name="ck_findings_disposition",
+        ),
     )
 
     scan: Mapped["Scan"] = relationship(back_populates="findings")
+
+
+class FindingDispositionEvent(Base):
+    """Append-only audit log of every finding-disposition change
+    (PRD #96 / #97). One row per transition; `findings.disposition`
+    holds the current state, this table holds the history."""
+
+    __tablename__ = "finding_disposition_events"
+    id: Mapped[int] = mapped_column(
+        BIGINT, sa.Identity(always=True), primary_key=True
+    )
+    finding_id: Mapped[int] = mapped_column(
+        ForeignKey("findings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    old_disposition: Mapped[str] = mapped_column(String(20), nullable=False)
+    new_disposition: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class LLMConfiguration(Base):
