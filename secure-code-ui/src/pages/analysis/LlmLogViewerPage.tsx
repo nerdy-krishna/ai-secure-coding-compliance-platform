@@ -297,6 +297,7 @@ const LlmLogViewerPage: React.FC = () => {
                 : `No interactions found for file: ${selectedFilePath}`}
             </div>
           ) : (
+            <div style={{ overflowX: "auto", maxWidth: "100%" }}>
             <table className="sccap-t">
               <thead>
                 <tr>
@@ -380,7 +381,16 @@ const LlmLogViewerPage: React.FC = () => {
                               </div>
                               <div>
                                 <Label>Prompt context</Label>
-                                <pre className="sccap-code">
+                                <pre
+                                  className="sccap-code"
+                                  style={{
+                                    whiteSpace: "pre-wrap",
+                                    overflowWrap: "anywhere",
+                                    overflow: "auto",
+                                    maxWidth: "100%",
+                                    maxHeight: 360,
+                                  }}
+                                >
                                   {JSON.stringify(
                                     redactSensitive(r.prompt_context),
                                     null,
@@ -390,7 +400,16 @@ const LlmLogViewerPage: React.FC = () => {
                               </div>
                               <div>
                                 <Label>Parsed output</Label>
-                                <pre className="sccap-code">
+                                <pre
+                                  className="sccap-code"
+                                  style={{
+                                    whiteSpace: "pre-wrap",
+                                    overflowWrap: "anywhere",
+                                    overflow: "auto",
+                                    maxWidth: "100%",
+                                    maxHeight: 360,
+                                  }}
+                                >
                                   {JSON.stringify(
                                     redactSensitive(r.parsed_output),
                                     null,
@@ -478,6 +497,7 @@ const LlmLogViewerPage: React.FC = () => {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>
