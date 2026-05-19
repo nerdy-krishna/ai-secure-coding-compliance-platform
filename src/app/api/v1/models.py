@@ -903,6 +903,9 @@ class AnalysisResultDetailResponse(BaseModel):
     disable_temperature: bool = False
     stage_temperatures: Optional[Dict[str, Any]] = None
     repository_url: Optional[str] = None
+    # How the code was submitted: 'upload' / 'archive' / 'git'. None for
+    # scans created before the column existed.
+    source_type: Optional[str] = None
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing

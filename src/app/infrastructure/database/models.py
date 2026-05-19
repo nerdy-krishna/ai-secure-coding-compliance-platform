@@ -170,6 +170,12 @@ class Scan(Base):
     cross_file_validation: Mapped[bool] = mapped_column(
         sa.Boolean, server_default="false", nullable=False
     )
+    # How the code was submitted: 'upload' (loose files), 'archive'
+    # (zip/rar), or 'git' (cloned repository). NULL for pre-existing
+    # scans. Surfaced in the results-page scan-info panel + reports.
+    source_type: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True
+    )
     context_bundles: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB)
     summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     # CycloneDX SBOM emitted by OSV-Scanner during the deterministic

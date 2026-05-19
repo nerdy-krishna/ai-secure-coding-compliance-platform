@@ -331,6 +331,7 @@ class ScanQueryService:
             scan_type=scan.scan_type,
             disable_temperature=bool(scan.disable_temperature),
             stage_temperatures=scan.stage_temperatures,
+            source_type=scan.source_type,
             repository_url=(scan.project.repository_url if scan.project else None),
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )

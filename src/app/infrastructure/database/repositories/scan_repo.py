@@ -106,11 +106,13 @@ class ScanRepository:
         stage_temperatures: Optional[Dict[str, Any]] = None,
         disable_temperature: bool = False,
         cross_file_validation: bool = False,
+        source_type: Optional[str] = None,
         tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Scan:
         """Creates a new Scan record. ``tenant_id`` is stamped from the
         submitter so the per-tenant scope filter (Chunk 9) is correct
-        for newly-created scans."""
+        for newly-created scans. ``source_type`` records how the code
+        was submitted (upload / archive / git)."""
         logger.info(
             "scan_repo.scan.created",
             extra={"project_id": str(project_id), "scan_type": scan_type},
@@ -126,6 +128,7 @@ class ScanRepository:
             stage_temperatures=stage_temperatures,
             disable_temperature=disable_temperature,
             cross_file_validation=cross_file_validation,
+            source_type=source_type,
             frameworks=frameworks,
             tenant_id=tenant_id,
         )

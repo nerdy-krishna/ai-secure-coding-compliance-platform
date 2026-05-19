@@ -336,6 +336,8 @@ export interface ScanResultResponse {
   disable_temperature?: boolean;
   stage_temperatures?: { [stage: string]: number } | null;
   repository_url?: string | null;
+  // How the code was submitted: "upload" | "archive" | "git".
+  source_type?: string | null;
   // Stage-event audit trail. SSE emits these live for in-progress
   // scans; the same list is included here so a terminal scan's page
   // can seed the live-event-log deterministically on mount, instead

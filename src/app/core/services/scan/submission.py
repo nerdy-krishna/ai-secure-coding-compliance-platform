@@ -135,6 +135,7 @@ class ScanSubmissionService:
         disable_temperature: bool = False,
         cross_file_validation: bool = False,
         repo_url: Optional[str] = None,
+        source_type: str = "upload",
         selected_files: Optional[List[str]] = None,
     ) -> db_models.Scan:
         """
@@ -242,6 +243,7 @@ class ScanSubmissionService:
                 stage_temperatures=stage_temperatures,
                 disable_temperature=disable_temperature,
                 cross_file_validation=cross_file_validation,
+                source_type=source_type,
                 frameworks=frameworks,
                 tenant_id=tenant_id,
             )
@@ -386,7 +388,9 @@ class ScanSubmissionService:
                 }
             )
 
-        return await self._process_and_launch_scan(files_data=files_data, **kwargs)
+        return await self._process_and_launch_scan(
+            files_data=files_data, source_type="upload", **kwargs
+        )
 
     async def create_scan_from_git(self, *, repo_url: str, **kwargs) -> db_models.Scan:
         """Handles submission from a Git repository."""
@@ -411,7 +415,10 @@ class ScanSubmissionService:
         )
         files_data = clone_repo_and_get_files(repo_url)
         return await self._process_and_launch_scan(
-            files_data=files_data, repo_url=repo_url, **kwargs
+            files_data=files_data,
+            repo_url=repo_url,
+            source_type="git",
+            **kwargs,
         )
 
     async def create_scan_from_archive(
@@ -423,4 +430,6 @@ class ScanSubmissionService:
             extra={"archive_filename": archive_file.filename},
         )
         files_data = extract_archive_to_files(archive_file)
-        return await self._process_and_launch_scan(files_data=files_data, **kwargs)
+        return await self._process_and_launch_scan(
+            files_data=files_data, source_type="archive", **kwargs
+        )

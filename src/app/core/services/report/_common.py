@@ -170,13 +170,16 @@ class ReportData:
     consolidation: Optional[ConsolidationStats]
     # Provenance (#101).
     osv_finding_count: int
-    # Scan-metadata block (#101).
+    # Scan-metadata block (#101). `source` / `temperature` are the
+    # submission settings surfaced in the report (PRD #96 follow-up).
     scan_id: str
     started: str
     completed: str
     file_count: int
     dual_llm: bool
     cross_file: bool
+    source: str
+    temperature: str
     exec_summary: str = field(default="")
 
 
@@ -185,6 +188,30 @@ def _fmt_ts(value: Optional[datetime]) -> str:
     if value is None:
         return ""
     return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _source_label(result: AnalysisResultDetailResponse) -> str:
+    """Human label for how the scan's code was submitted."""
+    source_type = getattr(result, "source_type", None)
+    url = getattr(result, "repository_url", None)
+    if source_type == "git":
+        return f"Git repository ({url})" if url else "Git repository"
+    if source_type == "archive":
+        return "Archive upload (zip / rar)"
+    if source_type == "upload":
+        return "Direct file upload"
+    # Pre-`source_type` scans: fall back to the project's repo URL.
+    return f"Git repository ({url})" if url else "Uploaded files"
+
+
+def _temperature_label(result: AnalysisResultDetailResponse) -> str:
+    """Human label for the scan's LLM-temperature setting."""
+    if getattr(result, "disable_temperature", False):
+        return "Disabled — deterministic output"
+    temps = getattr(result, "stage_temperatures", None)
+    if temps:
+        return " · ".join(f"{k}: {v}" for k, v in temps.items())
+    return "Provider default"
 
 
 def build_report_data(result: AnalysisResultDetailResponse) -> ReportData:
@@ -262,6 +289,8 @@ def build_report_data(result: AnalysisResultDetailResponse) -> ReportData:
         file_count=file_count,
         dual_llm=dual_llm,
         cross_file=bool(result.cross_file_validation),
+        source=_source_label(result),
+        temperature=_temperature_label(result),
     )
     data.exec_summary = _exec_summary(data)
     return data
@@ -302,8 +331,10 @@ def render_metadata_block(data: ReportData) -> str:
     rows = [
         ("Scan ID", data.scan_id or "—"),
         ("Scan type", data.scan_type),
+        ("Source", data.source),
         ("Files analysed", str(data.file_count)),
         ("Frameworks", ", ".join(data.frameworks) or "—"),
+        ("Temperature", data.temperature),
         ("Started", data.started or "—"),
         ("Completed", data.completed or "—"),
         ("Dual-LLM analysis", "Yes" if data.dual_llm else "No"),

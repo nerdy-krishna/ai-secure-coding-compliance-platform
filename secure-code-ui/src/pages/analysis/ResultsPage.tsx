@@ -93,16 +93,24 @@ const ScanInfoModal: React.FC<{
     },
     {
       label: "Source",
-      value: data.repository_url ? (
-        <>
-          Git repository ·{" "}
-          <span className="mono" style={{ fontSize: 11.5 }}>
-            {data.repository_url}
-          </span>
-        </>
-      ) : (
-        "Uploaded files / archive"
-      ),
+      value:
+        data.source_type === "git" || (!data.source_type && data.repository_url) ? (
+          <>
+            Git repository
+            {data.repository_url && (
+              <>
+                {" · "}
+                <span className="mono" style={{ fontSize: 11.5 }}>
+                  {data.repository_url}
+                </span>
+              </>
+            )}
+          </>
+        ) : data.source_type === "archive" ? (
+          "Archive upload (zip / rar)"
+        ) : (
+          "Direct file upload"
+        ),
     },
     {
       label: frameworks.length === 1 ? "Framework" : "Frameworks",
