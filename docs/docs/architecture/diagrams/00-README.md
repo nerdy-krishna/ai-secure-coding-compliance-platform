@@ -63,7 +63,7 @@ The same visual vocabulary is reused across all diagrams. Every page repeats the
 - **Solid arrow** with label → synchronous call (HTTP, gRPC, function call)
 - **Dashed arrow** → asynchronous event, message publish, fire-and-forget
 - **Double arrow** → bidirectional channel (e.g., SSE keepalive, WebSocket)
-- Arrow labels include the **wire protocol** (HTTPS, AMQP 0-9-1, SSE, AMQP-TLS) and the **payload kind** (JSON, JSONB, multipart, CycloneDX 1.5, SARIF, etc.)
+- Arrow labels include the **wire protocol** (HTTPS, AMQP 0-9-1, SSE, AMQP-TLS) and the **payload kind** (JSON, JSONB, multipart, CycloneDX 1.5, HTML/CSV/PDF report, etc.)
 
 ### Glossary (terms used throughout)
 

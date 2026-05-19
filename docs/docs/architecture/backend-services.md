@@ -21,7 +21,7 @@ All routers are prefixed with `/api/v1` and live under
 | ------ | ---------------- |
 | `setup.py` | First-run wizard (`/setup/*`). Gates the app via `SystemConfigCache.is_setup_completed()`. |
 | `refresh.py` | Custom `/auth/refresh` endpoint (fastapi-users doesn't ship one for the Bearer transport). |
-| `projects.py` | Project + scan CRUD, scan submission, cost approval / cancel, SSE status stream, PDF summary, SARIF download. |
+| `projects.py` | Project + scan CRUD, scan submission, cost approval / cancel, SSE status stream, and HTML / CSV / PDF report download. |
 | `chat.py` | Chat sessions + messages + live context rail (`/chat/sessions/{id}/context`). |
 | `compliance.py` | Per-framework posture stats + RAG control listing for the Compliance page. |
 | `dashboard.py` | `/dashboard/stats` — risk score, severity bar, trend, spend. |

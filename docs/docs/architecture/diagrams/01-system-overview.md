@@ -113,7 +113,7 @@ flowchart LR
 
 | Actor                | Authentication                    | Primary surface                                                 |
 |----------------------|-----------------------------------|------------------------------------------------------------------|
-| End User / Developer | Email+password, OIDC, SAML, Passkey | Submit scans, view findings, chat with advisor, download SARIF   |
+| End User / Developer | Email+password, OIDC, SAML, Passkey | Submit scans, view findings, chat with advisor, download reports |
 | Tenant Admin         | Same + `is_superuser=true`        | Admin console: users, frameworks, agents, prompts, system config |
 | Compliance Auditor   | Read-only (group-scoped)          | `/compliance`, control coverage, SSO audit log                   |
 | CI/CD Agent          | Service-account JWT or API key    | Headless scan submission and result polling                      |

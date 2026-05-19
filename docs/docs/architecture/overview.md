@@ -65,8 +65,7 @@ data stores the two share, and an observability pipeline.
   `llm_config_repo`, `rag_job_repo`, `system_config_repo`,
   `user_group_repo`.
 - `src/app/infrastructure/agents/` — LangGraph sub-graphs
-  (`generic_specialized_agent`, `impact_reporting_agent`,
-  `chat_agent`, `symbol_map_agent`).
+  (`generic_specialized_agent`, `chat_agent`, `symbol_map_agent`).
 - `src/app/infrastructure/workflows/worker_graph.py` — the top-level
   LangGraph `StateGraph`. Any edit to nodes / edges must be reflected
   in `.agent/scanning_flow.md`.

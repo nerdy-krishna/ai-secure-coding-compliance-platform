@@ -142,7 +142,7 @@ flowchart TB
 | axios                      | 1.9.0    | HTTP client (`maxRedirects: 0` to prevent auth-header leakage on redirect)                 |
 | react-router-dom           | 7.6.1    | Routing                                                                                   |
 | openapi-typescript         | 7.13.0   | Generates `src/shared/types/api-generated.ts` from FastAPI's `/openapi.json`               |
-| file-saver                 | 2.0.5    | SARIF/CSV blob downloads                                                                  |
+| file-saver                 | 2.0.5    | Report and CSV blob downloads                                                            |
 | eslint-plugin-security     | latest   | Lints for unsafe React/DOM patterns                                                       |
 
 ### Provider chain (composed top-down in `App.tsx`)

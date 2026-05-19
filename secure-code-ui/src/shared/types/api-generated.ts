@@ -203,26 +203,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/scans/{scan_id}/executive-summary/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Download Executive Summary
-         * @description Generates and downloads the executive summary as a PDF.
-         */
-        get: operations["download_executive_summary_api_v1_scans__scan_id__executive_summary_download_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
+
     "/api/v1/scans/{scan_id}/result": {
         parameters: {
             query?: never;
@@ -260,26 +241,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/scans/{scan_id}/sarif": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Download Sarif Report
-         * @description Downloads the SARIF report for a specific scan.
-         */
-        get: operations["download_sarif_report_api_v1_scans__scan_id__sarif_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
+
     "/api/v1/scans/{scan_id}/llm-interactions": {
         parameters: {
             query?: never;
@@ -1264,14 +1226,6 @@ export interface components {
         AnalysisResultDetailResponse: {
             /** Status */
             status: string;
-            /** Impact Report */
-            impact_report?: {
-                [key: string]: unknown;
-            } | null;
-            /** Sarif Report */
-            sarif_report?: {
-                [key: string]: unknown;
-            } | null;
             summary_report?: components["schemas"]["SummaryReportResponse"] | null;
             /** Text Report */
             text_report?: string | null;
@@ -1994,16 +1948,6 @@ export interface components {
              * @default []
              */
             events: components["schemas"]["ScanEventItem"][];
-            /**
-             * Has Sarif Report
-             * @default false
-             */
-            has_sarif_report: boolean;
-            /**
-             * Has Impact Report
-             * @default false
-             */
-            has_impact_report: boolean;
         };
         /** ScanResponse */
         ScanResponse: {
@@ -2715,35 +2659,7 @@ export interface operations {
             };
         };
     };
-    download_executive_summary_api_v1_scans__scan_id__executive_summary_download_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                scan_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
+
     get_scan_result_details_api_v1_scans__scan_id__result_get: {
         parameters: {
             query?: never;
@@ -2809,39 +2725,7 @@ export interface operations {
             };
         };
     };
-    download_sarif_report_api_v1_scans__scan_id__sarif_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                scan_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
+
     get_llm_interactions_for_scan_api_v1_scans__scan_id__llm_interactions_get: {
         parameters: {
             query?: never;

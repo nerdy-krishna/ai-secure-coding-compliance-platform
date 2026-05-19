@@ -20,7 +20,7 @@ first.
 | Auth | `/auth/*` | `fastapi-users` + `refresh.py` | [Authentication](./authentication.md) |
 | LLM configurations | `/admin/llm-configs` | `admin.py` / `llm_config.py` | [LLM Configuration](./llm-configuration.md) |
 | Projects + scans | `/projects`, `/scans` | `projects.py` | [Code Analysis Endpoints](./code-analysis-endpoints.md) |
-| Scan results | `/scans/{id}/result`, `/sarif`, etc. | `projects.py` | [Results Endpoints](./results-endpoints.md) |
+| Scan results | `/scans/{id}/result`, `/scans/{id}/report`, etc. | `projects.py` | [Results Endpoints](./results-endpoints.md) |
 | Dashboard | `/dashboard/stats` | `dashboard.py` | see [User Guide → Dashboard](../user-guide/dashboard-overview.md) |
 | Compliance | `/compliance/*` | `compliance.py` | see [Security Frameworks](../security-frameworks/supported-frameworks.md) |
 | Search | `/search` | `search.py` | see [User Guide → Dashboard](../user-guide/dashboard-overview.md) |

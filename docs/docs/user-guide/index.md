@@ -22,7 +22,7 @@ see everything.
 - **Security Advisor (chat)**
   - [Guideline-backed Q&A](./chat-interfaces/guideline-provision.md)
   - [Secure Code Generation](./chat-interfaces/secure-code-generation.md)
-- [**Reporting**](./reporting.md) — Executive Summary PDF + SARIF + impact report.
+- [**Reporting**](./reporting.md) — HTML, CSV, and PDF findings reports.
 - [Unit-test integration](./unit-test-integration.md) — roadmap note.
 
 ## For admins

@@ -10,7 +10,7 @@
 //
 // The detail pane renders description, remediation, compliance chips,
 // and (when a fix suggestion exists) a side-by-side diff using the
-// design's `.diff` / `.diff-row` utilities. Actions: SARIF download,
+// design's `.diff` / `.diff-row` utilities. Actions: report download,
 // navigate to LLM logs.
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";

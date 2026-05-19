@@ -104,8 +104,8 @@ After you click **Start scan**:
 - Status flips to `COMPLETED` (or `REMEDIATION_COMPLETED` for
   remediation scans).
 - The Results page (`/analysis/results/{scan_id}`) shows per-file
-  findings, the SARIF viewer, and CTAs to apply fixes or download
-  the Executive Summary PDF.
+  findings, and CTAs to apply fixes or download the HTML / CSV / PDF
+  findings report.
 - The Dashboard + Projects page stats refresh on the next page
   load.
 
