@@ -11,7 +11,10 @@ is part of the LangGraph checkpointer's on-disk contract — do not rename.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import time
 from typing import Any, Dict, List, cast
 
 import networkx as nx
@@ -22,6 +25,8 @@ from app.core.schemas import (
     SpecializedAgentState,
     VulnerabilityFinding,
 )
+from app.core.services.scan.task_ledger import ScanTaskLedgerService
+from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.agents.generic_specialized_agent import (
     build_generic_specialized_agent_graph,
 )
@@ -30,6 +35,7 @@ from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
 from app.shared.lib.agent_routing import resolve_agents_for_file
 from app.shared.lib.analysis_dispatch import (
+    LANE_PRIMARY,
     LANE_SECONDARY,
     plan_agent_invocations,
     resolve_reasoning_lanes,
@@ -46,6 +52,33 @@ from app.shared.lib.llm_slots import (
 logger = logging.getLogger(__name__)
 
 CONCURRENT_LLM_LIMIT = 5
+ANALYSIS_TASK_TYPE = "analysis"
+ANALYSIS_TASK_VERSION = "analysis-task-v1"
+
+
+def _stable_hash(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _serialise_agent_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "findings": [
+            f.model_dump(mode="json") for f in result.get("findings", []) or []
+        ],
+        "fixes": [f.model_dump(mode="json") for f in result.get("fixes", []) or []],
+    }
+
+
+def _deserialise_agent_result(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "findings": [
+            VulnerabilityFinding.model_validate(item)
+            for item in payload.get("findings", [])
+        ],
+        "fixes": [FixResult.model_validate(item) for item in payload.get("fixes", [])],
+        "__reused": True,
+    }
 
 
 def _number_lines(code: str, start_line: int) -> str:
@@ -222,13 +255,14 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             }
         ]
 
-    async def run_agent_with_sem(pool_key, coro):
+    async def run_agent_with_sem(pool_key, build_coro):
         async with semaphores[pool_key]:
-            return await coro
+            return await build_coro()
 
     async def analyze_one_file(
         file_path: str,
     ) -> Dict[str, Any]:
+        file_started_at = time.perf_counter()
         file_content = live_codebase.get(file_path)
         if not file_content:
             logger.warning(
@@ -291,6 +325,8 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         # fine; 0 findings because every LLM call raised is not.
         lane_calls: Dict[str, int] = {}
         lane_failures: Dict[str, int] = {}
+        reused_tasks = 0
+        failed_tasks = 0
 
         # Verified-findings prompt prefix (B4): pass the per-file
         # SAST scanner findings into the agent so it can avoid
@@ -303,7 +339,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             and f.file_path == file_path
         ]
 
-        for chunk in chunks:
+        for chunk_idx, chunk in enumerate(chunks):
             # The file-under-review code is line-numbered (file-relative);
             # dep_summary is kept as a separate, un-numbered context block
             # so the agent never confuses dependency context with the
@@ -343,15 +379,122 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                     "error": None,
                     "prescan_findings_for_file": per_file_scanner_findings,
                 }
-                tasks.append(
-                    run_agent_with_sem(
-                        spec.lane.pool_key,
-                        generic_agent_graph.ainvoke(
-                            initial_agent_state,
-                            config={"configurable": cast(dict, spec.agent)},
-                        ),
-                    )
+                agent_name_for_key = str(spec.agent.get("name", "agent"))
+                task_key = (
+                    f"{file_path}::chunk:{chunk_idx}:{chunk['start_line']}-{chunk['end_line']}"
+                    f"::agent:{agent_name_for_key}::lane:{spec.lane.lane}"
+                    f"::llm:{spec.lane.config_id}"
                 )
+                task_input_payload = {
+                    "file_path": file_path,
+                    "chunk_index": chunk_idx,
+                    "chunk_start_line": chunk["start_line"],
+                    "chunk_end_line": chunk["end_line"],
+                    "agent_name": agent_name_for_key,
+                    "lane": spec.lane.lane,
+                    "llm_config_id": str(spec.lane.config_id),
+                    "temperature": spec.lane.temperature,
+                    "scan_type": scan_type,
+                    "workflow_mode": initial_agent_state["workflow_mode"],
+                    "code_hash": _stable_hash(chunk["code"]),
+                    "dependency_context_hash": _stable_hash(dep_summary),
+                    "prescan_findings": [
+                        {
+                            "title": f.title,
+                            "source": f.source,
+                            "cwe": f.cwe,
+                            "line_number": f.line_number,
+                        }
+                        for f in per_file_scanner_findings
+                    ],
+                }
+                input_hash = _stable_hash(task_input_payload)
+                prompt_hash = _stable_hash(enriched_code)
+                version_hash = _stable_hash(
+                    {
+                        "version": ANALYSIS_TASK_VERSION,
+                        "agent": spec.agent,
+                        "schema": "SpecializedAgentState/VulnerabilityFinding/FixResult",
+                    }
+                )
+
+                async def _invoke_durable(
+                    *,
+                    state_for_agent: SpecializedAgentState = initial_agent_state,
+                    agent_for_call: Dict[str, Any] = spec.agent,
+                    pool_key: Any = spec.lane.pool_key,
+                    durable_task_key: str = task_key,
+                    durable_input_hash: str = input_hash,
+                    durable_prompt_hash: str = prompt_hash,
+                    durable_version_hash: str = version_hash,
+                    durable_payload: Dict[str, Any] = task_input_payload,
+                ) -> Dict[str, Any]:
+                    async with AsyncSessionLocal() as task_db:
+                        ledger = ScanTaskLedgerService(task_db)
+                        reused = await ledger.get_reusable_result(
+                            scan_id=scan_id,
+                            task_type=ANALYSIS_TASK_TYPE,
+                            task_key=durable_task_key,
+                            input_hash=durable_input_hash,
+                            prompt_hash=durable_prompt_hash,
+                            version_hash=durable_version_hash,
+                        )
+                        if reused is not None:
+                            return _deserialise_agent_result(reused)
+                        lease = await ledger.acquire_task(
+                            scan_id=scan_id,
+                            task_type=ANALYSIS_TASK_TYPE,
+                            task_key=durable_task_key,
+                            input_hash=durable_input_hash,
+                            prompt_hash=durable_prompt_hash,
+                            version_hash=durable_version_hash,
+                            input_payload=durable_payload,
+                            lease_owner=f"worker:{scan_id}",
+                            lease_ttl_seconds=1800,
+                            max_attempts=3,
+                        )
+                    if lease is None:
+                        return {
+                            "error": "analysis task unavailable or retry cap reached"
+                        }
+                    try:
+                        result = await run_agent_with_sem(
+                            pool_key,
+                            lambda state=state_for_agent, agent=agent_for_call: (
+                                generic_agent_graph.ainvoke(
+                                    state,
+                                    config={"configurable": cast(dict, agent)},
+                                )
+                            ),
+                        )
+                    except Exception as exc:
+                        async with AsyncSessionLocal() as task_db:
+                            await ScanTaskLedgerService(task_db).fail_task(
+                                lease.task.id, error=str(exc), retryable=True
+                            )
+                        raise
+                    if result is None or (
+                        isinstance(result, dict) and result.get("error")
+                    ):
+                        async with AsyncSessionLocal() as task_db:
+                            await ScanTaskLedgerService(task_db).fail_task(
+                                lease.task.id,
+                                error=str(
+                                    result.get("error")
+                                    if isinstance(result, dict)
+                                    else "agent returned None"
+                                ),
+                                retryable=True,
+                            )
+                        return result or {"error": "agent returned None"}
+                    async with AsyncSessionLocal() as task_db:
+                        await ScanTaskLedgerService(task_db).complete_task(
+                            lease.task.id,
+                            result_payload=_serialise_agent_result(result),
+                        )
+                    return result
+
+                tasks.append(_invoke_durable())
 
             agent_results = await asyncio.gather(*tasks, return_exceptions=True)
             # Per-agent diagnostics — historically this loop swallowed
@@ -391,7 +534,10 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                         },
                     )
                     continue
+                if isinstance(r, dict) and r.get("__reused"):
+                    reused_tasks += 1
                 if isinstance(r, dict) and r.get("error"):
+                    failed_tasks += 1
                     # An agent that returned an error dict (e.g. the LLM
                     # call 400'd and `generate_structured_output`
                     # surfaced it as `error`) IS a failed invocation —
@@ -447,6 +593,14 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                         "file_path": file_path,
                         "findings_count": len(file_findings),
                         "fixes_count": len(file_fixes),
+                        "llm_calls": sum(lane_calls.values()),
+                        "reused_tasks": reused_tasks,
+                        "failed_tasks": failed_tasks,
+                        "token_count": 0,
+                        "elapsed_ms": int(
+                            (time.perf_counter() - file_started_at) * 1000
+                        ),
+                        "classification": file_profile.get("classification"),
                     },
                 )
         except Exception as e:
@@ -457,6 +611,8 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             "fixes": file_fixes,
             "lane_calls": lane_calls,
             "lane_failures": lane_failures,
+            "reused_tasks": reused_tasks,
+            "failed_tasks": failed_tasks,
         }
 
     # All files analyzed in parallel. Concurrency across files is bounded
@@ -471,6 +627,8 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     lane_calls: Dict[str, int] = {}
     lane_failures: Dict[str, int] = {}
     failed_file_tasks = 0
+    reused_task_total = 0
+    failed_task_total = 0
     for r in file_results:
         if isinstance(r, BaseException):
             failed_file_tasks += 1
@@ -484,6 +642,8 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             lane_calls[_lane] = lane_calls.get(_lane, 0) + int(_n)
         for _lane, _n in (r.get("lane_failures") or {}).items():
             lane_failures[_lane] = lane_failures.get(_lane, 0) + int(_n)
+        reused_task_total += int(r.get("reused_tasks", 0) or 0)
+        failed_task_total += int(r.get("failed_tasks", 0) or 0)
 
     total_agent_calls = sum(lane_calls.values())
     total_agent_failures = sum(lane_failures.values())
@@ -496,7 +656,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
 
     logger.info(
         "Single-pass analysis complete for scan %s: %d agent findings, %d prior findings, %d proposed fixes; "
-        "agent_calls=%d agent_failures=%d failed_file_tasks=%d",
+        "agent_calls=%d agent_failures=%d failed_file_tasks=%d reused_tasks=%d failed_tasks=%d",
         scan_id,
         len(all_scan_findings),
         len(prior_findings),
@@ -504,6 +664,8 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         total_agent_calls,
         total_agent_failures,
         failed_file_tasks,
+        reused_task_total,
+        failed_task_total,
     )
 
     # Stage-level validation: if every agent invocation that fired
@@ -533,22 +695,34 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             ),
         }
 
-    # Dual-LLM degradation (#93): the secondary reasoning lane fired but
-    # every one of its calls failed (bad key / model down) while the
-    # primary lane carried the scan. The scan still completes on the
-    # primary model's findings; leave a timeline breadcrumb so the
-    # operator knows their dual-LLM scan silently ran single-LLM. (The
-    # both-lanes-dead case was already handled by the guard above.)
-    secondary_calls = lane_calls.get(LANE_SECONDARY, 0)
-    secondary_failures = lane_failures.get(LANE_SECONDARY, 0)
-    if secondary_calls > 0 and secondary_failures == secondary_calls:
+    # Dual-LLM degradation (#93): one lane fully failed (bad key / model
+    # down) while another lane carried the scan. The scan still completes;
+    # leave a timeline breadcrumb so operators know their dual-LLM scan ran
+    # with reduced model diversity. (The all-lanes-dead case was handled by
+    # the guard above.)
+    successful_lanes = {
+        lane for lane, calls in lane_calls.items() if calls > lane_failures.get(lane, 0)
+    }
+    for degraded_lane, event_name in (
+        (LANE_PRIMARY, "PRIMARY_LLM_DEGRADED"),
+        (LANE_SECONDARY, "SECONDARY_LLM_DEGRADED"),
+    ):
+        degraded_calls = lane_calls.get(degraded_lane, 0)
+        degraded_failures = lane_failures.get(degraded_lane, 0)
+        if not (
+            degraded_calls > 0
+            and degraded_failures == degraded_calls
+            and successful_lanes
+        ):
+            continue
         logger.warning(
-            "analyze: secondary reasoning LLM lane fully failed — scan "
-            "continues single-LLM",
+            "analyze: %s reasoning LLM lane fully failed — scan continues degraded",
+            degraded_lane,
             extra={
                 "scan_id": str(scan_id),
-                "secondary_calls": secondary_calls,
-                "secondary_failures": secondary_failures,
+                "lane": degraded_lane,
+                "calls": degraded_calls,
+                "failures": degraded_failures,
             },
         )
         try:
@@ -562,19 +736,21 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             async with _AsyncSessionLocal_deg() as _db_deg:
                 await _ScanRepository_deg(_db_deg).create_scan_event(
                     scan_id=scan_id,
-                    stage_name="SECONDARY_LLM_DEGRADED",
+                    stage_name=event_name,
                     status="FAILED",
                     details={
-                        "secondary_calls": secondary_calls,
-                        "secondary_failures": secondary_failures,
+                        "lane": degraded_lane,
+                        "calls": degraded_calls,
+                        "failures": degraded_failures,
+                        "successful_lanes": sorted(successful_lanes),
                         "message": (
-                            "Every second-reasoning-LLM call failed; the scan "
-                            "completed on the primary model only."
+                            f"Every {degraded_lane} reasoning-LLM call failed; "
+                            "the scan completed with another lane only."
                         ),
                     },
                 )
         except Exception as _e:
-            logger.warning("SECONDARY_LLM_DEGRADED event emit failed: %s", _e)
+            logger.warning("%s event emit failed: %s", event_name, _e)
 
     try:
         from app.infrastructure.database import (
