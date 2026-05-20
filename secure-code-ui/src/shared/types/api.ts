@@ -413,6 +413,7 @@ export interface ScanHistoryItem {
   total_findings?: number | null;
   severity_counts?: Record<string, number> | null;
   has_resumable_artifacts?: boolean;
+  active_processing_seconds?: number | null;
 }
 
 export interface PaginatedScanHistoryResponse {

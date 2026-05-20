@@ -834,7 +834,7 @@ class SummaryResponse(BaseModel):
 
 
 class OverallRiskScoreResponse(BaseModel):
-    score: int = 0
+    score: float = 0.0
     severity: str = "N/A"
 
     class Config:
@@ -1036,6 +1036,7 @@ class ScanHistoryItem(BaseModel):
     total_findings: Optional[int] = None
     severity_counts: Optional[Dict[str, int]] = None
     has_resumable_artifacts: bool = False
+    active_processing_seconds: Optional[float] = None
 
     class Config:
         from_attributes = True

@@ -53,6 +53,27 @@ def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
     # Resume is always available for FAILED scans; for CANCELLED it
     # depends on durable-task artifacts (validated by the endpoint).
     can_resume = scan.status in ("FAILED", "CANCELLED")
+
+    # Active processing time: use scan events timestamps rather than
+    # created_at → completed_at, which includes dormant periods when
+    # the scan was stopped and later resumed.  Falls back to wall
+    # clock when no events exist.
+    active_seconds: float | None = None
+    if scan.events:
+        timestamps = [
+            e.timestamp
+            for e in scan.events
+            if e.timestamp is not None
+        ]
+        if len(timestamps) >= 2:
+            active_seconds = (
+                max(timestamps) - min(timestamps)
+            ).total_seconds()
+        elif len(timestamps) == 1 and scan.completed_at:
+            active_seconds = (
+                scan.completed_at - timestamps[0]
+            ).total_seconds()
+
     return {
         "risk_score": scan.risk_score,
         "total_findings": total if isinstance(total, int) else None,
@@ -60,6 +81,7 @@ def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
             severity_counts if isinstance(severity_counts, dict) else None
         ),
         "has_resumable_artifacts": can_resume,
+        "active_processing_seconds": active_seconds,
     }
 
 
