@@ -36,6 +36,31 @@ final scan `status`.
 
 Use this for the Results page.
 
+## Resume or restart a failed/cancelled scan
+
+```http
+POST /scans/{scan_id}/run-control
+Content-Type: application/json
+
+{ "mode": "resume" | "restart" }
+```
+
+Manually resume or restart an eligible failed (or cancelled-with-
+durable-artifacts) scan. Both modes keep the same scan id and
+the original submitted snapshot/config while preserving audit
+history (`scan_events` and `llm_interactions`).
+
+| Mode | Behaviour |
+| ---- | --------- |
+| `resume` | Keeps completed durable task rows; analysis and consolidation stages reuse matching completed work. |
+| `restart` | Deletes `scan_tasks` and derived final findings but keeps audit history; reruns analysis from the original snapshot. |
+
+* Pending-approval statuses are rejected (use existing approval
+  endpoints).
+* Authorization matches existing scan lifecycle mutation permissions.
+* The endpoint enqueues the scan through the standard worker queue
+  path and returns `202` on success.
+
 ## Downloadable findings report
 
 ```http

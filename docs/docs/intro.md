@@ -20,13 +20,15 @@ knowledge bases. The platform is organized around three surfaces:
 ### For developers and security users
 
 * **Live dashboard** — a real risk ring, five-bucket severity bar, 14-day scan trend sparkline, fixes-ready counter, and monthly LLM spend. Admins see a platform-wide snapshot variant.
-* **Gated, user-approved scan** — every scan runs a cheap deterministic pass, profiles each file, and pauses the LangGraph workflow with native `interrupt()`s at up to three approval gates (prescan review, profiling cost, analysis cost) before any expensive work runs.
-* **Versatile submission** — file uploads, Git repository URLs, or archive uploads (`.zip` / `.tar.gz`). An interactive file tree lets you include or exclude paths before estimation.
+* **Gated, user-approved scan** — every scan classifies each file (first-party / vendor / minified / static), runs a cheap deterministic pass, profiles eligible files, and pauses the LangGraph workflow with native `interrupt()`s at up to three approval gates (prescan review, profiling cost, analysis cost) before any expensive work runs. A **deep vendor scan** option gives full LLM coverage to vendor/minified assets when needed.
+* **Versatile submission** — file uploads, Git repository URLs, or archive uploads (`.zip` / `.tar.gz`). GitHub repos are previewed via the GitHub API without cloning. An interactive file tree lets you include or exclude paths before estimation.
 * **Multi-framework scanning** — pick any combination of the 8 bundled OWASP frameworks (ASVS, Proactive Controls, Cheatsheets, CWE Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) plus custom frameworks ingested from CSV or Git URLs.
-* **Consolidated findings + downloadable report** — a reasoning-model pass merges raw findings into one root finding per real issue; export any scan as an HTML, CSV, PDF, or SARIF 2.1.0 report.
+* **Consolidated findings + downloadable report** — per-file reasoning-model consolidation merges raw findings, followed by a global cross-file consolidation pass that unifies same-root findings across files; export any scan as an HTML, CSV, PDF, or SARIF 2.1.0 report.
 * **Intelligent, incremental remediation** — choose findings, let specialized agents generate fixes, merge via a dedicated conflict-resolution agent, and download the patched tree.
 * **Per-project stats on the Projects page** — each card shows the latest terminal scan's risk score, severity bar, and fixes-ready count, no client-side heuristics.
 * **Global search** — one TopNav combobox across projects, scans, and findings, always scoped to what the current user is allowed to see.
+* **Durable tasks & resume/restart** — every analysis and consolidation invocation is a durable task keyed by input hash. Failed or interrupted scans can be manually resumed (reuses completed work) or restarted (reruns from the original snapshot), preserving full audit history.
+* **Adaptive concurrency & rate limits** — scan LLM concurrency adjusts dynamically based on wait time and error signals; per-LLM-config RPM/TPM budgets and prompt-size guardrails prevent oversized prompts from failing the scan.
 * **Security Advisor with live context rail** — framework-scoped chat backed by RAG retrieval, with a right-hand rail that surfaces the knowledge sources, referenced findings, and files most likely discussed.
 
 ### For security admins

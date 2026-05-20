@@ -15,8 +15,10 @@ separate, opt-in step.
   trend, fixes-ready counter, and monthly LLM spend, all driven by real
   data (no placeholders). Admins see a platform-wide snapshot variant.
 - **Versatile submission** — upload individual files, pick a Git
-  repository URL, or drop in a `.zip` / `.tar.gz` archive. The
-  selective-files tree lets you exclude what you don't want analyzed.
+  repository URL, or drop in a `.zip` / `.tar.gz` archive. GitHub
+  repos are previewed via the GitHub API (no clone required for
+  source-tree listing). The selective-files tree lets you exclude
+  what you don't want analyzed.
 - **Gated, user-approved scan** — the worker pauses the LangGraph
   workflow with native `interrupt()`s at up to three gates: a
   deterministic-prescan review, a profiling-cost approval, and the
@@ -75,6 +77,24 @@ separate, opt-in step.
   its own analysis temperature, so "same model, two temperatures" is a
   valid diversity strategy. You can also disable the temperature
   setting entirely and let each model run at its provider default.
+- **Durable tasks & resume/restart** — every analysis and consolidation
+  invocation is persisted as a durable scan task keyed by input hash.
+  Failed or interrupted scans can be manually **resumed** (reuses
+  completed durable work) or **restarted** (discards partial
+  artifacts, reruns from the original snapshot), preserving full
+  audit history either way.
+- **File classification & vendor/minified policy** — every submitted
+  file is deterministically classified before analysis. Vendor,
+  minified, and static assets skip expensive LLM profiling and full
+  agent routing by default while keeping cheap SAST checks active.
+  An advanced **deep vendor scan** option gives full LLM inspection
+  when needed, reflected in cost and time estimates.
+- **Adaptive concurrency & per-config rate limits** — scan LLM
+  concurrency adjusts dynamically based on rolling-window wait time
+  and error signals, respecting per-LLM-configuration RPM/TPM
+  budgets and prompt-size caps. Prompt-size guardrails split or
+  compact oversized prompts before the LLM call and skip impossible
+  ones with a coverage warning instead of failing the scan.
 
 ### For security admins
 - **User Groups + scoped visibility** — an admin creates groups and
@@ -131,35 +151,56 @@ separate, opt-in step.
    finds anything the scan pauses at `PENDING_PRESCAN_APPROVAL` so you
    can review the deterministic findings before any code is sent to an
    LLM. Critical secrets need an explicit override to continue.
-3. **Profiling gate** — the scan pauses at `PENDING_PROFILING_APPROVAL`
-   with a profiling-cost estimate. On approval, every file is profiled
-   on the utility model: a summary, its security-relevant operations,
-   and the security domains that apply to it.
-4. **Cost gate** — a dry run, scoped to each file's routed agent set
+3. **File classification** — every submitted file is deterministically
+   classified (first-party source, minified bundle, known/unknown
+   third-party vendor, generated asset, static asset). The resulting
+   policy skips LLM profiling and full agent routing for low-value
+   vendor/minified/static files by default while keeping Gitleaks active.
+   An advanced **deep vendor scan** option is available at submit time
+   for deeper inspection of vendor code.
+4. **Profiling gate** — the scan pauses at `PENDING_PROFILING_APPROVAL`
+   with a profiling-cost estimate. On approval, eligible files are
+   profiled on the utility model: a summary, its security-relevant
+   operations, and the security domains that apply to it.
+5. **Cost gate** — a dry run, scoped to each file's routed agent set
    (the per-language baseline unioned with the profiler's picks),
-   produces the deep-analysis cost estimate. The scan pauses at
-   `PENDING_COST_APPROVAL`. With a second reasoning LLM configured the
-   estimate is priced on both models, broken down per LLM.
-5. **Approve** (or cancel) each gate in the UI. A live SSE stream
+   produces the deep-analysis cost and estimated processing duration.
+   The scan pauses at `PENDING_COST_APPROVAL`. With a second reasoning
+   LLM configured the estimate is priced on both models, broken down
+   per LLM.
+6. **Approve** (or cancel) each gate in the UI. A live SSE stream
    surfaces estimates and reconnects through token expiry; the worker
    resumes the same LangGraph thread from the checkpoint.
-6. **Analyze** — specialized agents run in parallel (five at a time
-   per reasoning LLM under `CONCURRENT_LLM_LIMIT`); each file is
-   analysed by its routed agent set. If a second reasoning LLM was
+7. **Analyze** — specialized agents run in parallel under adaptive
+   per-LLM-concurrency control, bound by per-config RPM/TPM rate
+   limits and prompt-size guardrails. Each analysis invocation is a
+   **durable task** persisted in a scan-scoped task ledger — if the
+   worker is interrupted, completed analysis chunks are reused on
+   resume rather than re-invoked. If a second reasoning LLM was
    chosen, every agent runs on both models and the findings union.
-7. **Consolidate** — a reasoning-model pass merges same-root-cause
-   findings into one root finding per real issue and drops false
-   positives and noise. Each finding records which reasoning LLM(s)
-   detected it.
-8. **Cross-file validation (opt-in)** — if enabled at submit, each
-   eligible finding is re-judged against its cross-file callers and
-   inputs, attaching a non-destructive `confirmed` / `mitigated` /
-   `unconfirmed` verdict.
-9. **Review** findings in the Results page — both deterministic and
-   LLM-emitted, tagged by source — and download the report as HTML,
-   CSV, PDF, or SARIF 2.1.0.
-10. **Remediate** — select findings, apply fixes incrementally with a
+8. **Consolidate (per-file)** — a reasoning-model pass merges
+   same-root-cause findings per file into one root finding per real
+   issue and drops false positives and noise. Each finding records
+   which reasoning LLM(s) detected it. Per-file consolidation is also
+   a durable task, reusable on resume.
+9. **Global consolidation** — a deterministic pre-clustering pass
+   identifies cross-file same-root findings (e.g. a missing CSP header
+   across multiple templates) and merges them into one multi-file
+   finding with affected locations on every file, keeping the primary
+   file path for backward compatibility.
+10. **Cross-file validation (opt-in)** — if enabled at submit, each
+    eligible finding is re-judged against its cross-file callers and
+    inputs, attaching a non-destructive `confirmed` / `mitigated` /
+    `unconfirmed` verdict.
+11. **Review** findings in the Results page — both deterministic and
+    LLM-emitted, tagged by source — and download the report as HTML,
+    CSV, PDF, or SARIF 2.1.0.
+12. **Remediate** — select findings, apply fixes incrementally with a
     merge agent to resolve conflicts, then download the patched tree.
+13. **Resume or restart** — failed scans (and eligible cancelled scans
+    with durable artifacts) can be manually resumed (reuses completed
+    durable work) or restarted (discards partial artifacts, reruns
+    from the original snapshot). Both preserve audit history.
 
 The full worker graph and state transitions live in
 [`.agent/scanning_flow.md`](.agent/scanning_flow.md).

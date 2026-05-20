@@ -15,11 +15,11 @@ Pick exactly one on the top of the page:
 
 1. **File upload** — drag-and-drop files or browse. Useful for quick
    one-off reviews.
-2. **Git repository** — paste a public Git URL. Click **Preview** to
-   clone the repo into a temp dir, walk analyzable files, and
-   populate the selective-files tree. The preview is destroyed after
-   the walk — the full clone happens again inside the worker at
-   scan time.
+2. **Git repository** — paste a public Git URL. For GitHub repos,
+   **Preview** lists the source tree via the GitHub API (no clone
+   required) and individual source files are fetched from raw URLs
+   at scan time. Non-GitHub repos fall back to a temp-dir clone for
+   both preview and submission.
 3. **Archive upload** — `.zip` or `.tar.gz`. Similar preview flow;
    the contents are extracted into the file tree for pruning.
 
@@ -58,8 +58,8 @@ falls back to the reasoning config when omitted.
 
 ## Advanced options
 
-The **Advanced** disclosure on the submit page carries three optional
-LLM controls beyond the two slots:
+The **Advanced** disclosure on the submit page carries these optional
+controls beyond the two LLM slots:
 
 - **Disable temperature** — when ticked, the scan sends *no*
   temperature to any LLM call; each model runs at its own provider
@@ -83,19 +83,33 @@ The second reasoning LLM is confined to the analysis stage —
 consolidation, the remediation merge, and the profiler always run on
 the primary slots.
 
+- **Deep vendor scan** — by default vendor, minified, and static
+  assets skip expensive LLM profiling and full agent routing while
+  keeping SAST checks active. Toggle this on to give those files full
+  LLM coverage; the estimate rises accordingly.
+
+- **Cross-file validation** — when enabled, each eligible finding is
+  re-judged against the code that calls it across other files,
+  attaching a non-destructive `confirmed` / `mitigated` /
+  `unconfirmed` verdict.
+
 ## Submit → estimate → approve
 
 After you click **Start scan**:
 
 1. The scan enters `QUEUED`. The UI navigates to the
    **Scanning in progress** page with a live SSE status stream.
-2. The worker runs the **audit pass**: builds a repo map, bundles
-   dependencies, tokenizes every prompt set, prices them via
-   LiteLLM, and lands at `PENDING_COST_APPROVAL`. The page shows an
-   estimate modal — tokens + USD — with **Approve** and **Cancel**.
+2. The worker runs the **audit pass**: builds a repo map, classifies
+   every file (first-party / vendor / minified / static), runs
+   deterministic SAST, and if findings are present pauses at
+   `PENDING_PRESCAN_APPROVAL` for review. Profiling cost and
+   deep-analysis cost estimates follow at successive approval gates.
+   The page shows an estimate modal — tokens + USD + estimated
+   processing duration — with **Approve** and **Cancel**.
 3. On **Approve** the worker resumes the paused LangGraph thread and
-   runs the deep analysis. The UI flips to a progress rail showing
-   each pipeline stage.
+   runs the deep analysis under adaptive concurrency. The UI flips
+   to a progress rail showing each pipeline stage with per-file
+   aggregate stats (calls, reused, skipped, tokens, elapsed).
 4. On **Cancel** the scan is terminal at `CANCELLED`; the
    checkpointer state is preserved for admin inspection.
 
@@ -106,6 +120,10 @@ After you click **Start scan**:
 - The Results page (`/analysis/results/{scan_id}`) shows per-file
   findings, and CTAs to apply fixes or download the HTML / CSV / PDF /
   SARIF findings report.
+- **Failed** scans show **Resume** and **Restart** buttons — resume
+  reuses completed durable analysis work; restart discards partial
+  artifacts and reruns from the original snapshot. Both preserve
+  the timeline and audit history.
 - The Dashboard + Projects page stats refresh on the next page
   load.
 

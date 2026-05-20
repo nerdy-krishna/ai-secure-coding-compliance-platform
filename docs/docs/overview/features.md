@@ -30,7 +30,12 @@ admins see everything.
 ## Submit
 
 - File upload, Git repository URL, or archive (`.zip` / `.tar.gz`).
+  GitHub repos are previewed via the GitHub API (tree listing without
+  cloning) and source files are fetched individually from raw URLs.
 - Selective-files tree that lets you prune before cost estimation.
+- Advanced **deep vendor scan** toggle — when on, vendor, minified, and
+  static assets receive full LLM profiling and agent routing instead of
+  being skipped by default; reflected in cost and time estimates.
 - Two LLM slots per scan — a **utility** (cheap) model for the
   per-file profiler and fix verification, and a **reasoning**
   (capable) model for analysis and consolidation. Put the same model
@@ -43,12 +48,24 @@ admins see everything.
 - Framework multi-select (8 bundled OWASP frameworks plus any
   admin-added custom framework).
 
-Before the deep analysis, every file is profiled on the utility model
-(see [Data Flow](../architecture/data-flow.md)). The deep analysis
-then runs as a single parallel pass, but each file is analysed only by
-the agents its profile routed to — not the whole roster — bounded by
-`CONCURRENT_LLM_LIMIT=5`. Per-file dependency context is injected from
-the repository map so agents have visibility into imports.
+Before analysis, every submitted file is **deterministically classified**
+(first-party source, vendor, minified bundle, generated/static asset).
+Vendor, minified, and static assets skip LLM profiling and full agent
+routing by default while keeping SAST checks active.
+
+Eligible files are profiled on the utility model (see
+[Data Flow](../architecture/data-flow.md)). The deep analysis runs as
+a single parallel pass under **adaptive per-LLM concurrency control**
+that adjusts based on wait time and error signals, bounded by
+per-config RPM/TPM rate limits and prompt-size guardrails. Each
+analysis invocation and per-file consolidation is a **durable scan
+task** persisted in a scan-scoped task ledger — if the worker is
+interrupted, completed chunks are reused on resume.
+
+After per-file consolidation a **global consolidation** pass merges
+cross-file same-root findings (e.g. a missing CSP header across
+multiple templates) into one multi-file finding with affected
+locations on every file.
 
 ## Results
 
@@ -59,6 +76,10 @@ the repository map so agents have visibility into imports.
   self-contained HTML page, a CSV (one row per finding), a paginated PDF,
   or SARIF 2.1.0 for code scanning integrations.
 - Timeline and LLM-logs drill-downs for the full scan trail.
+- **Resume / Restart** buttons for failed scans — resume reuses
+  completed durable work; restart discards partial artifacts and
+  reruns from the original snapshot. Both preserve audit history and
+  write boundary events to the timeline.
 
 ## Projects
 
