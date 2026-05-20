@@ -107,7 +107,7 @@ After you click **Start scan**:
    The page shows an estimate modal — tokens + USD + estimated
    processing duration — with **Approve** and **Cancel**.
 3. On **Approve** the worker resumes the paused LangGraph thread and
-   runs the deep analysis under adaptive concurrency. The UI flips
+   runs the deep analysis under a fixed concurrency pool with circuit-breaker and retry+jitter protection. The UI flips
    to a progress rail showing each pipeline stage with per-file
    aggregate stats (calls, reused, skipped, tokens, elapsed).
 4. On **Cancel** the scan is terminal at `CANCELLED`; the

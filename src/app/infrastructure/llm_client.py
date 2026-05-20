@@ -35,7 +35,8 @@ from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRe
 from app.infrastructure.llm_client_rate_limiter import get_rate_limiter_for_config
 from app.infrastructure.observability import get_langfuse, mask
 from app.shared.lib import cost_estimation
-from app.shared.lib.adaptive_llm_concurrency import get_controller
+from app.shared.lib.circuit_breaker import call as circuit_breaker_call
+from app.shared.lib.retry_jitter import _default_is_retryable, retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +244,7 @@ class LLMClient:
 
         model = self._build_model()
         model_key = f"{self.provider_name}:{self.db_llm_config.model_name}"
-        adaptive_key = str(getattr(self.db_llm_config, "id", model_key))
+        circuit_key = str(getattr(self.db_llm_config, "id", model_key))
 
         def _make_agent(prompted: bool, temperature: Optional[float]) -> Agent:
             """Build the Pydantic AI agent.
@@ -323,28 +324,32 @@ class LLMClient:
             cache_write_tokens = int(getattr(usage, "cache_write_tokens", 0) or 0)
             cache_read_tokens = int(getattr(usage, "cache_read_tokens", 0) or 0)
 
-        async def _run_with_schedulers(run_agent: Agent):
-            async with get_controller(adaptive_key).permit(adaptive_key):
-                if rate_limiter:
-                    await rate_limiter.acquire(tokens=prompt_tokens_for_budget or 1)
-                return await run_agent.run(prompt)
+        # Acquire rate-limit budget before the API call.  This may sleep
+        # if the token bucket is empty — normal, expected behaviour,
+        # not a failure.  Keep it outside the retry/circuit-breaker
+        # envelope so rate-limiter waits don't count as errors.
+        if rate_limiter:
+            await rate_limiter.acquire(tokens=prompt_tokens_for_budget or 1)
 
-        try:
-            _capture(await _run_with_schedulers(agent))
-        except Exception as e:
-            # One recovery retry for two known model quirks:
-            #  - a model that rejects tool-based structured output (e.g.
-            #    DeepSeek's reasoner: "does not support this tool_choice")
-            #    is retried with prompt-based output and remembered;
-            #  - a model that rejects the `temperature` parameter (#78)
-            #    is retried without it.
-            tool_issue = not use_prompted and _is_tool_choice_unsupported(e)
-            temp_issue = self.temperature is not None and (
-                _is_temperature_unsupported(e)
-            )
-            if tool_issue or temp_issue:
+        async def _invoke_llm(run_agent: Agent) -> None:
+            """Single LLM invocation with model-quirk fallback.
+
+            If the model rejects tool-based output or temperature, rebuild
+            the agent and retry exactly once.  Transient errors (429, 5xx)
+            are NOT caught here — they propagate to the retry wrapper.
+            """
+            nonlocal use_prompted
+            try:
+                _capture(await run_agent.run(prompt))
+            except Exception as e:
+                tool_issue = not use_prompted and _is_tool_choice_unsupported(e)
+                temp_issue = self.temperature is not None and (
+                    _is_temperature_unsupported(e)
+                )
+                if not tool_issue and not temp_issue:
+                    raise
                 logger.warning(
-                    "Model %s rejected %s (%s); retrying.",
+                    "Model %s rejected %s (%s); retrying with fallback.",
                     model_key,
                     " and ".join(
                         x
@@ -358,34 +363,31 @@ class LLMClient:
                 )
                 if tool_issue:
                     _PROMPTED_OUTPUT_MODELS.add(model_key)
-                try:
-                    _capture(
-                        await _run_with_schedulers(
-                            _make_agent(
-                                prompted=use_prompted or tool_issue,
-                                temperature=None if temp_issue else self.temperature,
-                            )
-                        )
-                    )
-                except Exception as e2:
-                    logger.error(
-                        "Pydantic AI run failed (recovery retry) "
-                        "(provider=%s, model=%s): %s",
-                        self.provider_name,
-                        self.db_llm_config.model_name,
-                        e2,
-                        exc_info=True,
-                    )
-                    error_message = str(e2)
-            else:
-                logger.error(
-                    "Pydantic AI run failed (provider=%s, model=%s): %s",
-                    self.provider_name,
-                    self.db_llm_config.model_name,
-                    e,
-                    exc_info=True,
+                    use_prompted = True
+                _capture(
+                    await _make_agent(
+                        prompted=use_prompted,
+                        temperature=None if temp_issue else self.temperature,
+                    ).run(prompt)
                 )
-                error_message = str(e)
+
+        try:
+            await circuit_breaker_call(
+                key=circuit_key,
+                fn=lambda: retry_with_backoff(
+                    lambda: _invoke_llm(agent)
+                ),
+                is_retryable=_default_is_retryable,
+            )
+        except Exception as e:
+            logger.error(
+                "LLM call failed (provider=%s, model=%s): %s",
+                self.provider_name,
+                self.db_llm_config.model_name,
+                e,
+                exc_info=True,
+            )
+            error_message = str(e)
 
         end_time = time.perf_counter()
         latency_ms = int((end_time - start_time) * 1000)

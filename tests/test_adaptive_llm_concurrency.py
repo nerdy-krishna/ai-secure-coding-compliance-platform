@@ -1,24 +1,14 @@
-import pytest
+"""Deprecated — tests moved to test_llm_resilience.py.
 
-from app.shared.lib.adaptive_llm_concurrency import AdaptiveConcurrencyController
+The AdaptiveConcurrencyController module is no longer used by llm_client.py.
+Circuit breaker + retry-with-jitter + token-bucket rate limiter replaced it.
+"""
+
+import pytest
 
 pytestmark = pytest.mark.asyncio
 
 
-async def test_adaptive_concurrency_additive_increase_and_cap():
-    controller = AdaptiveConcurrencyController(floor=1, initial=1, cap=2)
-    for _ in range(8):
-        await controller.record_success(wait_ms=0)
-    assert controller.limit == 2
-    for _ in range(16):
-        await controller.record_success(wait_ms=0)
-    assert controller.limit == 2
-
-
-async def test_adaptive_concurrency_multiplicative_decrease_and_floor():
-    controller = AdaptiveConcurrencyController(floor=1, initial=4, cap=8)
-    await controller.record_failure()
-    assert controller.limit == 2
-    await controller.record_failure()
-    await controller.record_failure()
-    assert controller.limit == 1
+async def test_placeholder():
+    """Keep the test file as documentation of the removed module."""
+    pass
