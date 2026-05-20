@@ -56,6 +56,7 @@ from app.core.services.scan import (
 from app.core.services.report import SUPPORTED_FORMATS, generate_report
 from app.api.v1.dependencies import (
     get_current_user_tenant_id,
+    get_db,
     get_scan_lifecycle_service,
     get_scan_query_service,
     get_scan_submission_service,
@@ -986,3 +987,54 @@ async def delete_project(
         extra={"actor_id": user.id, "project_id": str(project_id)},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ── Account preferences ───────────────────────────────────────────────
+
+
+class PreferencesBody(BaseModel):
+    theme: str | None = Field(None, max_length=16)
+    variant: str | None = Field(None, max_length=16)
+    accent: str | None = Field(None, max_length=128)
+
+
+@router.get("/account/preferences")
+async def get_account_preferences(
+    user: db_models.User = Depends(current_active_user),
+):
+    """Return the current user's stored preferences (theme, variant, accent)."""
+    prefs = user.preferences or {}
+    return {
+        "theme": prefs.get("theme"),
+        "variant": prefs.get("variant"),
+        "accent": prefs.get("accent"),
+    }
+
+
+_sentinel = object()
+
+
+@router.put("/account/preferences", status_code=status.HTTP_200_OK)
+async def update_account_preferences(
+    body: PreferencesBody,
+    user: db_models.User = Depends(current_active_user),
+    db = Depends(get_db),
+):
+    """Merge the provided preference keys into the user's stored JSONB.
+    Omitted keys keep their existing values; explicit nulls clear a key."""
+    current = dict(user.preferences or {})
+    for key in ("theme", "variant", "accent"):
+        val = getattr(body, key, _sentinel)
+        if val is not _sentinel:
+            if val is None:
+                current.pop(key, None)
+            else:
+                current[key] = val
+    user.preferences = current if current else None
+    await db.commit()
+    await db.refresh(user)
+    return {
+        "theme": current.get("theme"),
+        "variant": current.get("variant"),
+        "accent": current.get("accent"),
+    }

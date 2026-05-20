@@ -89,8 +89,8 @@ const AppearanceSettingsPage: React.FC = () => {
           }
         />
         <div style={{ color: "var(--fg-muted)", fontSize: 13, marginTop: 4 }}>
-          These settings are stored in your browser and apply to every page in
-          SCCAP.
+          These settings are saved to your account and follow you across
+          browsers and devices.
         </div>
       </div>
 

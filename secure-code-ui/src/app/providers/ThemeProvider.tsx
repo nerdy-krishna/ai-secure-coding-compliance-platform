@@ -1,10 +1,10 @@
 // secure-code-ui/src/app/providers/ThemeProvider.tsx
 //
 // Manages the SCCAP theme mode + color-variation attributes on
-// document.documentElement. Persists theme + variant + optional accent
-// override to localStorage and writes matching `data-theme` /
-// `data-variant` attributes so the token CSS picks them up. The user
-// edits these from the Appearance settings page.
+// document.documentElement.  Preferences are stored server-side
+// (GET/PUT /api/v1/account/preferences) and mirrored to localStorage
+// as a fast local cache so the theme applies instantly on page load
+// before the API call resolves.
 
 import React, {
   createContext,
@@ -14,6 +14,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { preferencesService } from "../../shared/api/preferencesService";
 
 export type SccapTheme = "light" | "dark";
 export type SccapVariant = "A" | "B";
@@ -37,15 +38,17 @@ const STORAGE_KEYS = {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function readStored<T extends string>(key: string, fallback: T, valid: readonly T[]): T {
+function readStored<T extends string>(
+  key: string,
+  fallback: T,
+  valid: readonly T[],
+): T {
   if (typeof window === "undefined") return fallback;
   const raw = window.localStorage.getItem(key);
   return valid.includes(raw as T) ? (raw as T) : fallback;
 }
 
 // Allow-list regex for CSS color values accepted as accent overrides.
-// Permits #hex (3–8 hex digits), rgb(), rgba(), hsl(), hsla(), oklch(), color().
-// Rejects strings containing ; or { } to prevent CSS injection.
 const ACCENT_RE =
   /^#[0-9a-fA-F]{3,8}$|^(rgb|rgba|hsl|hsla|oklch|color)\([^;{}]{0,80}\)$/i;
 
@@ -60,6 +63,29 @@ function readAccent(): string {
   return safeAccent(raw);
 }
 
+/** Debounced server-sync helper — avoids PUT-ing on every keystroke or
+ *  rapid toggle.  500ms is short enough that theme changes feel
+ *  instantaneous but long enough to coalesce variant + accent changes. */
+let _syncTimer: ReturnType<typeof setTimeout> | null = null;
+function _scheduleSync(prefs: {
+  theme: SccapTheme;
+  variant: SccapVariant;
+  accent: string;
+}) {
+  if (_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(() => {
+    preferencesService
+      .update({
+        theme: prefs.theme,
+        variant: prefs.variant,
+        accent: prefs.accent || null,
+      })
+      .catch(() => {
+        // Best-effort — localStorage already has it.
+      });
+  }, 500);
+}
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -70,26 +96,89 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     readStored<SccapVariant>(STORAGE_KEYS.variant, "A", ["A", "B"]),
   );
   const [accent, setAccentState] = useState<string>(() => readAccent());
+  // Track whether we've pulled from the server yet so we don't
+  // overwrite a user's deliberate choice with a stale server value
+  // on a re-render.
+  const [serverSynced, setServerSynced] = useState(false);
 
-  // Drop the legacy `sccap-role` localStorage entry from the cosmetic
-  // role-preview era — role is now derived solely from user.is_superuser.
+  // Drop the legacy role entry.
   useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(STORAGE_KEYS.role);
     }
   }, []);
 
-  // Write attributes + persist on every change.
+  // On mount: pull preferences from the server.  If the server has
+  // values we don't have locally (first login from a new browser),
+  // apply them.  If the server has nothing (new user), push our
+  // localStorage defaults up.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    preferencesService
+      .get()
+      .then((prefs) => {
+        if (cancelled) return;
+        const hasServerPrefs =
+          prefs.theme || prefs.variant || prefs.accent;
+        if (hasServerPrefs) {
+          // Server has stored preferences — apply them, overriding
+          // localStorage defaults.
+          if (
+            prefs.theme &&
+            (prefs.theme === "light" || prefs.theme === "dark")
+          ) {
+            setThemeState(prefs.theme);
+            window.localStorage.setItem(STORAGE_KEYS.theme, prefs.theme);
+          }
+          if (prefs.variant && (prefs.variant === "A" || prefs.variant === "B")) {
+            setVariantState(prefs.variant);
+            window.localStorage.setItem(STORAGE_KEYS.variant, prefs.variant);
+          }
+          if (prefs.accent) {
+            const acc = safeAccent(prefs.accent);
+            if (acc) {
+              setAccentState(acc);
+              window.localStorage.setItem(STORAGE_KEYS.accent, acc);
+            }
+          }
+        } else {
+          // No server prefs yet — push our current localStorage
+          // values up so they persist across browsers going forward.
+          preferencesService
+            .update({
+              theme,
+              variant,
+              accent: accent || null,
+            })
+            .catch(() => {});
+        }
+        setServerSynced(true);
+      })
+      .catch(() => {
+        // Network error — keep localStorage values.
+        setServerSynced(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Write attributes + persist to localStorage on every change.
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.setAttribute("data-variant", variant);
     window.localStorage.setItem(STORAGE_KEYS.theme, theme);
     window.localStorage.setItem(STORAGE_KEYS.variant, variant);
-  }, [theme, variant]);
+    // Sync to server (debounced) once initial fetch settles.
+    if (serverSynced) {
+      _scheduleSync({ theme, variant, accent });
+    }
+  }, [theme, variant, accent, serverSynced]);
 
-  // Accent override — sets --primary + --primary-strong to the same hue
-  // (the prototype does this naively; a proper OKLCH derivation can come
-  // later if the palette needs nuance).
+  // Accent override.
   useEffect(() => {
     const validated = safeAccent(accent);
     window.localStorage.setItem(STORAGE_KEYS.accent, validated);

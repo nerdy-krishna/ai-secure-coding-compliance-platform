@@ -61,6 +61,11 @@ class User(SQLAlchemyBaseUserTable[int], Base):
         "WebAuthnCredential", back_populates="user", cascade="all, delete-orphan"
     )
 
+    # Cross-browser user preferences (theme, variant, accent).  Nullable
+    # JSONB — absent means "use defaults".  Written by
+    # PUT /api/v1/account/preferences.
+    preferences: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
 
 class Project(Base):
     __tablename__ = "projects"
