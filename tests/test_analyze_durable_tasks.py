@@ -5,6 +5,12 @@ from types import SimpleNamespace
 
 import networkx as nx
 import pytest
+
+# tree-sitter is a worker-only dependency installed in the Docker image
+# but not in CI's standard pytest job.  Skip collection gracefully
+# rather than failing with ModuleNotFoundError.
+pytest.importorskip("tree_sitter")
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -101,9 +107,6 @@ async def test_completed_analysis_task_is_reused_without_agent_invocation(
     )
     task_payload = {"findings": [finding.model_dump(mode="json")], "fixes": []}
 
-    # Use the node's own hash/key helpers by letting the first ensure happen via
-    # a fake stale task? Simpler: monkeypatch the durable lookup to return this
-    # payload and assert the graph is never invoked.
     async def _reuse(*_args, **_kwargs):
         return task_payload
 

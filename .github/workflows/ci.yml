@@ -217,7 +217,7 @@ jobs:
         run: pip install "poetry==1.8.3"
       - name: Install dependencies (with test group)
         run: |
-          poetry install --no-interaction --no-ansi --no-root --without dev --with test --with worker
+          poetry install --no-interaction --no-ansi --no-root --without dev --with test
       - name: Run Alembic migrations
         run: poetry run alembic upgrade head
       - name: pytest
