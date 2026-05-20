@@ -26,6 +26,7 @@ from app.infrastructure.database import models as db_models
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.database.repositories.scan_task_repo import ScanTaskRepository
 from app.shared.lib.files import get_language_from_filename
+from app.shared.lib.risk_score import compute_cvss_aggregate, scoreable_findings
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     COMPLETED_SCAN_STATUSES,
@@ -227,6 +228,16 @@ class ScanQueryService:
 
             summary_dict = scan.summary.get("summary", {})
             risk_score_dict = scan.summary.get("overall_risk_score", {})
+
+            # Recompute the risk score fresh from findings so the results
+            # page always reflects the current formula, not a stale
+            # persisted value from when the scan completed.
+            active_findings = scoreable_findings(scan.findings)
+            if active_findings:
+                fresh_score = compute_cvss_aggregate(
+                    active_findings, scan_id=str(scan_id)
+                )
+                risk_score_dict = dict(risk_score_dict, score=fresh_score)
 
             summary_report_response = api_models.SummaryReportResponse(
                 submission_id=scan.id,
