@@ -21,6 +21,7 @@ from fastapi import HTTPException, status
 from app.api.v1 import models as api_models
 from app.config.config import settings
 from app.infrastructure.database import models as db_models
+from app.core.services.scan.task_ledger import ScanTaskLedgerService
 from app.infrastructure.database.repositories.scan_outbox_repo import (
     ScanOutboxRepository,
 )
@@ -29,11 +30,14 @@ from app.infrastructure.messaging.publisher import publish_message
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     STATUS_CANCELLED,
+    STATUS_FAILED,
     STATUS_PENDING_APPROVAL,
     STATUS_PENDING_PRESCAN_APPROVAL,
     STATUS_PENDING_PROFILING_APPROVAL,
+    STATUS_QUEUED,
     STATUS_QUEUED_FOR_SCAN,
 )
+from app.shared.lib.scan_task_status import STATUS_SCAN_TASK_COMPLETED
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +236,159 @@ class ScanLifecycleService:
                 "sweeper will retry.",
                 extra={"scan_id": str(scan_id)},
             )
+
+    async def resume_or_restart_scan(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        request: "api_models.ScanRunControlRequest",
+    ) -> dict[str, Any]:
+        """Manually requeue a failed/cancelled scan.
+
+        ``resume`` keeps durable task artifacts so later workflow nodes can
+        reuse completed work. ``restart`` deletes task artifacts and derived
+        final outputs, while preserving the original submitted snapshot,
+        scan events, and LLM interactions for auditability.
+        """
+        mode = request.mode
+        logger.info(
+            "scan: manual run-control attempt",
+            extra={"scan_id": str(scan_id), "actor_user_id": user.id, "mode": mode},
+        )
+        scan = await self._get_scan_or_404(scan_id)
+        if scan.user_id != user.id and not user.is_superuser:
+            logger.warning(
+                "scan: authorization denied",
+                extra={
+                    "scan_id": str(scan_id),
+                    "actor_user_id": user.id,
+                    "action": mode,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Not authorized to {mode} this scan",
+            )
+
+        pending_statuses = {
+            STATUS_PENDING_PRESCAN_APPROVAL,
+            STATUS_PENDING_PROFILING_APPROVAL,
+            STATUS_PENDING_APPROVAL,
+        }
+        if scan.status in pending_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Scan is pending approval; use the existing approval flow "
+                    "instead of manual resume/restart."
+                ),
+            )
+        if scan.status not in {STATUS_FAILED, STATUS_CANCELLED}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Scan cannot be {mode}ed from its current state: {scan.status}",
+            )
+
+        task_ledger = ScanTaskLedgerService(self.repo.db)
+        artifact_counts = await task_ledger.summarize_scan_tasks(scan_id)
+        artifact_total = sum(artifact_counts.values())
+        completed_artifacts = artifact_counts.get(STATUS_SCAN_TASK_COMPLETED, 0)
+
+        if scan.status == STATUS_CANCELLED and artifact_total == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cancelled scan has no resumable artifacts.",
+            )
+
+        deleted_tasks = 0
+        deleted_findings = 0
+        deleted_snapshots = 0
+        if mode == "restart":
+            deleted_tasks = await task_ledger.delete_scan_tasks(scan_id)
+            deleted_findings = await self.repo.delete_findings_for_scan(scan_id)
+            deleted_snapshots = await self.repo.delete_derived_snapshots_for_scan(
+                scan_id
+            )
+            artifact_counts = {}
+            artifact_total = 0
+            completed_artifacts = 0
+
+        boundary_stage = (
+            "MANUAL_RESUME_REQUESTED"
+            if mode == "resume"
+            else "MANUAL_RESTART_REQUESTED"
+        )
+        await self.repo.create_scan_event(
+            scan_id=scan_id,
+            stage_name=boundary_stage,
+            status="COMPLETED",
+            details={
+                "mode": mode,
+                "actor_user_id": user.id,
+                "artifact_counts": artifact_counts,
+                "artifact_total": artifact_total,
+                "completed_artifacts": completed_artifacts,
+                "deleted_tasks": deleted_tasks,
+                "deleted_findings": deleted_findings,
+                "deleted_derived_snapshots": deleted_snapshots,
+                "approvals_preserved": True,
+            },
+        )
+        if mode == "resume":
+            await self.repo.create_scan_event(
+                scan_id=scan_id,
+                stage_name="RESUME_ARTIFACT_EVALUATION",
+                status="COMPLETED",
+                details={
+                    "artifact_counts": artifact_counts,
+                    "artifact_total": artifact_total,
+                    "completed_artifacts": completed_artifacts,
+                    "reusable_artifacts": completed_artifacts,
+                },
+            )
+
+        await self.repo.reset_scan_for_manual_run(
+            scan_id,
+            status=STATUS_QUEUED,
+            clear_final_outputs=(mode == "restart"),
+        )
+        await self.repo.create_scan_event(
+            scan_id=scan_id,
+            stage_name="QUEUED",
+            status="COMPLETED",
+            details={"mode": mode, "manual_run_control": True},
+        )
+
+        payload = {
+            "scan_id": str(scan_id),
+            "action": f"manual_{mode}",
+            "mode": mode,
+        }
+        outbox_row = await self.outbox.enqueue(
+            scan_id=scan_id,
+            queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+            payload=payload,
+        )
+        published = await publish_message(settings.RABBITMQ_SUBMISSION_QUEUE, payload)
+        if published:
+            await self.outbox.mark_published(outbox_row.id)
+        else:
+            await self.outbox.record_failed_attempt(outbox_row.id)
+            logger.warning(
+                "Manual %s enqueued to outbox but RabbitMQ publish failed; sweeper will retry.",
+                mode,
+                extra={"scan_id": str(scan_id)},
+            )
+
+        return {
+            "message": f"Scan {mode} queued for processing.",
+            "scan_id": str(scan_id),
+            "mode": mode,
+            "artifact_counts": artifact_counts,
+            "deleted_tasks": deleted_tasks,
+            "deleted_findings": deleted_findings,
+            "deleted_derived_snapshots": deleted_snapshots,
+        }
 
     async def get_prescan_review(
         self, scan_id: uuid.UUID, user: db_models.User

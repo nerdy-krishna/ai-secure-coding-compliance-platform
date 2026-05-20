@@ -24,6 +24,7 @@ from sqlalchemy import func, select
 from app.api.v1 import models as api_models
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.scan_task_repo import ScanTaskRepository
 from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
@@ -316,6 +317,10 @@ class ScanQueryService:
                 )
                 break
 
+        task_counts = await ScanTaskRepository(self.repo.db).count_by_status_for_scan(
+            scan_id
+        )
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             project_id=scan.project_id,
@@ -332,6 +337,7 @@ class ScanQueryService:
             disable_temperature=bool(scan.disable_temperature),
             stage_temperatures=scan.stage_temperatures,
             source_type=scan.source_type,
+            has_resumable_artifacts=sum(task_counts.values()) > 0,
             repository_url=(scan.project.repository_url if scan.project else None),
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )

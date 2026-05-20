@@ -23,6 +23,7 @@ from sqlalchemy.orm import relationship, Mapped, mapped_column
 from fastapi_users.db import SQLAlchemyBaseUserTable
 
 from app.shared.lib.scan_status import STATUS_QUEUED
+from app.shared.lib.scan_task_status import STATUS_SCAN_TASK_PENDING
 from app.infrastructure.database.database import Base
 
 
@@ -173,9 +174,7 @@ class Scan(Base):
     # How the code was submitted: 'upload' (loose files), 'archive'
     # (zip/rar), or 'git' (cloned repository). NULL for pre-existing
     # scans. Surfaced in the results-page scan-info panel + reports.
-    source_type: Mapped[Optional[str]] = mapped_column(
-        String(20), nullable=True
-    )
+    source_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     context_bundles: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB)
     summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     # CycloneDX SBOM emitted by OSV-Scanner during the deterministic
@@ -203,7 +202,74 @@ class Scan(Base):
     llm_interactions: Mapped[List["LLMInteraction"]] = relationship(
         "LLMInteraction", back_populates="scan"
     )
+    tasks: Mapped[List["ScanTask"]] = relationship(
+        "ScanTask", back_populates="scan", cascade="all, delete-orphan"
+    )
     risk_score: Mapped[Optional[int]] = mapped_column(Integer)
+
+
+class ScanTask(Base):
+    """Durable ledger row for resumable per-scan work.
+
+    Rows are scoped to one scan. ``task_type`` and ``task_key`` identify
+    the unit of work within that scan, while input/prompt/version hashes
+    determine whether a completed result can be reused or must be rerun.
+    """
+
+    __tablename__ = "scan_tasks"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_id", "task_type", "task_key", name="uq_scan_tasks_scan_type_key"
+        ),
+        sa.CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'stale', 'retryable')",
+            name="ck_scan_tasks_status",
+        ),
+        sa.CheckConstraint("attempts >= 0", name="ck_scan_tasks_attempts_nonnegative"),
+        sa.CheckConstraint(
+            "max_attempts > 0", name="ck_scan_tasks_max_attempts_positive"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    task_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_key: Mapped[str] = mapped_column(Text, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    version_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    result_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=STATUS_SCAN_TASK_PENDING, index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    lease_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    scan: Mapped["Scan"] = relationship(back_populates="tasks")
 
 
 class ScanEvent(Base):
@@ -388,9 +454,7 @@ class FindingDispositionEvent(Base):
     holds the current state, this table holds the history."""
 
     __tablename__ = "finding_disposition_events"
-    id: Mapped[int] = mapped_column(
-        BIGINT, sa.Identity(always=True), primary_key=True
-    )
+    id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
     finding_id: Mapped[int] = mapped_column(
         ForeignKey("findings.id", ondelete="CASCADE"),
         nullable=False,

@@ -338,6 +338,8 @@ export interface ScanResultResponse {
   repository_url?: string | null;
   // How the code was submitted: "upload" | "archive" | "git".
   source_type?: string | null;
+  // True when durable scan task artifacts exist for resume/restart.
+  has_resumable_artifacts?: boolean;
   // Stage-event audit trail. SSE emits these live for in-progress
   // scans; the same list is included here so a terminal scan's page
   // can seed the live-event-log deterministically on mount, instead

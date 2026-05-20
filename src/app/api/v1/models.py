@@ -68,6 +68,17 @@ def _validate_repo_url(url: str) -> str:
     return url
 
 
+class ScanRunControlRequest(BaseModel):
+    """Body for `POST /api/v1/scans/{id}/run-control`.
+
+    ``resume`` keeps durable scan task rows so completed work can be reused.
+    ``restart`` discards durable task rows and derived final outputs, then
+    reruns the original submitted snapshot/config under the same scan id.
+    """
+
+    mode: Literal["resume", "restart"]
+
+
 class ApprovalRequest(BaseModel):
     """Body for `POST /api/v1/scans/{id}/approve`.
 
@@ -906,6 +917,10 @@ class AnalysisResultDetailResponse(BaseModel):
     # How the code was submitted: 'upload' / 'archive' / 'git'. None for
     # scans created before the column existed.
     source_type: Optional[str] = None
+    # Whether durable per-scan task artifacts exist for this scan. Used by
+    # the scan-status page to decide if a CANCELLED scan can offer manual
+    # resume/restart controls.
+    has_resumable_artifacts: bool = False
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing

@@ -482,6 +482,26 @@ async def get_prescan_review(
 
 
 @router.post(
+    "/scans/{scan_id}/run-control",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=dict,
+)
+async def run_control_scan_analysis(
+    scan_id: uuid.UUID,
+    request: api_models.ScanRunControlRequest,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+):
+    """Manually resume or restart an eligible failed/cancelled scan."""
+    result = await service.resume_or_restart_scan(scan_id, user, request)
+    logger.info(
+        "scans.run_control_queued",
+        extra={"actor_id": user.id, "scan_id": str(scan_id), "mode": request.mode},
+    )
+    return result
+
+
+@router.post(
     "/scans/{scan_id}/cancel", status_code=status.HTTP_200_OK, response_model=dict
 )
 async def cancel_scan_analysis(

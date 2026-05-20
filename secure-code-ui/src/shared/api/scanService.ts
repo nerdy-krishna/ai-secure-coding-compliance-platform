@@ -382,6 +382,21 @@ export const scanService = {
   },
 
   /**
+   * Manually resume or restart an eligible failed/cancelled scan.
+   * V01.2.2: scanId encoded.
+   */
+  runControlScan: async (
+    scanId: string,
+    mode: "resume" | "restart",
+  ): Promise<{ message: string; mode: "resume" | "restart" }> => {
+    const response = await apiClient.post<{ message: string; mode: "resume" | "restart" }>(
+      `/scans/${encodeURIComponent(scanId)}/run-control`,
+      { mode },
+    );
+    return response.data;
+  },
+
+  /**
    * Cancels a scan that is pending approval.
    * V01.2.2: scanId encoded.
    */

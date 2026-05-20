@@ -608,6 +608,54 @@ class ScanRepository:
             raise
         return result.rowcount or 0
 
+    async def delete_derived_snapshots_for_scan(self, scan_id: uuid.UUID) -> int:
+        """Delete generated snapshots while preserving ORIGINAL_SUBMISSION."""
+        result = await self.db.execute(
+            db_models.CodeSnapshot.__table__.delete().where(
+                db_models.CodeSnapshot.scan_id == scan_id,
+                db_models.CodeSnapshot.snapshot_type != "ORIGINAL_SUBMISSION",
+            )
+        )
+        try:
+            await self.db.commit()
+        except SQLAlchemyError as e:
+            logger.error(
+                "scan_repo.delete_derived_snapshots_for_scan.commit_failed",
+                extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
+                exc_info=True,
+            )
+            raise
+        return result.rowcount or 0
+
+    async def reset_scan_for_manual_run(
+        self,
+        scan_id: uuid.UUID,
+        *,
+        status: str,
+        clear_final_outputs: bool,
+    ) -> None:
+        """Prepare a terminal scan for a manually queued resume/restart.
+
+        ``clear_final_outputs`` is true for restart: summary/risk/completed-at
+        are derived final outputs and must not describe the new run.
+        Resume keeps summary/risk unless a later rerun overwrites them.
+        """
+        values: Dict[str, Any] = {"status": status, "completed_at": None}
+        if clear_final_outputs:
+            values.update({"summary": None, "risk_score": None})
+        await self.db.execute(
+            update(db_models.Scan).where(db_models.Scan.id == scan_id).values(**values)
+        )
+        try:
+            await self.db.commit()
+        except SQLAlchemyError as e:
+            logger.error(
+                "scan_repo.reset_scan_for_manual_run.commit_failed",
+                extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
+                exc_info=True,
+            )
+            raise
+
     async def update_correlated_findings(
         self, findings: List[agent_schemas.VulnerabilityFinding]
     ):

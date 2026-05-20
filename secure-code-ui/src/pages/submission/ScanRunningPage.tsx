@@ -105,6 +105,19 @@ const toScanEventMsg = (
   };
 };
 
+const eventDisplayName = (stageName: string): string => {
+  switch (stageName) {
+    case "MANUAL_RESUME_REQUESTED":
+      return "Manual resume requested";
+    case "RESUME_ARTIFACT_EVALUATION":
+      return "Resume artifacts evaluated";
+    case "MANUAL_RESTART_REQUESTED":
+      return "Manual restart requested";
+    default:
+      return stageName;
+  }
+};
+
 // Merge new scan-events into the existing list, deduped by the stable
 // DB id (`event_id`). All three feeds — seed, SSE, poll — re-emit the
 // same rows, so a stable-id dedupe is what keeps the live event log
@@ -168,6 +181,7 @@ const ScanRunningPage: React.FC = () => {
   // Whether the scan opted in to cross-file validation (#82). Seeded
   // from the one-shot getScanResult below; drives the extra stage row.
   const [crossFileValidation, setCrossFileValidation] = useState(false);
+  const [hasResumableArtifacts, setHasResumableArtifacts] = useState(false);
   const [events, setEvents] = useState<ScanEventMsg[]>([]);
   // §3.10b — per-file analysis progress, keyed by file_path so a file
   // showing up multiple times collapses to one row. Renders below the
@@ -187,6 +201,8 @@ const ScanRunningPage: React.FC = () => {
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [runControlMode, setRunControlMode] = useState<"resume" | "restart" | null>(null);
+  const [runControlSubmitting, setRunControlSubmitting] = useState(false);
   // Project pointers seeded from the one-shot getScanResult call below.
   // Used to route back to the scan's project page after delete instead
   // of bouncing the user to the dashboard (a queued/failed scan has no
@@ -236,6 +252,7 @@ const ScanRunningPage: React.FC = () => {
         if (typeof r.cross_file_validation === "boolean") {
           setCrossFileValidation(r.cross_file_validation);
         }
+        setHasResumableArtifacts(Boolean(r.has_resumable_artifacts));
         if (r.project_id) {
           setProjectInfo({
             id: r.project_id,
@@ -289,6 +306,7 @@ const ScanRunningPage: React.FC = () => {
         if (typeof r.status === "string" && r.status.length < 64) {
           setStatus(r.status);
         }
+        setHasResumableArtifacts(Boolean(r.has_resumable_artifacts));
         if (r.cost_details) {
           setCostDetails((prev) => ({ ...(prev ?? {}), ...r.cost_details }));
         }
@@ -616,6 +634,8 @@ const ScanRunningPage: React.FC = () => {
   const isBlocked = isBlockedStatus(status);
   const isExpired = status === "EXPIRED";
   const isUnsuccessful = isUnsuccessfulTerminal(status);
+  const canRunControl =
+    status === "FAILED" || (status === "CANCELLED" && hasResumableArtifacts);
 
   // Reset the optimistic-dismiss tracker the moment the live status
   // moves off the gate the user submitted against. Crucially fires on
@@ -827,6 +847,28 @@ const ScanRunningPage: React.FC = () => {
       setStopConfirmOpen(false);
     }
   }, [scanId, projectInfo, navigate, queryClient, toast]);
+
+  const handleRunControl = useCallback(async () => {
+    if (!scanId || !runControlMode) return;
+    setRunControlSubmitting(true);
+    try {
+      await scanService.runControlScan(scanId, runControlMode);
+      toast.info(
+        runControlMode === "resume"
+          ? "Scan resume queued. Completed durable work will be reused where possible."
+          : "Scan restart queued. Partial task artifacts and derived findings were discarded.",
+      );
+      setStatus("QUEUED");
+      setRunControlMode(null);
+      queryClient.invalidateQueries({ queryKey: ["project-scans", projectInfo?.id] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (err) {
+      const e = err as { message?: string };
+      toast.error(e.message || `Failed to ${runControlMode} scan`);
+    } finally {
+      setRunControlSubmitting(false);
+    }
+  }, [scanId, runControlMode, toast, queryClient, projectInfo?.id]);
 
   const handleDelete = useCallback(async () => {
     if (!scanId) return;
@@ -1498,7 +1540,7 @@ const ScanRunningPage: React.FC = () => {
               : events
                   .map(
                     (e) =>
-                      `[${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : "—"}] ${e.stage_name} · ${e.status}`,
+                      `[${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : "—"}] ${eventDisplayName(e.stage_name)} · ${e.status}`,
                   )
                   .join("\n")}
           </pre>
@@ -1566,6 +1608,24 @@ const ScanRunningPage: React.FC = () => {
             <Icon.X size={12} /> {cancelling ? "Stopping…" : "Stop scan"}
           </button>
         )}
+        {canRunControl && (
+          <>
+            <button
+              className="sccap-btn sccap-btn-primary"
+              onClick={() => setRunControlMode("resume")}
+              disabled={runControlSubmitting}
+            >
+              Resume scan
+            </button>
+            <button
+              className="sccap-btn"
+              onClick={() => setRunControlMode("restart")}
+              disabled={runControlSubmitting}
+            >
+              Restart from original submission
+            </button>
+          </>
+        )}
         {isSuperuser && (
           <button
             className="sccap-btn"
@@ -1613,6 +1673,56 @@ const ScanRunningPage: React.FC = () => {
           The scan will transition to <b>CANCELLED</b>. Any partial progress is
           discarded — no findings or fixes are produced. You can submit the
           project again later.
+        </div>
+      </Modal>
+
+      <Modal
+        open={runControlMode !== null}
+        onClose={() =>
+          runControlSubmitting ? undefined : setRunControlMode(null)
+        }
+        title={
+          runControlMode === "resume"
+            ? "Resume this scan?"
+            : "Restart this scan?"
+        }
+        footer={
+          <>
+            <button
+              className="sccap-btn"
+              onClick={() => setRunControlMode(null)}
+              disabled={runControlSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              className="sccap-btn sccap-btn-primary"
+              onClick={handleRunControl}
+              disabled={runControlSubmitting}
+            >
+              {runControlSubmitting
+                ? "Queueing…"
+                : runControlMode === "resume"
+                  ? "Resume scan"
+                  : "Restart scan"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ color: "var(--fg)", fontSize: 13.5, lineHeight: 1.55 }}>
+          {runControlMode === "resume" ? (
+            <>
+              Resume reuses completed durable work where possible and continues
+              from the original submitted snapshot and scan configuration.
+            </>
+          ) : (
+            <>
+              Restart discards partial task artifacts and derived final findings,
+              then reruns the original submitted snapshot and scan configuration
+              under the same scan id. Audit events and LLM interaction logs are
+              preserved.
+            </>
+          )}
         </div>
       </Modal>
 
