@@ -49,12 +49,16 @@ def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
     summary = (scan.summary or {}).get("summary") or {}
     severity_counts = summary.get("severity_counts")
     total = summary.get("total_findings_count")
+    # Resume is always available for FAILED scans; for CANCELLED it
+    # depends on durable-task artifacts (validated by the endpoint).
+    can_resume = scan.status in ("FAILED", "CANCELLED")
     return {
         "risk_score": scan.risk_score,
         "total_findings": total if isinstance(total, int) else None,
         "severity_counts": (
             severity_counts if isinstance(severity_counts, dict) else None
         ),
+        "has_resumable_artifacts": can_resume,
     }
 
 

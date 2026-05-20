@@ -1035,6 +1035,7 @@ class ScanHistoryItem(BaseModel):
     risk_score: Optional[int] = None
     total_findings: Optional[int] = None
     severity_counts: Optional[Dict[str, int]] = None
+    has_resumable_artifacts: bool = False
 
     class Config:
         from_attributes = True
