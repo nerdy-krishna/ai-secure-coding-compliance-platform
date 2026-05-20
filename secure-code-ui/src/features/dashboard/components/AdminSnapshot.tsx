@@ -213,7 +213,7 @@ export const AdminSnapshot: React.FC = () => {
       </div>
 
       {recentScans.length > 0 && (
-        <div className="sccap-card" style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{ display: "grid", gap: 16 }}>
           <SectionHead
             title={
               <>
@@ -229,26 +229,19 @@ export const AdminSnapshot: React.FC = () => {
                 View all <Icon.ChevronR size={12} />
               </Link>
             }
-            style={{ padding: "18px 20px 10px", margin: 0 }}
           />
-          <div>
-            {recentScans.map((s, idx) => (
-              <div
-                key={s.id}
-                style={{
-                  borderBottom:
-                    idx < recentScans.length - 1
-                      ? "1px solid var(--border)"
-                      : "none",
-                }}
-              >
-                <ScanCard
-                  scan={s}
-                  onOpen={() => navigate(scanRouteFor(s.id, s.status))}
-                />
-              </div>
-            ))}
-          </div>
+          {recentScans.map((s) => (
+            <div
+              key={s.id}
+              className="sccap-card"
+              style={{ padding: 0, overflow: "hidden" }}
+            >
+              <ScanCard
+                scan={s}
+                onOpen={() => navigate(scanRouteFor(s.id, s.status))}
+              />
+            </div>
+          ))}
         </div>
       )}
     </div>

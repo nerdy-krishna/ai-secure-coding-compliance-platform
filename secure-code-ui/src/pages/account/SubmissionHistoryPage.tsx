@@ -226,16 +226,12 @@ const SubmissionHistoryPage: React.FC = () => {
               >
                 {group.key}
               </div>
-              <div className="sccap-card" style={{ padding: 0 }}>
-                {group.scans.map((scan, idx) => (
+              <div style={{ display: "grid", gap: 10 }}>
+                {group.scans.map((scan) => (
                   <div
                     key={scan.id}
-                    style={{
-                      borderBottom:
-                        idx < group.scans.length - 1
-                          ? "1px solid var(--border)"
-                          : "none",
-                    }}
+                    className="sccap-card"
+                    style={{ padding: 0, overflow: "hidden" }}
                   >
                     <ScanCard
                       scan={scan}

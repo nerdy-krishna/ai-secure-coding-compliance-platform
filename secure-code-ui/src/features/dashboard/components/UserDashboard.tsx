@@ -223,16 +223,12 @@ export const UserDashboard: React.FC = () => {
               to get started.
             </div>
           ) : (
-            <div>
-              {recent.map((s, idx) => (
+            <div style={{ display: "grid", gap: 8 }}>
+              {recent.map((s) => (
                 <div
                   key={s.id}
-                  style={{
-                    borderBottom:
-                      idx < recent.length - 1
-                        ? "1px solid var(--border)"
-                        : "none",
-                  }}
+                  className="sccap-card"
+                  style={{ padding: 0, overflow: "hidden" }}
                 >
                   <ScanCard
                     scan={s}

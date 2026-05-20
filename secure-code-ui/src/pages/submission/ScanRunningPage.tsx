@@ -1084,48 +1084,81 @@ const ScanRunningPage: React.FC = () => {
             />
           </div>
 
-          <div style={{ display: "grid", gap: 10, marginTop: 22 }}>
-            {(() => {
-              return scanProgress.stages.map((s) => {
-                const state = s.state;
-                const isHighlighted =
-                  state === "running" || state === "paused";
-                return (
+          {/* Horizontal stage timeline — same design as the compact
+              pipeline on the dashboard / projects scan cards. */}
+          <div style={{ display: "flex", marginTop: 22, overflowX: "auto" }}>
+            {scanProgress.stages.map((s, i) => {
+              const state = s.state;
+              const last = i === scanProgress.stages.length - 1;
+              const prevDone = i > 0 && scanProgress.stages[i - 1].state === "done";
+              const circleBg =
+                state === "done"
+                  ? "var(--success)"
+                  : state === "running"
+                    ? "var(--primary)"
+                    : state === "paused"
+                      ? "var(--medium)"
+                      : "var(--bg-elev)";
+              const labelColor =
+                state === "running"
+                  ? "var(--primary)"
+                  : state === "paused"
+                    ? "var(--medium)"
+                    : state === "done"
+                      ? "var(--fg-muted)"
+                      : "var(--fg-subtle)";
+              return (
+                <div
+                  key={s.key}
+                  title={`${s.label} — ${state}${state === "paused" ? " · awaiting your approval" : ""}`}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                  }}
+                >
                   <div
-                    key={s.key}
                     style={{
-                      display: "grid",
-                      gridTemplateColumns: "auto 1fr",
-                      gap: 12,
+                      display: "flex",
                       alignItems: "center",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      background: isHighlighted
-                        ? "var(--primary-weak)"
-                        : "transparent",
-                      transition: "background .3s var(--ease)",
+                      width: "100%",
                     }}
                   >
-                    <div
-                      className={state === "running" ? "pulse-ring" : undefined}
+                    <span
                       style={{
-                        width: 26,
-                        height: 26,
-                        borderRadius: "50%",
-                        display: "grid",
-                        placeItems: "center",
+                        flex: 1,
+                        height: 2,
                         background:
-                          state === "done"
-                            ? "var(--success)"
-                            : state === "running"
-                              ? "var(--primary)"
-                              : state === "paused"
-                                ? "var(--primary)"
-                                : "var(--bg-soft)",
-                        color: state === "pending" ? "var(--fg-subtle)" : "white",
+                          i === 0
+                            ? "transparent"
+                            : prevDone
+                              ? "var(--success)"
+                              : "var(--border)",
+                      }}
+                    />
+                    <span
+                      className={
+                        state === "running" ? "pulse-ring" : undefined
+                      }
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: "50%",
+                        flexShrink: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: circleBg,
+                        color:
+                          state === "pending"
+                            ? "var(--fg-subtle)"
+                            : "#fff",
                         border:
-                          "1px solid " +
-                          (state === "pending" ? "var(--border)" : "transparent"),
+                          state === "pending"
+                            ? "1.5px solid var(--border)"
+                            : "1.5px solid transparent",
                       }}
                     >
                       {state === "done" ? (
@@ -1146,35 +1179,35 @@ const ScanRunningPage: React.FC = () => {
                       ) : (
                         <StageIcon name={s.icon} size={14} />
                       )}
-                    </div>
-                    <div
+                    </span>
+                    <span
                       style={{
-                        fontSize: 13.5,
-                        fontWeight: isHighlighted ? 600 : 400,
-                        color:
-                          state === "pending"
-                            ? "var(--fg-subtle)"
-                            : "var(--fg)",
+                        flex: 1,
+                        height: 2,
+                        background: last
+                          ? "transparent"
+                          : state === "done"
+                            ? "var(--success)"
+                            : "var(--border)",
                       }}
-                    >
-                      {s.label}
-                      {state === "paused" && (
-                        <span
-                          style={{
-                            marginLeft: 8,
-                            fontSize: 12,
-                            fontWeight: 400,
-                            color: "var(--fg-muted)",
-                          }}
-                        >
-                          · awaiting your approval
-                        </span>
-                      )}
-                    </div>
+                    />
                   </div>
-                );
-              });
-            })()}
+                  <span
+                    style={{
+                      marginTop: 6,
+                      fontSize: 10.5,
+                      lineHeight: 1.3,
+                      textAlign: "center",
+                      color: labelColor,
+                      fontWeight:
+                        state === "running" || state === "paused" ? 600 : 400,
+                    }}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
