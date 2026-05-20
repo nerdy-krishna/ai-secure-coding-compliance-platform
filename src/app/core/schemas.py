@@ -60,6 +60,7 @@ class AffectedLocation(BaseModel):
     navigable under one finding.
     """
 
+    file_path: Optional[str] = Field(default=None, max_length=4096)
     line_number: int = Field(ge=0)
     snippet: Optional[str] = Field(default=None, max_length=20_000)
 

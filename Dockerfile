@@ -96,16 +96,16 @@ COPY --chown=appuser:appuser pyproject.toml poetry.lock ./
 # dev tools.
 #
 # `INSTALL_DEV_DEPS` (F15b follow-up): set to `true` at build time to
-# include dev deps (pytest, pytest-asyncio, etc.) in the venv. Useful
-# for CI / local pytest runs inside the container; the production
-# image stays slim by leaving the default `false`.
+# include test + worker deps (pytest, pytest-asyncio, tree-sitter, etc.)
+# in the venv. Useful for CI / local pytest runs inside the API container;
+# the production image stays slim by leaving the default `false`.
 FROM poetry-base AS api-builder
 ARG INSTALL_DEV_DEPS=false
 
 RUN --mount=type=cache,target=/home/appuser/.cache/pypoetry,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/appuser/.cache/pip,uid=1001,gid=1001 \
     if [ "${INSTALL_DEV_DEPS}" = "true" ]; then \
-        poetry install --no-interaction --no-ansi --no-root --with test ; \
+        poetry install --no-interaction --no-ansi --no-root --with test,worker ; \
     else \
         poetry install --no-interaction --no-ansi --no-root --without dev ; \
     fi

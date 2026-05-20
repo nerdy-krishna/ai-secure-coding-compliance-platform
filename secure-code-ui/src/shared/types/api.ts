@@ -57,13 +57,29 @@ export interface LLMConfiguration {
   tokenizer?: string;
   input_cost_per_million: number;
   output_cost_per_million: number;
+  requests_per_minute?: number | null;
+  tokens_per_minute?: number | null;
+  max_prompt_tokens?: number | null;
   created_at: string;
   updated_at: string;
 }
 
-export type LLMConfigurationCreate = Schemas["LLMConfigurationCreate"];
-export type LLMConfigurationRead = Schemas["LLMConfigurationRead"];
-export type LLMConfigurationUpdate = Schemas["LLMConfigurationUpdate"];
+export interface LLMConfigurationCreate {
+  name: string;
+  provider: "openai" | "anthropic" | "google" | "deepseek" | "xai";
+  model_name: string;
+  tokenizer?: string | null;
+  input_cost_per_million?: number;
+  output_cost_per_million?: number;
+  requests_per_minute?: number | null;
+  tokens_per_minute?: number | null;
+  max_prompt_tokens?: number | null;
+  api_key: string;
+}
+export type LLMConfigurationRead = LLMConfiguration;
+export type LLMConfigurationUpdate = Partial<Omit<LLMConfigurationCreate, "api_key">> & {
+  api_key?: string;
+};
 
 // --- Chat ---------------------------------------------------------------
 export type ChatSessionCreateRequest = Schemas["ChatSessionCreateRequest"];
@@ -324,6 +340,7 @@ export interface ScanResultResponse {
   // Whether the scan opted in to cross-file finding validation (#82).
   // Drives the cross-file-validation stage in ScanRunningPage's rail.
   cross_file_validation?: boolean;
+  deep_vendor_scan?: boolean;
   // The LLM configs the scan ran with — reasoning / utility / 2nd
   // analysis LLM — each with its provider + model. Shown on Results.
   llms_used?: LLMUsageItem[];

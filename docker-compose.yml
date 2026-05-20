@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile
       target: api
+      args:
+        INSTALL_DEV_DEPS: "true"
     container_name: sccap_app
     env_file:
       - .env

@@ -37,6 +37,9 @@ interface FormState {
   tokenizer: string;
   input_cost_per_million: string;
   output_cost_per_million: string;
+  requests_per_minute: string;
+  tokens_per_minute: string;
+  max_prompt_tokens: string;
   api_key: string;
 }
 
@@ -47,6 +50,9 @@ const EMPTY_FORM: FormState = {
   tokenizer: "",
   input_cost_per_million: "",
   output_cost_per_million: "",
+  requests_per_minute: "",
+  tokens_per_minute: "",
+  max_prompt_tokens: "",
   api_key: "",
 };
 
@@ -110,6 +116,9 @@ const LLMSettingsPage: React.FC = () => {
         tokenizer: editing.tokenizer ?? "",
         input_cost_per_million: String(editing.input_cost_per_million ?? ""),
         output_cost_per_million: String(editing.output_cost_per_million ?? ""),
+        requests_per_minute: String(editing.requests_per_minute ?? ""),
+        tokens_per_minute: String(editing.tokens_per_minute ?? ""),
+        max_prompt_tokens: String(editing.max_prompt_tokens ?? ""),
         api_key: "",
       });
       formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -168,6 +177,9 @@ const LLMSettingsPage: React.FC = () => {
     const output = form.output_cost_per_million === ""
       ? 0
       : Number(form.output_cost_per_million);
+    const rpm = form.requests_per_minute === "" ? null : Number(form.requests_per_minute);
+    const tpm = form.tokens_per_minute === "" ? null : Number(form.tokens_per_minute);
+    const maxPrompt = form.max_prompt_tokens === "" ? null : Number(form.max_prompt_tokens);
     if (
       !form.name ||
       !form.provider ||
@@ -175,7 +187,10 @@ const LLMSettingsPage: React.FC = () => {
       isNaN(input) ||
       input < 0 ||
       isNaN(output) ||
-      output < 0
+      output < 0 ||
+      (rpm !== null && (!Number.isInteger(rpm) || rpm <= 0)) ||
+      (tpm !== null && (!Number.isInteger(tpm) || tpm <= 0)) ||
+      (maxPrompt !== null && (!Number.isInteger(maxPrompt) || maxPrompt <= 0))
     ) {
       toast.error("Please fill all required fields with valid values.");
       return;
@@ -209,6 +224,9 @@ const LLMSettingsPage: React.FC = () => {
       input_cost_per_million: input,
       output_cost_per_million: output,
       api_key: form.api_key,
+      requests_per_minute: rpm,
+      tokens_per_minute: tpm,
+      max_prompt_tokens: maxPrompt,
     };
     if (editing) {
       // V15.3.3: explicit allowlist of mutable fields. `provider` and
@@ -225,6 +243,9 @@ const LLMSettingsPage: React.FC = () => {
         tokenizer: payload.tokenizer,
         input_cost_per_million: payload.input_cost_per_million,
         output_cost_per_million: payload.output_cost_per_million,
+        requests_per_minute: payload.requests_per_minute,
+        tokens_per_minute: payload.tokens_per_minute,
+        max_prompt_tokens: payload.max_prompt_tokens,
         ...(form.api_key ? { api_key: payload.api_key } : {}),
       };
       updateMutation.mutate({ id: editing.id, data: updatePayload });
@@ -346,6 +367,42 @@ const LLMSettingsPage: React.FC = () => {
                     ...form,
                     output_cost_per_million: e.target.value,
                   })
+                }
+              />
+            </Field>
+            <Field label="Requests/minute" hint="(optional)">
+              <input
+                className="sccap-input mono"
+                type="number"
+                min="1"
+                placeholder="provider default"
+                value={form.requests_per_minute}
+                onChange={(e) =>
+                  setForm({ ...form, requests_per_minute: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="Tokens/minute" hint="(optional)">
+              <input
+                className="sccap-input mono"
+                type="number"
+                min="1"
+                placeholder="provider default"
+                value={form.tokens_per_minute}
+                onChange={(e) =>
+                  setForm({ ...form, tokens_per_minute: e.target.value })
+                }
+              />
+            </Field>
+            <Field label="Max prompt tokens" hint="(optional)">
+              <input
+                className="sccap-input mono"
+                type="number"
+                min="1"
+                placeholder="model/context default"
+                value={form.max_prompt_tokens}
+                onChange={(e) =>
+                  setForm({ ...form, max_prompt_tokens: e.target.value })
                 }
               />
             </Field>

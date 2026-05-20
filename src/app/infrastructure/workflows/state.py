@@ -57,6 +57,9 @@ class WorkerState(TypedDict):
     # finding against its cross-file context; when false / None the node
     # is a no-op. Set from `Scan.cross_file_validation` by `retrieve`.
     cross_file_validation: Optional[bool]
+    # Opt-in deeper analysis of vendor/minified/static assets. Default false;
+    # classification policy otherwise skips low-value LLM/Semgrep work.
+    deep_vendor_scan: Optional[bool]
     files: Optional[Dict[str, str]]
     initial_file_map: Optional[Dict[str, str]]
     final_file_map: Optional[Dict[str, str]]

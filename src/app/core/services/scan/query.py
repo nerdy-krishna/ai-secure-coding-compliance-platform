@@ -331,6 +331,7 @@ class ScanQueryService:
             source_counts=source_counts,
             cost_details=scan.cost_details,
             cross_file_validation=bool(scan.cross_file_validation),
+            deep_vendor_scan=bool(scan.deep_vendor_scan),
             llms_used=llms_used,
             consolidation_stats=consolidation_stats,
             scan_type=scan.scan_type,

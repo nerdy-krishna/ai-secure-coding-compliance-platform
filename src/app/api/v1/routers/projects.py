@@ -267,6 +267,7 @@ async def create_scan(
     temperature_analysis_secondary: float = Form(0.2, ge=0.0, le=1.0),
     disable_temperature: bool = Form(False),
     cross_file_validation: bool = Form(False),
+    deep_vendor_scan: bool = Form(False),
     frameworks: str = Form(
         ..., min_length=1, max_length=2048
     ),  # Received as a string, will be processed in service
@@ -381,6 +382,7 @@ async def create_scan(
         "stage_temperatures": stage_temperatures,
         "disable_temperature": disable_temperature,
         "cross_file_validation": cross_file_validation,
+        "deep_vendor_scan": deep_vendor_scan,
         "frameworks": [fw.strip() for fw in frameworks.split(",")],
         "selected_files": selected_files_list,
     }

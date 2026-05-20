@@ -32,9 +32,10 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from app.infrastructure.database import AsyncSessionLocal as async_session_factory
 from app.infrastructure.database.models import LLMConfiguration as DB_LLMConfiguration
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
-from app.infrastructure.llm_client_rate_limiter import get_rate_limiter_for_provider
+from app.infrastructure.llm_client_rate_limiter import get_rate_limiter_for_config
 from app.infrastructure.observability import get_langfuse, mask
 from app.shared.lib import cost_estimation
+from app.shared.lib.adaptive_llm_concurrency import get_controller
 
 logger = logging.getLogger(__name__)
 
@@ -216,16 +217,33 @@ class LLMClient:
         # Pre-count tokens for the rate limiter's token budget. Cheap,
         # local call via LiteLLM (no network round-trip under
         # LITELLM_LOCAL_MODEL_COST_MAP=True).
-        rate_limiter = get_rate_limiter_for_provider(self.provider_name)
+        rate_limiter = get_rate_limiter_for_config(
+            self.db_llm_config, self.provider_name
+        )
         prompt_tokens_for_budget: Optional[int] = None
         if rate_limiter:
             prompt_tokens_for_budget = await cost_estimation.count_tokens(
                 full_prompt_for_counting, self.db_llm_config
             )
-            await rate_limiter.acquire(tokens=prompt_tokens_for_budget)
+            max_prompt_tokens = getattr(self.db_llm_config, "max_prompt_tokens", None)
+            if max_prompt_tokens and prompt_tokens_for_budget > int(max_prompt_tokens):
+                return AgentLLMResult(
+                    parsed_output=None,
+                    raw_output="",
+                    error=(
+                        f"Prompt token estimate {prompt_tokens_for_budget} exceeds "
+                        f"configured max_prompt_tokens {max_prompt_tokens}."
+                    ),
+                    cost=0.0,
+                    prompt_tokens=prompt_tokens_for_budget,
+                    completion_tokens=0,
+                    total_tokens=prompt_tokens_for_budget,
+                    latency_ms=0,
+                )
 
         model = self._build_model()
         model_key = f"{self.provider_name}:{self.db_llm_config.model_name}"
+        adaptive_key = str(getattr(self.db_llm_config, "id", model_key))
 
         def _make_agent(prompted: bool, temperature: Optional[float]) -> Agent:
             """Build the Pydantic AI agent.
@@ -305,8 +323,14 @@ class LLMClient:
             cache_write_tokens = int(getattr(usage, "cache_write_tokens", 0) or 0)
             cache_read_tokens = int(getattr(usage, "cache_read_tokens", 0) or 0)
 
+        async def _run_with_schedulers(run_agent: Agent):
+            async with get_controller(adaptive_key).permit(adaptive_key):
+                if rate_limiter:
+                    await rate_limiter.acquire(tokens=prompt_tokens_for_budget or 1)
+                return await run_agent.run(prompt)
+
         try:
-            _capture(await agent.run(prompt))
+            _capture(await _run_with_schedulers(agent))
         except Exception as e:
             # One recovery retry for two known model quirks:
             #  - a model that rejects tool-based structured output (e.g.
@@ -336,10 +360,12 @@ class LLMClient:
                     _PROMPTED_OUTPUT_MODELS.add(model_key)
                 try:
                     _capture(
-                        await _make_agent(
-                            prompted=use_prompted or tool_issue,
-                            temperature=None if temp_issue else self.temperature,
-                        ).run(prompt)
+                        await _run_with_schedulers(
+                            _make_agent(
+                                prompted=use_prompted or tool_issue,
+                                temperature=None if temp_issue else self.temperature,
+                            )
+                        )
                     )
                 except Exception as e2:
                     logger.error(

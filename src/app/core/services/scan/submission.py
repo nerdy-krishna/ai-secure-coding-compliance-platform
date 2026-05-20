@@ -48,7 +48,7 @@ from app.infrastructure.messaging.publisher import publish_message
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
 from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.framework_validation import validate_framework_selection
-from app.shared.lib.git import clone_repo_and_get_files
+from app.shared.lib.git import clone_repo_and_get_files, fetch_github_selected_files
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,7 @@ class ScanSubmissionService:
         stage_temperatures: Optional[Dict[str, Any]] = None,
         disable_temperature: bool = False,
         cross_file_validation: bool = False,
+        deep_vendor_scan: bool = False,
         repo_url: Optional[str] = None,
         source_type: str = "upload",
         selected_files: Optional[List[str]] = None,
@@ -243,6 +244,7 @@ class ScanSubmissionService:
                 stage_temperatures=stage_temperatures,
                 disable_temperature=disable_temperature,
                 cross_file_validation=cross_file_validation,
+                deep_vendor_scan=deep_vendor_scan,
                 source_type=source_type,
                 frameworks=frameworks,
                 tenant_id=tenant_id,
@@ -413,7 +415,11 @@ class ScanSubmissionService:
             "scan-submission: from git",
             extra={"repo_url": _redact_repo_url(repo_url)},
         )
-        files_data = clone_repo_and_get_files(repo_url)
+        selected_files = kwargs.get("selected_files")
+        if selected_files:
+            files_data = fetch_github_selected_files(repo_url, selected_files)
+        else:
+            files_data = clone_repo_and_get_files(repo_url)
         return await self._process_and_launch_scan(
             files_data=files_data,
             repo_url=repo_url,

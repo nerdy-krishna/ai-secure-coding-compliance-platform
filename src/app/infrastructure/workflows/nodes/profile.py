@@ -30,6 +30,7 @@ from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRe
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib import cost_estimation
+from app.shared.lib.file_classification import should_skip_llm_profile
 from app.shared.lib.llm_slots import (
     LLMStep,
     resolve_llm_config_id,
@@ -64,6 +65,8 @@ async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
     """
     scan_id = state["scan_id"]
     files: Dict[str, str] = state.get("files") or {}
+    file_profiles: Dict[str, Any] = state.get("file_profiles") or {}
+    deep_vendor_scan = bool(state.get("deep_vendor_scan"))
 
     async with AsyncSessionLocal() as db:
         await ScanRepository(db).record_scan_event(
@@ -88,7 +91,11 @@ async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
                     "profiling-cost estimation."
                 )
             }
-        for content in files.values():
+        for path, content in files.items():
+            if should_skip_llm_profile(
+                file_profiles.get(path) or {}, deep_vendor_scan=deep_vendor_scan
+            ):
+                continue
             total_input_tokens += await cost_estimation.count_tokens(
                 content, utility_config
             )
@@ -186,6 +193,8 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     # round-trip (the cost node reads it the same way).
     repository_map = state.get("repository_map")
     repo_files = getattr(repository_map, "files", None) or {}
+    existing_profiles: Dict[str, Any] = state.get("file_profiles") or {}
+    deep_vendor_scan = bool(state.get("deep_vendor_scan"))
 
     try:
         profiler = await create_file_profiler(
@@ -198,6 +207,10 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     semaphore = asyncio.Semaphore(CONCURRENT_PROFILER_LIMIT)
 
     async def _profile(path: str, content: str):
+        if should_skip_llm_profile(
+            existing_profiles.get(path) or {}, deep_vendor_scan=deep_vendor_scan
+        ):
+            return path, None
         async with semaphore:
             profile = await profiler.profile_file(
                 path,
@@ -222,7 +235,23 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
             )
             continue
         path, profile = result
-        file_profiles[path] = profile.model_dump()
+        if profile is None:
+            current = dict(existing_profiles.get(path) or {})
+            current.setdefault(
+                "summary", "Skipped LLM profiling by file coverage policy."
+            )
+            current.setdefault("security_relevant_operations", [])
+            current.setdefault("applicable_domains", [])
+            current["profile_skipped_reason"] = "coverage_policy"
+            file_profiles[path] = current
+        else:
+            current = dict(existing_profiles.get(path) or {})
+            current.update(profile.model_dump())
+            file_profiles[path] = current
+
+    for key, value in existing_profiles.items():
+        if key.startswith("_") and key not in file_profiles:
+            file_profiles[key] = value
 
     async with AsyncSessionLocal() as db:
         repo = ScanRepository(db)

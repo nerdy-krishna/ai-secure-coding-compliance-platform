@@ -140,6 +140,24 @@ class LLMConfigurationBase(BaseModel):
         ge=0,
         le=10000,
     )
+    requests_per_minute: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=100000,
+        description="Optional per-configuration RPM limit. Null falls back to provider defaults.",
+    )
+    tokens_per_minute: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=100000000,
+        description="Optional per-configuration TPM limit. Null falls back to provider defaults.",
+    )
+    max_prompt_tokens: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=10000000,
+        description="Optional max prompt/input token budget for a single request.",
+    )
     # --- End of added fields ---
 
 
@@ -246,6 +264,9 @@ class LLMConfigurationUpdate(BaseModel):
     output_cost_per_million: Optional[float] = Field(
         None, description="Cost per 1 million output tokens in USD."
     )
+    requests_per_minute: Optional[int] = Field(None, ge=1, le=100000)
+    tokens_per_minute: Optional[int] = Field(None, ge=1, le=100000000)
+    max_prompt_tokens: Optional[int] = Field(None, ge=1, le=10000000)
 
     class Config:
         from_attributes = True
@@ -899,6 +920,7 @@ class AnalysisResultDetailResponse(BaseModel):
     # Surfaced so ScanRunningPage can show the cross-file-validation
     # stage in the progress rail only for opted-in scans.
     cross_file_validation: bool = False
+    deep_vendor_scan: bool = False
     # The LLM configs the scan ran with — reasoning, utility, and the
     # optional second analysis LLM — each with its model. Surfaced on
     # the Results page. Empty for scans created before the column set.

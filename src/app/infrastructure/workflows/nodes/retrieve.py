@@ -176,6 +176,7 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
                 "stage_temperatures": scan.stage_temperatures,
                 "disable_temperature": scan.disable_temperature,
                 "cross_file_validation": scan.cross_file_validation,
+                "deep_vendor_scan": scan.deep_vendor_scan,
                 "files": files,
                 "initial_file_map": original_snapshot.file_map,
                 "live_codebase": files.copy(),

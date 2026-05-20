@@ -13,6 +13,8 @@ is part of the LangGraph checkpointer's on-disk contract — do not rename.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from typing import Any, Dict, List
 
@@ -22,6 +24,7 @@ from app.infrastructure.agents.finding_consolidator import (
     create_finding_consolidator,
 )
 from app.infrastructure.database import AsyncSessionLocal
+from app.core.services.scan.task_ledger import ScanTaskLedgerService
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.llm_slots import (
@@ -35,6 +38,24 @@ logger = logging.getLogger(__name__)
 
 # Bounds concurrent per-file consolidation calls on the reasoning slot.
 CONCURRENT_CONSOLIDATION_LIMIT = 5
+CONSOLIDATION_TASK_TYPE = "consolidation:file"
+CONSOLIDATION_TASK_VERSION = "consolidation-file-v1"
+
+
+def _stable_hash(payload: Any) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _serialise_findings(findings: List[VulnerabilityFinding]) -> Dict[str, Any]:
+    return {"findings": [f.model_dump(mode="json") for f in findings]}
+
+
+def _deserialise_findings(payload: Dict[str, Any]) -> List[VulnerabilityFinding]:
+    return [
+        VulnerabilityFinding.model_validate(item)
+        for item in payload.get("findings", [])
+    ]
 
 
 async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
@@ -88,14 +109,71 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         return {"error_message": f"Could not start finding consolidator: {exc}"}
 
     semaphore = asyncio.Semaphore(CONCURRENT_CONSOLIDATION_LIMIT)
+    stats = {"reused": 0, "rerun": 0, "failed": 0, "completed": 0}
 
     async def _consolidate(file_path: str, file_findings: List[VulnerabilityFinding]):
         source = live_codebase.get(file_path)
         if not source:
             # No source to reason over — pass the findings through.
             return [_passthrough(f) for f in file_findings]
-        async with semaphore:
-            return await consolidator.consolidate_file(file_path, source, file_findings)
+        input_payload = {
+            "file_path": file_path,
+            "source_hash": _stable_hash(source),
+            "findings": [f.model_dump(mode="json") for f in file_findings],
+        }
+        input_hash = _stable_hash(input_payload)
+        prompt_hash = _stable_hash(
+            {"source": source, "findings": input_payload["findings"]}
+        )
+        version_hash = _stable_hash(CONSOLIDATION_TASK_VERSION)
+        task_key = f"{file_path}::file-consolidation"
+        async with AsyncSessionLocal() as task_db:
+            ledger = ScanTaskLedgerService(task_db)
+            reused = await ledger.get_reusable_result(
+                scan_id=state["scan_id"],
+                task_type=CONSOLIDATION_TASK_TYPE,
+                task_key=task_key,
+                input_hash=input_hash,
+                prompt_hash=prompt_hash,
+                version_hash=version_hash,
+            )
+            if reused is not None:
+                stats["reused"] += 1
+                return _deserialise_findings(reused)
+            lease = await ledger.acquire_task(
+                scan_id=state["scan_id"],
+                task_type=CONSOLIDATION_TASK_TYPE,
+                task_key=task_key,
+                input_hash=input_hash,
+                prompt_hash=prompt_hash,
+                version_hash=version_hash,
+                input_payload=input_payload,
+                lease_owner=f"worker:{state['scan_id']}",
+                lease_ttl_seconds=1800,
+                max_attempts=3,
+            )
+        if lease is None:
+            stats["failed"] += 1
+            return [_passthrough(f) for f in file_findings]
+        stats["rerun"] += 1
+        try:
+            async with semaphore:
+                result = await consolidator.consolidate_file(
+                    file_path, source, file_findings
+                )
+        except Exception as exc:  # noqa: BLE001
+            stats["failed"] += 1
+            async with AsyncSessionLocal() as task_db:
+                await ScanTaskLedgerService(task_db).fail_task(
+                    lease.task.id, error=str(exc), retryable=True
+                )
+            return [_passthrough(f) for f in file_findings]
+        async with AsyncSessionLocal() as task_db:
+            await ScanTaskLedgerService(task_db).complete_task(
+                lease.task.id, result_payload=_serialise_findings(result)
+            )
+        stats["completed"] += 1
+        return result
 
     results = await asyncio.gather(
         *(_consolidate(fp, ff) for fp, ff in by_file.items()),
@@ -129,6 +207,10 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             "merged_roots": consolidator.merged_roots,
             "merged_inputs": consolidator.merged_inputs,
             "dropped": consolidator.dropped,
+            "reused_tasks": stats["reused"],
+            "rerun_tasks": stats["rerun"],
+            "failed_tasks": stats["failed"],
+            "completed_tasks": stats["completed"],
             "finding_count": len(consolidated),  # back-compat key
         },
     )

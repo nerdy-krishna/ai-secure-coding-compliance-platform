@@ -7,9 +7,10 @@ from app.shared.lib.rate_limiter import AsyncRateLimiter
 
 logger = logging.getLogger(__name__)
 
-# A global registry for provider-specific rate limiters.
+# A global registry for provider-specific and per-config rate limiters.
 # This ensures that all parts of the application share the same limiters.
 provider_rate_limiters: Dict[str, AsyncRateLimiter] = {}
+config_rate_limiters: Dict[str, AsyncRateLimiter] = {}
 
 # Conservative defaults used by the fallback path in
 # `get_rate_limiter_for_provider` — see the rationale there.
@@ -81,6 +82,30 @@ def initialize_rate_limiters():
     provider_rate_limiters.update(_limiters)
 
     logger.info("Global LLM rate limiters initialization complete.")
+
+
+def get_provider_limits(provider_name: str) -> Tuple[int, int]:
+    return _provider_settings().get(
+        provider_name.lower(), (_FALLBACK_RPM, _FALLBACK_TPM)
+    )
+
+
+def get_rate_limiter_for_config(config, provider_name: str) -> AsyncRateLimiter:
+    """Return a limiter keyed by LLM configuration when config limits are set.
+
+    Null per-config limits fall back to provider defaults, but the bucket remains
+    per-config so two configs for the same provider do not unnecessarily starve
+    each other in scan workflows.
+    """
+    provider_rpm, provider_tpm = get_provider_limits(provider_name)
+    rpm = int(getattr(config, "requests_per_minute", None) or provider_rpm)
+    tpm = int(getattr(config, "tokens_per_minute", None) or provider_tpm)
+    key = str(getattr(config, "id", provider_name)).lower()
+    limiter = config_rate_limiters.get(key)
+    if limiter is None or limiter.rpm_limit != rpm or limiter.tpm_limit != tpm:
+        limiter = AsyncRateLimiter(rpm, tpm)
+        config_rate_limiters[key] = limiter
+    return limiter
 
 
 def get_rate_limiter_for_provider(provider_name: str) -> AsyncRateLimiter:

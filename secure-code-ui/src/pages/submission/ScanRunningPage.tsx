@@ -45,6 +45,14 @@ interface ScanEventMsg {
     file_path?: string;
     findings_count?: number;
     fixes_count?: number;
+    llm_calls?: number;
+    reused_tasks?: number;
+    skipped_tasks?: number;
+    failed_tasks?: number;
+    token_count?: number;
+    elapsed_ms?: number;
+    classification?: string;
+    progress_category?: string;
   } | null;
 }
 
@@ -55,6 +63,14 @@ interface FileProgressItem {
   file_path: string;
   findings_count: number;
   fixes_count: number;
+  llm_calls: number;
+  reused_tasks: number;
+  skipped_tasks: number;
+  failed_tasks: number;
+  token_count: number;
+  elapsed_ms: number;
+  classification?: string;
+  progress_category?: string;
   timestamp: string | null;
 }
 
@@ -113,6 +129,14 @@ const eventDisplayName = (stageName: string): string => {
       return "Resume artifacts evaluated";
     case "MANUAL_RESTART_REQUESTED":
       return "Manual restart requested";
+    case "COVERAGE_WARNING":
+      return "Coverage warning";
+    case "PRIMARY_LLM_DEGRADED":
+      return "Primary LLM degraded";
+    case "SECONDARY_LLM_DEGRADED":
+      return "Secondary LLM degraded";
+    case "GLOBAL_CONSOLIDATION":
+      return "Global consolidation";
     default:
       return stageName;
   }
@@ -415,6 +439,14 @@ const ScanRunningPage: React.FC = () => {
                   file_path: filePath,
                   findings_count: findingsCount,
                   fixes_count: fixesCount,
+                  llm_calls: Math.max(0, Number(msg.details?.llm_calls) | 0),
+                  reused_tasks: Math.max(0, Number(msg.details?.reused_tasks) | 0),
+                  skipped_tasks: Math.max(0, Number(msg.details?.skipped_tasks) | 0),
+                  failed_tasks: Math.max(0, Number(msg.details?.failed_tasks) | 0),
+                  token_count: Math.max(0, Number(msg.details?.token_count) | 0),
+                  elapsed_ms: Math.max(0, Number(msg.details?.elapsed_ms) | 0),
+                  classification: msg.details?.classification,
+                  progress_category: msg.details?.progress_category,
                   timestamp: msg.timestamp,
                 },
               };
@@ -1496,9 +1528,13 @@ const ScanRunningPage: React.FC = () => {
                         flexShrink: 0,
                       }}
                     >
-                      {f.findings_count} finding
-                      {f.findings_count === 1 ? "" : "s"}
+                      {f.progress_category === "skipped-low-value" ? "skipped" : `${f.findings_count} finding${f.findings_count === 1 ? "" : "s"}`}
                       {f.fixes_count > 0 && ` · ${f.fixes_count} fix${f.fixes_count === 1 ? "" : "es"}`}
+                      {` · ${f.llm_calls} LLM`}
+                      {f.reused_tasks > 0 && ` · ${f.reused_tasks} reused`}
+                      {f.failed_tasks > 0 && ` · ${f.failed_tasks} failed`}
+                      {f.classification && ` · ${f.classification}`}
+                      {f.elapsed_ms > 0 && ` · ${Math.round(f.elapsed_ms / 1000)}s`}
                     </span>
                   </div>
                 ))}

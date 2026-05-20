@@ -106,6 +106,7 @@ class ScanRepository:
         stage_temperatures: Optional[Dict[str, Any]] = None,
         disable_temperature: bool = False,
         cross_file_validation: bool = False,
+        deep_vendor_scan: bool = False,
         source_type: Optional[str] = None,
         tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Scan:
@@ -128,6 +129,7 @@ class ScanRepository:
             stage_temperatures=stage_temperatures,
             disable_temperature=disable_temperature,
             cross_file_validation=cross_file_validation,
+            deep_vendor_scan=deep_vendor_scan,
             source_type=source_type,
             frameworks=frameworks,
             tenant_id=tenant_id,
@@ -581,6 +583,53 @@ class ScanRepository:
         # were built in the same iteration.
         for schema, row in zip(new_findings, db_findings):
             schema.id = row.id
+
+    async def replace_findings_for_scan(
+        self, scan_id: uuid.UUID, findings: List[agent_schemas.VulnerabilityFinding]
+    ) -> int:
+        """Transactionally replace the authoritative final findings for a scan.
+
+        Unlike ``save_findings``, this intentionally ignores any ``id`` values on
+        the input schemas: a resumed final-save may carry DB ids from an earlier
+        attempt, but the replacement set must still be inserted after the delete.
+        The newly assigned ids are hydrated back onto the schemas in input order.
+        """
+        scan_tenant_id = (
+            await self.db.execute(
+                select(db_models.Scan.tenant_id).where(db_models.Scan.id == scan_id)
+            )
+        ).scalar_one_or_none()
+        await self.db.execute(
+            db_models.Finding.__table__.delete().where(
+                db_models.Finding.scan_id == scan_id
+            )
+        )
+        db_findings: List[db_models.Finding] = []
+        for finding in findings:
+            finding_dict = finding.model_dump(exclude_unset=True, exclude={"id"})
+            agent_name = finding_dict.pop("agent_name", None)
+            if agent_name and not finding_dict.get("corroborating_agents"):
+                finding_dict["corroborating_agents"] = [agent_name]
+            db_findings.append(
+                db_models.Finding(
+                    scan_id=scan_id, tenant_id=scan_tenant_id, **finding_dict
+                )
+            )
+        if db_findings:
+            self.db.add_all(db_findings)
+        try:
+            await self.db.commit()
+        except SQLAlchemyError as e:
+            await self.db.rollback()
+            logger.error(
+                "scan_repo.replace_findings_for_scan.commit_failed",
+                extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
+                exc_info=True,
+            )
+            raise
+        for schema, row in zip(findings, db_findings):
+            schema.id = row.id
+        return len(db_findings)
 
     async def delete_findings_for_scan(self, scan_id: uuid.UUID) -> int:
         """Delete every persisted Finding row for a scan. Returns the

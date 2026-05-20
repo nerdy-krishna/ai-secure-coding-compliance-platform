@@ -79,6 +79,10 @@ def _validate_cfg(cfg) -> None:
     output_cost = getattr(cfg, "output_cost_per_million", None)
     if output_cost is not None and output_cost < 0:
         raise ValueError("output_cost_per_million must be non-negative.")
+    for field in ("requests_per_minute", "tokens_per_minute", "max_prompt_tokens"):
+        value = getattr(cfg, field, None)
+        if value is not None and value <= 0:
+            raise ValueError(f"{field} must be positive when set.")
 
 
 class LLMConfigRepository:
@@ -164,6 +168,9 @@ class LLMConfigRepository:
             encrypted_api_key=encrypted_key,
             input_cost_per_million=config.input_cost_per_million,
             output_cost_per_million=config.output_cost_per_million,
+            requests_per_minute=config.requests_per_minute,
+            tokens_per_minute=config.tokens_per_minute,
+            max_prompt_tokens=config.max_prompt_tokens,
         )
         self.db.add(db_config)
         await self.db.commit()

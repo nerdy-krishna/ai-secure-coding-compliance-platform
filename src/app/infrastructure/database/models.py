@@ -171,6 +171,11 @@ class Scan(Base):
     cross_file_validation: Mapped[bool] = mapped_column(
         sa.Boolean, server_default="false", nullable=False
     )
+    # Advanced opt-in: include vendor/minified/static assets in deeper LLM and
+    # Semgrep policy instead of the default reduced-coverage path.
+    deep_vendor_scan: Mapped[bool] = mapped_column(
+        sa.Boolean, server_default="false", nullable=False
+    )
     # How the code was submitted: 'upload' (loose files), 'archive'
     # (zip/rar), or 'git' (cloned repository). NULL for pre-existing
     # scans. Surfaced in the results-page scan-info panel + reports.
@@ -494,6 +499,9 @@ class LLMConfiguration(Base):
     output_cost_per_million: Mapped[float] = mapped_column(
         DECIMAL(10, 6), nullable=False, server_default="0.0"
     )
+    requests_per_minute: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tokens_per_minute: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_prompt_tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=func.now()
     )

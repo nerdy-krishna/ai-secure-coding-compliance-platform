@@ -54,8 +54,9 @@ class AsyncRateLimiter:
         if self.disabled:
             return  # Limiter is disabled
 
-        async with self.lock:
-            while True:
+        while True:
+            time_to_wait = 0.0
+            async with self.lock:
                 current_time = time.monotonic()
 
                 # Prune old requests that are outside the time window
@@ -85,13 +86,14 @@ class AsyncRateLimiter:
                     # Find how many old requests we need to pop to make space for the new tokens
                     tokens_to_free = (current_tokens + tokens) - self.tpm_limit
                     freed_tokens = 0
-                    for i, (ts, tk) in enumerate(self.requests):
+                    for ts, tk in self.requests:
                         freed_tokens += tk
                         if freed_tokens >= tokens_to_free:
                             wait_time_for_tpm = ts + self.period - current_time
                             break
 
-                # Wait for the maximum of the two required wait times
+                # Sleep after releasing the lock so one throttled caller does not
+                # block unrelated callers that may fit the remaining budget.
                 time_to_wait = max(wait_time_for_rpm, wait_time_for_tpm, 0)
                 if time_to_wait > 0:
                     logger.info(
@@ -100,4 +102,4 @@ class AsyncRateLimiter:
                         current_requests,
                         current_tokens,
                     )
-                await asyncio.sleep(time_to_wait)
+            await asyncio.sleep(time_to_wait)

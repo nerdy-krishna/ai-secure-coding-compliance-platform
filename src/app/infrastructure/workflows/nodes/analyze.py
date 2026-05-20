@@ -34,6 +34,7 @@ from app.infrastructure.workflows.nodes.cost import CHUNK_ONLY_IF_LARGER_THAN
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
 from app.shared.lib.agent_routing import resolve_agents_for_file
+from app.shared.lib.file_classification import should_skip_llm_analysis
 from app.shared.lib.analysis_dispatch import (
     LANE_PRIMARY,
     LANE_SECONDARY,
@@ -288,6 +289,82 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         # domains narrow the agent set; falls back to extension-only
         # routing when the file has no profile.
         file_profile = (state.get("file_profiles") or {}).get(file_path) or {}
+        if should_skip_llm_analysis(
+            file_profile, deep_vendor_scan=bool(state.get("deep_vendor_scan"))
+        ):
+            coverage_findings: List[VulnerabilityFinding] = []
+            coverage_warnings = file_profile.get("coverage_warnings") or []
+            if "missing_source_map_reduced_client_coverage" in coverage_warnings:
+                coverage_findings.append(
+                    VulnerabilityFinding(
+                        title="Reduced client-side coverage: source map missing",
+                        description=(
+                            "This app-owned minified bundle was not fully LLM-analyzed "
+                            "because no submitted source map or original source was available."
+                        ),
+                        severity="Informational",
+                        line_number=0,
+                        remediation=(
+                            "Submit the original source or local source map, or enable deep "
+                            "vendor/static asset scanning if reviewing bundled output is required."
+                        ),
+                        confidence="High",
+                        file_path=file_path,
+                        source="coverage",
+                    )
+                )
+            try:
+                from app.infrastructure.database import (
+                    AsyncSessionLocal as _AsyncSessionLocal_skip,
+                )
+                from app.infrastructure.database.repositories.scan_repo import (
+                    ScanRepository as _ScanRepository_skip,
+                )
+
+                async with _AsyncSessionLocal_skip() as _db_skip:
+                    if coverage_warnings:
+                        await _ScanRepository_skip(_db_skip).create_scan_event(
+                            scan_id=scan_id,
+                            stage_name="COVERAGE_WARNING",
+                            status="COMPLETED",
+                            details={
+                                "file_path": file_path,
+                                "warnings": coverage_warnings,
+                                "classification": file_profile.get("classification"),
+                            },
+                        )
+                    await _ScanRepository_skip(_db_skip).create_scan_event(
+                        scan_id=scan_id,
+                        stage_name="FILE_ANALYZED",
+                        status="COMPLETED",
+                        details={
+                            "file_path": file_path,
+                            "findings_count": 0,
+                            "fixes_count": 0,
+                            "llm_calls": 0,
+                            "reused_tasks": 0,
+                            "failed_tasks": 0,
+                            "skipped_tasks": 1,
+                            "skip_reason": "coverage_policy",
+                            "progress_category": "skipped-low-value",
+                            "token_count": 0,
+                            "elapsed_ms": int(
+                                (time.perf_counter() - file_started_at) * 1000
+                            ),
+                            "classification": file_profile.get("classification"),
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("FILE_ANALYZED skip event emit failed: %s", exc)
+            return {
+                "findings": coverage_findings,
+                "fixes": [],
+                "lane_calls": {},
+                "lane_failures": {},
+                "reused_tasks": 0,
+                "failed_tasks": 0,
+                "skipped_tasks": 1,
+            }
         relevant_agents = resolve_agents_for_file(
             file_path,
             all_relevant_agents,
@@ -601,6 +678,12 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                             (time.perf_counter() - file_started_at) * 1000
                         ),
                         "classification": file_profile.get("classification"),
+                        "skipped_tasks": 0,
+                        "progress_category": (
+                            "reused"
+                            if reused_tasks and not failed_tasks
+                            else "analyzed"
+                        ),
                     },
                 )
         except Exception as e:
@@ -613,6 +696,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             "lane_failures": lane_failures,
             "reused_tasks": reused_tasks,
             "failed_tasks": failed_tasks,
+            "skipped_tasks": 0,
         }
 
     # All files analyzed in parallel. Concurrency across files is bounded
@@ -629,6 +713,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     failed_file_tasks = 0
     reused_task_total = 0
     failed_task_total = 0
+    skipped_task_total = 0
     for r in file_results:
         if isinstance(r, BaseException):
             failed_file_tasks += 1
@@ -644,6 +729,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             lane_failures[_lane] = lane_failures.get(_lane, 0) + int(_n)
         reused_task_total += int(r.get("reused_tasks", 0) or 0)
         failed_task_total += int(r.get("failed_tasks", 0) or 0)
+        skipped_task_total += int(r.get("skipped_tasks", 0) or 0)
 
     total_agent_calls = sum(lane_calls.values())
     total_agent_failures = sum(lane_failures.values())
@@ -656,7 +742,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
 
     logger.info(
         "Single-pass analysis complete for scan %s: %d agent findings, %d prior findings, %d proposed fixes; "
-        "agent_calls=%d agent_failures=%d failed_file_tasks=%d reused_tasks=%d failed_tasks=%d",
+        "agent_calls=%d agent_failures=%d failed_file_tasks=%d reused_tasks=%d failed_tasks=%d skipped_tasks=%d",
         scan_id,
         len(all_scan_findings),
         len(prior_findings),
@@ -666,6 +752,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         failed_file_tasks,
         reused_task_total,
         failed_task_total,
+        skipped_task_total,
     )
 
     # Stage-level validation: if every agent invocation that fired

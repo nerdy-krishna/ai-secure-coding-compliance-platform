@@ -32,6 +32,7 @@ from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRe
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.analysis_tools.chunker import semantic_chunker
+from app.infrastructure.llm_client_rate_limiter import get_provider_limits
 from app.shared.lib import cost_estimation
 from app.shared.lib.agent_routing import resolve_agents_for_file
 from app.shared.lib.scan_progress import (
@@ -57,6 +58,38 @@ CHUNK_ONLY_IF_LARGER_THAN = 150_000
 # V02.3.5 — estimated costs at or above this threshold require dual-control
 # approval (two distinct approver user-ids) before the scan may proceed.
 HIGH_VALUE_COST_USD = 50.0
+
+
+def _estimate_processing_seconds(*, configs, tokens_per_config) -> int:
+    estimates: list[float] = []
+    for cfg, tokens in zip(configs, tokens_per_config):
+        if cfg is None:
+            continue
+        provider_rpm, provider_tpm = get_provider_limits(cfg.provider)
+        rpm = getattr(cfg, "requests_per_minute", None) or provider_rpm
+        tpm = getattr(cfg, "tokens_per_minute", None) or provider_tpm
+        calls = max(1, int(tokens > 0))
+        estimates.append(max((calls / max(1, rpm)) * 60, (tokens / max(1, tpm)) * 60))
+    return int(max(estimates or [0]))
+
+
+def _rate_limit_warnings(*, configs, tokens_per_config) -> list[Dict[str, Any]]:
+    warnings: list[Dict[str, Any]] = []
+    for cfg, tokens in zip(configs, tokens_per_config):
+        if cfg is None:
+            continue
+        max_prompt = getattr(cfg, "max_prompt_tokens", None)
+        if max_prompt and tokens > max_prompt:
+            warnings.append(
+                {
+                    "llm_config_id": str(cfg.id),
+                    "model": cfg.model_name,
+                    "warning": "estimated_prompt_tokens_exceed_configured_max",
+                    "estimated_tokens": int(tokens),
+                    "max_prompt_tokens": int(max_prompt),
+                }
+            )
+    return warnings
 
 
 async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
@@ -209,6 +242,20 @@ async def estimate_cost_node(state: WorkerState) -> Dict[str, Any]:
         secondary_reasoning_input_tokens=(
             total_input_tokens if secondary_reasoning_config is not None else 0
         ),
+    )
+
+    processing_seconds = _estimate_processing_seconds(
+        configs=[llm_config]
+        + ([secondary_reasoning_config] if secondary_reasoning_config else []),
+        tokens_per_config=[total_input_tokens]
+        + ([total_input_tokens] if secondary_reasoning_config else []),
+    )
+    cost_details["estimated_processing_seconds"] = processing_seconds
+    cost_details["rate_limit_warnings"] = _rate_limit_warnings(
+        configs=[llm_config]
+        + ([secondary_reasoning_config] if secondary_reasoning_config else []),
+        tokens_per_config=[total_input_tokens]
+        + ([total_input_tokens] if secondary_reasoning_config else []),
     )
 
     # V02.3.5 — flag high-value scans for the lifecycle service's

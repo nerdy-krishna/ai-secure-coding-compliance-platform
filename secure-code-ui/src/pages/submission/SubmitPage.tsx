@@ -262,6 +262,7 @@ const SubmitPage: React.FC = () => {
   // Opt-in cross-file finding validation (#81 / PRD #75). Off by
   // default — it costs one extra reasoning-LLM call per eligible finding.
   const [crossFileValidation, setCrossFileValidation] = useState(false);
+  const [deepVendorScan, setDeepVendorScan] = useState(false);
   const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
@@ -618,6 +619,7 @@ const SubmitPage: React.FC = () => {
       payload.append("temperature_merge", String(stageTemps.merge));
       payload.append("disable_temperature", String(disableTemperature));
       payload.append("cross_file_validation", String(crossFileValidation));
+      payload.append("deep_vendor_scan", String(deepVendorScan));
       // V02.2.1: intersect selectedFrameworks with the loaded allowlist before submitting
       const safeFrameworks = selectedFrameworks.filter((n) => frameworks?.some((f) => f.name === n));
       payload.append("frameworks", safeFrameworks.join(","));
@@ -1510,6 +1512,42 @@ const SubmitPage: React.FC = () => {
                       calls and feeds it across other files. Improves
                       accuracy but costs one extra LLM call per eligible
                       finding.
+                    </div>
+                  </span>
+                </label>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 8,
+                    fontSize: 12,
+                    color: "var(--fg-muted)",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={deepVendorScan}
+                    onChange={(e) => setDeepVendorScan(e.target.checked)}
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>
+                    <span style={{ fontWeight: 500 }}>
+                      Deep vendor/static asset scan
+                    </span>
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 11,
+                        color: "var(--fg-subtle)",
+                      }}
+                    >
+                      Includes minified/vendor/static assets in deeper Semgrep and
+                      LLM routing. Use for bundled client-side reviews; expect
+                      more cost, time, and noise.
                     </div>
                   </span>
                 </label>

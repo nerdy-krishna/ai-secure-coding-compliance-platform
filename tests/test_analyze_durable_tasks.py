@@ -8,8 +8,6 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-pytest.importorskip("tree_sitter")
-
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.database import models as db_models
 from app.infrastructure.workflows.nodes import analyze as analyze_mod
@@ -21,6 +19,16 @@ pytestmark = pytest.mark.asyncio
 async def _scan(
     db_session: AsyncSession, seeded_user: db_models.User
 ) -> db_models.Scan:
+    llm_config_id = uuid.uuid4()
+    llm_config = db_models.LLMConfiguration(
+        id=llm_config_id,
+        name=f"llm-{uuid.uuid4().hex}",
+        provider="openai",
+        model_name="gpt-test",
+        encrypted_api_key="encrypted",
+        input_cost_per_million=0,
+        output_cost_per_million=0,
+    )
     project = db_models.Project(name=f"p-{uuid.uuid4().hex}", user_id=seeded_user.id)
     scan = db_models.Scan(
         project=project,
@@ -28,9 +36,9 @@ async def _scan(
         scan_type="AUDIT",
         status="RUNNING_AGENTS",
         frameworks=["ASVS"],
-        reasoning_llm_config_id=uuid.uuid4(),
+        reasoning_llm_config_id=llm_config_id,
     )
-    db_session.add(scan)
+    db_session.add_all([llm_config, scan])
     await db_session.commit()
     return scan
 

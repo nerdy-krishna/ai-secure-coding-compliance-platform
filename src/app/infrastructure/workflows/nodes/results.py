@@ -48,9 +48,7 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
             # `id` from every output finding, so `save_findings` inserts
             # the whole set. Always delete first, even when `findings` is
             # empty — the quality gate may have dropped everything.
-            await repo.delete_findings_for_scan(scan_id)
-            if findings:
-                await repo.save_findings(scan_id, findings)
+            await repo.replace_findings_for_scan(scan_id, findings)
 
             if scan_type == "REMEDIATE" and final_file_map:
                 logger.info("Saving POST_REMEDIATION snapshot for scan %s.", scan_id)

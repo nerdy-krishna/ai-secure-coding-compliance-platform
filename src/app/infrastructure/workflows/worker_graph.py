@@ -34,6 +34,7 @@ from app.infrastructure.workflows.nodes.analyze import (
     CONCURRENT_LLM_LIMIT,
     analyze_files_parallel_node,
 )
+from app.infrastructure.workflows.nodes.classify import classify_files_node
 from app.infrastructure.workflows.nodes.consolidate import (
     HAS_TREE_SITTER,
     _resolve_file_fix_conflicts,
@@ -43,6 +44,9 @@ from app.infrastructure.workflows.nodes.consolidate import (
 )
 from app.infrastructure.workflows.nodes.consolidate_findings import (
     consolidate_findings_node,
+)
+from app.infrastructure.workflows.nodes.global_consolidate import (
+    global_consolidate_findings_node,
 )
 from app.infrastructure.workflows.nodes.cost import (
     CHUNK_ONLY_IF_LARGER_THAN,
@@ -145,6 +149,7 @@ __all__ = [
 workflow = StateGraph(WorkerState)
 
 workflow.add_node("retrieve_and_prepare_data", retrieve_and_prepare_data_node)
+workflow.add_node("classify_files", classify_files_node)
 workflow.add_node("deterministic_prescan", deterministic_prescan_node)
 workflow.add_node("pending_prescan_approval", pending_prescan_approval_node)
 workflow.add_node("blocked_pre_llm", blocked_pre_llm_node)
@@ -156,6 +161,7 @@ workflow.add_node("estimate_cost", estimate_cost_node)
 workflow.add_node("cost_gate", cost_gate_node)
 workflow.add_node("analyze_files_parallel", analyze_files_parallel_node)
 workflow.add_node("consolidate_findings", consolidate_findings_node)
+workflow.add_node("global_consolidate_findings", global_consolidate_findings_node)
 workflow.add_node("validate_cross_file", validate_cross_file_node)
 workflow.add_node("consolidate_and_patch", consolidate_and_patch_node)
 workflow.add_node("verify_patches", verify_patches_node)
@@ -171,8 +177,8 @@ def should_continue(state: WorkerState) -> str:
 
 
 def _route_after_retrieve(state: WorkerState) -> str:
-    """Retrieval either fails early or proceeds to the SAST pre-pass."""
-    return "handle_error" if state.get("error_message") else "deterministic_prescan"
+    """Retrieval either fails early or proceeds to deterministic classification."""
+    return "handle_error" if state.get("error_message") else "classify_files"
 
 
 def _route_after_prescan(state: WorkerState) -> str:
@@ -301,9 +307,14 @@ workflow.add_conditional_edges(
     "retrieve_and_prepare_data",
     _route_after_retrieve,
     {
-        "deterministic_prescan": "deterministic_prescan",
+        "classify_files": "classify_files",
         "handle_error": "handle_error",
     },
+)
+workflow.add_conditional_edges(
+    "classify_files",
+    should_continue,
+    {"continue": "deterministic_prescan", "handle_error": "handle_error"},
 )
 workflow.add_conditional_edges(
     "deterministic_prescan",
@@ -379,6 +390,11 @@ workflow.add_conditional_edges(
 )
 workflow.add_conditional_edges(
     "consolidate_findings",
+    should_continue,
+    {"continue": "global_consolidate_findings", "handle_error": "handle_error"},
+)
+workflow.add_conditional_edges(
+    "global_consolidate_findings",
     should_continue,
     {"continue": "validate_cross_file", "handle_error": "handle_error"},
 )

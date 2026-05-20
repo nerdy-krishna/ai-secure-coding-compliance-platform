@@ -37,6 +37,11 @@ function validateCreatePayload(data: LLMConfigurationCreate): void {
   if (data.output_cost_per_million !== undefined && (!Number.isFinite(data.output_cost_per_million) || data.output_cost_per_million < 0)) {
     throw new Error('Invalid LLM config');
   }
+  for (const value of [data.requests_per_minute, data.tokens_per_minute, data.max_prompt_tokens]) {
+    if (value !== undefined && value !== null && (!Number.isInteger(value) || value <= 0)) {
+      throw new Error('Invalid LLM config');
+    }
+  }
 }
 
 // V02.2.1: Runtime validation for LLMConfigurationUpdate fields.
@@ -58,6 +63,11 @@ function validateUpdatePayload(data: LLMConfigurationUpdate): void {
   }
   if (data.output_cost_per_million !== undefined && (!Number.isFinite(data.output_cost_per_million) || data.output_cost_per_million < 0)) {
     throw new Error('Invalid LLM config');
+  }
+  for (const value of [data.requests_per_minute, data.tokens_per_minute, data.max_prompt_tokens]) {
+    if (value !== undefined && value !== null && (!Number.isInteger(value) || value <= 0)) {
+      throw new Error('Invalid LLM config');
+    }
   }
 }
 
@@ -89,6 +99,9 @@ export const llmConfigService = {
       api_key: configData.api_key,
       input_cost_per_million: configData.input_cost_per_million,
       output_cost_per_million: configData.output_cost_per_million,
+      requests_per_minute: configData.requests_per_minute,
+      tokens_per_minute: configData.tokens_per_minute,
+      max_prompt_tokens: configData.max_prompt_tokens,
     };
 
     const response = await apiClient.post<LLMConfiguration>(
@@ -121,6 +134,9 @@ export const llmConfigService = {
     if (configData.api_key !== undefined) payload.api_key = configData.api_key;
     if (configData.input_cost_per_million !== undefined) payload.input_cost_per_million = configData.input_cost_per_million;
     if (configData.output_cost_per_million !== undefined) payload.output_cost_per_million = configData.output_cost_per_million;
+    if (configData.requests_per_minute !== undefined) payload.requests_per_minute = configData.requests_per_minute;
+    if (configData.tokens_per_minute !== undefined) payload.tokens_per_minute = configData.tokens_per_minute;
+    if (configData.max_prompt_tokens !== undefined) payload.max_prompt_tokens = configData.max_prompt_tokens;
 
     // V01.2.2: encodeURIComponent prevents URL path manipulation via configId metacharacters.
     const response = await apiClient.patch<LLMConfiguration>(

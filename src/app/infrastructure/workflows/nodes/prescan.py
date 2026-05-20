@@ -39,6 +39,7 @@ from app.infrastructure.scanners.registry import (
 from app.infrastructure.scanners.semgrep_runner import run_semgrep
 from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.workflows.state import WorkerState
+from app.shared.lib.file_classification import should_skip_semgrep
 from app.shared.lib.scan_progress import (
     EV_COMPLETED,
     EV_WAITING,
@@ -130,6 +131,8 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
 
     scan_id = state["scan_id"]
     files: Dict[str, str] = state.get("files") or {}
+    file_profiles: Dict[str, Any] = state.get("file_profiles") or {}
+    deep_vendor_scan = bool(state.get("deep_vendor_scan"))
     if not files:
         logger.info("deterministic_prescan: no files for scan %s; skipping", scan_id)
         return {}
@@ -184,7 +187,14 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     # Derive languages from eligible file extensions and select matching
     # Semgrep rules from the DB. If 0 rules are found, Semgrep is skipped
     # for this scan rather than falling back to the bundled pack.
-    languages = _derive_languages(eligible.keys())
+    semgrep_eligible = {
+        path: content
+        for path, content in eligible.items()
+        if not should_skip_semgrep(
+            file_profiles.get(path) or {}, deep_vendor_scan=deep_vendor_scan
+        )
+    }
+    languages = _derive_languages(semgrep_eligible.keys())
     _semgrep_rules = []
     if languages:
         try:
@@ -228,20 +238,26 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 async with semaphore:
                     return await coro_factory()
 
-            if _semgrep_rules:
+            if _semgrep_rules and semgrep_eligible:
                 from app.core.services.semgrep_ingestion.materializer import (
                     materialize_rules as _mat,
                 )
 
                 async def _run_semgrep_materialized():
-                    async with _mat(_semgrep_rules) as _cfg_dir:
-                        return await run_semgrep(
-                            staged_dir, original_paths, config_path=_cfg_dir
-                        )
+                    with stage_files(semgrep_eligible) as (
+                        semgrep_dir,
+                        semgrep_original_paths,
+                    ):
+                        async with _mat(_semgrep_rules) as _cfg_dir:
+                            return await run_semgrep(
+                                semgrep_dir,
+                                semgrep_original_paths,
+                                config_path=_cfg_dir,
+                            )
 
                 semgrep_task = _gated(_run_semgrep_materialized)
             else:
-                # 0 ingested rules — pass None so run_semgrep returns [] without subprocess
+                # 0 ingested rules or all files policy-skipped — pass None so run_semgrep returns [] without subprocess
                 semgrep_task = _gated(
                     lambda: run_semgrep(staged_dir, original_paths, config_path=None)
                 )
