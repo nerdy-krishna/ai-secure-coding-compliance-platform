@@ -204,3 +204,6 @@ evals/.promptfoo/
 # Whitelist docs build dependency manifest (the global *.txt rule above
 # catches recovery dumps; pinned-dep manifests must ship).
 !docs/requirements-docs.txt
+
+# Pi coding agent sessions and settings
+.pi/
