@@ -103,11 +103,24 @@ jobs:
         # (the admin/UI server we do not expose); our usage is limited to
         # token-counting and the offline price map.
         # Re-evaluate on the next litellm minor that loosens these constraints.
+        #
+        # idna 3.13 (GHSA-65pc-fj4g-8rjx): idna.encode() quadratic
+        # complexity on certain inputs. Fix is idna>=3.15. Blocked by
+        # transitive pins in the dependency tree; re-evaluate on next
+        # poetry update.
+        #
+        # pyjwt 2.12.1 (PYSEC-2025-183): key confusion when multiple
+        # key types are configured in the same PyJWT instance. We use
+        # fastapi-users' JWT backend with a single HS256 key; the
+        # multi-key attack surface does not apply. Re-evaluate when
+        # fastapi-users ships a compatible PyJWT pin.
         run: |
           pip-audit --strict --requirement requirements-audit.txt \
             --ignore-vuln GHSA-xqmj-j6mv-4862 \
             --ignore-vuln GHSA-r75f-5x8p-qvmc \
-            --ignore-vuln GHSA-v4p8-mg3p-g94g
+            --ignore-vuln GHSA-v4p8-mg3p-g94g \
+            --ignore-vuln GHSA-65pc-fj4g-8rjx \
+            --ignore-vuln PYSEC-2025-183
 
   gitleaks:
     name: Gitleaks (secret scan)
@@ -204,7 +217,7 @@ jobs:
         run: pip install "poetry==1.8.3"
       - name: Install dependencies (with test group)
         run: |
-          poetry install --no-interaction --no-ansi --no-root --without dev --with test
+          poetry install --no-interaction --no-ansi --no-root --without dev --with test --with worker
       - name: Run Alembic migrations
         run: poetry run alembic upgrade head
       - name: pytest
