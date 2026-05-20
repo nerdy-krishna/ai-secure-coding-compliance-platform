@@ -39,7 +39,7 @@ Use this for the Results page.
 ## Downloadable findings report
 
 ```http
-GET /scans/{scan_id}/report?format=html|csv|pdf
+GET /scans/{scan_id}/report?format=html|csv|pdf|sarif
 ```
 
 Renders the scan's consolidated findings as a downloadable report and
@@ -51,16 +51,15 @@ defaults to `html`; an unsupported value returns `400`.
 | `html` | `text/html` | A self-contained styled HTML document (inline CSS, no external assets). |
 | `csv` | `text/csv` | One row per finding; columns for file, line, severity, CVSS, confidence, CWE, source, title, description, remediation, corroborating agents, affected lines. |
 | `pdf` | `application/pdf` | A paginated, print-oriented PDF — cover page, running header/footer, a card per finding. Rendered with WeasyPrint. |
+| `sarif` | `application/sarif+json` | SARIF 2.1.0 JSON suitable for GitHub code scanning upload; includes stable rules, rule indexes, repository-relative artifact URIs, locations / related locations, CWE/CVSS/source/triage metadata. |
 
 Scoped by H.2 visibility — the same `404`-not-`403` rule applies.
 
 !!! note "SARIF export"
 
-    SCCAP previously exposed `/scans/{id}/sarif` and an
-    `/executive-summary/download` endpoint; both were removed in the
-    2026-04-26 cleanup (the impact-reporting node that backed them was
-    never wired into the graph). The HTML / CSV / PDF report above is
-    the replacement. SARIF export is not currently offered.
+    SARIF is generated on demand from the same consolidated findings as
+    HTML / CSV / PDF. SCCAP does not persist a separate SARIF blob or run
+    a reporting graph node.
 
 ## LLM interactions for a scan
 

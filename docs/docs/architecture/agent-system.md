@@ -162,8 +162,8 @@ Specialized agents live under `src/app/infrastructure/agents/`:
 - **`symbol_map_agent`** — builds the repo-map symbol index used by
   `ContextBundlingEngine`.
 
-Impact-summary and SARIF generation were removed in the 2026-04-26
-cleanup. The downloadable HTML / CSV / PDF findings report
+Impact-summary generation was removed in the 2026-04-26 cleanup. The
+on-demand HTML / CSV / PDF / SARIF findings report
 (`GET /scans/{id}/report`) is rendered directly from the consolidated
 findings — see [Reporting](../user-guide/reporting.md) — so no
 separate reporting node is needed.

@@ -23,7 +23,7 @@ knowledge bases. The platform is organized around three surfaces:
 * **Gated, user-approved scan** — every scan runs a cheap deterministic pass, profiles each file, and pauses the LangGraph workflow with native `interrupt()`s at up to three approval gates (prescan review, profiling cost, analysis cost) before any expensive work runs.
 * **Versatile submission** — file uploads, Git repository URLs, or archive uploads (`.zip` / `.tar.gz`). An interactive file tree lets you include or exclude paths before estimation.
 * **Multi-framework scanning** — pick any combination of the 8 bundled OWASP frameworks (ASVS, Proactive Controls, Cheatsheets, CWE Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) plus custom frameworks ingested from CSV or Git URLs.
-* **Consolidated findings + downloadable report** — a reasoning-model pass merges raw findings into one root finding per real issue; export any scan as an HTML, CSV, or PDF report.
+* **Consolidated findings + downloadable report** — a reasoning-model pass merges raw findings into one root finding per real issue; export any scan as an HTML, CSV, PDF, or SARIF 2.1.0 report.
 * **Intelligent, incremental remediation** — choose findings, let specialized agents generate fixes, merge via a dedicated conflict-resolution agent, and download the patched tree.
 * **Per-project stats on the Projects page** — each card shows the latest terminal scan's risk score, severity bar, and fixes-ready count, no client-side heuristics.
 * **Global search** — one TopNav combobox across projects, scans, and findings, always scoped to what the current user is allowed to see.

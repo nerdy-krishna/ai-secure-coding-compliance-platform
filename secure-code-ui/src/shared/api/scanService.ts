@@ -362,7 +362,7 @@ export const scanService = {
    */
   downloadReport: async (
     scanId: string,
-    format: "html" | "csv" | "pdf",
+    format: "html" | "csv" | "pdf" | "sarif",
   ): Promise<void> => {
     const response = await apiClient.get(
       `/scans/${encodeURIComponent(scanId)}/report`,

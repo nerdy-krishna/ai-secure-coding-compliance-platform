@@ -56,8 +56,8 @@ the repository map so agents have visibility into imports.
   for a consolidated finding — every affected location and the agents
   that corroborated it.
 - **Download report** buttons export the scan's findings as a
-  self-contained HTML page, a CSV (one row per finding), or a
-  paginated PDF.
+  self-contained HTML page, a CSV (one row per finding), a paginated PDF,
+  or SARIF 2.1.0 for code scanning integrations.
 - Timeline and LLM-logs drill-downs for the full scan trail.
 
 ## Projects

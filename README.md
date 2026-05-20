@@ -42,8 +42,8 @@ separate, opt-in step.
   mitigated findings out of the default Results view and badges the
   confirmed ones — no severity is ever changed.
 - **Downloadable findings report** — export any scan's findings as a
-  self-contained HTML page, a CSV (one row per finding), or a
-  paginated PDF, straight from the Results page.
+  self-contained HTML page, a CSV (one row per finding), a paginated PDF,
+  or SARIF 2.1.0 for GitHub code scanning, straight from the Results page.
 - **Intelligent remediation** — pick findings, let the multi-agent
   system generate code fixes, and download the patched codebase as a
   zip. Remediation runs incrementally with a merge agent to resolve
@@ -157,7 +157,7 @@ separate, opt-in step.
    `unconfirmed` verdict.
 9. **Review** findings in the Results page — both deterministic and
    LLM-emitted, tagged by source — and download the report as HTML,
-   CSV, or PDF.
+   CSV, PDF, or SARIF 2.1.0.
 10. **Remediate** — select findings, apply fixes incrementally with a
     merge agent to resolve conflicts, then download the patched tree.
 

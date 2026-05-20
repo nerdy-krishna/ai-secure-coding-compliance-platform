@@ -25,9 +25,9 @@ canonical view. It shows:
   affected location. A CWE id is shown only for findings emitted by
   the deterministic SAST scanners; LLM-agent findings carry no CWE.
 
-## Downloadable report (HTML / CSV / PDF)
+## Downloadable report (HTML / CSV / PDF / SARIF)
 
-The Results header has **HTML**, **CSV**, and **PDF** download
+The Results header has **HTML**, **CSV**, **PDF**, and **SARIF** download
 buttons. Each renders the scan's consolidated findings through a
 dedicated format-native generator:
 
@@ -38,9 +38,13 @@ dedicated format-native generator:
   agents, and affected lines. Drop it straight into a spreadsheet.
 - **PDF** — a paginated, print-oriented document with a cover page,
   running headers/footers, and a card per finding.
+- **SARIF** — SARIF 2.1.0 JSON suitable for GitHub code scanning upload;
+  includes stable rule IDs / indexes, repository-relative artifact URIs,
+  primary locations, related locations for merged findings, and
+  CWE/CVSS/source/triage metadata.
 
-All three are served on demand by
-`GET /api/v1/scans/{scan_id}/report?format=html|csv|pdf` — see
+All four are served on demand by
+`GET /api/v1/scans/{scan_id}/report?format=html|csv|pdf|sarif` — see
 [API → Results Endpoints](../api-reference/results-endpoints.md).
 
 ## Raw findings (JSON)
@@ -70,10 +74,9 @@ Admins can inspect the full trail from
 
 ## History
 
-Earlier versions of SCCAP exported a SARIF 2.1 document and an
-Executive Summary PDF backed by an `impact_reporting_agent` whose
-graph node was never actually wired in; both were removed in the
-2026-04-26 cleanup. The downloadable HTML / CSV / PDF report
-described above is the replacement — it renders directly from the
-consolidated findings, with no separate reporting node. SARIF export
-is not currently offered.
+Earlier versions of SCCAP exposed a separate `/scans/{id}/sarif`
+endpoint and an Executive Summary PDF backed by an
+`impact_reporting_agent` whose graph node was never actually wired in;
+both were removed in the 2026-04-26 cleanup. The current SARIF export
+is the on-demand `format=sarif` variant of the consolidated findings
+report, with no separate reporting node or persisted SARIF artifact.

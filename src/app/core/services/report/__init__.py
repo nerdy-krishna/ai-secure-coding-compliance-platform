@@ -16,6 +16,7 @@ from app.api.v1.models import AnalysisResultDetailResponse
 from app.core.services.report.csv_report import render_csv
 from app.core.services.report.html_report import render_html
 from app.core.services.report.pdf_report import render_pdf
+from app.core.services.report.sarif_report import render_sarif
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ _FORMATS: Dict[str, tuple] = {
     "html": (render_html, "text/html; charset=utf-8", "html"),
     "csv": (render_csv, "text/csv; charset=utf-8", "csv"),
     "pdf": (render_pdf, "application/pdf", "pdf"),
+    "sarif": (render_sarif, "application/sarif+json; charset=utf-8", "sarif"),
 }
 
 SUPPORTED_FORMATS = tuple(_FORMATS)

@@ -64,7 +64,7 @@ from app.api.v1.dependencies import (
     get_visible_user_ids_sse,
 )
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
-from app.shared.lib.git import clone_repo_and_get_files
+from app.shared.lib.git import list_repo_processable_files
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
 
 router = APIRouter()
@@ -239,13 +239,13 @@ async def preview_git_files(
 ):
     # V01.3.6 / V05.3.2: SSRF allowlist before any clone.
     _validate_repo_url(request.repo_url)
-    files_data = clone_repo_and_get_files(request.repo_url)
-    if not files_data:
+    files = list_repo_processable_files(request.repo_url)
+    if not files:
         raise HTTPException(
             status_code=400,
             detail="Repository cloned, but no processable files were found.",
         )
-    return {"files": [f["path"] for f in files_data]}
+    return {"files": files}
 
 
 @router.post("/scans", response_model=api_models.ScanResponse)
@@ -809,7 +809,7 @@ async def download_scan_report(
     service: ScanQueryService = Depends(get_scan_query_service),
 ):
     """Download a scan's findings as a report. `format` is one of
-    `html` or `csv`; the report is rendered server-side on request from
+    `html`, `csv`, `pdf`, or `sarif`; the report is rendered server-side on request from
     the scan's stored findings. Visibility is enforced by
     `get_scan_result` (the same scoping as the result endpoint)."""
     fmt = (format or "").strip().lower()

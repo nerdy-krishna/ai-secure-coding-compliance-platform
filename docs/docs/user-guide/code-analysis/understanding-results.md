@@ -18,7 +18,7 @@ findings, decide what to remediate, and export downstream artifacts.
   CVSS-weighted 0–10 risk score on the scan row (the same calculation
   the Dashboard / Compliance posture is derived from, shown here as a
   0–10 intensity rather than a 0–100 posture).
-- **Download report** — HTML, CSV, and PDF buttons in the header
+- **Download report** — HTML, CSV, PDF, and SARIF buttons in the header
   export the scan's consolidated findings (see [Reporting](../reporting.md)).
 - **Per-file panels** — every analyzed file gets a collapsible
   section. Expand to see its consolidated findings, with:
@@ -54,11 +54,12 @@ inline so reviewers can prioritize triage.
 ## Report formats
 
 The Results header exports the scan's findings as a self-contained
-HTML page, a CSV (one row per finding), or a paginated PDF — see
-[Reporting](../reporting.md). The earlier Impact tab, SARIF export,
-and Executive Summary PDF (backed by an `impact_reporting_agent` node
-that was never wired in) were removed in the 2026-04-26 cleanup; the
-HTML / CSV / PDF report is their replacement.
+HTML page, a CSV (one row per finding), a paginated PDF, or SARIF 2.1.0
+for code scanning integrations — see [Reporting](../reporting.md). The
+earlier Impact tab and Executive Summary PDF (backed by an
+`impact_reporting_agent` node that was never wired in) were removed in
+the 2026-04-26 cleanup; report artifacts are now generated on demand
+from consolidated findings without a separate reporting node.
 
 ## Related links
 
