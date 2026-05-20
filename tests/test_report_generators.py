@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import uuid
 
 import pytest
@@ -23,6 +24,7 @@ from app.api.v1.models import (
 from app.core.services.report import generate_report
 from app.core.services.report.csv_report import render_csv
 from app.core.services.report.html_report import render_html
+from app.core.services.report.sarif_report import render_sarif
 
 
 def _finding(**overrides) -> VulnerabilityFindingResponse:
@@ -37,6 +39,8 @@ def _finding(**overrides) -> VulnerabilityFindingResponse:
         remediation="Use parameterised queries.",
         confidence="High",
         references=[],
+        cvss_score=9.8,
+        cvss_vector="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
     )
     base.update(overrides)
     return VulnerabilityFindingResponse(**base)
@@ -143,6 +147,99 @@ def test_pdf_renders_with_no_findings():
     """An empty scan still produces a valid PDF (cover + empty section)."""
     artifact = generate_report(_result([]), "pdf")
     assert artifact.content.startswith(b"%PDF-")
+
+
+def test_sarif_is_v210_and_github_code_scanning_friendly():
+    result = _result(
+        [
+            _finding(
+                cwe="CWE-89",
+                source="semgrep",
+                references=["https://cwe.mitre.org/data/definitions/89.html"],
+                affected_locations=[
+                    {"line_number": 42, "snippet": "db.execute(query)"},
+                    {"line_number": 44, "snippet": "cursor.fetchall()"},
+                ],
+                vulnerable_snippet="db.execute(query)",
+                detected_by_llms=["reasoner-a"],
+            )
+        ]
+    )
+
+    sarif = json.loads(render_sarif(result))
+
+    assert sarif["version"] == "2.1.0"
+    assert sarif["$schema"] == "https://json.schemastore.org/sarif-2.1.0.json"
+    run = sarif["runs"][0]
+    assert run["tool"]["driver"]["name"] == "SCCAP"
+    assert run["tool"]["driver"]["informationUri"]
+    assert run["tool"]["driver"]["semanticVersion"]
+
+    rules = run["tool"]["driver"]["rules"]
+    assert len(rules) == 1
+    rule = rules[0]
+    assert rule["id"] == "semgrep/CWE-89/sql-injection"
+    assert rule["properties"]["tags"] == ["security", "external/cwe/cwe-89"]
+    assert rule["properties"]["precision"] == "high"
+    assert rule["help"]["markdown"]
+
+    sarif_result = run["results"][0]
+    assert sarif_result["ruleId"] == rule["id"]
+    assert sarif_result["ruleIndex"] == 0
+    assert sarif_result["level"] == "error"
+    assert sarif_result["message"]["text"] == "SQL injection"
+    assert sarif_result["locations"][0]["physicalLocation"] == {
+        "artifactLocation": {"uri": "app.py", "uriBaseId": "%SRCROOT%"},
+        "region": {
+            "startLine": 42,
+            "snippet": {"text": "db.execute(query)"},
+        },
+    }
+    assert sarif_result["relatedLocations"][0]["physicalLocation"]["region"]["startLine"] == 44
+    assert sarif_result["properties"] == {
+        "finding_id": 1,
+        "severity": "High",
+        "cvss_score": 9.8,
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "cwe": "CWE-89",
+        "source": "semgrep",
+        "confidence": "High",
+        "disposition": "open",
+        "detected_by_llms": ["reasoner-a"],
+        "references": ["https://cwe.mitre.org/data/definitions/89.html"],
+        "remediation": "Use parameterised queries.",
+    }
+    assert run["originalUriBaseIds"] == {"%SRCROOT%": {"uri": "file:///"}}
+
+
+def test_sarif_deduplicates_rules_and_normalizes_paths_and_lines():
+    result = _result(
+        [
+            _finding(id=1, file_path="/repo/src/../src/a b.py", line_number=0, cwe=None),
+            _finding(id=2, file_path="\\repo\\src\\a b.py", line_number=7, cwe=None),
+        ]
+    )
+
+    sarif = json.loads(render_sarif(result))
+    run = sarif["runs"][0]
+
+    assert len(run["tool"]["driver"]["rules"]) == 1
+    assert [r["ruleIndex"] for r in run["results"]] == [0, 0]
+    assert run["results"][0]["locations"][0]["physicalLocation"] == {
+        "artifactLocation": {"uri": "repo/src/a%20b.py", "uriBaseId": "%SRCROOT%"}
+    }
+    assert run["results"][1]["locations"][0]["physicalLocation"] == {
+        "artifactLocation": {"uri": "repo/src/a%20b.py", "uriBaseId": "%SRCROOT%"},
+        "region": {"startLine": 7},
+    }
+
+
+def test_generate_report_dispatches_sarif_artifact():
+    artifact = generate_report(_result([_finding()]), "sarif")
+
+    assert artifact.media_type == "application/sarif+json; charset=utf-8"
+    assert artifact.filename.endswith(".sarif")
+    assert json.loads(artifact.content)["version"] == "2.1.0"
 
 
 # --- Enriched content (#101) + triage layout (#102) ---------------------
