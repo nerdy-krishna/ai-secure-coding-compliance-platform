@@ -102,7 +102,7 @@ async def test_llm_client_survives_langfuse_span_failure(
         "_build_model",
         lambda self: object(),
     )
-    monkeypatch.setattr(llm_mod, "get_rate_limiter_for_provider", lambda _p: None)
+    monkeypatch.setattr(llm_mod, "get_rate_limiter_for_config", lambda _c, _p: None)
 
     class _Resp(BaseModel):
         ok: bool
