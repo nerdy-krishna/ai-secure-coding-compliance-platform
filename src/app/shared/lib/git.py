@@ -37,15 +37,17 @@ Security properties enforced by ``clone_repo_and_get_files``:
   defence) and use ``%s`` lazy formatting (log-injection defence).
 """
 
+import json
 import logging
 import os
 import re
 import shutil
 import socket
 import tempfile
+import urllib.request
 from ipaddress import ip_address
-from typing import Dict, List
-from urllib.parse import urlparse, urlunparse
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote, urlparse, urlunparse
 
 from fastapi import HTTPException
 
@@ -71,6 +73,7 @@ MAX_FILES = 50_000
 MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB per file
 MAX_TOTAL_BYTES = 500 * 1024 * 1024  # 500 MB total tree
 CLONE_TIMEOUT_SECONDS = 120
+GITHUB_API_TIMEOUT_SECONDS = 30
 
 # Executable magic bytes; binaries that match are skipped.
 _EXEC_MAGIC = (
@@ -197,6 +200,206 @@ def _looks_like_executable(file_path: str) -> bool:
     if header.count(b"\x00") > len(header) * 0.2:
         return True
     return False
+
+
+def _github_auth_headers() -> Dict[str, str]:
+    """Return optional GitHub API auth headers from the process environment."""
+
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_PAT")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "sccap-git-ingest",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _github_api_json(
+    url: str, headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    request = urllib.request.Request(url, headers=headers or _github_auth_headers())
+    try:
+        with urllib.request.urlopen(  # nosec B310 - URL is constructed after strict GitHub host validation.
+            request, timeout=GITHUB_API_TIMEOUT_SECONDS
+        ) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        logger.warning("github.api_failed url=%s error=%s", url, exc)
+        raise HTTPException(
+            status_code=400, detail="Failed to read GitHub repository metadata."
+        )
+
+
+def _parse_github_repo(repo_url: str) -> Optional[Tuple[str, str]]:
+    """Return (owner, repo) for a GitHub HTTPS repo URL, else None."""
+
+    parsed = urlparse(repo_url)
+    if (parsed.hostname or "").lower() != "github.com":
+        return None
+    parts = [p for p in parsed.path.split("/") if p]
+    if len(parts) < 2:
+        return None
+    owner = parts[0]
+    repo = parts[1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    if not owner or not repo:
+        return None
+    return owner, repo
+
+
+def _github_default_branch(owner: str, repo: str) -> str:
+    repo_meta = _github_api_json(f"https://api.github.com/repos/{owner}/{repo}")
+    branch = repo_meta.get("default_branch")
+    if not isinstance(branch, str) or not branch:
+        raise HTTPException(
+            status_code=400, detail="GitHub repository default branch is unavailable."
+        )
+    return branch
+
+
+def _github_tree_entries(owner: str, repo: str) -> List[Dict[str, Any]]:
+    branch = _github_default_branch(owner, repo)
+    encoded_branch = quote(branch, safe="")
+    tree = _github_api_json(
+        f"https://api.github.com/repos/{owner}/{repo}/git/trees/{encoded_branch}?recursive=1"
+    )
+    if tree.get("truncated"):
+        raise HTTPException(
+            status_code=413,
+            detail="Repository file tree is too large to preview via GitHub API.",
+        )
+    entries = tree.get("tree")
+    if not isinstance(entries, list):
+        raise HTTPException(
+            status_code=400, detail="GitHub repository file tree is unavailable."
+        )
+    return entries
+
+
+def _is_processable_tree_entry(entry: Dict[str, Any]) -> bool:
+    if entry.get("type") != "blob":
+        return False
+    path = entry.get("path")
+    if not isinstance(path, str) or not path:
+        return False
+    if (
+        path.startswith("/")
+        or ".." in path.split("/")
+        or "\x00" in path
+        or "\\" in path
+    ):
+        return False
+    if get_language_from_filename(path) is None:
+        return False
+    size = entry.get("size")
+    if not isinstance(size, int) or size < 0 or size > MAX_FILE_BYTES:
+        return False
+    return True
+
+
+def list_repo_processable_files(repo_url: str) -> List[str]:
+    """Return processable source file paths for preview without cloning GitHub repos."""
+
+    _validate_repo_url(repo_url)
+    github_repo = _parse_github_repo(repo_url)
+    if github_repo is None:
+        return [f["path"] for f in clone_repo_and_get_files(repo_url)]
+
+    owner, repo = github_repo
+    paths = [
+        entry["path"]
+        for entry in _github_tree_entries(owner, repo)
+        if _is_processable_tree_entry(entry)
+    ]
+    if len(paths) > MAX_FILES:
+        raise HTTPException(
+            status_code=413, detail="Repository exceeds maximum file count"
+        )
+    return sorted(paths)
+
+
+def fetch_github_selected_files(
+    repo_url: str, selected_files: Iterable[str]
+) -> List[Dict[str, str]]:
+    """Fetch only selected processable files from GitHub raw URLs."""
+
+    _validate_repo_url(repo_url)
+    github_repo = _parse_github_repo(repo_url)
+    if github_repo is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected-file Git fetch is only supported for GitHub URLs.",
+        )
+
+    selected = list(dict.fromkeys(selected_files))
+    if not selected:
+        raise HTTPException(status_code=400, detail="No selected files were provided.")
+    if len(selected) > MAX_FILES:
+        raise HTTPException(
+            status_code=413, detail="Repository exceeds maximum file count"
+        )
+
+    owner, repo = github_repo
+    branch = _github_default_branch(owner, repo)
+    allowed_paths = {
+        entry["path"]: entry
+        for entry in _github_tree_entries(owner, repo)
+        if _is_processable_tree_entry(entry)
+    }
+    unknown = set(selected) - set(allowed_paths)
+    if unknown:
+        sample = sorted(unknown)[:5]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown selected files (showing up to 5): {sample}",
+        )
+
+    files_data: List[Dict[str, str]] = []
+    total_bytes = 0
+    headers = _github_auth_headers()
+    for path in selected:
+        size = int(allowed_paths[path].get("size") or 0)
+        if total_bytes + size > MAX_TOTAL_BYTES:
+            raise HTTPException(
+                status_code=413, detail="Repository exceeds maximum total size"
+            )
+        raw_url = (
+            "https://raw.githubusercontent.com/"
+            f"{owner}/{repo}/{quote(branch, safe='')}/{quote(path, safe='/')}"
+        )
+        try:
+            request = urllib.request.Request(raw_url, headers=headers)
+            with urllib.request.urlopen(  # nosec B310 - URL is constructed from validated GitHub owner/repo/path.
+                request, timeout=GITHUB_API_TIMEOUT_SECONDS
+            ) as response:
+                raw = response.read(MAX_FILE_BYTES + 1)
+        except Exception as exc:
+            logger.warning(
+                "github.raw_failed repo=%s path=%s error=%s",
+                _redact_url(repo_url),
+                path,
+                exc,
+            )
+            raise HTTPException(
+                status_code=400, detail="Failed to read selected GitHub file."
+            )
+        if len(raw) > MAX_FILE_BYTES:
+            raise HTTPException(
+                status_code=413, detail="Selected file exceeds maximum size"
+            )
+        content = raw.decode("utf-8", errors="ignore").replace("\x00", "")
+        total_bytes += len(content.encode())
+        files_data.append(
+            {
+                "path": path,
+                "content": content,
+                "language": get_language_from_filename(path) or "unknown",
+            }
+        )
+    return files_data
 
 
 def clone_repo_and_get_files(repo_url: str) -> List[Dict[str, str]]:
