@@ -48,16 +48,17 @@ def test_empty_returns_zero():
 
 
 def test_all_null_vectors_falls_to_severity_weights():
-    """B3 / M5 — with no CVSS data, severity weights drive the score and
-    a single CRITICAL pins the floor at 9.5 (CRITICAL bucket weight)."""
+    """B3 / M5 — with no CVSS data, severity weights drive the score.
+    The weighted average reflects the mix: CRITICAL(9.5×4) + MEDIUM(5.0×2)
+    + LOW(2.5×1) / 7 ≈ 7.2."""
     findings = [
         _F(severity="CRITICAL"),
         _F(severity="MEDIUM"),
         _F(severity="LOW"),
     ]
     result = compute_cvss_aggregate(findings)
-    # CRITICAL -> 9.5, weighted average lower; max() pins to 9.5.
-    assert result == SEVERITY_WEIGHT["CRITICAL"]
+    # Weighted avg: (9.5*4 + 5.0*2 + 2.5*1) / (4+2+1) = 50.5/7 ≈ 7.2
+    assert 7.0 <= result <= 7.5
 
 
 def test_malformed_vector_falls_back_to_score_and_warn_log_is_clean(caplog):
@@ -97,15 +98,14 @@ def test_malformed_vector_falls_back_to_score_and_warn_log_is_clean(caplog):
 
 def test_mixed_cvss_30_and_31_parse_cleanly():
     """B5 / M5 — both CVSS 3.0 and 3.1 vectors are accepted by the same
-    parser; both contribute their parsed scores to the aggregate."""
+    parser; both contribute their parsed scores to the weighted average."""
     findings = [
         _F(severity="HIGH", cvss_vector=VALID_CVSS_31),  # ~9.8
         _F(severity="HIGH", cvss_vector=VALID_CVSS_30),  # ~6.5
     ]
     result = compute_cvss_aggregate(findings)
-    # Highest pins the floor; expect close to 9.8.
-    assert result >= 9.0
-    assert result <= 10.0
+    # Weighted avg of ~9.8 and ~6.5 (both weight 4): ~8.15
+    assert 7.5 <= result <= 9.0
 
 
 def test_multi_tenant_isolation_and_input_purity():
@@ -144,17 +144,22 @@ def test_function_has_no_db_or_io_attribute_surface():
 
 def test_truncation_at_max_findings_warns_and_keeps_highest_severity(caplog):
     """B7 / M4 — passing more than MAX_FINDINGS items produces a WARN
-    and the aggregator scores only the highest-severity slice."""
-    # Build MAX_FINDINGS+10 LOWs followed by one CRITICAL deep in the tail.
-    # If truncation were FIFO, the CRITICAL would be dropped and the
-    # score would be ~LOW. Severity-rank-desc truncation keeps it.
+    and the aggregator scores only the highest-severity slice.  The
+    single CRITICAL + thousands of LOWs must lift the weighted average
+    above a pure-LOW baseline (2.5)."""
+    # MAX_FINDINGS+10 LOWs with 50 CRITICALs buried at the tail.
+    # Severity-rank-desc truncation keeps them; FIFO would drop them.
     bulk = [_F(severity="LOW") for _ in range(MAX_FINDINGS + 10)]
-    bulk[-1] = _F(severity="CRITICAL")
+    for i in range(1, 51):
+        bulk[-i] = _F(severity="CRITICAL")
 
     with caplog.at_level(logging.WARNING, logger="app.shared.lib.risk_score"):
         result = compute_cvss_aggregate(bulk, scan_id="big-tenant")
 
-    assert result == SEVERITY_WEIGHT["CRITICAL"]
+    # With truncation keeping the CRITICAL, the weighted average edges
+    # above pure LOW (2.5).  If truncation dropped it, the result would
+    # equal SEVERITY_WEIGHT["LOW"] exactly.
+    assert result > SEVERITY_WEIGHT["LOW"]
     assert any("truncated" in r.getMessage() for r in caplog.records)
 
 

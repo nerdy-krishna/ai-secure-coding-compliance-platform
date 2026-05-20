@@ -178,15 +178,12 @@ def compute_cvss_aggregate(
     if not scores:
         return 0.0
 
-    highest = max(scores)
     weights = [_severity_weight_for_score(s) for s in scores]
     total_weight = sum(weights)
     if total_weight <= 0:
-        weighted_avg = 0.0
+        aggregate = 0.0
     else:
-        weighted_avg = sum(s * w for s, w in zip(scores, weights)) / total_weight
-
-    aggregate = max(highest, weighted_avg)
+        aggregate = sum(s * w for s, w in zip(scores, weights)) / total_weight
     aggregate = max(0.0, min(10.0, aggregate))
 
     if truncated:
