@@ -10,6 +10,7 @@ and rejects the message if they disagree.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -243,6 +244,54 @@ async def test_resume_kind_match_proceeds(
 
     assert success is True
     assert len(workflow_invocations) == 1
+
+
+async def test_cancelled_workflow_marks_scan_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broker/channel-side cancellation must not leave the scan in an
+    active DB status. In Python 3.12, asyncio.CancelledError inherits
+    from BaseException, so a plain `except Exception` does not run the
+    FAILED cleanup path.
+    """
+    from app.workers import consumer
+
+    state = await _build_state()
+    fake_scan = MagicMock()
+    fake_scan.status = "QUEUED_FOR_SCAN"
+
+    fake_repo = MagicMock()
+    fake_repo.get_scan = AsyncMock(return_value=fake_scan)
+    fake_repo.update_status = AsyncMock(return_value=None)
+
+    fake_session = MagicMock()
+    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
+    fake_session.__aexit__ = AsyncMock(return_value=False)
+
+    fake_workflow = MagicMock()
+    fake_workflow.ainvoke = AsyncMock(side_effect=asyncio.CancelledError)
+
+    async def _fake_get_workflow():
+        return fake_workflow
+
+    monkeypatch.setattr(
+        "app.infrastructure.database.repositories.scan_repo.ScanRepository",
+        lambda _db: fake_repo,
+    )
+    monkeypatch.setattr(
+        "app.infrastructure.database.AsyncSessionLocal",
+        lambda: fake_session,
+    )
+    monkeypatch.setattr(consumer, "get_workflow", _fake_get_workflow)
+    monkeypatch.setattr(consumer, "get_langchain_handler", lambda: None, raising=False)
+    monkeypatch.setattr(
+        consumer, "_maybe_cleanup_checkpointer_thread", AsyncMock(return_value=None)
+    )
+
+    success = await consumer._run_workflow_for_scan(state)
+
+    assert success is False
+    fake_repo.update_status.assert_awaited_once_with(state["scan_id"], "FAILED")
 
 
 async def test_handle_message_forwards_kind_and_override(

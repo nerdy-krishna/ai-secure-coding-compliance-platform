@@ -347,6 +347,12 @@ async def _run_workflow_for_scan(
             scan_id_str_log,
             settings.SCAN_WORKFLOW_TIMEOUT_SECONDS,
         )
+    except asyncio.CancelledError:
+        logger.error(
+            "WORKFLOW: Scan %s workflow invocation was cancelled; marking FAILED.",
+            scan_id_str_log,
+            exc_info=True,
+        )
     except Exception:
         logger.error(
             "WORKFLOW: Exception during worker_workflow invocation",
