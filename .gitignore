@@ -207,3 +207,6 @@ evals/.promptfoo/
 
 # Pi coding agent sessions and settings
 .pi/
+# Personal agent instruction files (keep on laptop only)
+AGENTS.md
+CLAUDE.md
