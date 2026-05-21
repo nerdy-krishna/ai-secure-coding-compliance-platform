@@ -518,11 +518,9 @@ def _build_finding_object(
         references=initial_finding.references,
         file_path=filename,
         agent_name=agent_name,
-        # Provenance: tag every LLM-emitted finding as "agent" at write
-        # time so the per-source counter on the results page accurately
-        # reflects scanner-vs-LLM provenance without relying on the
-        # post-hoc backfill admin script (Feature-7 follow-up B1).
-        source="agent",
+        # Provenance: tag every LLM-emitted finding with the agent name
+        # so the diagnostics page shows which agent found what.
+        source=agent_name or "agent",
         cvss_vector=initial_finding.cvss_vector,
         cvss_score=float(cvss_score) if cvss_score is not None else None,
     )
