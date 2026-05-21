@@ -149,11 +149,7 @@ class ScanQueryService:
         """
         logger.info(
             "scan-query: full result requested",
-            extra={
-                "actor_user_id": str(user.id),
-                "scan_id": str(scan_id),
-                "findings_count": len(scan.findings),
-            },
+            extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
         )
         try:
             scan = await self.repo.get_scan_with_details(scan_id)
