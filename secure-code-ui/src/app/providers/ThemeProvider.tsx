@@ -65,13 +65,16 @@ function readAccent(): string {
 
 /** Debounced server-sync helper — avoids PUT-ing on every keystroke or
  *  rapid toggle.  500ms is short enough that theme changes feel
- *  instantaneous but long enough to coalesce variant + accent changes. */
+ *  instantaneous but long enough to coalesce variant + accent changes.
+ *  Only syncs when there's an access token. */
 let _syncTimer: ReturnType<typeof setTimeout> | null = null;
 function _scheduleSync(prefs: {
   theme: SccapTheme;
   variant: SccapVariant;
   accent: string;
 }) {
+  if (typeof window === "undefined") return;
+  if (!window.localStorage.getItem("accessToken")) return;
   if (_syncTimer) clearTimeout(_syncTimer);
   _syncTimer = setTimeout(() => {
     preferencesService
@@ -108,12 +111,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
-  // On mount: pull preferences from the server.  If the server has
-  // values we don't have locally (first login from a new browser),
-  // apply them.  If the server has nothing (new user), push our
-  // localStorage defaults up.
+  // On mount: pull preferences from the server.  Only run when the
+  // user has an access token — the login page has no token and the
+  // 401 interceptor would redirect to /login, causing a reload loop.
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const token = window.localStorage.getItem("accessToken");
+    if (!token) {
+      setServerSynced(true);
+      return;
+    }
     let cancelled = false;
     preferencesService
       .get()
