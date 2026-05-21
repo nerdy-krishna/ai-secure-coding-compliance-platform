@@ -27,6 +27,7 @@ import { CopyButton } from "../../shared/ui/CopyButton";
 import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
+import { FindingsDebugPanel } from "../../features/scans/FindingsDebugPanel";
 import type {
   Finding,
   FindingDisposition,
@@ -2434,6 +2435,11 @@ const DispositionHistory: React.FC<{
           )}
         </div>
       )}
+
+      {/* Findings debug panel — agent-quality troubleshooting */}
+      {scanId ? (
+        <FindingsDebugPanel scanId={scanId} />
+      ) : null}
     </div>
   );
 };

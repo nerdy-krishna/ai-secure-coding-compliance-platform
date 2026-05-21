@@ -867,6 +867,22 @@ async def get_llm_interactions_for_scan(
     return await service.get_llm_interactions_for_scan(scan_id, user)
 
 
+@router.get(
+    "/scans/{scan_id}/findings/debug",
+    response_model=api_models.ScanFindingsDebugResponse,
+)
+async def get_scan_findings_debug(
+    scan_id: uuid.UUID,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+):
+    """Return raw and consolidated findings for agent-quality debugging.
+
+    Includes SAST and raw-LLM pre-consolidation findings alongside the
+    final consolidated set, plus Sankey-flow node/link data."""
+    return await service.get_findings_debug(scan_id, user)
+
+
 @router.patch(
     "/scans/{scan_id}/findings/{finding_id}/disposition",
     response_model=api_models.FindingDispositionResponse,

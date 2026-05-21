@@ -597,6 +597,53 @@ class ScanQueryService:
             responses.append(resp)
         return responses
 
+    async def get_findings_debug(
+        self, scan_id: uuid.UUID, user: db_models.User
+    ) -> api_models.ScanFindingsDebugResponse:
+        """Return raw and consolidated findings for agent debugging."""
+        scan = await self.repo.get_scan(scan_id)
+        if not scan or (scan.user_id != user.id and not user.is_superuser):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan not found or not authorized.",
+            )
+
+        # Bucket findings
+        sast: list[api_models.VulnerabilityFindingResponse] = []
+        raw_llm: list[api_models.VulnerabilityFindingResponse] = []
+        consolidated: list[api_models.VulnerabilityFindingResponse] = []
+        for f in scan.findings:
+            resp = api_models.VulnerabilityFindingResponse.from_orm(f)
+            bucket = getattr(f, "finding_bucket", "consolidated")
+            if bucket == "sast":
+                sast.append(resp)
+            elif bucket == "raw_llm":
+                raw_llm.append(resp)
+            else:
+                consolidated.append(resp)
+
+        # Sankey: SAST → raw_llm → consolidated flow counts.
+        sast_count = len(sast)
+        raw_count = len(raw_llm)
+        cons_count = len(consolidated)
+        nodes = [
+            api_models.SankeyNode(id="sast", label=f"SAST ({sast_count})"),
+            api_models.SankeyNode(id="raw_llm", label=f"Raw LLM ({raw_count})"),
+            api_models.SankeyNode(id="consolidated", label=f"Consolidated ({cons_count})"),
+        ]
+        links = [
+            api_models.SankeyLink(source="sast", target="consolidated", value=sast_count),
+            api_models.SankeyLink(source="raw_llm", target="consolidated", value=raw_count),
+        ]
+
+        return api_models.ScanFindingsDebugResponse(
+            sast_findings=sast,
+            raw_llm_findings=raw_llm,
+            consolidated_findings=consolidated,
+            sankey_nodes=nodes,
+            sankey_links=links,
+        )
+
     async def get_paginated_projects(
         self,
         user_id: int,

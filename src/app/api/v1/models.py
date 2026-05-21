@@ -1042,6 +1042,26 @@ class ScanHistoryItem(BaseModel):
         from_attributes = True
 
 
+class SankeyNode(BaseModel):
+    id: str
+    label: str
+
+
+class SankeyLink(BaseModel):
+    source: str
+    target: str
+    value: int
+
+
+class ScanFindingsDebugResponse(BaseModel):
+    """Debug view: raw findings + consolidated + Sankey data."""
+    sast_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
+    raw_llm_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
+    consolidated_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
+    sankey_nodes: List[SankeyNode] = Field(default_factory=list)
+    sankey_links: List[SankeyLink] = Field(default_factory=list)
+
+
 class PaginatedScanHistoryResponse(BaseModel):
     items: List[ScanHistoryItem]
     total: int
