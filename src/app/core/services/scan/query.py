@@ -609,7 +609,9 @@ class ScanQueryService:
                         db_models.Finding.scan_id == scan_id
                     )
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
         sast: list[api_models.VulnerabilityFindingResponse] = []

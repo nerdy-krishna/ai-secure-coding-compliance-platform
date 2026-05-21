@@ -63,14 +63,14 @@ export const ScanCard: React.FC<ScanCardProps> = ({
   // For terminal scans with event-based active time, use that instead
   // of wall-clock (which includes dormant periods from stop/resume).
   const activeSeconds = scan.active_processing_seconds;
-  const terminalElapsed =
-    progress.isTerminal && typeof activeSeconds === "number"
-      ? formatDuration(activeSeconds * 1000)
-      : null;
-  const elapsed = terminalElapsed ?? useElapsed(
+  const wallElapsed = useElapsed(
     scan.created_at,
     progress.isTerminal ? (scan.completed_at ?? scan.created_at) : null,
   );
+  const elapsed =
+    progress.isTerminal && typeof activeSeconds === "number"
+      ? formatDuration(activeSeconds * 1000)
+      : wallElapsed;
 
   // Status-coloured left accent so stacked scan items are easy to tell
   // apart at a glance.

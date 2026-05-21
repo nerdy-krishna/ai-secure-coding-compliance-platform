@@ -14,9 +14,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import update
 
-from app.config.config import settings
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database import models as db_models
 
@@ -74,7 +73,5 @@ async def run_stuck_scan_sweeper(stop_event: asyncio.Event) -> None:
         try:
             await _sweep_once()
         except Exception:
-            logger.error(
-                "stuck_scan_sweeper: sweep failed", exc_info=True
-            )
+            logger.error("stuck_scan_sweeper: sweep failed", exc_info=True)
     logger.info("stuck_scan_sweeper: stopped")

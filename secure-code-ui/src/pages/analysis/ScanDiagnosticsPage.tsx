@@ -116,8 +116,6 @@ const PipelineTab: React.FC<{
           sourceGroups={debug.source_groups}
           severityGroups={debug.severity_groups}
           cweGroups={debug.cwe_groups}
-          sastCount={debug.sast_findings.length}
-          rawLlmCount={debug.raw_llm_findings.length}
           consolidatedCount={debug.consolidated_findings.length}
         />
       </div>

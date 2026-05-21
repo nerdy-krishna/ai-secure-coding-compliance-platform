@@ -11,8 +11,6 @@ interface Props {
   sourceGroups: Record<string, number>;
   severityGroups: Record<string, number>;
   cweGroups: Record<string, number>;
-  sastCount: number;
-  rawLlmCount: number;
   consolidatedCount: number;
 }
 
@@ -51,8 +49,6 @@ export const ElaborateSankey: React.FC<Props> = ({
   sourceGroups,
   severityGroups,
   cweGroups,
-  sastCount: _sastCount,
-  rawLlmCount: _rawLlmCount,
   consolidatedCount,
 }) => {
   const data = useMemo(() => {
