@@ -489,9 +489,7 @@ class RepositoryMappingEngine:
                         f"Skipped: No language grammar found for this file type. Error: {e}"
                     ],
                 )
-            except (
-                Exception
-            ) as e:  # Catch other unexpected errors during _parse_file for this specific file
+            except Exception as e:  # Catch other unexpected errors during _parse_file for this specific file
                 self.logger.error(
                     "repo_map.parse_error path_hash=%s", path_hash, exc_info=True
                 )

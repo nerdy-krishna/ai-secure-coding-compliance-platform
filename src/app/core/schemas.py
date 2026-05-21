@@ -252,8 +252,7 @@ class VulnerabilityFinding(BaseModel):
             cwe_match = re.fullmatch(r"CWE-(\d+)", ref, re.IGNORECASE)
             if cwe_match:
                 cleaned.append(
-                    "https://cwe.mitre.org/data/definitions/"
-                    f"{cwe_match.group(1)}.html"
+                    f"https://cwe.mitre.org/data/definitions/{cwe_match.group(1)}.html"
                 )
         return cleaned[:20]
 

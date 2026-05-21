@@ -16,7 +16,6 @@ _MAX_CONFIGS = 500
 
 
 class SystemConfigRepository:
-
     def __init__(self, db_session: AsyncSession):
         self.db = db_session
 

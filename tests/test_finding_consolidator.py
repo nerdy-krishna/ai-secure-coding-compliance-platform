@@ -59,7 +59,9 @@ class _FakeClient:
 
 def _consolidate(client, findings):
     consolidator = FindingConsolidator(client)
-    results, _flow_map = asyncio.run(consolidator.consolidate_file("app.py", _SOURCE, findings))
+    results, _flow_map = asyncio.run(
+        consolidator.consolidate_file("app.py", _SOURCE, findings)
+    )
     return results
 
 

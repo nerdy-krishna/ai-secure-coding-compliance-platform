@@ -204,15 +204,17 @@ class FindingConsolidator:
             consolidated.append(_build_merged_finding(merged, subsumed, file_path))
             for i in subsumed_nums:
                 raw_f = findings[i - 1]
-                flow_map.append({
-                    "raw_title": raw_f.title,
-                    "raw_source": raw_f.source,
-                    "raw_severity": raw_f.severity,
-                    "raw_cwe": raw_f.cwe,
-                    "raw_line": raw_f.line_number,
-                    "consolidated_title": merged.title,
-                    "status": "merged",
-                })
+                flow_map.append(
+                    {
+                        "raw_title": raw_f.title,
+                        "raw_source": raw_f.source,
+                        "raw_severity": raw_f.severity,
+                        "raw_cwe": raw_f.cwe,
+                        "raw_line": raw_f.line_number,
+                        "consolidated_title": merged.title,
+                        "status": "merged",
+                    }
+                )
 
         # Each drop carries a false-positive justification — the
         # justification is the forcing function, so a finding the model
@@ -223,15 +225,17 @@ class FindingConsolidator:
         dropped = set(_valid(list(drop_reasons.keys()))) - covered
         for i in sorted(dropped):
             raw_f = findings[i - 1]
-            flow_map.append({
-                "raw_title": raw_f.title,
-                "raw_source": raw_f.source,
-                "raw_severity": raw_f.severity,
-                "raw_cwe": raw_f.cwe,
-                "raw_line": raw_f.line_number,
-                "consolidated_title": "__dropped__",
-                "status": "dropped",
-            })
+            flow_map.append(
+                {
+                    "raw_title": raw_f.title,
+                    "raw_source": raw_f.source,
+                    "raw_severity": raw_f.severity,
+                    "raw_cwe": raw_f.cwe,
+                    "raw_line": raw_f.line_number,
+                    "consolidated_title": "__dropped__",
+                    "status": "dropped",
+                }
+            )
         # Findings the LLM neither merged nor dropped — keep them rather
         # than silently lose a finding to an incomplete response.
         orphans = [
@@ -243,15 +247,17 @@ class FindingConsolidator:
         for i in range(1, n + 1):
             if i not in covered and i not in dropped:
                 raw_f = findings[i - 1]
-                flow_map.append({
-                    "raw_title": raw_f.title,
-                    "raw_source": raw_f.source,
-                    "raw_severity": raw_f.severity,
-                    "raw_cwe": raw_f.cwe,
-                    "raw_line": raw_f.line_number,
-                    "consolidated_title": raw_f.title,
-                    "status": "passthrough",
-                })
+                flow_map.append(
+                    {
+                        "raw_title": raw_f.title,
+                        "raw_source": raw_f.source,
+                        "raw_severity": raw_f.severity,
+                        "raw_cwe": raw_f.cwe,
+                        "raw_line": raw_f.line_number,
+                        "consolidated_title": raw_f.title,
+                        "status": "passthrough",
+                    }
+                )
 
         # Accumulate the consolidation tally (#83 follow-up).
         self.merged_roots += len(

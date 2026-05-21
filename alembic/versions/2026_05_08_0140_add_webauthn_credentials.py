@@ -85,7 +85,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_webauthn_credentials_user_id", table_name="webauthn_credentials"
-    )
+    op.drop_index("ix_webauthn_credentials_user_id", table_name="webauthn_credentials")
     op.drop_table("webauthn_credentials")

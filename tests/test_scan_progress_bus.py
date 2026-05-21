@@ -18,7 +18,6 @@ followup.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -49,7 +48,9 @@ async def test_subscribe_and_dispatch_routes_only_to_matching_subscriber() -> No
     q_a = await bus.subscribe("scan-a")
     q_b = await bus.subscribe("scan-b")
 
-    await bus._dispatch_notification(json.dumps({"scan_id": "scan-a", "kind": KIND_STATUS}))
+    await bus._dispatch_notification(
+        json.dumps({"scan_id": "scan-a", "kind": KIND_STATUS})
+    )
 
     # Subscriber A got the notification; B's queue stays empty.
     assert q_a.qsize() == 1
@@ -62,7 +63,9 @@ async def test_dispatch_to_multiple_subscribers_for_same_scan() -> None:
     q1 = await bus.subscribe("scan-a")
     q2 = await bus.subscribe("scan-a")
 
-    await bus._dispatch_notification(json.dumps({"scan_id": "scan-a", "kind": KIND_EVENT}))
+    await bus._dispatch_notification(
+        json.dumps({"scan_id": "scan-a", "kind": KIND_EVENT})
+    )
 
     assert (await q1.get()) == KIND_EVENT
     assert (await q2.get()) == KIND_EVENT
@@ -86,7 +89,9 @@ async def test_dispatch_drops_when_subscriber_queue_full() -> None:
     assert q.qsize() == 64
 
     # Should not raise — drops the notification + logs WARN.
-    await bus._dispatch_notification(json.dumps({"scan_id": "scan-a", "kind": KIND_STATUS}))
+    await bus._dispatch_notification(
+        json.dumps({"scan_id": "scan-a", "kind": KIND_STATUS})
+    )
     assert q.qsize() == 64  # still full; new notification discarded
 
 
@@ -107,9 +112,7 @@ async def test_notify_scan_progress_emits_pg_notify() -> None:
     fake_session = MagicMock()
     fake_session.execute = AsyncMock()
 
-    await notify_scan_progress(
-        fake_session, scan_id="abc", kind=KIND_STATUS
-    )
+    await notify_scan_progress(fake_session, scan_id="abc", kind=KIND_STATUS)
 
     fake_session.execute.assert_awaited_once()
     call = fake_session.execute.await_args

@@ -21,8 +21,16 @@ def test_github_preview_uses_tree_api_without_total_repo_size_limit(monkeypatch)
                 "truncated": False,
                 "tree": [
                     {"type": "blob", "path": "src/app.py", "size": 123},
-                    {"type": "blob", "path": "data/huge.bin", "size": gitlib.MAX_TOTAL_BYTES + 1},
-                    {"type": "blob", "path": "assets/picture.jpg", "size": 6 * 1024 * 1024},
+                    {
+                        "type": "blob",
+                        "path": "data/huge.bin",
+                        "size": gitlib.MAX_TOTAL_BYTES + 1,
+                    },
+                    {
+                        "type": "blob",
+                        "path": "assets/picture.jpg",
+                        "size": 6 * 1024 * 1024,
+                    },
                 ],
             }
         raise AssertionError(url)
@@ -79,9 +87,7 @@ def test_fetch_github_selected_files_downloads_only_selected_paths(monkeypatch):
         "https://github.com/owner/repo", ["src/app.py"]
     )
 
-    assert files == [
-        {"path": "src/app.py", "content": raw_body, "language": "python"}
-    ]
+    assert files == [{"path": "src/app.py", "content": raw_body, "language": "python"}]
     assert requested_urls == [
         "https://raw.githubusercontent.com/owner/repo/main/src/app.py"
     ]

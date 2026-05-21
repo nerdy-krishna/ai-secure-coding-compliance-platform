@@ -39,7 +39,7 @@ def upgrade() -> None:
     """Fail every non-terminal scan."""
     placeholders = ", ".join(f"'{s}'" for s in _TERMINAL_STATUSES)
     op.execute(
-        f"UPDATE scans SET status = 'FAILED' " f"WHERE status NOT IN ({placeholders})"
+        f"UPDATE scans SET status = 'FAILED' WHERE status NOT IN ({placeholders})"
     )
 
 

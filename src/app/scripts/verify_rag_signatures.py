@@ -35,9 +35,9 @@ with patch(
 
 
 async def test_cheatsheets():
-    assert isinstance(
-        service._fetch_github_files, AsyncMock
-    ), "verify_rag_signatures must run with mocked _fetch_github_files"
+    assert isinstance(service._fetch_github_files, AsyncMock), (
+        "verify_rag_signatures must run with mocked _fetch_github_files"
+    )
     print("Testing Cheatsheets Ingestion...")
     # Mock internals
     service._fetch_github_files = AsyncMock(
@@ -68,9 +68,9 @@ async def test_cheatsheets():
 
 
 async def test_proactive_controls():
-    assert isinstance(
-        service._fetch_github_files, AsyncMock
-    ), "verify_rag_signatures must run with mocked _fetch_github_files"
+    assert isinstance(service._fetch_github_files, AsyncMock), (
+        "verify_rag_signatures must run with mocked _fetch_github_files"
+    )
     print("\nTesting Proactive Controls Ingestion...")
     try:
         await service.ingest_proactive_controls_github("about:blank", user_id=123)

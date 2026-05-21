@@ -509,7 +509,7 @@ class ScanLifecycleService:
         if request.disposition == fd.OPEN and not user.is_superuser:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=("Only an administrator can clear a finding's " "disposition."),
+                detail=("Only an administrator can clear a finding's disposition."),
             )
 
         finding = await self.repo.get_finding(finding_id)
@@ -612,7 +612,7 @@ class ScanLifecycleService:
         if request.disposition == fd.OPEN and not user.is_superuser:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=("Only an administrator can clear a finding's " "disposition."),
+                detail=("Only an administrator can clear a finding's disposition."),
             )
         if fd.note_required(request.disposition) and not (
             request.note and request.note.strip()

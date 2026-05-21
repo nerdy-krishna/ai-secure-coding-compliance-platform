@@ -92,8 +92,7 @@ def _api_callback_url(provider_name: str, suffix: str = "callback") -> str:
     back to ``frontend_base_url`` for single-origin deploys.
     """
     return (
-        f"{settings.api_base_url.rstrip('/')}/api/v1/auth/sso/"
-        f"{provider_name}/{suffix}"
+        f"{settings.api_base_url.rstrip('/')}/api/v1/auth/sso/{provider_name}/{suffix}"
     )
 
 

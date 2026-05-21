@@ -5,6 +5,7 @@ Revises: 1c658ded0a81
 Create Date: 2026-05-18 16:00:15.786755
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -14,8 +15,8 @@ from app.core.services.default_seed_service import PROMPT_TEMPLATES
 
 
 # revision identifiers, used by Alembic.
-revision: str = '2fc63e6b8859'
-down_revision: Union[str, None] = '1c658ded0a81'
+revision: str = "2fc63e6b8859"
+down_revision: Union[str, None] = "1c658ded0a81"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

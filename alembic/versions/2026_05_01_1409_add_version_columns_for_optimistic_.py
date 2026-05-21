@@ -37,15 +37,11 @@ def upgrade() -> None:
     """Upgrade schema."""
     op.add_column(
         "system_configurations",
-        sa.Column(
-            "version", sa.Integer(), server_default="1", nullable=False
-        ),
+        sa.Column("version", sa.Integer(), server_default="1", nullable=False),
     )
     op.add_column(
         "user_groups",
-        sa.Column(
-            "version", sa.Integer(), server_default="1", nullable=False
-        ),
+        sa.Column("version", sa.Integer(), server_default="1", nullable=False),
     )
 
 

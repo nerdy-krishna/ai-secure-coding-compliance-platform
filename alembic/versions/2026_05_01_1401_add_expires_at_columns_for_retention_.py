@@ -83,7 +83,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index("ix_rag_preprocessing_jobs_expires_at", table_name="rag_preprocessing_jobs")
+    op.drop_index(
+        "ix_rag_preprocessing_jobs_expires_at", table_name="rag_preprocessing_jobs"
+    )
     op.drop_column("rag_preprocessing_jobs", "expires_at")
     op.drop_index("ix_llm_interactions_expires_at", table_name="llm_interactions")
     op.drop_column("llm_interactions", "expires_at")

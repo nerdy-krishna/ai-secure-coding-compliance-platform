@@ -20,11 +20,22 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "scans",
-        sa.Column("deep_vendor_scan", sa.Boolean(), server_default="false", nullable=False),
+        sa.Column(
+            "deep_vendor_scan", sa.Boolean(), server_default="false", nullable=False
+        ),
     )
-    op.add_column("llm_configurations", sa.Column("requests_per_minute", sa.Integer(), nullable=True))
-    op.add_column("llm_configurations", sa.Column("tokens_per_minute", sa.Integer(), nullable=True))
-    op.add_column("llm_configurations", sa.Column("max_prompt_tokens", sa.Integer(), nullable=True))
+    op.add_column(
+        "llm_configurations",
+        sa.Column("requests_per_minute", sa.Integer(), nullable=True),
+    )
+    op.add_column(
+        "llm_configurations",
+        sa.Column("tokens_per_minute", sa.Integer(), nullable=True),
+    )
+    op.add_column(
+        "llm_configurations",
+        sa.Column("max_prompt_tokens", sa.Integer(), nullable=True),
+    )
 
 
 def downgrade() -> None:

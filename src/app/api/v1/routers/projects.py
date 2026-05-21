@@ -720,7 +720,7 @@ async def stream_scan_progress(
                                 "predicted_output_tokens"
                             ),
                         }
-                    yield (f"event: scan_state\n" f"data: {_json.dumps(payload)}\n\n")
+                    yield (f"event: scan_state\ndata: {_json.dumps(payload)}\n\n")
 
                 # Emit any ScanEvents with id > last_event_id.
                 events = sorted(

@@ -7,12 +7,9 @@ tests/fixtures/semgrep_rules/.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from app.core.services.semgrep_ingestion.parser import parse_rule_file
 
@@ -29,6 +26,7 @@ def _make_source(slug: str = "test-source") -> MagicMock:
 # ---------------------------------------------------------------------------
 # Parser extracts expected fields
 # ---------------------------------------------------------------------------
+
 
 def test_python_sql_injection_languages():
     src = _make_source()

@@ -30,9 +30,7 @@ def test_sparse_embed_empty_input_returns_empty():
 
 
 def test_sparse_embed_query_mode_runs():
-    indices, values = sparse_embed(
-        ["server side request forgery"], is_query=True
-    )[0]
+    indices, values = sparse_embed(["server side request forgery"], is_query=True)[0]
     assert indices and len(indices) == len(values)
 
 

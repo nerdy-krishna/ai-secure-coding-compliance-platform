@@ -340,7 +340,7 @@ async def perform_setup(
             # SystemConfigCache is now out of sync with persisted state.
             # Operators need to see this so they can re-run / repair.
             logger.error(
-                "setup: failed to persist CORS allowed_origins; " "cache not updated",
+                "setup: failed to persist CORS allowed_origins; cache not updated",
                 extra={"origins": allowed_origins},
                 exc_info=True,
             )

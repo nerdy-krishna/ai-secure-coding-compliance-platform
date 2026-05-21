@@ -114,7 +114,7 @@ async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
             await notify_scan_completed(scan.id)
         except Exception:  # noqa: BLE001
             logger.warning(
-                "WORKFLOW: scan-completion Web Push failed for %s " "(non-fatal).",
+                "WORKFLOW: scan-completion Web Push failed for %s (non-fatal).",
                 scan_id_str,
             )
         wf = await get_workflow()

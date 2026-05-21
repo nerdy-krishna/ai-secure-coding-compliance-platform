@@ -16,14 +16,15 @@ Revises: f888d36f2dc5
 Create Date: 2026-05-04 05:10:23.428712
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = '9f55f0cfadf6'
-down_revision: Union[str, None] = 'f888d36f2dc5'
+revision: str = "9f55f0cfadf6"
+down_revision: Union[str, None] = "f888d36f2dc5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

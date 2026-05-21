@@ -41,17 +41,13 @@ def upgrade() -> None:
     )
     op.add_column(
         "findings",
-        sa.Column(
-            "disposition_at", sa.DateTime(timezone=True), nullable=True
-        ),
+        sa.Column("disposition_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.add_column(
         "findings",
         sa.Column("disposition_note", sa.Text(), nullable=True),
     )
-    op.create_index(
-        "ix_findings_disposition", "findings", ["disposition"]
-    )
+    op.create_index("ix_findings_disposition", "findings", ["disposition"])
     op.create_check_constraint(
         "ck_findings_disposition",
         "findings",
@@ -85,12 +81,8 @@ def upgrade() -> None:
             server_default=sa.func.now(),
             nullable=False,
         ),
-        sa.ForeignKeyConstraint(
-            ["finding_id"], ["findings.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["actor_user_id"], ["user.id"], ondelete="SET NULL"
-        ),
+        sa.ForeignKeyConstraint(["finding_id"], ["findings.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["actor_user_id"], ["user.id"], ondelete="SET NULL"),
     )
     op.create_index(
         "ix_finding_disposition_events_finding_id",
@@ -106,9 +98,7 @@ def downgrade() -> None:
         table_name="finding_disposition_events",
     )
     op.drop_table("finding_disposition_events")
-    op.drop_constraint(
-        "fk_findings_disposition_by", "findings", type_="foreignkey"
-    )
+    op.drop_constraint("fk_findings_disposition_by", "findings", type_="foreignkey")
     op.drop_constraint("ck_findings_disposition", "findings", type_="check")
     op.drop_index("ix_findings_disposition", table_name="findings")
     op.drop_column("findings", "disposition_note")

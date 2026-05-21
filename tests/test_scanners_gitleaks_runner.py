@@ -74,9 +74,9 @@ async def test_gitleaks_finds_secret_and_emits_critical_severity(monkeypatch):
     assert len(findings) == 1
     f = findings[0]
     assert f.source == "gitleaks"
-    assert (
-        f.severity == "Critical"
-    ), "all gitleaks findings emit Critical for short-circuit"
+    assert f.severity == "Critical", (
+        "all gitleaks findings emit Critical for short-circuit"
+    )
     assert f.confidence == "High"
     assert f.cwe == "CWE-798"
     assert f.file_path == "config.py"
@@ -154,9 +154,9 @@ async def test_gitleaks_report_payload_never_logged_above_debug(monkeypatch, cap
     info_messages = "\n".join(
         r.getMessage() for r in caplog.records if r.levelno >= logging.INFO
     )
-    assert (
-        sentinel not in info_messages
-    ), "raw report must not appear in INFO/WARNING logs"
+    assert sentinel not in info_messages, (
+        "raw report must not appear in INFO/WARNING logs"
+    )
 
 
 async def test_gitleaks_description_is_html_escaped_and_truncated(monkeypatch):
@@ -216,6 +216,4 @@ async def test_gitleaks_unlinks_report_file_after_run(monkeypatch, tmp_path):
     monkeypatch.setattr(gitleaks_runner, "_invoke_gitleaks_sync", _impl)
     await run_gitleaks(Path("/tmp/staged"), original_paths={})
     assert "path" in captured, "mock was not invoked"
-    assert (
-        not captured["path"].exists()
-    ), f"report file leaked at {captured['path']}"
+    assert not captured["path"].exists(), f"report file leaked at {captured['path']}"

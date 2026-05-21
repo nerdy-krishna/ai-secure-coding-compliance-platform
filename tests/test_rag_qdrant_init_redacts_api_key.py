@@ -64,9 +64,9 @@ def test_init_failure_redacts_api_key(
     full_log = caplog.text + " ".join(
         str(getattr(r, "args", "")) for r in caplog.records
     )
-    assert (
-        secret_value not in full_log
-    ), f"QDRANT_API_KEY value {secret_value!r} leaked into logs:\n{full_log!r}"
+    assert secret_value not in full_log, (
+        f"QDRANT_API_KEY value {secret_value!r} leaked into logs:\n{full_log!r}"
+    )
     # Positive: env-dump still works for non-secret keys.
     assert "QDRANT_HOST" in full_log
     # Be defensive — clean up just in case.

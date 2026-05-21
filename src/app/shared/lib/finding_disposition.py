@@ -85,5 +85,5 @@ def validate_transition(current: str, target: str, note: Optional[str]) -> None:
         raise DispositionError(f"Finding is already {target!r}; nothing to change.")
     if note_required(target) and not (note and note.strip()):
         raise DispositionError(
-            f"A justification note is required to mark a finding " f"{target!r}."
+            f"A justification note is required to mark a finding {target!r}."
         )

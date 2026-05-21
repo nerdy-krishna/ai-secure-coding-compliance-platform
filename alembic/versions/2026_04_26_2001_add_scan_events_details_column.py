@@ -28,9 +28,7 @@ def upgrade() -> None:
     """Upgrade schema."""
     op.add_column(
         "scan_events",
-        sa.Column(
-            "details", postgresql.JSONB(astext_type=sa.Text()), nullable=True
-        ),
+        sa.Column("details", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     )
 
 

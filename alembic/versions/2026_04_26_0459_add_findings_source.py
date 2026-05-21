@@ -26,9 +26,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     op.add_column("findings", sa.Column("source", sa.String(length=32), nullable=True))
-    op.create_index(
-        op.f("ix_findings_source"), "findings", ["source"], unique=False
-    )
+    op.create_index(op.f("ix_findings_source"), "findings", ["source"], unique=False)
 
 
 def downgrade() -> None:

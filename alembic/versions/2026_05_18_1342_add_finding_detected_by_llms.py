@@ -5,6 +5,7 @@ Revises: 396e6b152252
 Create Date: 2026-05-18 13:42:43.159904
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -12,8 +13,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '1c658ded0a81'
-down_revision: Union[str, None] = '396e6b152252'
+revision: str = "1c658ded0a81"
+down_revision: Union[str, None] = "396e6b152252"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -27,9 +28,9 @@ def upgrade() -> None:
     migrations) are intentionally omitted.
     """
     op.add_column(
-        'findings',
+        "findings",
         sa.Column(
-            'detected_by_llms',
+            "detected_by_llms",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=True,
         ),
@@ -38,4 +39,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_column('findings', 'detected_by_llms')
+    op.drop_column("findings", "detected_by_llms")

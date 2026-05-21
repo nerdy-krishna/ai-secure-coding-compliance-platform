@@ -195,7 +195,10 @@ def test_sarif_is_v210_and_github_code_scanning_friendly():
             "snippet": {"text": "db.execute(query)"},
         },
     }
-    assert sarif_result["relatedLocations"][0]["physicalLocation"]["region"]["startLine"] == 44
+    assert (
+        sarif_result["relatedLocations"][0]["physicalLocation"]["region"]["startLine"]
+        == 44
+    )
     assert sarif_result["properties"] == {
         "finding_id": 1,
         "severity": "High",
@@ -215,7 +218,9 @@ def test_sarif_is_v210_and_github_code_scanning_friendly():
 def test_sarif_deduplicates_rules_and_normalizes_paths_and_lines():
     result = _result(
         [
-            _finding(id=1, file_path="/repo/src/../src/a b.py", line_number=0, cwe=None),
+            _finding(
+                id=1, file_path="/repo/src/../src/a b.py", line_number=0, cwe=None
+            ),
             _finding(id=2, file_path="\\repo\\src\\a b.py", line_number=7, cwe=None),
         ]
     )

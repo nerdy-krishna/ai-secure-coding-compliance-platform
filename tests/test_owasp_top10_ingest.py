@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import io
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -27,7 +27,9 @@ from fastapi import HTTPException, UploadFile
 from app.core.services.security_standards_service import SecurityStandardsService
 
 
-def _make_service(monkeypatch: pytest.MonkeyPatch) -> tuple[SecurityStandardsService, MagicMock]:
+def _make_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[SecurityStandardsService, MagicMock]:
     """SecurityStandardsService with a stubbed RAG service."""
     fake_rag = MagicMock()
     fake_rag.delete_by_framework = MagicMock()
@@ -222,7 +224,9 @@ async def test_starter_content_files_validate(
     service, fake_rag = _make_service(monkeypatch)
 
     with open(llm_path, "rb") as fp:
-        llm_upload = UploadFile(filename="llm_top10_2025.json", file=io.BytesIO(fp.read()))
+        llm_upload = UploadFile(
+            filename="llm_top10_2025.json", file=io.BytesIO(fp.read())
+        )
     result = await service.ingest_owasp_top10_json(
         llm_upload,
         framework_name="llm_top10",

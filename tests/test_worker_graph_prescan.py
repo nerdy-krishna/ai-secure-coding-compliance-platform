@@ -134,12 +134,12 @@ async def test_prescan_returns_findings_with_source_bandit_for_real_python(monke
     # Semgrep is now DB-driven. The stub session causes the rule selection
     # to fail gracefully (caught exception → 0 rules → Semgrep skipped).
     # Only Bandit fires on this snippet.
-    assert any(
-        f.source == "bandit" for f in findings
-    ), "Bandit must flag the shell=True call regardless of which other scanners corroborate"
-    assert all(
-        f.source in {"bandit", "semgrep", "osv"} for f in findings
-    ), "Only bandit/semgrep/osv should fire on this snippet (no secrets)"
+    assert any(f.source == "bandit" for f in findings), (
+        "Bandit must flag the shell=True call regardless of which other scanners corroborate"
+    )
+    assert all(f.source in {"bandit", "semgrep", "osv"} for f in findings), (
+        "Only bandit/semgrep/osv should fire on this snippet (no secrets)"
+    )
     assert all(f.confidence == "High" for f in findings)
 
 
@@ -239,9 +239,9 @@ async def test_prescan_persists_findings_exactly_once_in_node(monkeypatch):
     result = await worker_graph.deterministic_prescan_node(state)
     findings = result.get("findings", [])
     assert findings, "Expected Bandit to flag at least one issue"
-    assert (
-        len(saw_save_calls) == 1
-    ), f"prescan must persist exactly once per scan, got {len(saw_save_calls)} calls"
+    assert len(saw_save_calls) == 1, (
+        f"prescan must persist exactly once per scan, got {len(saw_save_calls)} calls"
+    )
     assert saw_save_calls[0][1] == findings, (
         "save_findings must be called with the same findings list returned "
         "in state — that's how downstream nodes get back the DB-assigned ids"
@@ -278,9 +278,9 @@ async def test_prescan_skips_persist_when_no_findings(monkeypatch):
 
     state = _state(files={"clean.py": "x = 1\n"})
     await worker_graph.deterministic_prescan_node(state)
-    assert (
-        saw_save_calls == []
-    ), "prescan must not call save_findings when findings is empty"
+    assert saw_save_calls == [], (
+        "prescan must not call save_findings when findings is empty"
+    )
 
 
 async def test_prescan_node_does_not_call_interrupt():

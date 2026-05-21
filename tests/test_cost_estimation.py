@@ -44,9 +44,9 @@ def test_count_tokens_in_plausible_range(provider, model, min_tokens, max_tokens
     where the tokenizer falls back to `len/4` silently."""
     cfg = _config(provider, model)
     tokens = asyncio.run(cost_estimation.count_tokens(SAMPLE_TEXT, cfg))
-    assert (
-        min_tokens <= tokens <= max_tokens
-    ), f"{provider}/{model}: got {tokens} tokens; expected {min_tokens}..{max_tokens}"
+    assert min_tokens <= tokens <= max_tokens, (
+        f"{provider}/{model}: got {tokens} tokens; expected {min_tokens}..{max_tokens}"
+    )
 
 
 def test_calculate_actual_cost_uses_litellm_map_when_override_absent():
@@ -179,9 +179,9 @@ def test_secondary_reasoning_prices_the_analysis_pass_twice():
     # reasoning:  1000 in @ $1000/1M = $1.00 + 250 out @ $2000/1M = $0.50
     # secondary:  1000 in @ $3000/1M = $3.00 + 250 out @ $6000/1M = $1.50
     assert est["slots"]["reasoning"]["total_estimated_cost"] == pytest.approx(1.50)
-    assert est["slots"]["reasoning_secondary"][
-        "total_estimated_cost"
-    ] == pytest.approx(4.50)
+    assert est["slots"]["reasoning_secondary"]["total_estimated_cost"] == pytest.approx(
+        4.50
+    )
     assert est["total_estimated_cost"] == pytest.approx(6.00)
     assert est["total_input_tokens"] == 2_000
 

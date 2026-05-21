@@ -26,10 +26,16 @@ from app.infrastructure.database.repositories.scan_repo import ScanRepository
 
 
 @pytest_asyncio.fixture
-async def two_tenants(db_session: AsyncSession) -> Tuple[db_models.Tenant, db_models.Tenant]:
+async def two_tenants(
+    db_session: AsyncSession,
+) -> Tuple[db_models.Tenant, db_models.Tenant]:
     """Create two non-default tenants A + B for cross-tenant assertions."""
-    tenant_a = db_models.Tenant(slug=f"tenant-a-{uuid.uuid4().hex[:6]}", display_name="Tenant A")
-    tenant_b = db_models.Tenant(slug=f"tenant-b-{uuid.uuid4().hex[:6]}", display_name="Tenant B")
+    tenant_a = db_models.Tenant(
+        slug=f"tenant-a-{uuid.uuid4().hex[:6]}", display_name="Tenant A"
+    )
+    tenant_b = db_models.Tenant(
+        slug=f"tenant-b-{uuid.uuid4().hex[:6]}", display_name="Tenant B"
+    )
     db_session.add_all([tenant_a, tenant_b])
     await db_session.flush()
     return tenant_a, tenant_b
@@ -204,8 +210,12 @@ async def test_scan_repo_paginated_scans_for_user_isolates_tenants(
         tenant_id=shared_seed["tenant_a"].id,
     )
     seen_ids = {row.id for row in rows}
-    assert bob_scan_id not in seen_ids, "tenant filter should hide Bob's scan from Alice"
-    assert shared_seed["alice_scan"].id in seen_ids, "Alice should still see her own scan"
+    assert bob_scan_id not in seen_ids, (
+        "tenant filter should hide Bob's scan from Alice"
+    )
+    assert shared_seed["alice_scan"].id in seen_ids, (
+        "Alice should still see her own scan"
+    )
 
 
 async def test_scan_repo_paginated_projects_isolates_tenants(
@@ -327,9 +337,7 @@ async def test_compliance_service_isolates_tenants(
     assert asvs["findings_matched"] == 1
 
 
-async def test_search_service_isolates_tenants(
-    db_session: AsyncSession, shared_seed
-):
+async def test_search_service_isolates_tenants(db_session: AsyncSession, shared_seed):
     """Global search across projects/scans/findings respects tenant."""
     service = SearchService(db_session)
     alice = shared_seed["alice"]

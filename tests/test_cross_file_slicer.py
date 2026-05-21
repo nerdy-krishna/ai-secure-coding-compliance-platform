@@ -43,14 +43,12 @@ _CODEBASE = {
         "    return rows\n"
     ),
     "db/queries.py": (
-        "# db queries\n" "def run_query(sql):\n" "    return DB.execute(sql)\n"
+        "# db queries\ndef run_query(sql):\n    return DB.execute(sql)\n"
     ),
     "api/handler.py": (
-        "# api handler\n"
-        "def handle_login(req):\n"
-        "    return authenticate(req.user)\n"
+        "# api handler\ndef handle_login(req):\n    return authenticate(req.user)\n"
     ),
-    "util/lonely.py": ("# lonely util\n" "def lonely():\n" "    return 1\n"),
+    "util/lonely.py": ("# lonely util\ndef lonely():\n    return 1\n"),
 }
 
 _REPO_MAP = SimpleNamespace(

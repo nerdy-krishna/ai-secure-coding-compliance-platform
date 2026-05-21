@@ -416,8 +416,7 @@ def render_models_section(data: ReportData) -> str:
             extra = ""
             if cs.merged_inputs or cs.dropped:
                 extra = (
-                    f" &middot; {cs.merged_inputs} merged "
-                    f"&middot; {cs.dropped} dropped"
+                    f" &middot; {cs.merged_inputs} merged &middot; {cs.dropped} dropped"
                 )
             consolidation_line = (
                 f'<div class="model-stat">Consolidation: {cs.raw_count} '

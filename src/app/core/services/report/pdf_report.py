@@ -43,15 +43,15 @@ _PRINT_STYLE = f"""
   size: A4;
   margin: 2.2cm 1.8cm 2cm 1.8cm;
   @top-left {{ content: "SCCAP — Security Scan Report"; font-size: 8.5px;
-    color: {_P['fg_subtle']}; }}
+    color: {_P["fg_subtle"]}; }}
   @top-right {{ content: string(doc-project); font-size: 8.5px;
-    color: {_P['fg_subtle']}; }}
+    color: {_P["fg_subtle"]}; }}
   @bottom-right {{ content: "Page " counter(page) " of " counter(pages);
-    font-size: 8.5px; color: {_P['fg_subtle']}; }}
+    font-size: 8.5px; color: {_P["fg_subtle"]}; }}
 }}
 @page :first {{ @top-left {{ content: none }} @top-right {{ content: none }} }}
 * {{ box-sizing: border-box; }}
-body {{ font-family: "DejaVu Sans", sans-serif; color: {_P['fg']};
+body {{ font-family: "DejaVu Sans", sans-serif; color: {_P["fg"]};
   font-size: 10.5px; line-height: 1.5; }}
 .doc-project {{ string-set: doc-project content(); position: absolute;
   left: -9999px; }}
@@ -59,86 +59,86 @@ body {{ font-family: "DejaVu Sans", sans-serif; color: {_P['fg']};
 .cover .brand {{ display: flex; align-items: center; gap: 8px;
   margin-bottom: 26px; }}
 .cover .brand .mark {{ width: 24px; height: 24px; border-radius: 6px;
-  background: {_P['accent']}; color: #fff; font-weight: 800;
+  background: {_P["accent"]}; color: #fff; font-weight: 800;
   font-size: 13px; text-align: center; line-height: 24px; }}
 .cover .brand .name {{ font-size: 11px; font-weight: 700;
-  color: {_P['fg']}; }}
-.cover h1 {{ font-size: 30px; margin: 0 0 6px; color: {_P['fg']}; }}
-.cover .project {{ font-size: 18px; color: {_P['fg_muted']};
+  color: {_P["fg"]}; }}
+.cover h1 {{ font-size: 30px; margin: 0 0 6px; color: {_P["fg"]}; }}
+.cover .project {{ font-size: 18px; color: {_P["fg_muted"]};
   margin: 0 0 24px; }}
-.cover .cmeta {{ font-size: 11px; color: {_P['fg_muted']}; }}
+.cover .cmeta {{ font-size: 11px; color: {_P["fg_muted"]}; }}
 .cover .cmeta div {{ margin-bottom: 3px; }}
-.cover .cmeta b {{ color: {_P['fg']}; }}
-h2.section {{ font-size: 14px; border-bottom: 2px solid {_P['accent']};
-  padding-bottom: 4px; margin: 18px 0 10px; color: {_P['fg']};
+.cover .cmeta b {{ color: {_P["fg"]}; }}
+h2.section {{ font-size: 14px; border-bottom: 2px solid {_P["accent"]};
+  padding-bottom: 4px; margin: 18px 0 10px; color: {_P["fg"]};
   page-break-after: avoid; }}
-.muted {{ color: {_P['fg_muted']}; }}
+.muted {{ color: {_P["fg_muted"]}; }}
 /* Scan-metadata block */
-.metablock {{ display: flex; flex-wrap: wrap; border: 1px solid {_P['border']};
+.metablock {{ display: flex; flex-wrap: wrap; border: 1px solid {_P["border"]};
   border-radius: 6px; overflow: hidden; }}
-.meta-cell {{ width: 50%; background: {_P['surface']}; padding: 6px 10px;
+.meta-cell {{ width: 50%; background: {_P["surface"]}; padding: 6px 10px;
   display: flex; justify-content: space-between; gap: 10px; font-size: 9.5px;
-  border-bottom: 1px solid {_P['border']}; }}
-.meta-cell .k {{ color: {_P['fg_subtle']}; }}
-.meta-cell .v {{ color: {_P['fg']}; font-weight: 700; text-align: right; }}
+  border-bottom: 1px solid {_P["border"]}; }}
+.meta-cell .k {{ color: {_P["fg_subtle"]}; }}
+.meta-cell .v {{ color: {_P["fg"]}; font-weight: 700; text-align: right; }}
 /* Executive summary */
-.exec {{ background: {_P['bg_soft']}; border: 1px solid {_P['border']};
+.exec {{ background: {_P["bg_soft"]}; border: 1px solid {_P["border"]};
   border-radius: 6px; padding: 10px 12px; font-size: 10px; margin: 0; }}
 /* Risk panel */
-.riskpanel {{ background: {_P['surface']}; border: 1px solid {_P['border']};
+.riskpanel {{ background: {_P["surface"]}; border: 1px solid {_P["border"]};
   border-radius: 6px; padding: 12px 14px; }}
 .risk-scores {{ display: flex; gap: 30px; margin-bottom: 9px; }}
 .risk-score {{ display: flex; flex-direction: column; }}
 .risk-score .rs-num {{ font-size: 24px; font-weight: 800;
-  color: {_P['accent']}; }}
-.risk-score.raw .rs-num {{ color: {_P['fg_subtle']}; }}
-.risk-score .rs-cap {{ font-size: 8px; color: {_P['fg_muted']};
+  color: {_P["accent"]}; }}
+.risk-score.raw .rs-num {{ color: {_P["fg_subtle"]}; }}
+.risk-score .rs-cap {{ font-size: 8px; color: {_P["fg_muted"]};
   text-transform: uppercase; letter-spacing: .04em; }}
-.resolved {{ font-size: 9px; color: {_P['fg_muted']}; margin-top: 8px; }}
+.resolved {{ font-size: 9px; color: {_P["fg_muted"]}; margin-top: 8px; }}
 /* Models & pipeline */
 .models {{ display: flex; flex-wrap: wrap; gap: 8px; }}
-.model-card {{ width: 48%; background: {_P['surface']};
-  border: 1px solid {_P['border']}; border-radius: 6px; padding: 8px 10px;
+.model-card {{ width: 48%; background: {_P["surface"]};
+  border: 1px solid {_P["border"]}; border-radius: 6px; padding: 8px 10px;
   page-break-inside: avoid; }}
 .model-cat {{ font-size: 7.5px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .05em; color: {_P['fg_subtle']}; }}
-.model-name {{ font-size: 10.5px; font-weight: 700; color: {_P['fg']}; }}
-.model-meta {{ font-size: 8.5px; color: {_P['fg_muted']};
+  letter-spacing: .05em; color: {_P["fg_subtle"]}; }}
+.model-name {{ font-size: 10.5px; font-weight: 700; color: {_P["fg"]}; }}
+.model-meta {{ font-size: 8.5px; color: {_P["fg_muted"]};
   font-family: "DejaVu Sans Mono", monospace; }}
-.model-stat {{ font-size: 8.5px; color: {_P['fg_muted']}; margin-top: 3px; }}
+.model-stat {{ font-size: 8.5px; color: {_P["fg_muted"]}; margin-top: 3px; }}
 /* Counts + chips */
 .counts {{ margin-top: 4px; }}
 .count {{ display: inline-block; border-radius: 5px; padding: 3px 9px;
   font-size: 9px; font-weight: 700; margin-right: 5px; }}
 /* Finding card */
-.finding {{ page-break-inside: avoid; background: {_P['surface']};
-  border: 1px solid {_P['border']}; border-radius: 6px;
+.finding {{ page-break-inside: avoid; background: {_P["surface"]};
+  border: 1px solid {_P["border"]}; border-radius: 6px;
   padding: 12px 14px; margin-bottom: 10px; }}
-.finding h3 {{ font-size: 12px; margin: 0 0 4px; color: {_P['fg']}; }}
+.finding h3 {{ font-size: 12px; margin: 0 0 4px; color: {_P["fg"]}; }}
 .sev {{ display: inline-block; font-size: 8.5px; font-weight: 700;
   padding: 1.5px 7px; border-radius: 4px; margin-right: 6px; }}
 .loc {{ font-family: "DejaVu Sans Mono", monospace; font-size: 9px;
-  color: {_P['fg_muted']}; }}
-.prov {{ font-size: 8.5px; color: {_P['fg_subtle']}; margin: 3px 0; }}
+  color: {_P["fg_muted"]}; }}
+.prov {{ font-size: 8.5px; color: {_P["fg_subtle"]}; margin: 3px 0; }}
 .label {{ font-size: 8.5px; font-weight: 700; text-transform: uppercase;
-  color: {_P['fg_subtle']}; letter-spacing: .05em; margin: 8px 0 2px; }}
-.body {{ white-space: pre-wrap; overflow-wrap: anywhere; color: {_P['fg']}; }}
-pre {{ background: {_P['bg_soft']}; border: 1px solid {_P['border']};
+  color: {_P["fg_subtle"]}; letter-spacing: .05em; margin: 8px 0 2px; }}
+.body {{ white-space: pre-wrap; overflow-wrap: anywhere; color: {_P["fg"]}; }}
+pre {{ background: {_P["bg_soft"]}; border: 1px solid {_P["border"]};
   border-radius: 5px; padding: 7px 9px; font-size: 8.5px;
   font-family: "DejaVu Sans Mono", monospace; white-space: pre-wrap;
   overflow-wrap: anywhere; }}
 .also {{ font-family: "DejaVu Sans Mono", monospace; font-size: 9px;
-  color: {_P['fg_subtle']}; margin-top: 6px; }}
-.empty {{ color: {_P['fg_muted']}; }}
+  color: {_P["fg_subtle"]}; margin-top: 6px; }}
+.empty {{ color: {_P["fg_muted"]}; }}
 /* Compact disposition lists */
 .compact {{ list-style: none; margin: 0; padding: 0; }}
-.cf-row {{ background: {_P['surface']}; border: 1px solid {_P['border']};
+.cf-row {{ background: {_P["surface"]}; border: 1px solid {_P["border"]};
   border-radius: 5px; padding: 6px 9px; margin-bottom: 5px; font-size: 9px;
   page-break-inside: avoid; }}
-.cf-title {{ font-weight: 700; color: {_P['fg']}; }}
+.cf-title {{ font-weight: 700; color: {_P["fg"]}; }}
 .cf-loc {{ font-family: "DejaVu Sans Mono", monospace; font-size: 8px;
-  color: {_P['fg_muted']}; }}
-.cf-note {{ display: block; margin-top: 3px; color: {_P['fg_muted']}; }}
+  color: {_P["fg_muted"]}; }}
+.cf-note {{ display: block; margin-top: 3px; color: {_P["fg_muted"]}; }}
 """
 
 
@@ -205,14 +205,13 @@ def _finding_card(finding) -> str:
     lines = affected_lines(finding)
     also = (
         f'<div class="also">also affects: '
-        f'{", ".join("line " + str(n) for n in lines)}</div>'
+        f"{', '.join('line ' + str(n) for n in lines)}</div>"
         if lines
         else ""
     )
     agents = ", ".join(finding.corroborating_agents or [])
     agents_row = (
-        f'<div class="label">Corroborated by</div>'
-        f'<div class="body">{_e(agents)}</div>'
+        f'<div class="label">Corroborated by</div><div class="body">{_e(agents)}</div>'
         if agents
         else ""
     )

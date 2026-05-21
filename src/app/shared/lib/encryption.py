@@ -26,7 +26,9 @@ class FernetEncrypt:
     _key_str = (
         _raw_key.get_secret_value()
         if hasattr(_raw_key, "get_secret_value")
-        else str(_raw_key) if _raw_key else ""
+        else str(_raw_key)
+        if _raw_key
+        else ""
     )
     if not _key_str:
         raise ValueError(

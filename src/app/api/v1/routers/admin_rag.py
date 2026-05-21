@@ -21,6 +21,7 @@ Protection requirements for raw_content (V14.1.2):
     from a tenant-scoped path (currently always admin so plaintext acceptable
     today, but document the expectation).
 """
+
 import asyncio
 import logging
 import math
@@ -560,8 +561,7 @@ async def ingest_documents(
                     raise HTTPException(
                         status_code=400,
                         detail=(
-                            f"CSV cell for '{k}' exceeds "
-                            f"{MAX_RAG_CSV_CELL_BYTES} bytes"
+                            f"CSV cell for '{k}' exceeds {MAX_RAG_CSV_CELL_BYTES} bytes"
                         ),
                     )
             metadata["framework_name"] = framework_name

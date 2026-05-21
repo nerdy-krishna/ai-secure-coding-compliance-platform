@@ -110,7 +110,7 @@ def consume_state(cookie_value: str) -> SsoStateClaims:
     required = {"provider_id", "nonce", "state", "return_to", "ts"}
     if not required.issubset(payload.keys()):
         raise ValueError(
-            "state cookie payload missing keys: " f"{required - set(payload.keys())}"
+            f"state cookie payload missing keys: {required - set(payload.keys())}"
         )
     return payload  # type: ignore[return-value]
 

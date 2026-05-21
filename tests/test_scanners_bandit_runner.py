@@ -86,9 +86,7 @@ async def test_bandit_description_is_html_escaped_and_truncated():
     # a long path-like string in a hardcoded password (B105) trigger so
     # the resulting `issue_text` is non-trivial.
     files = {
-        "secret.py": (
-            'PASSWORD = "<script>alert(1)</script>" + ("A" * 250)\n' "x = 1\n"
-        )
+        "secret.py": ('PASSWORD = "<script>alert(1)</script>" + ("A" * 250)\nx = 1\n')
     }
     with stage_files(files) as (staged_dir, original_paths):
         findings = await run_bandit(staged_dir, original_paths)

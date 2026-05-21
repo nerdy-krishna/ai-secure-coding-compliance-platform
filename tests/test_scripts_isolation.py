@@ -46,6 +46,6 @@ def test_no_prod_module_imports_app_scripts(prod_dir: Path):
             for pattern in _FORBIDDEN_PATTERNS:
                 if pattern.search(line):
                     offenders.append(f"{path}:{line_no}: {line.strip()}")
-    assert (
-        not offenders
-    ), "Production modules MUST NOT import from app.scripts:\n" + "\n".join(offenders)
+    assert not offenders, (
+        "Production modules MUST NOT import from app.scripts:\n" + "\n".join(offenders)
+    )

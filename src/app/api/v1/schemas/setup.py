@@ -20,8 +20,7 @@ class SetupRequest(BaseModel):
     llm_provider: Literal["openai", "anthropic", "google", "deepseek", "xai"] = Field(
         ...,
         description=(
-            "LLM Provider. One of: 'openai', 'anthropic', 'google', "
-            "'deepseek', 'xai'."
+            "LLM Provider. One of: 'openai', 'anthropic', 'google', 'deepseek', 'xai'."
         ),
     )
     # Breach-database (HIBP) check on llm_api_key/admin_password is performed at the router layer

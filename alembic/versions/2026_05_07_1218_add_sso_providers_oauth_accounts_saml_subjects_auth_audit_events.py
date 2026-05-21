@@ -232,8 +232,7 @@ def upgrade() -> None:
     # M15: ts DESC index so the admin audit page (most-recent-first) stays
     # fast as the table grows.
     op.execute(
-        "CREATE INDEX ix_auth_audit_events_ts_desc "
-        "ON auth_audit_events (ts DESC)"
+        "CREATE INDEX ix_auth_audit_events_ts_desc ON auth_audit_events (ts DESC)"
     )
 
     # ---- M7: append-only enforcement on auth_audit_events ----
@@ -264,15 +263,9 @@ def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS auth_audit_immutable ON auth_audit_events")
     op.execute("DROP FUNCTION IF EXISTS auth_audit_events_block_modify()")
 
-    op.drop_index(
-        "ix_auth_audit_events_ts_desc", table_name="auth_audit_events"
-    )
-    op.drop_index(
-        "ix_auth_audit_events_provider_id", table_name="auth_audit_events"
-    )
-    op.drop_index(
-        "ix_auth_audit_events_user_id", table_name="auth_audit_events"
-    )
+    op.drop_index("ix_auth_audit_events_ts_desc", table_name="auth_audit_events")
+    op.drop_index("ix_auth_audit_events_provider_id", table_name="auth_audit_events")
+    op.drop_index("ix_auth_audit_events_user_id", table_name="auth_audit_events")
     op.drop_index("ix_auth_audit_events_event", table_name="auth_audit_events")
     op.drop_table("auth_audit_events")
 
@@ -280,9 +273,7 @@ def downgrade() -> None:
     op.drop_index("ix_saml_subjects_user_id", table_name="saml_subjects")
     op.drop_table("saml_subjects")
 
-    op.drop_index(
-        "ix_oauth_accounts_provider_id", table_name="oauth_accounts"
-    )
+    op.drop_index("ix_oauth_accounts_provider_id", table_name="oauth_accounts")
     op.drop_index("ix_oauth_accounts_user_id", table_name="oauth_accounts")
     op.drop_table("oauth_accounts")
 

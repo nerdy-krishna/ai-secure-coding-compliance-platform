@@ -121,9 +121,7 @@ def upgrade() -> None:
     # auth_audit_events has the immutability trigger — drop, backfill,
     # restore. The trigger is RECREATED below; operators can verify
     # post-migration via `\d+ auth_audit_events` in psql.
-    op.execute(
-        "DROP TRIGGER IF EXISTS auth_audit_immutable ON auth_audit_events"
-    )
+    op.execute("DROP TRIGGER IF EXISTS auth_audit_immutable ON auth_audit_events")
     op.execute(
         """
         UPDATE auth_audit_events
@@ -162,9 +160,7 @@ def downgrade() -> None:
 
     # Restore the audit immutability dance (drop trigger before any DDL on
     # the audited table, then recreate after).
-    op.execute(
-        "DROP TRIGGER IF EXISTS auth_audit_immutable ON auth_audit_events"
-    )
+    op.execute("DROP TRIGGER IF EXISTS auth_audit_immutable ON auth_audit_events")
 
     for table_name, fk_name in reversed(_TARGETS):
         op.drop_constraint(fk_name, table_name, type_="foreignkey")

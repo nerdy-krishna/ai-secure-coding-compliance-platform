@@ -49,7 +49,5 @@ def downgrade() -> None:
         "llm_interactions",
         type_="foreignkey",
     )
-    op.drop_index(
-        "ix_llm_interactions_llm_config_id", table_name="llm_interactions"
-    )
+    op.drop_index("ix_llm_interactions_llm_config_id", table_name="llm_interactions")
     op.drop_column("llm_interactions", "llm_config_id")

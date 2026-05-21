@@ -10,13 +10,10 @@ or DB is needed.
 
 from __future__ import annotations
 
-import asyncio
-import json
-import subprocess
 import uuid
 from pathlib import Path
 from typing import Any, Dict
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -26,6 +23,7 @@ pytestmark = pytest.mark.asyncio
 # ---------------------------------------------------------------------------
 # Helpers — minimal state dict and stub objects
 # ---------------------------------------------------------------------------
+
 
 def _state(files: Dict[str, str]) -> Dict[str, Any]:
     return {
@@ -84,6 +82,7 @@ class _StubScanRepo:
 # (a) 0 rules → Semgrep skipped
 # ---------------------------------------------------------------------------
 
+
 async def test_prescan_skips_semgrep_when_zero_rules(monkeypatch):
     """With an empty DB stub, select_rules_for_scan always returns 0 rules.
     run_semgrep must be called with config_path=None → returns [] immediately.
@@ -97,7 +96,7 @@ async def test_prescan_skips_semgrep_when_zero_rules(monkeypatch):
 
     semgrep_calls: list[dict] = []
 
-    original_run_semgrep = prescan_mod.run_semgrep
+    original_run_semgrep = prescan_mod.run_semgrep  # noqa: F841 — captured for potential restore
 
     async def _tracking_semgrep(staged_dir, original_paths, config_path=None):
         semgrep_calls.append({"config_path": config_path})
@@ -112,6 +111,7 @@ async def test_prescan_skips_semgrep_when_zero_rules(monkeypatch):
 
     state = _state({"hello.py": "x = 1\n"})
     from app.infrastructure.workflows.nodes.prescan import deterministic_prescan_node
+
     result = await deterministic_prescan_node(state)
 
     # Prescan must complete without raising
@@ -125,6 +125,7 @@ async def test_prescan_skips_semgrep_when_zero_rules(monkeypatch):
 # ---------------------------------------------------------------------------
 # (b) 2 ingested rules → run_semgrep called with a real config_path
 # ---------------------------------------------------------------------------
+
 
 async def test_prescan_passes_config_path_when_rules_exist(monkeypatch, tmp_path):
     """When the rule selector returns non-empty rules, run_semgrep must
@@ -162,10 +163,10 @@ async def test_prescan_passes_config_path_when_rules_exist(monkeypatch, tmp_path
         return stub_rules
 
     import app.core.services.semgrep_ingestion.selector as selector_mod
+
     monkeypatch.setattr(selector_mod, "select_rules_for_scan", _fake_select)
 
     # Also import inside the prescan_mod closure (it does a local import)
-    import app.core.services.semgrep_ingestion as ing_pkg
     monkeypatch.setattr(
         "app.core.services.semgrep_ingestion.selector.select_rules_for_scan",
         _fake_select,
@@ -184,6 +185,7 @@ async def test_prescan_passes_config_path_when_rules_exist(monkeypatch, tmp_path
 
     state = _state({"main.py": "x = 1\n"})
     from app.infrastructure.workflows.nodes.prescan import deterministic_prescan_node
+
     result = await deterministic_prescan_node(state)
 
     assert isinstance(result, dict)
@@ -195,6 +197,7 @@ async def test_prescan_passes_config_path_when_rules_exist(monkeypatch, tmp_path
 # ---------------------------------------------------------------------------
 # (c) run_semgrep returns [] when config_path is None (direct unit test)
 # ---------------------------------------------------------------------------
+
 
 async def test_run_semgrep_returns_empty_for_none_config_path():
     from app.infrastructure.scanners.semgrep_runner import run_semgrep

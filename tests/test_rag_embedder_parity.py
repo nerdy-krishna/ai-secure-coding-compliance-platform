@@ -111,13 +111,13 @@ def test_embedder_matches_pr1_goldens() -> None:
         norm_actual = math.sqrt(sum(x * x for x in vec))
 
         for i, (a, g) in enumerate(zip(head_actual, golden["head"])):
-            assert _close(
-                a, g
-            ), f"{text!r} head[{i}] drifted: actual={a!r}, golden={g!r}"
+            assert _close(a, g), (
+                f"{text!r} head[{i}] drifted: actual={a!r}, golden={g!r}"
+            )
         for i, (a, g) in enumerate(zip(tail_actual, golden["tail"])):
-            assert _close(
-                a, g
-            ), f"{text!r} tail[{i}] drifted: actual={a!r}, golden={g!r}"
+            assert _close(a, g), (
+                f"{text!r} tail[{i}] drifted: actual={a!r}, golden={g!r}"
+            )
         assert _close(norm_actual, golden["norm"]), (
             f"{text!r} L2 norm drifted: actual={norm_actual!r}, "
             f"golden={golden['norm']!r}"

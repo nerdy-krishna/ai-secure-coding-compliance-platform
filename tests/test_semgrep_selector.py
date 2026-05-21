@@ -11,11 +11,12 @@ import uuid
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
-from app.infrastructure.database.repositories.semgrep_rule_repo import SemgrepRuleRepository
+from app.infrastructure.database.repositories.semgrep_rule_repo import (
+    SemgrepRuleRepository,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -24,6 +25,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "semgrep_rules"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _make_source(
     db: AsyncSession,
@@ -34,16 +36,18 @@ async def _make_source(
 ) -> db_models.SemgrepRuleSource:
     slug = slug or f"src-{uuid.uuid4().hex[:8]}"
     repo = SemgrepRuleRepository(db)
-    source = await repo.upsert_source({
-        "slug": slug,
-        "display_name": slug,
-        "description": "test source",
-        "repo_url": "https://github.com/example/rules",
-        "branch": "main",
-        "subpath": None,
-        "license_spdx": license_spdx,
-        "author": "test",
-    })
+    source = await repo.upsert_source(
+        {
+            "slug": slug,
+            "display_name": slug,
+            "description": "test source",
+            "repo_url": "https://github.com/example/rules",
+            "branch": "main",
+            "subpath": None,
+            "license_spdx": license_spdx,
+            "author": "test",
+        }
+    )
     source.enabled = enabled
     await db.flush()
     return source
@@ -61,31 +65,35 @@ async def _add_rule(
 ) -> db_models.SemgrepRule:
     namespaced_id = namespaced_id or f"{source.slug}.rule-{uuid.uuid4().hex[:6]}"
     repo = SemgrepRuleRepository(db)
-    rule, _ = await repo.upsert_rule(source.id, {
-        "namespaced_id": namespaced_id,
-        "original_id": namespaced_id.split(".")[-1],
-        "relative_path": "rules/test.yaml",
-        "languages": languages or ["python"],
-        "severity": severity,
-        "category": "security",
-        "technology": technology or [],
-        "cwe": ["CWE-89"],
-        "owasp": [],
-        "confidence": "HIGH",
-        "likelihood": None,
-        "impact": None,
-        "message": "test rule",
-        "raw_yaml": {"id": namespaced_id, "languages": languages or ["python"]},
-        "content_hash": uuid.uuid4().hex,
-        "license_spdx": source.license_spdx,
-        "enabled": enabled,
-    })
+    rule, _ = await repo.upsert_rule(
+        source.id,
+        {
+            "namespaced_id": namespaced_id,
+            "original_id": namespaced_id.split(".")[-1],
+            "relative_path": "rules/test.yaml",
+            "languages": languages or ["python"],
+            "severity": severity,
+            "category": "security",
+            "technology": technology or [],
+            "cwe": ["CWE-89"],
+            "owasp": [],
+            "confidence": "HIGH",
+            "likelihood": None,
+            "impact": None,
+            "message": "test rule",
+            "raw_yaml": {"id": namespaced_id, "languages": languages or ["python"]},
+            "content_hash": uuid.uuid4().hex,
+            "license_spdx": source.license_spdx,
+            "enabled": enabled,
+        },
+    )
     return rule
 
 
 # ---------------------------------------------------------------------------
 # Tests — select_rules_for_scan
 # ---------------------------------------------------------------------------
+
 
 async def test_select_rules_returns_matching_language(db_session: AsyncSession):
     src = await _make_source(db_session)
@@ -179,7 +187,9 @@ async def test_select_rules_no_match_returns_empty(db_session: AsyncSession):
 
 async def test_select_rules_technology_filter(db_session: AsyncSession):
     src = await _make_source(db_session)
-    rule_with_tech = await _add_rule(db_session, src, languages=["python"], technology=["django"])
+    rule_with_tech = await _add_rule(
+        db_session, src, languages=["python"], technology=["django"]
+    )
     rule_no_tech = await _add_rule(db_session, src, languages=["python"], technology=[])
 
     repo = SemgrepRuleRepository(db_session)
@@ -198,6 +208,7 @@ async def test_select_rules_technology_filter(db_session: AsyncSession):
 # ---------------------------------------------------------------------------
 # Tests — coverage summary
 # ---------------------------------------------------------------------------
+
 
 async def test_coverage_summary_covered_when_rules_exist(db_session: AsyncSession):
     src = await _make_source(db_session)
@@ -243,6 +254,7 @@ async def test_coverage_summary_recommends_disabled_sources(db_session: AsyncSes
 # Tests — upsert_rule dedup by content_hash
 # ---------------------------------------------------------------------------
 
+
 async def test_upsert_rule_deduplicates_unchanged_hash(db_session: AsyncSession):
     src = await _make_source(db_session)
     shared_hash = uuid.uuid4().hex
@@ -272,13 +284,14 @@ async def test_upsert_rule_deduplicates_unchanged_hash(db_session: AsyncSession)
     rule_b, is_new_b = await repo.upsert_rule(src.id, data)
 
     assert is_new_a is True
-    assert is_new_b is False   # unchanged hash → no update
+    assert is_new_b is False  # unchanged hash → no update
     assert rule_a.id == rule_b.id
 
 
 # ---------------------------------------------------------------------------
 # Tests — delete_rules_not_in safety guard
 # ---------------------------------------------------------------------------
+
 
 async def test_delete_rules_not_in_safety_guard(db_session: AsyncSession):
     """When keep_namespaced_ids is empty, nothing must be deleted."""
@@ -292,6 +305,7 @@ async def test_delete_rules_not_in_safety_guard(db_session: AsyncSession):
 
     # Rule must still exist
     from sqlalchemy import select
+
     still_there = await db_session.scalar(
         select(db_models.SemgrepRule).where(db_models.SemgrepRule.id == rule.id)
     )
@@ -301,7 +315,7 @@ async def test_delete_rules_not_in_safety_guard(db_session: AsyncSession):
 async def test_delete_rules_not_in_removes_stale(db_session: AsyncSession):
     src = await _make_source(db_session)
     rule_keep = await _add_rule(db_session, src)
-    rule_stale = await _add_rule(db_session, src)
+    _rule_stale = await _add_rule(db_session, src)  # created for deletion side-effect
     await db_session.flush()
 
     repo = SemgrepRuleRepository(db_session)

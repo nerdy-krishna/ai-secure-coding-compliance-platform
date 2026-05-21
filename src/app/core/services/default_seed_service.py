@@ -303,8 +303,7 @@ _ASVS_AGENT_SPECS: List[Dict[str, Any]] = [
     {
         "name": "CryptographyAgent",
         "description": (
-            "Evaluates the use of encryption, hashing algorithms, and "
-            "key management."
+            "Evaluates the use of encryption, hashing algorithms, and key management."
         ),
         "domain_query": {
             "keywords": (
@@ -991,7 +990,7 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
     {
         "name": "InputValidationAgent",
         "description": (
-            "Improper input validation. Covers CWE-20, CWE-129, " "CWE-1284, CWE-1287."
+            "Improper input validation. Covers CWE-20, CWE-129, CWE-1284, CWE-1287."
         ),
         "domain_query": {
             "keywords": (
@@ -1109,8 +1108,7 @@ _CWE_AGENT_SPECS: List[Dict[str, Any]] = [
     {
         "name": "PrivilegeManagementAgent",
         "description": (
-            "Privilege management. Covers CWE-269, CWE-250, CWE-271, "
-            "CWE-272, CWE-1390."
+            "Privilege management. Covers CWE-269, CWE-250, CWE-271, CWE-272, CWE-1390."
         ),
         "domain_query": {
             "keywords": (

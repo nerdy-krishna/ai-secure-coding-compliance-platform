@@ -651,11 +651,16 @@ class ScanQueryService:
 
         # Read consolidation flow map from CONSOLIDATING event
         import json as _json
+
         flow_map: list[dict] | None = None
         full_nodes: list[api_models.SankeyNode] | None = None
         full_links: list[api_models.SankeyLink] | None = None
         for ev in reversed(scan.events or []):
-            if ev.stage_name == "CONSOLIDATING" and ev.details and ev.details.get("flow_map_json"):
+            if (
+                ev.stage_name == "CONSOLIDATING"
+                and ev.details
+                and ev.details.get("flow_map_json")
+            ):
                 try:
                     flow_map = _json.loads(ev.details["flow_map_json"])
                     break
@@ -693,57 +698,118 @@ class ScanQueryService:
             flinks: list[api_models.SankeyLink] = []
 
             # SAST tool nodes
-            sast_colors = {"bandit": "#3b82f6", "semgrep": "#a855f7", "gitleaks": "#dc2626", "osv": "#0891b2"}
             for src, cnt in sorted(sast_by_source.items()):
-                fnodes.append(api_models.SankeyNode(id=f"sast_{src}", label=f"{src} ({cnt})"))
+                fnodes.append(
+                    api_models.SankeyNode(id=f"sast_{src}", label=f"{src} ({cnt})")
+                )
 
             # SAST → raw_llm flows (proportional)
             total_sast = sum(sast_by_source.values())
             for agent, cnt in sorted(merged_by_agent.items()):
                 if total_sast > 0:
                     for src, scnt in sast_by_source.items():
-                        share = max(1, round(scnt / total_sast * sum(
-                            merged_by_agent.get(agent, 0) + dropped_by_agent.get(agent, 0) + passthrough_by_agent.get(agent, 0)
-                        ) / len(sast_by_source)))
-                        flinks.append(api_models.SankeyLink(source=f"sast_{src}", target=f"raw_{agent}_merged", value=min(share, scnt)))
+                        share = max(
+                            1,
+                            round(
+                                scnt
+                                / total_sast
+                                * sum(
+                                    merged_by_agent.get(agent, 0)
+                                    + dropped_by_agent.get(agent, 0)
+                                    + passthrough_by_agent.get(agent, 0)
+                                )
+                                / len(sast_by_source)
+                            ),
+                        )
+                        flinks.append(
+                            api_models.SankeyLink(
+                                source=f"sast_{src}",
+                                target=f"raw_{agent}_merged",
+                                value=min(share, scnt),
+                            )
+                        )
 
-            # Raw LLM agent nodes (three per agent: merged, dropped, passthrough)
-            agent_colors = ["#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899", "#f43f5e", "#ef4444"]
-            ai = 0
-            for agent in sorted(set(list(merged_by_agent.keys()) + list(dropped_by_agent.keys()) + list(passthrough_by_agent.keys()))):
-                color = agent_colors[ai % len(agent_colors)]
-                ai += 1
+            # Raw LLM agent nodes with merged/dropped/passthrough nodes
+            for agent in sorted(
+                set(
+                    list(merged_by_agent.keys())
+                    + list(dropped_by_agent.keys())
+                    + list(passthrough_by_agent.keys())
+                )
+            ):
                 short = agent[:16]
                 if merged_by_agent.get(agent, 0) > 0:
-                    fnodes.append(api_models.SankeyNode(id=f"raw_{agent}_merged", label=f"{short} → ({merged_by_agent[agent]})"))
+                    fnodes.append(
+                        api_models.SankeyNode(
+                            id=f"raw_{agent}_merged",
+                            label=f"{short} → ({merged_by_agent[agent]})",
+                        )
+                    )
                 if dropped_by_agent.get(agent, 0) > 0:
-                    fnodes.append(api_models.SankeyNode(id=f"raw_{agent}_dropped", label=f"✗ {dropped_by_agent[agent]}"))
+                    fnodes.append(
+                        api_models.SankeyNode(
+                            id=f"raw_{agent}_dropped",
+                            label=f"✗ {dropped_by_agent[agent]}",
+                        )
+                    )
                 if passthrough_by_agent.get(agent, 0) > 0:
-                    fnodes.append(api_models.SankeyNode(id=f"raw_{agent}_pass", label=f"→ ({passthrough_by_agent[agent]})"))
+                    fnodes.append(
+                        api_models.SankeyNode(
+                            id=f"raw_{agent}_pass",
+                            label=f"→ ({passthrough_by_agent[agent]})",
+                        )
+                    )
                 # Merged raw → consolidated flows (proportional to consolidated severity distribution)
                 total_cons = sum(cons_by_sev.values())
                 if merged_by_agent.get(agent, 0) > 0 and total_cons > 0:
                     for sev, scnt in cons_by_sev.items():
-                        share = max(1, round(scnt / total_cons * merged_by_agent[agent]))
-                        flinks.append(api_models.SankeyLink(source=f"raw_{agent}_merged", target=f"cons_{sev}", value=share))
+                        share = max(
+                            1, round(scnt / total_cons * merged_by_agent[agent])
+                        )
+                        flinks.append(
+                            api_models.SankeyLink(
+                                source=f"raw_{agent}_merged",
+                                target=f"cons_{sev}",
+                                value=share,
+                            )
+                        )
                 # Passthrough → consolidated (same proportional)
                 if passthrough_by_agent.get(agent, 0) > 0 and total_cons > 0:
                     for sev, scnt in cons_by_sev.items():
-                        share = max(1, round(scnt / total_cons * passthrough_by_agent[agent]))
-                        flinks.append(api_models.SankeyLink(source=f"raw_{agent}_pass", target=f"cons_{sev}", value=share))
+                        share = max(
+                            1, round(scnt / total_cons * passthrough_by_agent[agent])
+                        )
+                        flinks.append(
+                            api_models.SankeyLink(
+                                source=f"raw_{agent}_pass",
+                                target=f"cons_{sev}",
+                                value=share,
+                            )
+                        )
 
             # Consolidated nodes
-            sev_colors = {"CRITICAL": "#dc2626", "HIGH": "#f97316", "MEDIUM": "#eab308", "LOW": "#22c55e", "INFORMATIONAL": "#64748b"}
             for sev, cnt in sorted(cons_by_sev.items()):
-                fnodes.append(api_models.SankeyNode(id=f"cons_{sev}", label=f"{sev} ({cnt})"))
+                fnodes.append(
+                    api_models.SankeyNode(id=f"cons_{sev}", label=f"{sev} ({cnt})")
+                )
 
             # Dropped node
             total_dropped = sum(dropped_by_agent.values())
             if total_dropped > 0:
-                fnodes.append(api_models.SankeyNode(id="dropped", label=f"Dropped ({total_dropped})"))
+                fnodes.append(
+                    api_models.SankeyNode(
+                        id="dropped", label=f"Dropped ({total_dropped})"
+                    )
+                )
                 for agent, cnt in dropped_by_agent.items():
                     if cnt > 0:
-                        flinks.append(api_models.SankeyLink(source=f"raw_{agent}_dropped", target="dropped", value=cnt))
+                        flinks.append(
+                            api_models.SankeyLink(
+                                source=f"raw_{agent}_dropped",
+                                target="dropped",
+                                value=cnt,
+                            )
+                        )
 
             full_nodes = fnodes
             full_links = flinks
