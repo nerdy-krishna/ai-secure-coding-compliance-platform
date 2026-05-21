@@ -530,6 +530,17 @@ async def lifespan(app: FastAPI):
         name="retention-sweeper",
     )
 
+    # --- Stuck-scan sweeper: mark scans FAILED when the worker is down ---
+    from app.infrastructure.messaging.stuck_scan_sweeper import (
+        run_stuck_scan_sweeper,
+    )
+
+    stuck_scan_stop = asyncio.Event()
+    stuck_scan_task = asyncio.create_task(
+        run_stuck_scan_sweeper(stuck_scan_stop),
+        name="stuck-scan-sweeper",
+    )
+
     # --- Semgrep ingestion: reset stuck runs + upsert config defaults ---
     try:
         from app.infrastructure.database.repositories.semgrep_rule_repo import (
@@ -625,6 +636,7 @@ async def lifespan(app: FastAPI):
     findings_source_sweeper_stop.set()
     retention_sweeper_stop.set()
     semgrep_sweeper_stop.set()
+    stuck_scan_stop.set()
     if progress_bus is not None:
         try:
             await progress_bus.stop()
@@ -666,6 +678,13 @@ async def lifespan(app: FastAPI):
         semgrep_sweeper_task.cancel()
     except Exception as e:
         logger.warning(f"semgrep_sync_sweeper shutdown error: {e}")
+    try:
+        await asyncio.wait_for(stuck_scan_task, timeout=5)
+    except asyncio.TimeoutError:
+        logger.warning("stuck_scan_sweeper did not stop within 5s; cancelling.")
+        stuck_scan_task.cancel()
+    except Exception as e:
+        logger.warning(f"stuck_scan_sweeper shutdown error: {e}")
 
     from app.infrastructure.messaging.publisher import close_publisher
 
