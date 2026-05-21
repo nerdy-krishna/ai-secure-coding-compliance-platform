@@ -556,7 +556,9 @@ async def lifespan(app: FastAPI):
 
         _SEMGREP_CONFIG_DEFAULTS = {
             "semgrep_ingestion.global_enabled": {"value": True},
-            "semgrep_ingestion.workdir": {"value": "/tmp/sccap-semgrep-rules"},  # nosec B108 — configurable default, not a tmpfile call
+            "semgrep_ingestion.workdir": {
+                "value": "/tmp/sccap-semgrep-rules"
+            },  # nosec B108 — configurable default, not a tmpfile call
             "semgrep_ingestion.sweep_interval_seconds": {"value": 900},
             "semgrep_ingestion.max_rules_per_scan": {"value": 5000},
             "semgrep_ingestion.allowed_licenses": {

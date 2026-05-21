@@ -74,16 +74,12 @@ def _is_configured() -> bool:
     secret_val = (
         secret.get_secret_value()
         if secret is not None and hasattr(secret, "get_secret_value")
-        else str(secret)
-        if secret is not None
-        else ""
+        else str(secret) if secret is not None else ""
     )
     public_val = (
         public.get_secret_value()
         if public is not None and hasattr(public, "get_secret_value")
-        else str(public)
-        if public is not None
-        else ""
+        else str(public) if public is not None else ""
     )
     return bool(secret_val) and bool(public_val)
 
@@ -127,16 +123,12 @@ def get_langfuse() -> Optional[Any]:
             secret_val = (
                 secret.get_secret_value()
                 if secret is not None and hasattr(secret, "get_secret_value")
-                else str(secret)
-                if secret is not None
-                else ""
+                else str(secret) if secret is not None else ""
             )
             public_val = (
                 public.get_secret_value()
                 if public is not None and hasattr(public, "get_secret_value")
-                else str(public)
-                if public is not None
-                else ""
+                else str(public) if public is not None else ""
             )
 
             _client = Langfuse(
