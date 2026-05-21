@@ -600,11 +600,22 @@ class ScanQueryService:
                 detail="Scan not found or not authorized.",
             )
 
-        # Bucket findings
+        # Query findings directly instead of lazy-loading scan.findings
+        # to avoid MissingGreenlet errors outside the session context.
+        all_findings = list(
+            (
+                await self.repo.db.execute(
+                    select(db_models.Finding).where(
+                        db_models.Finding.scan_id == scan_id
+                    )
+                )
+            ).scalars().all()
+        )
+
         sast: list[api_models.VulnerabilityFindingResponse] = []
         raw_llm: list[api_models.VulnerabilityFindingResponse] = []
         consolidated: list[api_models.VulnerabilityFindingResponse] = []
-        for f in scan.findings:
+        for f in all_findings:
             resp = api_models.VulnerabilityFindingResponse.from_orm(f)
             bucket = getattr(f, "finding_bucket", "consolidated")
             if bucket == "sast":
