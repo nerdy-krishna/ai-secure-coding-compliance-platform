@@ -19,7 +19,7 @@ import enum
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, TypeVar
+from typing import Awaitable, Callable, Dict, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +58,7 @@ class CircuitBreakerOpenError(Exception):
         self.recovery_at = recovery_at
         remaining = max(0, recovery_at - time.monotonic())
         super().__init__(
-            f"Circuit breaker '{key}' is OPEN; "
-            f"recovery probe in {remaining:.1f}s"
+            f"Circuit breaker '{key}' is OPEN; " f"recovery probe in {remaining:.1f}s"
         )
 
 

@@ -1034,7 +1034,7 @@ _sentinel = object()
 async def update_account_preferences(
     body: PreferencesBody,
     user: db_models.User = Depends(current_active_user),
-    db = Depends(get_db),
+    db=Depends(get_db),
 ):
     """Merge the provided preference keys into the user's stored JSONB.
     Omitted keys keep their existing values; explicit nulls clear a key."""

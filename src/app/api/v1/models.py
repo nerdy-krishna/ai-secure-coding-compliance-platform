@@ -1055,9 +1055,12 @@ class SankeyLink(BaseModel):
 
 class ScanFindingsDebugResponse(BaseModel):
     """Debug view: raw findings + consolidated + Sankey data."""
+
     sast_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
     raw_llm_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
-    consolidated_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
+    consolidated_findings: List[VulnerabilityFindingResponse] = Field(
+        default_factory=list
+    )
     sankey_nodes: List[SankeyNode] = Field(default_factory=list)
     sankey_links: List[SankeyLink] = Field(default_factory=list)
 

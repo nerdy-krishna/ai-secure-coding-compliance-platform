@@ -319,8 +319,9 @@ async def _run_workflow_for_scan(
 
             async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(func.coalesce(func.max(db_models.Finding.batch), 0))
-                    .where(db_models.Finding.scan_id == scan_id_uuid)
+                    select(func.coalesce(func.max(db_models.Finding.batch), 0)).where(
+                        db_models.Finding.scan_id == scan_id_uuid
+                    )
                 )
                 max_batch: int = result.scalar_one() or 0
             initial_state["_batch"] = max_batch + 1

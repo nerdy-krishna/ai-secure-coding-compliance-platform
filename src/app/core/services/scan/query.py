@@ -60,19 +60,11 @@ def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
     # clock when no events exist.
     active_seconds: float | None = None
     if scan.events:
-        timestamps = [
-            e.timestamp
-            for e in scan.events
-            if e.timestamp is not None
-        ]
+        timestamps = [e.timestamp for e in scan.events if e.timestamp is not None]
         if len(timestamps) >= 2:
-            active_seconds = (
-                max(timestamps) - min(timestamps)
-            ).total_seconds()
+            active_seconds = (max(timestamps) - min(timestamps)).total_seconds()
         elif len(timestamps) == 1 and scan.completed_at:
-            active_seconds = (
-                scan.completed_at - timestamps[0]
-            ).total_seconds()
+            active_seconds = (scan.completed_at - timestamps[0]).total_seconds()
 
     return {
         "risk_score": scan.risk_score,
@@ -236,7 +228,11 @@ class ScanQueryService:
             # FIX: Use a robust groupby to associate findings with files.
             # Sort findings by file_path to prepare for grouping.
             sorted_findings = sorted(
-                [f for f in scan.findings if getattr(f, "finding_bucket", "consolidated") == "consolidated"],
+                [
+                    f
+                    for f in scan.findings
+                    if getattr(f, "finding_bucket", "consolidated") == "consolidated"
+                ],
                 key=attrgetter("file_path"),
             )
 
@@ -625,11 +621,17 @@ class ScanQueryService:
         nodes = [
             api_models.SankeyNode(id="sast", label=f"SAST ({sast_count})"),
             api_models.SankeyNode(id="raw_llm", label=f"Raw LLM ({raw_count})"),
-            api_models.SankeyNode(id="consolidated", label=f"Consolidated ({cons_count})"),
+            api_models.SankeyNode(
+                id="consolidated", label=f"Consolidated ({cons_count})"
+            ),
         ]
         links = [
-            api_models.SankeyLink(source="sast", target="consolidated", value=sast_count),
-            api_models.SankeyLink(source="raw_llm", target="consolidated", value=raw_count),
+            api_models.SankeyLink(
+                source="sast", target="consolidated", value=sast_count
+            ),
+            api_models.SankeyLink(
+                source="raw_llm", target="consolidated", value=raw_count
+            ),
         ]
 
         return api_models.ScanFindingsDebugResponse(

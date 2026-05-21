@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Awaitable, Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,17 @@ def _default_is_retryable(exc: Exception) -> bool:
     # HTTP 5xx patterns
     if any(
         phrase in s or phrase in cls_name
-        for phrase in ("500", "502", "503", "504", "server error", "internal error", "service unavailable", "bad gateway", "gateway timeout")
+        for phrase in (
+            "500",
+            "502",
+            "503",
+            "504",
+            "server error",
+            "internal error",
+            "service unavailable",
+            "bad gateway",
+            "gateway timeout",
+        )
     ):
         return True
     # Connection / network errors — check both message and exception type

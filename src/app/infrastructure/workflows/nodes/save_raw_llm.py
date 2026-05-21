@@ -37,13 +37,10 @@ async def save_raw_llm_findings_node(state: Dict[str, Any]) -> Dict[str, Any]:
     scan_id = state["scan_id"]
     findings: list[VulnerabilityFinding] = state.get("findings") or []
     llm_findings = [
-        f for f in findings
-        if (f.source or "").lower() not in _SAST_SOURCES
+        f for f in findings if (f.source or "").lower() not in _SAST_SOURCES
     ]
     if not llm_findings:
-        logger.info(
-            "save_raw_llm: no LLM findings to snapshot for scan %s", scan_id
-        )
+        logger.info("save_raw_llm: no LLM findings to snapshot for scan %s", scan_id)
         return {}
 
     batch = state.get("_batch", 1)
@@ -57,12 +54,12 @@ async def save_raw_llm_findings_node(state: Dict[str, Any]) -> Dict[str, Any]:
             )
         logger.info(
             "save_raw_llm: persisted %d LLM findings for scan %s (batch %s)",
-            len(llm_findings), scan_id, batch,
+            len(llm_findings),
+            scan_id,
+            batch,
         )
     except Exception:
-        logger.error(
-            "save_raw_llm: failed for scan %s", scan_id, exc_info=True
-        )
+        logger.error("save_raw_llm: failed for scan %s", scan_id, exc_info=True)
         # Don't block the pipeline — consolidation still runs.
 
     return {}

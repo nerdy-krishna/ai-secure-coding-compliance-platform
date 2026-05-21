@@ -514,7 +514,11 @@ class ScanRepository:
             raise
 
     async def save_findings(
-        self, scan_id: uuid.UUID, findings: List[agent_schemas.VulnerabilityFinding]
+        self,
+        scan_id: uuid.UUID,
+        findings: List[agent_schemas.VulnerabilityFinding],
+        finding_bucket: str = "consolidated",
+        batch: int = 1,
     ):
         """Inserts vulnerability findings for a scan and hydrates the
         DB-assigned ``id`` back onto each input Pydantic schema.
@@ -562,9 +566,11 @@ class ScanRepository:
 
             db_findings.append(
                 db_models.Finding(
-                    scan_id=scan_id, tenant_id=scan_tenant_id,
-                    finding_bucket=finding_bucket, batch=batch,
-                    **finding_dict
+                    scan_id=scan_id,
+                    tenant_id=scan_tenant_id,
+                    finding_bucket=finding_bucket,
+                    batch=batch,
+                    **finding_dict,
                 )
             )
 
@@ -587,7 +593,9 @@ class ScanRepository:
             schema.id = row.id
 
     async def replace_findings_for_scan(
-        self, scan_id: uuid.UUID, findings: List[agent_schemas.VulnerabilityFinding],
+        self,
+        scan_id: uuid.UUID,
+        findings: List[agent_schemas.VulnerabilityFinding],
         batch: int = 1,
     ) -> int:
         """Transactionally replace the consolidated findings for a scan.
@@ -615,9 +623,11 @@ class ScanRepository:
                 finding_dict["corroborating_agents"] = [agent_name]
             db_findings.append(
                 db_models.Finding(
-                    scan_id=scan_id, tenant_id=scan_tenant_id,
-                    finding_bucket="consolidated", batch=batch,
-                    **finding_dict
+                    scan_id=scan_id,
+                    tenant_id=scan_tenant_id,
+                    finding_bucket="consolidated",
+                    batch=batch,
+                    **finding_dict,
                 )
             )
         if db_findings:

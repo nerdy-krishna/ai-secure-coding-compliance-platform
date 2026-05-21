@@ -374,9 +374,7 @@ class LLMClient:
         try:
             await circuit_breaker_call(
                 key=circuit_key,
-                fn=lambda: retry_with_backoff(
-                    lambda: _invoke_llm(agent)
-                ),
+                fn=lambda: retry_with_backoff(lambda: _invoke_llm(agent)),
                 is_retryable=_default_is_retryable,
             )
         except Exception as e:
