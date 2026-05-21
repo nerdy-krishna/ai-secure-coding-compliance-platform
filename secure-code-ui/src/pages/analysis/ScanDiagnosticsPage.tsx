@@ -110,6 +110,8 @@ const PipelineTab: React.FC<{
           severityGroups={debug.severity_groups}
           cweGroups={debug.cwe_groups}
           agentGroups={debug.agent_groups}
+          fullSankeyNodes={debug.full_sankey_nodes}
+          fullSankeyLinks={debug.full_sankey_links}
           consolidatedCount={debug.consolidated_findings.length}
         />
       </div>

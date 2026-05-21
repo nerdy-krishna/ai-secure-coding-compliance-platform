@@ -158,7 +158,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         stats["rerun"] += 1
         try:
             async with semaphore:
-                result = await consolidator.consolidate_file(
+                result, flow = await consolidator.consolidate_file(
                     file_path, source, file_findings
                 )
         except Exception as exc:  # noqa: BLE001
@@ -181,6 +181,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
     )
 
     consolidated: List[VulnerabilityFinding] = []
+    all_flow_maps: list[dict] = []
     for file_path, result in zip(by_file.keys(), results):
         if isinstance(result, BaseException):
             logger.warning(
@@ -190,7 +191,9 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             )
             consolidated.extend(_passthrough(f) for f in by_file[file_path])
             continue
-        consolidated.extend(result)
+        findings_list, flow = result
+        consolidated.extend(findings_list)
+        all_flow_maps.extend(flow)
 
     logger.info(
         "consolidate_findings: scan_id=%s %d raw -> %d consolidated across %d file(s)",
@@ -199,6 +202,8 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         len(consolidated),
         len(by_file),
     )
+    # Store consolidation flow map for the sankey diagram
+    flow_map_json = json.dumps(all_flow_maps, default=str)
     await _emit_event(
         state["scan_id"],
         {
@@ -212,6 +217,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             "failed_tasks": stats["failed"],
             "completed_tasks": stats["completed"],
             "finding_count": len(consolidated),  # back-compat key
+            "flow_map_json": flow_map_json,
         },
     )
     return {"findings": consolidated}

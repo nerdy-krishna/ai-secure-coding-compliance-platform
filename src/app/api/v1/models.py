@@ -1068,6 +1068,11 @@ class ScanFindingsDebugResponse(BaseModel):
     severity_groups: Dict[str, int] = Field(default_factory=dict)
     cwe_groups: Dict[str, int] = Field(default_factory=dict)
     agent_groups: Dict[str, int] = Field(default_factory=dict)
+    # Per-finding consolidation flow map (raw→consolidated mapping)
+    flow_map: Optional[List[Dict[str, Any]]] = None
+    # Full three-column sankey data
+    full_sankey_nodes: Optional[List[SankeyNode]] = None
+    full_sankey_links: Optional[List[SankeyLink]] = None
 
 
 class PaginatedScanHistoryResponse(BaseModel):

@@ -143,7 +143,7 @@ class FindingConsolidator:
         file_path: str,
         source_code: str,
         findings: List[VulnerabilityFinding],
-    ) -> List[VulnerabilityFinding]:
+    ) -> tuple[List[VulnerabilityFinding], list[dict]]:
         """Consolidate one file's raw findings into root findings.
 
         Returns the merged/kept findings, each with `id` cleared (the
@@ -153,7 +153,7 @@ class FindingConsolidator:
         loses findings.
         """
         if not findings:
-            return []
+            return [], []
 
         try:
             result = await self._client.generate_structured_output(
@@ -167,7 +167,7 @@ class FindingConsolidator:
                 file_path,
                 exc,
             )
-            return [_passthrough(f) for f in findings]
+            return [_passthrough(f) for f in findings], []
 
         if result.error or result.parsed_output is None:
             logger.warning(
@@ -175,7 +175,7 @@ class FindingConsolidator:
                 file_path,
                 result.error,
             )
-            return [_passthrough(f) for f in findings]
+            return [_passthrough(f) for f in findings], []
 
         response: _ConsolidationResponse = result.parsed_output
         n = len(findings)
@@ -192,6 +192,8 @@ class FindingConsolidator:
 
         consolidated: List[VulnerabilityFinding] = []
         covered: set[int] = set()
+        # Build per-finding flow map: raw_index → {title, status}
+        flow_map: list[dict] = []
 
         for merged in response.merged_findings:
             subsumed_nums = _valid(merged.subsumed_finding_numbers)
@@ -200,6 +202,17 @@ class FindingConsolidator:
             covered.update(subsumed_nums)
             subsumed = [findings[i - 1] for i in subsumed_nums]
             consolidated.append(_build_merged_finding(merged, subsumed, file_path))
+            for i in subsumed_nums:
+                raw_f = findings[i - 1]
+                flow_map.append({
+                    "raw_title": raw_f.title,
+                    "raw_source": raw_f.source,
+                    "raw_severity": raw_f.severity,
+                    "raw_cwe": raw_f.cwe,
+                    "raw_line": raw_f.line_number,
+                    "consolidated_title": merged.title,
+                    "status": "merged",
+                })
 
         # Each drop carries a false-positive justification — the
         # justification is the forcing function, so a finding the model
@@ -208,6 +221,17 @@ class FindingConsolidator:
             d.finding_number: d.false_positive_reason for d in response.dropped_findings
         }
         dropped = set(_valid(list(drop_reasons.keys()))) - covered
+        for i in sorted(dropped):
+            raw_f = findings[i - 1]
+            flow_map.append({
+                "raw_title": raw_f.title,
+                "raw_source": raw_f.source,
+                "raw_severity": raw_f.severity,
+                "raw_cwe": raw_f.cwe,
+                "raw_line": raw_f.line_number,
+                "consolidated_title": "__dropped__",
+                "status": "dropped",
+            })
         # Findings the LLM neither merged nor dropped — keep them rather
         # than silently lose a finding to an incomplete response.
         orphans = [
@@ -216,6 +240,18 @@ class FindingConsolidator:
             if i not in covered and i not in dropped
         ]
         consolidated.extend(_passthrough(f) for f in orphans)
+        for i in range(1, n + 1):
+            if i not in covered and i not in dropped:
+                raw_f = findings[i - 1]
+                flow_map.append({
+                    "raw_title": raw_f.title,
+                    "raw_source": raw_f.source,
+                    "raw_severity": raw_f.severity,
+                    "raw_cwe": raw_f.cwe,
+                    "raw_line": raw_f.line_number,
+                    "consolidated_title": raw_f.title,
+                    "status": "passthrough",
+                })
 
         # Accumulate the consolidation tally (#83 follow-up).
         self.merged_roots += len(
@@ -245,7 +281,7 @@ class FindingConsolidator:
                 findings[num - 1].title,
                 drop_reasons.get(num, "")[:300],
             )
-        return consolidated
+        return consolidated, flow_map
 
     @staticmethod
     def _build_prompt(
