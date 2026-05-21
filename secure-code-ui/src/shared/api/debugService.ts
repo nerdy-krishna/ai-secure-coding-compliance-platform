@@ -20,6 +20,9 @@ export interface ScanFindingsDebug {
   consolidated_findings: Finding[];
   sankey_nodes: SankeyNode[];
   sankey_links: SankeyLink[];
+  source_groups: Record<string, number>;
+  severity_groups: Record<string, number>;
+  cwe_groups: Record<string, number>;
 }
 
 export const debugService = {

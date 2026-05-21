@@ -615,6 +615,9 @@ class ScanQueryService:
         sast: list[api_models.VulnerabilityFindingResponse] = []
         raw_llm: list[api_models.VulnerabilityFindingResponse] = []
         consolidated: list[api_models.VulnerabilityFindingResponse] = []
+        source_groups: dict[str, int] = {}
+        severity_groups: dict[str, int] = {}
+        cwe_groups: dict[str, int] = {}
         for f in all_findings:
             resp = api_models.VulnerabilityFindingResponse.from_orm(f)
             bucket = getattr(f, "finding_bucket", "consolidated")
@@ -624,6 +627,20 @@ class ScanQueryService:
                 raw_llm.append(resp)
             else:
                 consolidated.append(resp)
+            # Grouping for elaborate Sankey filters
+            src = (f.source or "unknown").strip().lower() or "unknown"
+            source_groups[src] = source_groups.get(src, 0) + 1
+            sev = (f.severity or "INFO").upper()
+            severity_groups[sev] = severity_groups.get(sev, 0) + 1
+            cwe_raw = f.cwe or ""
+            if cwe_raw:
+                import re
+
+                m = re.match(r"CWE-(\d+)", str(cwe_raw), re.IGNORECASE)
+                if m:
+                    cwe_groups[f"CWE-{m.group(1)}"] = (
+                        cwe_groups.get(f"CWE-{m.group(1)}", 0) + 1
+                    )
 
         # Sankey: SAST → raw_llm → consolidated flow counts.
         sast_count = len(sast)
@@ -651,6 +668,9 @@ class ScanQueryService:
             consolidated_findings=consolidated,
             sankey_nodes=nodes,
             sankey_links=links,
+            source_groups=source_groups,
+            severity_groups=severity_groups,
+            cwe_groups=cwe_groups,
         )
 
     async def get_paginated_projects(

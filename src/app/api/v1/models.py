@@ -1054,7 +1054,7 @@ class SankeyLink(BaseModel):
 
 
 class ScanFindingsDebugResponse(BaseModel):
-    """Debug view: raw findings + consolidated + Sankey data."""
+    """Debug view: raw findings + consolidated + Sankey data + groupings."""
 
     sast_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
     raw_llm_findings: List[VulnerabilityFindingResponse] = Field(default_factory=list)
@@ -1063,6 +1063,10 @@ class ScanFindingsDebugResponse(BaseModel):
     )
     sankey_nodes: List[SankeyNode] = Field(default_factory=list)
     sankey_links: List[SankeyLink] = Field(default_factory=list)
+    # Grouped counts for the elaborate Sankey filters
+    source_groups: Dict[str, int] = Field(default_factory=dict)
+    severity_groups: Dict[str, int] = Field(default_factory=dict)
+    cwe_groups: Dict[str, int] = Field(default_factory=dict)
 
 
 class PaginatedScanHistoryResponse(BaseModel):

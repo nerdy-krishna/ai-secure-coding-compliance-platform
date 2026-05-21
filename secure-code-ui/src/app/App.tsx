@@ -27,7 +27,7 @@ import SMTPSettingsTab from "../pages/admin/SMTPSettingsTab";
 import AgentManagementPage from "../pages/admin/AgentManagementPage";
 import FrameworkManagementPage from "../pages/admin/FrameworkManagementPage";
 import PromptManagementPage from "../pages/admin/PromptManagementPage";
-import LlmLogViewerPage from "../pages/analysis/LlmLogViewerPage";
+import { ScanDiagnosticsPage } from "../pages/analysis/ScanDiagnosticsPage";
 import ProjectDetailPage from "../pages/analysis/ProjectDetailPage";
 import ProjectsPage from "../pages/analysis/ProjectsPage";
 import ResultsPage from "../pages/analysis/ResultsPage";
@@ -191,8 +191,8 @@ function AppContent() {
           <Route path="/analysis/results/:scanId" element={<ResultsPage />} />
           <Route element={<FeatureRoute feature="log_stack" />}>
             <Route
-              path="/scans/:scanId/llm-logs"
-              element={<LlmLogViewerPage />}
+              path="/scans/:scanId/diagnostics"
+              element={<ScanDiagnosticsPage />}
             />
           </Route>
           <Route element={<FeatureRoute feature="chat" />}>

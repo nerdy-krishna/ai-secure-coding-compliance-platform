@@ -689,9 +689,9 @@ const ResultsPage: React.FC = () => {
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
-              onClick={() => navigate(`/scans/${scanId}/llm-logs`)}
+              onClick={() => navigate(`/scans/${scanId}/diagnostics`)}
             >
-              <Icon.Terminal size={13} /> LLM logs
+              <Icon.Terminal size={13} /> Scan Logs
             </button>
             {isSuperuser && (
               <button
@@ -870,10 +870,10 @@ const ResultsPage: React.FC = () => {
                     {stats ? (
                       <button
                         type="button"
-                        title={`View ${m.name} interactions in the LLM logs`}
+                        title={`View ${m.name} interactions in Scan Logs`}
                         onClick={() =>
                           navigate(
-                            `/scans/${scanId}/llm-logs?model=${encodeURIComponent(m.name)}`,
+                            `/scans/${scanId}/diagnostics?model=${encodeURIComponent(m.name)}`,
                           )
                         }
                         style={{
