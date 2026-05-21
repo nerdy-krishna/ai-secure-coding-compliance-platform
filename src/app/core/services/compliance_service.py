@@ -240,6 +240,7 @@ class ComplianceService:
                 db_models.Finding.cvss_vector,
             )
             .join(db_models.Finding, db_models.Finding.scan_id == db_models.Scan.id)
+            .where(db_models.Finding.finding_bucket == "consolidated")
             .where(db_models.Finding.disposition.not_in(_NON_SCOREABLE))
             .order_by(severity_rank.desc())
         )

@@ -260,6 +260,7 @@ class ChatService:
                 findings_stmt = (
                     select(db_models.Finding)
                     .where(db_models.Finding.scan_id == latest_terminal.id)
+                    .where(db_models.Finding.finding_bucket == "consolidated")
                     .where(db_models.Finding.is_applied_in_remediation.is_(False))
                     .order_by(
                         # Severity ordering handled client-side; sort by id

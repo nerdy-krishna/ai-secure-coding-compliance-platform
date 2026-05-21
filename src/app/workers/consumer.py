@@ -309,6 +309,23 @@ async def _run_workflow_for_scan(
 
     try:
         worker_workflow = await get_workflow()
+
+        # Compute the next analysis batch number from existing findings
+        # so restarts/resumes don't overwrite previous buckets.
+        try:
+            from app.infrastructure.database import AsyncSessionLocal
+            from app.infrastructure.database import models as db_models
+            from sqlalchemy import func, select
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(func.coalesce(func.max(db_models.Finding.batch), 0))
+                    .where(db_models.Finding.scan_id == scan_id_uuid)
+                )
+                max_batch: int = result.scalar_one() or 0
+            initial_state["_batch"] = max_batch + 1
+        except Exception:
+            pass  # Best-effort — default batch 1 is fine.
         # Anchor the per-scan parent trace in Langfuse. Handler reads
         # `correlation_id_var` (already set in `_build_initial_state`)
         # so the trace_id stitches with Loki logs by X-Correlation-ID.
@@ -441,6 +458,7 @@ async def _build_initial_state(
         "prescan_approval": None,
         "resume_attempts": None,
         "error_message": None,
+        "_batch": 1,
     }
 
     # Queue-type routing hints (scan_type gets overwritten by the DB value

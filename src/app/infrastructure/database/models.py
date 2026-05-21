@@ -437,6 +437,16 @@ class Finding(Base):
     )
     disposition_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Finding lifecycle bucket: 'sast' (deterministic scanners),
+    # 'raw_llm' (pre-consolidation LLM output), or 'consolidated'
+    # (final set shown in results / reports).
+    finding_bucket: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="consolidated"
+    )
+    # Incremented on each analysis run (restart / resume) so multiple
+    # batches can coexist for the same scan + bucket.
+    batch: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
     # V02.2.1: enforce maximum string lengths at the DB layer
     __table_args__ = (
         sa.CheckConstraint(

@@ -149,7 +149,11 @@ class ScanQueryService:
         """
         logger.info(
             "scan-query: full result requested",
-            extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
+            extra={
+                "actor_user_id": str(user.id),
+                "scan_id": str(scan_id),
+                "findings_count": len(scan.findings),
+            },
         )
         try:
             scan = await self.repo.get_scan_with_details(scan_id)
@@ -235,7 +239,10 @@ class ScanQueryService:
 
             # FIX: Use a robust groupby to associate findings with files.
             # Sort findings by file_path to prepare for grouping.
-            sorted_findings = sorted(scan.findings, key=attrgetter("file_path"))
+            sorted_findings = sorted(
+                [f for f in scan.findings if getattr(f, "finding_bucket", "consolidated") == "consolidated"],
+                key=attrgetter("file_path"),
+            )
 
             # Group findings by file_path and populate the map.
             for file_path, group in groupby(

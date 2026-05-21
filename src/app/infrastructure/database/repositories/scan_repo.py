@@ -562,7 +562,9 @@ class ScanRepository:
 
             db_findings.append(
                 db_models.Finding(
-                    scan_id=scan_id, tenant_id=scan_tenant_id, **finding_dict
+                    scan_id=scan_id, tenant_id=scan_tenant_id,
+                    finding_bucket=finding_bucket, batch=batch,
+                    **finding_dict
                 )
             )
 
@@ -585,23 +587,24 @@ class ScanRepository:
             schema.id = row.id
 
     async def replace_findings_for_scan(
-        self, scan_id: uuid.UUID, findings: List[agent_schemas.VulnerabilityFinding]
+        self, scan_id: uuid.UUID, findings: List[agent_schemas.VulnerabilityFinding],
+        batch: int = 1,
     ) -> int:
-        """Transactionally replace the authoritative final findings for a scan.
+        """Transactionally replace the consolidated findings for a scan.
 
-        Unlike ``save_findings``, this intentionally ignores any ``id`` values on
-        the input schemas: a resumed final-save may carry DB ids from an earlier
-        attempt, but the replacement set must still be inserted after the delete.
-        The newly assigned ids are hydrated back onto the schemas in input order.
+        Only deletes rows with finding_bucket='consolidated' — SAST and
+        raw-LLM buckets are preserved across restarts/resumes.
         """
         scan_tenant_id = (
             await self.db.execute(
                 select(db_models.Scan.tenant_id).where(db_models.Scan.id == scan_id)
             )
         ).scalar_one_or_none()
+        # Delete only the consolidated bucket — SAST + raw LLM survive.
         await self.db.execute(
             db_models.Finding.__table__.delete().where(
-                db_models.Finding.scan_id == scan_id
+                db_models.Finding.scan_id == scan_id,
+                db_models.Finding.finding_bucket == "consolidated",
             )
         )
         db_findings: List[db_models.Finding] = []
@@ -612,7 +615,9 @@ class ScanRepository:
                 finding_dict["corroborating_agents"] = [agent_name]
             db_findings.append(
                 db_models.Finding(
-                    scan_id=scan_id, tenant_id=scan_tenant_id, **finding_dict
+                    scan_id=scan_id, tenant_id=scan_tenant_id,
+                    finding_bucket="consolidated", batch=batch,
+                    **finding_dict
                 )
             )
         if db_findings:
@@ -632,18 +637,15 @@ class ScanRepository:
         return len(db_findings)
 
     async def delete_findings_for_scan(self, scan_id: uuid.UUID) -> int:
-        """Delete every persisted Finding row for a scan. Returns the
-        row count deleted.
+        """Delete only consolidated findings for a scan (restart path).
 
-        Used by `save_results_node` (#72): after the consolidation pass
-        the in-memory `state["findings"]` is the authoritative final
-        set, so the node clears the deterministic-prescan rows inserted
-        earlier and re-inserts the consolidated set. This keeps a
-        merged cluster from leaving its pre-merge prescan rows behind.
+        SAST and raw-LLM buckets are preserved across restarts for
+        agent-quality debugging.
         """
         result = await self.db.execute(
             db_models.Finding.__table__.delete().where(
-                db_models.Finding.scan_id == scan_id
+                db_models.Finding.scan_id == scan_id,
+                db_models.Finding.finding_bucket == "consolidated",
             )
         )
         try:

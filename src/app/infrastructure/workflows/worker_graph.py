@@ -48,6 +48,9 @@ from app.infrastructure.workflows.nodes.consolidate_findings import (
 from app.infrastructure.workflows.nodes.global_consolidate import (
     global_consolidate_findings_node,
 )
+from app.infrastructure.workflows.nodes.save_raw_llm import (
+    save_raw_llm_findings_node,
+)
 from app.infrastructure.workflows.nodes.cost import (
     CHUNK_ONLY_IF_LARGER_THAN,
     cost_gate_node,
@@ -160,6 +163,7 @@ workflow.add_node("profile_files", profile_files_node)
 workflow.add_node("estimate_cost", estimate_cost_node)
 workflow.add_node("cost_gate", cost_gate_node)
 workflow.add_node("analyze_files_parallel", analyze_files_parallel_node)
+workflow.add_node("save_raw_llm_findings", save_raw_llm_findings_node)
 workflow.add_node("consolidate_findings", consolidate_findings_node)
 workflow.add_node("global_consolidate_findings", global_consolidate_findings_node)
 workflow.add_node("validate_cross_file", validate_cross_file_node)
@@ -386,8 +390,9 @@ workflow.add_conditional_edges(
 workflow.add_conditional_edges(
     "analyze_files_parallel",
     should_continue,
-    {"continue": "consolidate_findings", "handle_error": "handle_error"},
+    {"continue": "save_raw_llm_findings", "handle_error": "handle_error"},
 )
+workflow.add_edge("save_raw_llm_findings", "consolidate_findings")
 workflow.add_conditional_edges(
     "consolidate_findings",
     should_continue,

@@ -32,8 +32,9 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
     scan_type = state["scan_type"]
     findings = state.get("findings", [])
     final_file_map = state.get("final_file_map")
+    batch = state.get("_batch", 1)
 
-    logger.info("Saving final results for scan %s.", scan_id)
+    logger.info("Saving final results for scan %s (batch %s).", scan_id, batch)
     try:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
@@ -48,7 +49,7 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
             # `id` from every output finding, so `save_findings` inserts
             # the whole set. Always delete first, even when `findings` is
             # empty — the quality gate may have dropped everything.
-            await repo.replace_findings_for_scan(scan_id, findings)
+            await repo.replace_findings_for_scan(scan_id, findings, batch=batch)
 
             if scan_type == "REMEDIATE" and final_file_map:
                 logger.info("Saving POST_REMEDIATION snapshot for scan %s.", scan_id)

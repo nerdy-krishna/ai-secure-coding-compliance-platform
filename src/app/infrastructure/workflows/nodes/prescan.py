@@ -340,7 +340,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     if prescan_findings:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
-            await repo.save_findings(scan_id, prescan_findings)
+            await repo.save_findings(scan_id, prescan_findings, finding_bucket="sast")
             # Emit the prescan-gate WAITING event here — this node runs
             # exactly once and never re-enters, so the gate marker is
             # written before the bare `pending_prescan_approval` node

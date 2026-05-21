@@ -99,3 +99,6 @@ class WorkerState(TypedDict):
     # by `_route_after_prescan_approval` to prevent loop-back denial of service.
     resume_attempts: Optional[int]
     error_message: Optional[str]
+    # Analysis batch number — incremented on each restart/resume so
+    # multiple generations of findings can coexist in the DB.
+    _batch: int
