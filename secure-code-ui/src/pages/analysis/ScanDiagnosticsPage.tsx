@@ -129,10 +129,16 @@ const PipelineTab: React.FC<{
 
 // ── Findings breakdown (with filters + expandable rows) ──────────────
 
+const SAST_CATEGORIES = ["Semgrep", "Bandit", "Gitleaks", "OSV"];
+const SOURCE_CATEGORIES = ["All Sources", "LLM", ...SAST_CATEGORIES];
+
+type SourceCategory = (typeof SOURCE_CATEGORIES)[number];
+
 const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) => {
   const [bucket, setBucket] = useState<Bucket>("raw_llm");
   const [sevFilter, setSevFilter] = useState<string>("All");
-  const [sourceFilter, setSourceFilter] = useState<string>("All");
+  const [sourceCat, setSourceCat] = useState<SourceCategory>("All Sources");
+  const [sourceAgent, setSourceAgent] = useState<string>("All Agents");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const findingsMap: Record<Bucket, Finding[]> = {
@@ -141,10 +147,15 @@ const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) =>
     consolidated: debug.consolidated_findings,
   };
 
-  const sources = useMemo(() => {
+  const llmAgents = useMemo(() => {
     const s = new Set<string>();
-    findingsMap[bucket].forEach(f => { if (f.source) s.add(f.source); });
-    return ["All", ...Array.from(s).sort()];
+    findingsMap[bucket].forEach(f => {
+      const src = (f.source ?? "").toLowerCase();
+      if (f.source && !SAST_CATEGORIES.map(c => c.toLowerCase()).includes(src)) {
+        s.add(f.source);
+      }
+    });
+    return ["All Agents", ...Array.from(s).sort()];
   }, [bucket, findingsMap]);
 
   const sevs = useMemo(() => {
@@ -156,20 +167,35 @@ const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) =>
   const filtered = useMemo(() => {
     return findingsMap[bucket].filter(f => {
       if (sevFilter !== "All" && f.severity !== sevFilter) return false;
-      if (sourceFilter !== "All" && f.source !== sourceFilter) return false;
+      // Two-tier source filter
+      if (sourceCat !== "All Sources") {
+        const src = (f.source ?? "").toLowerCase();
+        if (SAST_CATEGORIES.includes(sourceCat)) {
+          // Direct SAST match
+          if (src !== sourceCat.toLowerCase()) return false;
+        } else if (sourceCat === "LLM") {
+          // LLM: exclude SAST sources
+          if (SAST_CATEGORIES.map(c => c.toLowerCase()).includes(src)) return false;
+          // Second tier: specific agent
+          if (sourceAgent !== "All Agents" && f.source !== sourceAgent) return false;
+        }
+      }
       return true;
     });
-  }, [findingsMap, bucket, sevFilter, sourceFilter]);
+  }, [findingsMap, bucket, sevFilter, sourceCat, sourceAgent]);
 
-  // Reset expanded when bucket/filters change
-  useEffect(() => { setExpandedId(null); }, [bucket, sevFilter, sourceFilter]);
+  // Reset expanded and agent sub-filter when main filters change
+  useEffect(() => { setExpandedId(null); }, [bucket, sevFilter, sourceCat]);
+  useEffect(() => { if (sourceCat !== "LLM") setSourceAgent("All Agents"); }, [sourceCat]);
+
+  const resetFilters = () => { setBucket("raw_llm"); setSevFilter("All"); setSourceCat("All Sources"); setSourceAgent("All Agents"); };
 
   return (
     <div className="surface" style={{ padding: 0 }}>
       <SectionHead title="Findings breakdown" style={{ padding: "18px 20px 10px", margin: 0 }} />
       <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--border)" }}>
         {(Object.keys(BUCKET_LABEL) as Bucket[]).map((b) => (
-          <button key={b} onClick={() => { setBucket(b); setSevFilter("All"); setSourceFilter("All"); }}
+          <button key={b} onClick={() => { setBucket(b); resetFilters(); }}
             style={{
               flex: 1, padding: "10px 16px", background: bucket === b ? "var(--primary-weak)" : "transparent",
               border: "none", borderBottom: bucket === b ? "2px solid var(--primary)" : "2px solid transparent",
@@ -189,10 +215,16 @@ const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) =>
           {sevs.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <span style={{ fontSize: 11, color: "var(--fg-subtle)", textTransform: "uppercase" }}>Source</span>
-        <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}
+        <select value={sourceCat} onChange={e => setSourceCat(e.target.value as SourceCategory)}
           style={{ background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "var(--fg)" }}>
-          {sources.map(s => <option key={s} value={s}>{s}</option>)}
+          {SOURCE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+        {sourceCat === "LLM" && (
+          <select value={sourceAgent} onChange={e => setSourceAgent(e.target.value)}
+            style={{ background: "var(--bg-soft)", border: "1px solid var(--primary)", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "var(--fg)" }}>
+            {llmAgents.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        )}
         <span style={{ fontSize: 11, color: "var(--fg-muted)", marginLeft: "auto" }}>{filtered.length} of {findingsMap[bucket].length}</span>
       </div>
 
