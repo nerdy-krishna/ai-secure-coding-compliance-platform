@@ -14,9 +14,7 @@ from typing import Any, Dict
 
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
-from app.infrastructure.database.AsyncSessionLocal import (
-    AsyncSessionLocal,
-)
+from app.infrastructure.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
