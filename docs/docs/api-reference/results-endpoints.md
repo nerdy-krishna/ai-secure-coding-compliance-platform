@@ -98,6 +98,17 @@ output, cost, token counts, timestamp. Intended for admins debugging
 agent drift — regular users only see interactions for their own
 scans.
 
+## Findings debug (pipeline breakdown)
+
+```http
+GET /scans/{scan_id}/findings/debug
+```
+
+Returns findings from all three storage buckets (SAST, raw LLM,
+consolidated) plus Sankey-flow nodes/links and grouped counts by
+source, severity, and CWE. Used by the Pipeline & Logs diagnostics
+page and the compact findings panel on the results page.
+
 ## Delete
 
 ```http

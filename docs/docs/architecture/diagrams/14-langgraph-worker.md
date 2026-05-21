@@ -25,6 +25,7 @@ flowchart TB
       N7["estimate_cost — work node<br/>analysis dry-run · prices both reasoning LLMs<br/>status=PENDING_COST_APPROVAL"]:::app
       N8["cost_gate — interrupt"]:::app
       N9["analyze_files_parallel<br/>routed agents × file × reasoning lane(s)<br/>Pydantic AI structured output"]:::app
+      N9a["save_raw_llm_findings<br/>snapshot pre-consolidation LLM findings<br/>to raw_llm bucket"]:::app
       N10["consolidate_findings<br/>FindingConsolidator — merge / drop"]:::app
       N11["validate_cross_file<br/>opt-in #81 — no-op unless enabled"]:::app
       N12["consolidate_and_patch<br/>REMEDIATE: merge agent + tree-sitter verify<br/>(no snapshot for AUDIT / SUGGEST)"]:::app
@@ -65,14 +66,14 @@ flowchart TB
     N8 -. "resume via POST /approve" .-> MQ2
     Consumer -- "Command(resume)" --> N9
     N9 -. "fan-out (per reasoning lane)" .-> LLM
-    N9 --> N10 --> N11 --> N12
+    N9 --> N9a --> N10 --> N11 --> N12
     N12 -. merge-agent .-> LLM
     N12 --> N13
     N13 -. subprocess .-> SC
     N13 --> N14 --> N15 --> Done
     T1 --> Done
     T2 --> Done
-    N1 & N2 & N4 & N6 & N7 & N9 & N10 & N11 & N12 & N13 & N14 -. error_message .-> ERR
+    N1 & N2 & N4 & N6 & N7 & N9 & N9a & N10 & N11 & N12 & N13 & N14 -. error_message .-> ERR
     ERR --> Done
 
     classDef edge fill:#e0f2fe,stroke:#0369a1,color:#082f49;

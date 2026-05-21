@@ -61,6 +61,23 @@ earlier Impact tab and Executive Summary PDF (backed by an
 the 2026-04-26 cleanup; report artifacts are now generated on demand
 from consolidated findings without a separate reporting node.
 
+## Scan Logs & diagnostics
+
+The **Scan Logs** button in the results header opens the Pipeline & Logs
+page (`/scans/{id}/diagnostics`) with two tabs:
+
+- **Findings Pipeline** — an elaborate Sankey diagram showing how findings
+  flow from individual scanners and LLM agents through consolidation.
+  Filter by source, type, severity, or CWE. Breakdown tables show findings
+  in each storage bucket (SAST, raw LLM, consolidated).
+- **LLM Calls** — per-agent interaction log with model, token counts, and
+  cost for every LLM invocation during the scan.
+
+A compact **Findings Pipeline** panel at the bottom of the results page
+shows the same bucket breakdown with expandable rows — click any finding
+to see its full details (description, remediation, CVSS, corroborating
+agents, cross-file status, affected locations).
+
 ## Related links
 
 - [Managing Findings + Remediation](./managing-findings.md) — apply

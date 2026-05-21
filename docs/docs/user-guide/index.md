@@ -23,6 +23,7 @@ see everything.
   - [Guideline-backed Q&A](./chat-interfaces/guideline-provision.md)
   - [Secure Code Generation](./chat-interfaces/secure-code-generation.md)
 - [**Reporting**](./reporting.md) — HTML, CSV, PDF, and SARIF findings reports.
+- [**Scan diagnostics**](./code-analysis/understanding-results.md#scan-logs--diagnostics) — Pipeline & Logs page with findings flow Sankey and LLM call inspection.
 - [Unit-test integration](./unit-test-integration.md) — roadmap note.
 
 ## For admins
