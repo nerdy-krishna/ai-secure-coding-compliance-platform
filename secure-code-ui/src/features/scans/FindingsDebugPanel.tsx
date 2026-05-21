@@ -1,7 +1,7 @@
 // Compact mini debug panel for the bottom of scan results page.
 // Expandable finding rows with full LLM details.
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { debugService, type ScanFindingsDebug } from "../../shared/api/debugService";
 import type { Finding } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
@@ -11,6 +11,10 @@ interface Props {
 }
 
 type Bucket = "sast" | "raw_llm" | "consolidated";
+
+const SAST_CATEGORIES = ["Semgrep", "Bandit", "Gitleaks", "OSV"];
+const SOURCE_CATEGORIES = ["All Sources", "LLM", ...SAST_CATEGORIES];
+type SourceCategory = (typeof SOURCE_CATEGORIES)[number];
 
 const BUCKET_COLOR: Record<Bucket, string> = {
   sast: "#f59e0b",
@@ -30,6 +34,9 @@ export const FindingsDebugPanel: React.FC<Props> = ({ scanId }) => {
   const [collapsed, setCollapsed] = useState(true);
   const [activeBucket, setActiveBucket] = useState<Bucket>("raw_llm");
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [sevFilter, setSevFilter] = useState<string>("All");
+  const [sourceCat, setSourceCat] = useState<SourceCategory>("All Sources");
+  const [sourceAgent, setSourceAgent] = useState<string>("All Agents");
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +56,42 @@ export const FindingsDebugPanel: React.FC<Props> = ({ scanId }) => {
     raw_llm: data.raw_llm_findings,
     consolidated: data.consolidated_findings,
   };
-  const findings = findingsMap[activeBucket];
+
+  const llmAgents = useMemo(() => {
+    const s = new Set<string>();
+    findingsMap[activeBucket].forEach(f => {
+      const src = (f.source ?? "").toLowerCase();
+      if (f.source && !SAST_CATEGORIES.map(c => c.toLowerCase()).includes(src)) {
+        s.add(f.source);
+      }
+    });
+    return ["All Agents", ...Array.from(s).sort()];
+  }, [findingsMap, activeBucket]);
+
+  const sevs = useMemo(() => {
+    const s = new Set<string>();
+    findingsMap[activeBucket].forEach(f => { if (f.severity) s.add(f.severity); });
+    return ["All", ...Array.from(s).sort()];
+  }, [findingsMap, activeBucket]);
+
+  const filteredFindings = useMemo(() => {
+    return findingsMap[activeBucket].filter(f => {
+      if (sevFilter !== "All" && f.severity !== sevFilter) return false;
+      if (sourceCat !== "All Sources") {
+        const src = (f.source ?? "").toLowerCase();
+        if (SAST_CATEGORIES.includes(sourceCat)) {
+          if (src !== sourceCat.toLowerCase()) return false;
+        } else if (sourceCat === "LLM") {
+          if (SAST_CATEGORIES.map(c => c.toLowerCase()).includes(src)) return false;
+          if (sourceAgent !== "All Agents" && f.source !== sourceAgent) return false;
+        }
+      }
+      return true;
+    });
+  }, [findingsMap, activeBucket, sevFilter, sourceCat, sourceAgent]);
+
+  useEffect(() => { setExpandedId(null); }, [activeBucket, sevFilter, sourceCat]);
+  useEffect(() => { if (sourceCat !== "LLM") setSourceAgent("All Agents"); }, [sourceCat]);
 
   return (
     <div className="surface" style={{ padding: 0, overflow: "hidden" }}>
@@ -109,16 +151,36 @@ export const FindingsDebugPanel: React.FC<Props> = ({ scanId }) => {
               <button
                 key={b}
                 className={activeBucket === b ? "active" : ""}
-                onClick={(e) => { e.stopPropagation(); setActiveBucket(b); }}
+                onClick={(e) => { e.stopPropagation(); setActiveBucket(b); setSevFilter("All"); setSourceCat("All Sources"); setSourceAgent("All Agents"); }}
               >
                 {BUCKET_LABEL[b]} ({findingsMap[b].length})
               </button>
             ))}
           </div>
 
+          {/* Filters */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <select value={sevFilter} onChange={e => setSevFilter(e.target.value)}
+              style={{ background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 6px", fontSize: 11, color: "var(--fg)" }}>
+              <option value="All">All Severities</option>
+              {sevs.slice(1).map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={sourceCat} onChange={e => setSourceCat(e.target.value as SourceCategory)}
+              style={{ background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 6px", fontSize: 11, color: "var(--fg)" }}>
+              {SOURCE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {sourceCat === "LLM" && (
+              <select value={sourceAgent} onChange={e => setSourceAgent(e.target.value)}
+                style={{ background: "var(--bg-soft)", border: "1px solid var(--primary)", borderRadius: 6, padding: "3px 6px", fontSize: 11, color: "var(--fg)" }}>
+                {llmAgents.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            )}
+            <span style={{ fontSize: 11, color: "var(--fg-muted)", marginLeft: "auto" }}>{filteredFindings.length} of {findingsMap[activeBucket].length}</span>
+          </div>
+
           {/* Finding rows with expand/collapse */}
           <div style={{ maxHeight: 350, overflow: "auto" }}>
-            {findings.map((f, i) => {
+            {filteredFindings.map((f, i) => {
               const isExpanded = expandedId === (f.id ?? i);
               return (
                 <div
