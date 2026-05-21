@@ -248,10 +248,11 @@ const ResultsPage: React.FC = () => {
 
   const [sevFilter, setSevFilter] = useState<SeverityFilter>("all");
   const [search, setSearch] = useState("");
-  // Per-source filter chip — "all" or a specific scanner name like
-  // "bandit" / "gitleaks" / "semgrep" / "osv" / "agent". Driven by
-  // the by-source pill row below the summary card.
-  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  // Two-tier source: category (All / bandit / semgrep / gitleaks / osv / llm)
+  // then sub-agent when llm is selected.
+  const [sourceCatFilter, setSourceCatFilter] = useState<string>("all");
+  const [sourceAgentFilter, setSourceAgentFilter] = useState<string>("all");
+  const SAST_SOURCES = new Set(["bandit", "semgrep", "gitleaks", "osv"]);
   // Cross-file validation (#82): `mitigated` findings are collapsed out
   // of the default view — they stay expandable via this toggle.
   const [showMitigated, setShowMitigated] = useState(false);
@@ -371,13 +372,16 @@ const ResultsPage: React.FC = () => {
       allFindings.filter((f) => {
         if (sevFilter !== "all" && f.severity?.toLowerCase() !== sevFilter)
           return false;
-        if (sourceFilter !== "all") {
-          // Backend persists NULL `source` for legacy LLM-emitted rows
-          // and the source_counts aggregate buckets those under "agent",
-          // so the chip with `source=agent` should match findings with
-          // a missing source field.
-          const fSource = f.source ?? "agent";
-          if (fSource !== sourceFilter) return false;
+        // Two-tier source category filter
+        if (sourceCatFilter !== "all") {
+          if (sourceCatFilter === "llm") {
+            const src = (f.source ?? "").toLowerCase();
+            if (SAST_SOURCES.has(src)) return false;
+            if (sourceAgentFilter !== "all" && f.source !== sourceAgentFilter) return false;
+          } else {
+            const src = (f.source ?? "").toLowerCase();
+            if (src !== sourceCatFilter) return false;
+          }
         }
         if (filePathFilter) {
           // Folder filter: prefix match; file filter: exact match
@@ -400,7 +404,7 @@ const ResultsPage: React.FC = () => {
           return false;
         return true;
       }),
-    [allFindings, sevFilter, sourceFilter, filePathFilter, search, dispFilter],
+    [allFindings, sevFilter, sourceCatFilter, sourceAgentFilter, filePathFilter, search, dispFilter],
   );
 
   // Cross-file validation (#82): `mitigated` findings are collapsed out
@@ -982,125 +986,129 @@ const ResultsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Per-source filter row. Pills are buttons that filter the
-          findings list to that single source. The leading "All" pill
-          clears the filter; a "Clear" affordance appears once a
-          specific source is selected so the active state is unambiguous.
-          The aggregate counts come from the backend's `source_counts`
-          (sast-prescan-followups Group D2) so they include findings
-          excluded by the current sevFilter / search box. */}
-      {data.source_counts && Object.keys(data.source_counts).length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            marginTop: 8,
-            marginBottom: 8,
-            alignItems: "center",
-          }}
-        >
-          <span
+      {/* Per-source filter row — two-tier: category pills (All / Bandit /
+          Semgrep / Gitleaks / OSV / LLM) then agent sub-pills when LLM
+          is selected. Aggregate counts from backend source_counts, with
+          LLM agents grouped together. */}
+      {data.source_counts && Object.keys(data.source_counts).length > 0 && (() => {
+        const sourceColor: Record<string, string> = {
+          bandit: "#3b82f6",
+          semgrep: "#a855f7",
+          gitleaks: "#dc2626",
+          osv: "#0891b2",
+          llm: "#6366f1",
+        };
+        const agentColor = "#6366f1";
+        const CATEGORIES = ["all", "bandit", "semgrep", "gitleaks", "osv", "llm"];
+
+        // Compute category counts from source_counts, grouping non-SAST into "llm"
+        const catCounts: Record<string, number> = { all: 0 };
+        for (const [src, n] of Object.entries(data.source_counts)) {
+          catCounts.all += n;
+          const cat = SAST_SOURCES.has(src.toLowerCase()) ? src.toLowerCase() : "llm";
+          catCounts[cat] = (catCounts[cat] || 0) + n;
+        }
+
+        // Collect individual LLM agent names (non-SAST sources)
+        const llmAgents: [string, number][] = [];
+        for (const [src, n] of Object.entries(data.source_counts)) {
+          if (!SAST_SOURCES.has(src.toLowerCase()) && src !== "agent") {
+            llmAgents.push([src, n]);
+          }
+        }
+        llmAgents.sort((a, b) => b[1] - a[1]);
+
+        const renderPill = (
+          key: string,
+          label: string,
+          count: number,
+          color: string,
+          active: boolean,
+          onClick: () => void,
+          ariaLabel: string,
+          small?: boolean,
+        ) => (
+          <button
+            key={key}
+            type="button"
+            onClick={onClick}
+            aria-pressed={active}
+            aria-label={ariaLabel}
             style={{
-              fontSize: 11,
-              color: "var(--fg-muted)",
-              textTransform: "uppercase",
-              letterSpacing: ".06em",
+              padding: small ? "3px 8px" : "4px 10px",
+              borderRadius: 12,
+              border: `1px solid ${color}`,
+              background: active ? color : "transparent",
+              color: active ? "white" : color,
+              fontSize: small ? 11 : 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all .12s var(--ease)",
+              fontFamily: "inherit",
             }}
           >
-            By source:
-          </span>
-          {(() => {
-            const sourceColor: Record<string, string> = {
-              bandit: "#3b82f6",
-              semgrep: "#a855f7",
-              gitleaks: "#dc2626",
-              osv: "#0891b2",
-              agent: "#6b7280",
-            };
-            const totalFindings = Object.values(data.source_counts).reduce(
-              (sum, n) => sum + n,
-              0,
-            );
-            // Reusable pill-button. Active = colored background + white
-            // text. Inactive = transparent background + colored border +
-            // colored text, with a subtle hover lift.
-            const renderPill = (
-              key: string,
-              label: string,
-              count: number,
-              color: string,
-              active: boolean,
-              onClick: () => void,
-              ariaLabel: string,
-            ) => (
-              <button
-                key={key}
-                type="button"
-                onClick={onClick}
-                aria-pressed={active}
-                aria-label={ariaLabel}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: 12,
-                  border: `1px solid ${color}`,
-                  background: active ? color : "transparent",
-                  color: active ? "white" : color,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  transition: "all .12s var(--ease)",
-                  fontFamily: "inherit",
-                }}
-              >
-                {label}: {count}
-              </button>
-            );
-            const pills: React.ReactNode[] = [];
-            // Leading "All" pill — neutral grey. Active state when
-            // no source filter is currently applied.
-            pills.push(
-              renderPill(
-                "__all__",
-                "all",
-                totalFindings,
-                "#6b7280",
-                sourceFilter === "all",
-                () => setSourceFilter("all"),
-                "Show findings from every source",
-              ),
-            );
-            for (const [source, count] of Object.entries(data.source_counts)) {
-              pills.push(
-                renderPill(
-                  source,
-                  source,
+            {label}: {count}
+          </button>
+        );
+
+        return (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, marginBottom: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "var(--fg-muted)", textTransform: "uppercase", letterSpacing: ".06em" }}>By source:</span>
+              {CATEGORIES.map((cat) => {
+                const count = catCounts[cat] || 0;
+                const isActive = cat === "all"
+                  ? sourceCatFilter === "all"
+                  : sourceCatFilter === cat;
+                const color = sourceColor[cat] || agentColor;
+                const label = cat === "all" ? "all" : cat;
+                return renderPill(
+                  cat,
+                  label,
                   count,
-                  sourceColor[source] || "#6b7280",
-                  sourceFilter === source,
-                  () =>
-                    setSourceFilter((prev) =>
-                      prev === source ? "all" : source,
-                    ),
-                  `Show only findings from ${source}`,
-                ),
-              );
-            }
-            return pills;
-          })()}
-          {sourceFilter !== "all" && (
-            <button
-              type="button"
-              onClick={() => setSourceFilter("all")}
-              className="sccap-btn sccap-btn-sm sccap-btn-ghost"
-              style={{ marginLeft: 4 }}
-              aria-label="Clear source filter"
-            >
-              <Icon.X size={11} /> Clear filter
-            </button>
-          )}
-        </div>
-      )}
+                  color,
+                  isActive,
+                  () => {
+                    if (isActive) {
+                      setSourceCatFilter("all");
+                      setSourceAgentFilter("all");
+                    } else {
+                      setSourceCatFilter(cat);
+                      setSourceAgentFilter("all");
+                    }
+                  },
+                  `Show ${cat === "all" ? "all" : cat} findings`,
+                );
+              })}
+              {sourceCatFilter !== "all" && (
+                <button type="button" onClick={() => { setSourceCatFilter("all"); setSourceAgentFilter("all"); }}
+                  className="sccap-btn sccap-btn-sm sccap-btn-ghost" style={{ marginLeft: 4 }} aria-label="Clear source filter">
+                  <Icon.X size={11} /> Clear filter
+                </button>
+              )}
+            </div>
+
+            {/* Agent sub-pills — only when LLM is the selected category */}
+            {sourceCatFilter === "llm" && llmAgents.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8, alignItems: "center", paddingLeft: 4 }}>
+                <span style={{ fontSize: 10.5, color: "var(--fg-subtle)", fontStyle: "italic" }}>Agent:</span>
+                {llmAgents.map(([agentName, agentCount]) => (
+                  renderPill(
+                    agentName,
+                    agentName,
+                    agentCount,
+                    agentColor,
+                    sourceAgentFilter === agentName,
+                    () => setSourceAgentFilter(prev => prev === agentName ? "all" : agentName),
+                    `Show only ${agentName} findings`,
+                    true,
+                  )
+                ))}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* Prescan-only banner — shown when scan was stopped before LLM phase */}
       {isPrescanBlocked && allFindings.length > 0 && (
