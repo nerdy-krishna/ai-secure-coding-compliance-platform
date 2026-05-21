@@ -48,13 +48,10 @@ export const FindingsDebugPanel: React.FC<Props> = ({ scanId }) => {
     return () => { cancelled = true; };
   }, [scanId]);
 
-  if (loading || !data) return null;
-
-  const totalRaw = data.sast_findings.length + data.raw_llm_findings.length;
   const findingsMap: Record<Bucket, Finding[]> = {
-    sast: data.sast_findings,
-    raw_llm: data.raw_llm_findings,
-    consolidated: data.consolidated_findings,
+    sast: data?.sast_findings ?? [],
+    raw_llm: data?.raw_llm_findings ?? [],
+    consolidated: data?.consolidated_findings ?? [],
   };
 
   const llmAgents = useMemo(() => {
@@ -92,6 +89,10 @@ export const FindingsDebugPanel: React.FC<Props> = ({ scanId }) => {
 
   useEffect(() => { setExpandedId(null); }, [activeBucket, sevFilter, sourceCat]);
   useEffect(() => { if (sourceCat !== "LLM") setSourceAgent("All Agents"); }, [sourceCat]);
+
+  if (loading || !data) return null;
+
+  const totalRaw = data.sast_findings.length + data.raw_llm_findings.length;
 
   return (
     <div className="surface" style={{ padding: 0, overflow: "hidden" }}>
