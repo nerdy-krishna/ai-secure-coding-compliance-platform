@@ -19,6 +19,7 @@ type Tab = "pipeline" | "llm";
 const MODE_LABELS: Record<SankeyMode, string> = {
   source: "By Source",
   source_type: "By Type",
+  agent: "By Agent",
   severity: "By Severity",
   cwe: "By CWE",
 };
@@ -108,6 +109,7 @@ const PipelineTab: React.FC<{
           sourceGroups={debug.source_groups}
           severityGroups={debug.severity_groups}
           cweGroups={debug.cwe_groups}
+          agentGroups={debug.agent_groups}
           consolidatedCount={debug.consolidated_findings.length}
         />
       </div>
@@ -284,8 +286,15 @@ const LLMTab: React.FC<{ interactions: LLMInteractionResponse[]; scanId: string 
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedModel, setSelectedModel] = useState(() => searchParams.get("model") ?? "All Models");
   const [selectedFile, setSelectedFile] = useState("All Files");
+  const [selectedAgent, setSelectedAgent] = useState("All Agents");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showTech, setShowTech] = useState<Record<number, boolean>>({});
+
+  const agents = useMemo(() => {
+    const s = new Set<string>();
+    interactions.forEach(i => { if (i.agent_name) s.add(i.agent_name); });
+    return ["All Agents", ...Array.from(s).sort()];
+  }, [interactions]);
 
   const models = useMemo(() => {
     const s = new Set<string>();
@@ -314,8 +323,9 @@ const LLMTab: React.FC<{ interactions: LLMInteractionResponse[]; scanId: string 
   const filtered = useMemo(() => interactions.filter(i => {
     if (selectedModel !== "All Models" && i.llm_name !== selectedModel) return false;
     if (selectedFile !== "All Files" && i.file_path !== selectedFile) return false;
+    if (selectedAgent !== "All Agents" && i.agent_name !== selectedAgent) return false;
     return true;
-  }), [interactions, selectedModel, selectedFile]);
+  }), [interactions, selectedModel, selectedFile, selectedAgent]);
 
   const overall = useMemo(() => {
     let cost = 0, inp = 0, out = 0, tot = 0;
@@ -350,6 +360,16 @@ const LLMTab: React.FC<{ interactions: LLMInteractionResponse[]; scanId: string 
               <button key={m} className="sccap-btn sccap-btn-ghost" onClick={() => selectModel(m)}
                 style={{ width: "100%", justifyContent: "flex-start", padding: "8px 10px", background: m === selectedModel ? "var(--bg-soft)" : "transparent", color: m === selectedModel ? "var(--fg)" : "var(--fg-muted)", fontSize: 12.5, fontWeight: m === "All Models" ? 600 : 400 }}>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>{m}</span>
+              </button>
+            ))}
+            <div style={{ borderTop: "1px solid var(--border)", margin: "8px 4px" }} />
+          </>}
+          {agents.length > 1 && <>
+            <div style={{ fontSize: 10.5, color: "var(--fg-subtle)", textTransform: "uppercase", letterSpacing: ".06em", padding: "6px 10px 4px" }}>Agents</div>
+            {agents.map(a => (
+              <button key={a} className="sccap-btn sccap-btn-ghost" onClick={() => setSelectedAgent(a)}
+                style={{ width: "100%", justifyContent: "flex-start", padding: "8px 10px", background: a === selectedAgent ? "var(--bg-soft)" : "transparent", color: a === selectedAgent ? "var(--fg)" : "var(--fg-muted)", fontSize: 12.5, fontWeight: a === "All Agents" ? 600 : 400 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>{a}</span>
               </button>
             ))}
             <div style={{ borderTop: "1px solid var(--border)", margin: "8px 4px" }} />

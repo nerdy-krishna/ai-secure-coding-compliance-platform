@@ -1067,6 +1067,7 @@ class ScanFindingsDebugResponse(BaseModel):
     source_groups: Dict[str, int] = Field(default_factory=dict)
     severity_groups: Dict[str, int] = Field(default_factory=dict)
     cwe_groups: Dict[str, int] = Field(default_factory=dict)
+    agent_groups: Dict[str, int] = Field(default_factory=dict)
 
 
 class PaginatedScanHistoryResponse(BaseModel):

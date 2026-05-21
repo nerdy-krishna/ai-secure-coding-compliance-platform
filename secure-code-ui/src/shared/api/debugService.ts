@@ -23,6 +23,7 @@ export interface ScanFindingsDebug {
   source_groups: Record<string, number>;
   severity_groups: Record<string, number>;
   cwe_groups: Record<string, number>;
+  agent_groups: Record<string, number>;
 }
 
 export const debugService = {

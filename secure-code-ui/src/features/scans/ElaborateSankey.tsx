@@ -4,13 +4,14 @@
 
 import React, { useMemo } from "react";
 
-export type SankeyMode = "source" | "source_type" | "severity" | "cwe";
+export type SankeyMode = "source" | "source_type" | "agent" | "severity" | "cwe";
 
 interface Props {
   mode: SankeyMode;
   sourceGroups: Record<string, number>;
   severityGroups: Record<string, number>;
   cweGroups: Record<string, number>;
+  agentGroups: Record<string, number>;
   consolidatedCount: number;
 }
 
@@ -49,12 +50,15 @@ export const ElaborateSankey: React.FC<Props> = ({
   sourceGroups,
   severityGroups,
   cweGroups,
+  agentGroups,
   consolidatedCount,
 }) => {
   const data = useMemo(() => {
     let groups: Record<string, number>;
     if (mode === "source") {
       groups = sourceGroups;
+    } else if (mode === "agent") {
+      groups = agentGroups;
     } else if (mode === "severity") {
       groups = severityGroups;
     } else if (mode === "cwe") {
@@ -73,7 +77,7 @@ export const ElaborateSankey: React.FC<Props> = ({
       if (llm > 0) groups["llm"] = llm;
     }
     return buildNodes(mode, groups);
-  }, [mode, sourceGroups, severityGroups, cweGroups]);
+  }, [mode, sourceGroups, severityGroups, cweGroups, agentGroups]);
 
   const leftNodes = data.nodes.filter(n => n.id !== "consolidated");
   const rightNode = { id: "consolidated", label: `Consolidated (${consolidatedCount})`, value: consolidatedCount, color: "#10b981" };

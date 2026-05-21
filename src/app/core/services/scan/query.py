@@ -620,6 +620,7 @@ class ScanQueryService:
         source_groups: dict[str, int] = {}
         severity_groups: dict[str, int] = {}
         cwe_groups: dict[str, int] = {}
+        agent_groups: dict[str, int] = {}
         for f in all_findings:
             resp = api_models.VulnerabilityFindingResponse.from_orm(f)
             bucket = getattr(f, "finding_bucket", "consolidated")
@@ -643,6 +644,10 @@ class ScanQueryService:
                     cwe_groups[f"CWE-{m.group(1)}"] = (
                         cwe_groups.get(f"CWE-{m.group(1)}", 0) + 1
                     )
+            # Agent groups: non-SAST sources only (for By Agent Sankey mode)
+            if src not in ("bandit", "semgrep", "gitleaks", "osv", "unknown"):
+                agent_name = f.source or "unknown"
+                agent_groups[agent_name] = agent_groups.get(agent_name, 0) + 1
 
         # Sankey: SAST → raw_llm → consolidated flow counts.
         sast_count = len(sast)
@@ -673,6 +678,7 @@ class ScanQueryService:
             source_groups=source_groups,
             severity_groups=severity_groups,
             cwe_groups=cwe_groups,
+            agent_groups=agent_groups,
         )
 
     async def get_paginated_projects(
