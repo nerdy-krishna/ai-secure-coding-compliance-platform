@@ -1,7 +1,6 @@
 import type { RepoFile } from "../../features/submission/RepoFileTree";
 import {
   type BulkFindingDispositionResponse,
-  type BulkFindingDispositionResponse,
   type FindingDisposition,
   type FindingDispositionEvent,
   type FindingDispositionResponse,
