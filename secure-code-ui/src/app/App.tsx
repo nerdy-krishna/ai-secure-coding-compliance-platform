@@ -189,12 +189,13 @@ function AppContent() {
             element={<ProjectDetailPage />}
           />
           <Route path="/analysis/results/:scanId" element={<ResultsPage />} />
-          <Route element={<FeatureRoute feature="log_stack" />}>
-            <Route
-              path="/scans/:scanId/diagnostics"
-              element={<ScanDiagnosticsPage />}
-            />
-          </Route>
+          {/* Scan diagnostics reads DB events — no container-backend needed;
+              deliberately NOT gated behind log_stack (which only gates
+              the Grafana/Loki/Fluentd stack). */}
+          <Route
+            path="/scans/:scanId/diagnostics"
+            element={<ScanDiagnosticsPage />}
+          />
           <Route element={<FeatureRoute feature="chat" />}>
             <Route path="/advisor" element={<SecurityAdvisorPage />} />
           </Route>
