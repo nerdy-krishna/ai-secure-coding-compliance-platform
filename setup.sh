@@ -36,11 +36,25 @@ if [ ! -f .env ]; then
     cp .env.example .env
     
     echo " -> Generating secure keys..."
+    # ------------------------------------------------------------------
+    # Core secrets
     SECRET_KEY=$(python3 scripts/generate_secrets.py random)
     ENCRYPTION_KEY=$(python3 scripts/generate_secrets.py fernet)
     POSTGRES_PASSWORD=$(python3 scripts/generate_secrets.py random)
     RABBITMQ_DEFAULT_PASS=$(python3 scripts/generate_secrets.py random)
     QDRANT_API_KEY=$(python3 scripts/generate_secrets.py random)
+    # Grafana (log_stack profile)
+    GRAFANA_ADMIN_PASSWORD=$(python3 scripts/generate_secrets.py random)
+    # Langfuse / tracing stack secrets
+    LANGFUSE_POSTGRES_PASSWORD=$(python3 scripts/generate_secrets.py random)
+    CLICKHOUSE_PASSWORD=$(python3 scripts/generate_secrets.py random)
+    REDIS_PASSWORD=$(python3 scripts/generate_secrets.py random)
+    MINIO_ROOT_PASSWORD=$(python3 scripts/generate_secrets.py random)
+    LANGFUSE_ENCRYPTION_KEY=$(openssl rand -hex 32)  # must be exactly 64 hex chars
+    LANGFUSE_SALT=$(python3 scripts/generate_secrets.py random)
+    NEXTAUTH_SECRET=$(python3 scripts/generate_secrets.py random)
+    LANGFUSE_INIT_USER_PASSWORD=$(python3 scripts/generate_secrets.py random)
+    # ------------------------------------------------------------------
 
     # Escape sed replacement-side metacharacters (/, &, \) so that special
     # characters in generated secrets are treated as literals (V01.2.9).
@@ -50,55 +64,132 @@ if [ ! -f .env ]; then
     _POSTGRES_PASSWORD=$(_esc "$POSTGRES_PASSWORD")
     _RABBITMQ_DEFAULT_PASS=$(_esc "$RABBITMQ_DEFAULT_PASS")
     _QDRANT_API_KEY=$(_esc "$QDRANT_API_KEY")
+    _GRAFANA_ADMIN_PASSWORD=$(_esc "$GRAFANA_ADMIN_PASSWORD")
+    _LANGFUSE_POSTGRES_PASSWORD=$(_esc "$LANGFUSE_POSTGRES_PASSWORD")
+    _CLICKHOUSE_PASSWORD=$(_esc "$CLICKHOUSE_PASSWORD")
+    _REDIS_PASSWORD=$(_esc "$REDIS_PASSWORD")
+    _MINIO_ROOT_PASSWORD=$(_esc "$MINIO_ROOT_PASSWORD")
+    _LANGFUSE_ENCRYPTION_KEY=$(_esc "$LANGFUSE_ENCRYPTION_KEY")
+    _LANGFUSE_SALT=$(_esc "$LANGFUSE_SALT")
+    _NEXTAUTH_SECRET=$(_esc "$NEXTAUTH_SECRET")
+    _LANGFUSE_INIT_USER_PASSWORD=$(_esc "$LANGFUSE_INIT_USER_PASSWORD")
 
-    # Use sed based on OS (macOS sed requires empty extension for -i)
+    # Use sed based on OS (macOS sed requires empty extension for -i).
+    # All REPLACE_ME variables use a regex that matches both bare
+    # REPLACE_ME and suffixed forms (e.g. REPLACE_ME_64_HEX_...).
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s/SECRET_KEY=supersecretkey1234567890/SECRET_KEY=$_SECRET_KEY/" .env
-        sed -i '' "s/ENCRYPTION_KEY=.*$/ENCRYPTION_KEY=$_ENCRYPTION_KEY/" .env
-        sed -i '' "s/POSTGRES_PASSWORD=postgres/POSTGRES_PASSWORD=$_POSTGRES_PASSWORD/" .env
-        sed -i '' "s/RABBITMQ_DEFAULT_PASS=password/RABBITMQ_DEFAULT_PASS=$_RABBITMQ_DEFAULT_PASS/" .env
-        sed -i '' "s|QDRANT_API_KEY=change-me-qdrant-key|QDRANT_API_KEY=$_QDRANT_API_KEY|" .env
+        sed_i=(-i '')
     else
-        sed -i "s/SECRET_KEY=supersecretkey1234567890/SECRET_KEY=$_SECRET_KEY/" .env
-        sed -i "s/ENCRYPTION_KEY=.*$/ENCRYPTION_KEY=$_ENCRYPTION_KEY/" .env
-        sed -i "s/POSTGRES_PASSWORD=postgres/POSTGRES_PASSWORD=$_POSTGRES_PASSWORD/" .env
-        sed -i "s/RABBITMQ_DEFAULT_PASS=password/RABBITMQ_DEFAULT_PASS=$_RABBITMQ_DEFAULT_PASS/" .env
-        sed -i "s|QDRANT_API_KEY=change-me-qdrant-key|QDRANT_API_KEY=$_QDRANT_API_KEY|" .env
+        sed_i=(-i)
     fi
+    # Core
+    sed "${sed_i[@]}" "s/^SECRET_KEY=REPLACE_ME.*$/SECRET_KEY=$_SECRET_KEY/" .env
+    sed "${sed_i[@]}" "s/^ENCRYPTION_KEY=REPLACE_ME.*$/ENCRYPTION_KEY=$_ENCRYPTION_KEY/" .env
+    sed "${sed_i[@]}" "s/^POSTGRES_PASSWORD=REPLACE_ME.*$/POSTGRES_PASSWORD=$_POSTGRES_PASSWORD/" .env
+    sed "${sed_i[@]}" "s/^RABBITMQ_DEFAULT_PASS=REPLACE_ME.*$/RABBITMQ_DEFAULT_PASS=$_RABBITMQ_DEFAULT_PASS/" .env
+    sed "${sed_i[@]}" "s|^QDRANT_API_KEY=change-me-qdrant-key|QDRANT_API_KEY=$_QDRANT_API_KEY|" .env
+    # Observability / Grafana
+    sed "${sed_i[@]}" "s/^GRAFANA_ADMIN_PASSWORD=REPLACE_ME.*$/GRAFANA_ADMIN_PASSWORD=$_GRAFANA_ADMIN_PASSWORD/" .env
+    # Langfuse tracing stack
+    sed "${sed_i[@]}" "s/^LANGFUSE_POSTGRES_PASSWORD=REPLACE_ME.*$/LANGFUSE_POSTGRES_PASSWORD=$_LANGFUSE_POSTGRES_PASSWORD/" .env
+    sed "${sed_i[@]}" "s/^CLICKHOUSE_PASSWORD=REPLACE_ME.*$/CLICKHOUSE_PASSWORD=$_CLICKHOUSE_PASSWORD/" .env
+    sed "${sed_i[@]}" "s/^REDIS_PASSWORD=REPLACE_ME.*$/REDIS_PASSWORD=$_REDIS_PASSWORD/" .env
+    sed "${sed_i[@]}" "s/^MINIO_ROOT_PASSWORD=REPLACE_ME.*$/MINIO_ROOT_PASSWORD=$_MINIO_ROOT_PASSWORD/" .env
+    sed "${sed_i[@]}" "s/^LANGFUSE_ENCRYPTION_KEY=REPLACE_ME.*$/LANGFUSE_ENCRYPTION_KEY=$_LANGFUSE_ENCRYPTION_KEY/" .env
+    sed "${sed_i[@]}" "s/^LANGFUSE_SALT=REPLACE_ME.*$/LANGFUSE_SALT=$_LANGFUSE_SALT/" .env
+    sed "${sed_i[@]}" "s/^NEXTAUTH_SECRET=REPLACE_ME.*$/NEXTAUTH_SECRET=$_NEXTAUTH_SECRET/" .env
+    sed "${sed_i[@]}" "s/^LANGFUSE_INIT_USER_PASSWORD=REPLACE_ME.*$/LANGFUSE_INIT_USER_PASSWORD=$_LANGFUSE_INIT_USER_PASSWORD/" .env
 
     echo "[+] .env created and configured with new secrets."
 else
     echo "[!] .env already exists. Preserving existing secrets."
 
-    # Upgrade fix-up: if QDRANT_API_KEY is the placeholder we shipped
-    # in .env.example, generate a real one in place. Lets operators
-    # who pulled the Chroma → Qdrant migration commit (ADR-008) come
-    # up cleanly without a manual key-rotation step. Leaves any
-    # already-rotated value alone.
-    if grep -q '^QDRANT_API_KEY=change-me-qdrant-key$' .env; then
-        echo " -> Replacing placeholder QDRANT_API_KEY with a generated value..."
-        QDRANT_API_KEY=$(python3 scripts/generate_secrets.py random)
-        _esc() { printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'; }
-        _QDRANT_API_KEY=$(_esc "$QDRANT_API_KEY")
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s|QDRANT_API_KEY=change-me-qdrant-key|QDRANT_API_KEY=$_QDRANT_API_KEY|" .env
-        else
-            sed -i "s|QDRANT_API_KEY=change-me-qdrant-key|QDRANT_API_KEY=$_QDRANT_API_KEY|" .env
-        fi
-        echo "[+] QDRANT_API_KEY rotated."
+    # ------------------------------------------------------------------
+    # Upgrade fix-ups: detect and repair missing or placeholder secrets
+    # in .env files created before the current .env.example template.
+    # Three categories:
+    #   1. Key missing entirely → generate + append
+    #   2. Value is REPLACE_ME* or old placeholder → generate + inline replace
+    #   3. Deprecated keys → remove
+    # ------------------------------------------------------------------
+
+    # Escape for the replacement side of a sed s/// command.
+    _esc() { printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'; }
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed_i=(-i '')
+    else
+        sed_i=(-i)
     fi
 
-    # Upgrade fix-up: ADR-008 retired RAG_VECTOR_STORE; Settings now
-    # rejects unknown values via extra="ignore" but the lifespan
-    # WARN can be silenced by removing the line outright.
+    # -- _sccap_upgrade_secret <key> <gen-type> [<old-value-pattern>] ----
+    # Ensures KEY has a generated secret. If KEY is missing entirely,
+    # appends it. If KEY has an old/placeholder value (matched by
+    # old-value-pattern or REPLACE_ME), replaces inline. Otherwise leaves
+    # it alone.
+    # gen-type: "random" | "fernet" | "hex64" (openssl rand -hex 32)
+    _sccap_upgrade_secret() {
+        local key="$1" gentype="$2" old_pattern="${3:-}"
+        local val esc
+        if ! grep -q "^${key}=" .env; then
+            # Missing — generate and append.
+            case "$gentype" in
+                random) val=$(python3 scripts/generate_secrets.py random) ;;
+                fernet) val=$(python3 scripts/generate_secrets.py fernet) ;;
+                hex64)  val=$(openssl rand -hex 32) ;;
+                *) echo "[!] Unknown gen-type $gentype for $key; skipping." >&2; return 1 ;;
+            esac
+            esc=$(_esc "$val")
+            echo "${key}=${val}" >> .env
+            echo "   + added ${key}"
+            return 0
+        fi
+        # Present — check if it's a placeholder.
+        local need_replace=0
+        if [ -n "$old_pattern" ] && grep -q "^${key}=${old_pattern}$" .env; then
+            need_replace=1
+        elif grep -q "^${key}=REPLACE_ME" .env; then
+            need_replace=1
+        fi
+        if [ "$need_replace" -eq 1 ]; then
+            case "$gentype" in
+                random) val=$(python3 scripts/generate_secrets.py random) ;;
+                fernet) val=$(python3 scripts/generate_secrets.py fernet) ;;
+                hex64)  val=$(openssl rand -hex 32) ;;
+            esac
+            esc=$(_esc "$val")
+            sed "${sed_i[@]}" "s|^${key}=.*|${key}=${esc}|" .env
+            echo "   ~ replaced placeholder ${key}"
+        fi
+    }
+
+    # Deprecated keys to purge.
     if grep -q '^RAG_VECTOR_STORE=' .env; then
         echo " -> Removing retired RAG_VECTOR_STORE entry (ADR-008)..."
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' '/^RAG_VECTOR_STORE=/d' .env
-        else
-            sed -i '/^RAG_VECTOR_STORE=/d' .env
-        fi
+        sed "${sed_i[@]}" '/^RAG_VECTOR_STORE=/d' .env
     fi
+
+    # Patch all secrets that docker-compose or the app require.
+    echo " -> Checking for missing/placeholder secrets..."
+    _sccap_upgrade_secret SECRET_KEY random
+    _sccap_upgrade_secret ENCRYPTION_KEY fernet
+    _sccap_upgrade_secret POSTGRES_PASSWORD random
+    _sccap_upgrade_secret RABBITMQ_DEFAULT_PASS random
+    _sccap_upgrade_secret QDRANT_API_KEY random 'change-me-qdrant-key'
+    _sccap_upgrade_secret GRAFANA_ADMIN_PASSWORD random
+    _sccap_upgrade_secret LANGFUSE_POSTGRES_PASSWORD random
+    _sccap_upgrade_secret CLICKHOUSE_PASSWORD random
+    _sccap_upgrade_secret REDIS_PASSWORD random
+    _sccap_upgrade_secret MINIO_ROOT_PASSWORD random
+    _sccap_upgrade_secret LANGFUSE_ENCRYPTION_KEY hex64
+    _sccap_upgrade_secret LANGFUSE_SALT random
+    _sccap_upgrade_secret NEXTAUTH_SECRET random
+    _sccap_upgrade_secret LANGFUSE_INIT_USER_PASSWORD random
+    # GRAFANA_ADMIN_USER is not a secret but must exist for compose.
+    if ! grep -q '^GRAFANA_ADMIN_USER=' .env; then
+        echo "GRAFANA_ADMIN_USER=admin" >> .env
+        echo "   + added GRAFANA_ADMIN_USER"
+    fi
+    echo "[+] Secrets audit complete."
 fi
 flock -u 9
 
