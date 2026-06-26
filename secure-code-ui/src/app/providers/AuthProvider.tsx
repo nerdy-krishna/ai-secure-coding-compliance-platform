@@ -173,6 +173,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       // Arm proactive refresh so the user doesn't see a 401 flash near
       // access-token expiry.
       scheduleProactiveRefresh(response.access_token);
+      // Fetch user immediately so is_superuser is available for the
+      // route guard before the loading state is released — otherwise
+      // superusers get bounced to /account/dashboard as a non-admin.
+      await fetchAndSetUser();
     } catch (err: unknown) {
       // V16.2.5: Never log the raw axios error — it contains the Bearer token in request headers.
       console.error("AuthProvider: Login failed:", {
@@ -205,7 +209,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     // Match the password-login path so the user doesn't see a 401 flash
     // a few minutes after a passkey / SSO sign-in.
     scheduleProactiveRefresh(token);
-  }, []);
+    // Fetch user profile so is_superuser is available for route guards.
+    // The useEffect will also fire, but this ensures it's populated before
+    // the next render.
+    fetchAndSetUser();
+  }, [fetchAndSetUser]);
 
   const register = useCallback(
     async (credentials: UserRegisterData): Promise<UserRead> => {
