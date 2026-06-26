@@ -522,7 +522,7 @@ const SubmitPage: React.FC = () => {
       mode === "upload"
         ? files.map((f) => f.name)
         : (mode === "archive" || mode === "git") && previewFiles
-          ? previewFiles
+          ? previewFiles.map((f) => f.path)
           : [];
     return detectLanguages(fileNames);
   }, [mode, files, previewFiles]);
@@ -667,11 +667,9 @@ const SubmitPage: React.FC = () => {
     const fileNames =
       mode === "upload"
         ? files.map((f) => f.name)
-        : mode === "archive" && previewFiles
-          ? previewFiles
-          : mode === "git" && previewFiles
-            ? previewFiles
-            : [];
+        : (mode === "archive" || mode === "git") && previewFiles
+          ? previewFiles.map((f) => f.path)
+          : [];
 
     const langs = detectLanguages(fileNames);
     const key = coverageKey(langs);
