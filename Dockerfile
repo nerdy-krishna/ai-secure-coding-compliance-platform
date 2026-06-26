@@ -250,6 +250,8 @@ USER appuser
 
 COPY --chown=appuser:appuser --from=worker-builder /app/.venv /app/.venv
 COPY --chown=appuser:appuser ./src /app/src
+COPY --chown=appuser:appuser ./alembic /app/alembic
+COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
 COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 
 # Pre-warm the fastembed model cache (same as the api stage). Worker
