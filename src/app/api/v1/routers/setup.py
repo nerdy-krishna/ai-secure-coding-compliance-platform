@@ -257,7 +257,7 @@ async def perform_setup(
         # before persisting it as the lone CORS allowed_origin. Reject
         # malformed values, javascript:, schemes other than http/https, and
         # entries with a path/query/fragment/userinfo or excessive length.
-        _frontend_url = request.frontend_url.strip()
+        _frontend_url = str(request.frontend_url).strip()
         if len(_frontend_url) > 2048:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
