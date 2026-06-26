@@ -45,7 +45,7 @@ RUN chmod +x /docker-entrypoint.d/99-ssl-setup.sh
 RUN addgroup -S nginx-app && adduser -S -G nginx-app nginx-app \
     && chown -R nginx-app:nginx-app /usr/share/nginx/html /var/cache/nginx /var/log/nginx /etc/nginx \
     && touch /var/run/nginx.pid && chown nginx-app:nginx-app /var/run/nginx.pid \
-    && mkdir -p /var/log/letsencrypt /var/lib/letsencrypt \
+    && mkdir -p /etc/letsencrypt /var/log/letsencrypt /var/lib/letsencrypt \
     && chown -R nginx-app:nginx-app /etc/letsencrypt /var/log/letsencrypt /var/lib/letsencrypt
 USER nginx-app
 
