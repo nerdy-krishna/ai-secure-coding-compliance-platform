@@ -703,28 +703,40 @@ class ScanQueryService:
                     api_models.SankeyNode(id=f"sast_{src}", label=f"{src} ({cnt})")
                 )
 
-            # SAST → raw_llm flows (proportional)
+            # SAST → raw-stage flows (proportional). Keep this purely
+            # diagnostic: bad/missing flow-map data must never 500 the
+            # results page. The per-agent total is an integer count, not
+            # an iterable (regression: TypeError from sum(int)).
             total_sast = sum(sast_by_source.values())
-            for agent, cnt in sorted(merged_by_agent.items()):
-                if total_sast > 0:
+            for agent in sorted(
+                set(
+                    list(merged_by_agent.keys())
+                    + list(dropped_by_agent.keys())
+                    + list(passthrough_by_agent.keys())
+                )
+            ):
+                agent_total = (
+                    merged_by_agent.get(agent, 0)
+                    + dropped_by_agent.get(agent, 0)
+                    + passthrough_by_agent.get(agent, 0)
+                )
+                if total_sast > 0 and agent_total > 0:
+                    target_suffix = (
+                        "merged"
+                        if merged_by_agent.get(agent, 0) > 0
+                        else "dropped" if dropped_by_agent.get(agent, 0) > 0 else "pass"
+                    )
                     for src, scnt in sast_by_source.items():
                         share = max(
                             1,
                             round(
-                                scnt
-                                / total_sast
-                                * sum(
-                                    merged_by_agent.get(agent, 0)
-                                    + dropped_by_agent.get(agent, 0)
-                                    + passthrough_by_agent.get(agent, 0)
-                                )
-                                / len(sast_by_source)
+                                scnt / total_sast * agent_total / len(sast_by_source)
                             ),
                         )
                         flinks.append(
                             api_models.SankeyLink(
                                 source=f"sast_{src}",
-                                target=f"raw_{agent}_merged",
+                                target=f"raw_{agent}_{target_suffix}",
                                 value=min(share, scnt),
                             )
                         )
@@ -847,6 +859,105 @@ class ScanQueryService:
             flow_map=flow_map,
             full_sankey_nodes=full_nodes,
             full_sankey_links=full_links,
+        )
+
+    async def get_finding_lineage(
+        self,
+        scan_id: uuid.UUID,
+        user,
+        request: api_models.FindingLineageRequest,
+    ) -> api_models.FindingLineageResponse:
+        """Build and return a render-ready Finding Lineage graph."""
+        from app.core.services.scan.lineage import (
+            build_lineage_from_records,
+            build_lineage_from_findings,
+        )
+
+        scan = await self.repo.get_scan(scan_id)
+        if not scan or (scan.user_id != user.id and not user.is_superuser):
+            raise HTTPException(
+                status_code=404, detail="Scan not found or not authorized."
+            )
+
+        expanded_ids = request.expanded_node_ids or []
+        focused = request.focused_node_id
+        filters = request.filters
+        max_n = request.max_nodes
+
+        # Try exact lineage artifact first
+        try:
+            from app.infrastructure.database.repositories.scan_artifact_repo import (
+                ARTIFACT_TYPE_LINEAGE,
+                ScanArtifactRepository,
+            )
+
+            artifact = await ScanArtifactRepository(self.repo.db).get_by_type(
+                scan_id, ARTIFACT_TYPE_LINEAGE
+            )
+            if artifact is not None:
+                graph = build_lineage_from_records(
+                    raw_records=artifact.payload.get("raw_findings", []),
+                    final_records=artifact.payload.get("final_findings", []),
+                    links=artifact.payload.get("links", []),
+                    expanded_node_ids=expanded_ids,
+                    focused_node_id=focused,
+                    filters=filters,
+                    max_nodes=max_n,
+                )
+                return api_models.FindingLineageResponse(
+                    nodes=[api_models.LineageNode(**n) for n in graph["nodes"]],
+                    edges=[api_models.LineageEdge(**e) for e in graph["edges"]],
+                    lineage_quality=graph["lineage_quality"],
+                    warnings=graph["warnings"],
+                    available_expansions=graph.get("available_expansions", {}),
+                )
+        except Exception:
+            pass  # fall through to inferred
+
+        # Fallback: inferred lineage from findings
+        from sqlalchemy import select
+        from app.infrastructure.database import models as db_models
+
+        all_findings = list(
+            (
+                await self.repo.db.execute(
+                    select(db_models.Finding).where(
+                        db_models.Finding.scan_id == scan_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        sast_orm = [
+            f for f in all_findings if getattr(f, "finding_bucket", "") == "sast"
+        ]
+        raw_llm_orm = [
+            f for f in all_findings if getattr(f, "finding_bucket", "") == "raw_llm"
+        ]
+        consolidated_orm = [
+            f
+            for f in all_findings
+            if getattr(f, "finding_bucket", "consolidated") == "consolidated"
+        ]
+
+        graph = build_lineage_from_findings(
+            sast_findings=sast_orm,
+            raw_llm_findings=raw_llm_orm,
+            consolidated_findings=consolidated_orm,
+            expanded_node_ids=expanded_ids,
+            focused_node_id=focused,
+            filters=filters,
+            max_nodes=max_n,
+        )
+
+        return api_models.FindingLineageResponse(
+            nodes=[api_models.LineageNode(**n) for n in graph["nodes"]],
+            edges=[api_models.LineageEdge(**e) for e in graph["edges"]],
+            lineage_quality=graph["lineage_quality"],
+            warnings=graph["warnings"],
+            available_expansions=graph.get("available_expansions", {}),
         )
 
     async def get_paginated_projects(

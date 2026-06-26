@@ -13,14 +13,18 @@ import React from "react";
 import { useLocation } from "react-router-dom";
 import AdminSubNav from "./AdminSubNav";
 import { TopNav } from "./TopNav/TopNav";
+import { useAuth } from "../shared/hooks/useAuth";
 
 const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
   children,
 }) => {
   const { pathname } = useLocation();
+  const { user } = useAuth();
+  const isSuperuser = !!user?.is_superuser;
   const isAdminArea =
     pathname.startsWith("/admin") ||
-    pathname.startsWith("/account/settings/llm");
+    pathname.startsWith("/account/settings/llm") ||
+    (isSuperuser && pathname === "/account/dashboard");
   return (
     <div
       style={{

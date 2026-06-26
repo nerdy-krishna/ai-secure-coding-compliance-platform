@@ -73,6 +73,66 @@ export const AdminSnapshot: React.FC = () => {
 
   return (
     <div className="fade-in" style={{ display: "grid", gap: 20 }}>
+      {/* Admin quick-access */}
+      <div
+        className="sccap-card"
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+          alignItems: "center",
+          padding: 16,
+          background:
+            "linear-gradient(135deg, var(--primary-weak), var(--bg-elev))",
+        }}
+      >
+        <span
+          style={{
+            fontWeight: 600,
+            fontSize: 13,
+            color: "var(--primary)",
+            marginRight: 8,
+          }}
+        >
+          <Icon.Settings size={14} /> Admin settings:
+        </span>
+        <Link
+          to="/account/settings/llm"
+          className="sccap-btn sccap-btn-sm sccap-btn-primary"
+          style={{ textDecoration: "none" }}
+        >
+          LLM Configuration
+        </Link>
+        <Link
+          to="/admin/system"
+          className="sccap-btn sccap-btn-sm"
+          style={{ textDecoration: "none" }}
+        >
+          System Config
+        </Link>
+        <Link
+          to="/admin/features"
+          className="sccap-btn sccap-btn-sm"
+          style={{ textDecoration: "none" }}
+        >
+          Feature Flags
+        </Link>
+        <Link
+          to="/admin/users"
+          className="sccap-btn sccap-btn-sm"
+          style={{ textDecoration: "none" }}
+        >
+          User Management
+        </Link>
+        <Link
+          to="/admin/smtp"
+          className="sccap-btn sccap-btn-sm"
+          style={{ textDecoration: "none" }}
+        >
+          SMTP
+        </Link>
+      </div>
+
       <div
         className="sccap-card"
         style={{

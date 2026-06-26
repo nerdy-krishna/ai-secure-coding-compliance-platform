@@ -28,6 +28,8 @@ export interface ScanFindingsDebug {
     raw_title: string;
     raw_source: string;
     raw_severity: string;
+    raw_cwe?: string | null;
+    raw_line?: number | null;
     consolidated_title: string;
     status: string;
   }> | null;
@@ -39,6 +41,35 @@ export const debugService = {
   getFindingsDebug: async (scanId: string): Promise<ScanFindingsDebug> => {
     const { data } = await apiClient.get<ScanFindingsDebug>(
       `/scans/${encodeURIComponent(scanId)}/findings/debug`,
+    );
+    return data;
+  },
+
+  getFindingLineage: async (
+    scanId: string,
+    expandedNodeIds: string[] = [],
+    focusedNodeId?: string | null,
+    maxNodes = 250,
+    filters?: Record<string, string[]> | null,
+  ): Promise<{
+    nodes: Array<{
+      id: string; type: string; label: string; column: number;
+      count: number; expandable: boolean; expanded: boolean;
+      badges: Array<Record<string, unknown>>;
+    }>;
+    edges: Array<{ id: string; source: string; target: string; value: number }>;
+    lineage_quality: string;
+    warnings: string[];
+    available_expansions: Record<string, number>;
+  }> => {
+    const { data } = await apiClient.post(
+      `/scans/${encodeURIComponent(scanId)}/finding-lineage`,
+      {
+        expanded_node_ids: expandedNodeIds,
+        focused_node_id: focusedNodeId ?? null,
+        filters: filters ?? null,
+        max_nodes: maxNodes,
+      },
     );
     return data;
   },

@@ -167,6 +167,114 @@ _BACKOFF_START_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 30.0
 
 
+async def _try_fast_forward_completed_consolidation(
+    initial_state: WorkerState,
+) -> Optional[bool]:
+    """Finish a manual resume from completed durable consolidation output.
+
+    If a FAILED scan crashed after per-file consolidation completed, the
+    expensive analysis/consolidation artifacts are already durable. Manual
+    resume should continue from the next workflow boundary instead of
+    replaying prescan approvals and analysis. Returns:
+    - True: fast-forward completed successfully;
+    - False: fast-forward was applicable but failed;
+    - None: no completed consolidation artifact, caller should use graph.
+    """
+    from sqlalchemy import select
+
+    from app.core.schemas import VulnerabilityFinding
+    from app.infrastructure.database import AsyncSessionLocal
+    from app.infrastructure.database import models as db_models
+    from app.infrastructure.database.repositories.scan_repo import ScanRepository
+    from app.infrastructure.workflows.nodes.global_consolidate import (
+        global_consolidate_findings_node,
+    )
+    from app.infrastructure.workflows.nodes.results import (
+        save_final_report_node,
+        save_results_node,
+    )
+
+    scan_id = initial_state["scan_id"]
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = ScanRepository(db)
+            scan = await repo.get_scan(scan_id)
+            if scan is None:
+                logger.warning(
+                    "WORKFLOW: manual resume fast-forward found no scan %s", scan_id
+                )
+                return False
+            task_rows = (
+                (
+                    await db.execute(
+                        select(db_models.ScanTask).where(
+                            db_models.ScanTask.scan_id == scan_id,
+                            db_models.ScanTask.task_type == "consolidation:file",
+                            db_models.ScanTask.status == "completed",
+                            db_models.ScanTask.result_payload.is_not(None),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        if not task_rows:
+            return None
+
+        findings: list[VulnerabilityFinding] = []
+        flow_map: list[dict[str, Any]] = []
+        for task in task_rows:
+            payload = task.result_payload or {}
+            findings.extend(
+                VulnerabilityFinding.model_validate(item)
+                for item in payload.get("findings", [])
+            )
+            flow_map.extend(payload.get("flow_map") or [])
+
+        state: WorkerState = dict(initial_state)  # type: ignore[assignment]
+        state["scan_type"] = scan.scan_type
+        state["findings"] = findings
+
+        async with AsyncSessionLocal() as db:
+            details: dict[str, Any] = {
+                "raw_count": len(flow_map) or len(findings),
+                "consolidated_count": len(findings),
+                "finding_count": len(findings),
+                "fast_forwarded_from_tasks": len(task_rows),
+                "reused_tasks": len(task_rows),
+                "rerun_tasks": 0,
+                "failed_tasks": 0,
+                "completed_tasks": 0,
+            }
+            if flow_map:
+                details["flow_map_json"] = json.dumps(flow_map, default=str)
+            await ScanRepository(db).create_scan_event(
+                scan_id=scan_id,
+                stage_name="CONSOLIDATING",
+                status="COMPLETED",
+                details=details,
+            )
+
+        global_update = await global_consolidate_findings_node(state)
+        state.update(global_update)
+        await save_results_node(state)
+        await save_final_report_node(state)
+        logger.info(
+            "WORKFLOW: Manual resume fast-forwarded scan %s from %d completed consolidation task(s).",
+            scan_id,
+            len(task_rows),
+        )
+        return True
+    except Exception:
+        logger.error(
+            "WORKFLOW: manual resume fast-forward failed for scan %s",
+            scan_id,
+            exc_info=True,
+        )
+        return False
+
+
 async def _run_workflow_for_scan(
     initial_state: WorkerState,
     *,
@@ -495,15 +603,33 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
             return
 
         resume_payload: Optional[dict] = None
-        if (message.routing_key or "") == settings.RABBITMQ_APPROVAL_QUEUE:
-            try:
-                body = json.loads(message.body.decode("utf-8"))
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                logger.error("MSG: Approval body parse failed: %s", e)
-                await message.reject(requeue=False)
+        body: dict[str, Any] = {}
+        body_parse_failed = False
+        try:
+            parsed_body = json.loads(message.body.decode("utf-8"))
+            if isinstance(parsed_body, dict):
+                body = parsed_body
+            else:
+                body_parse_failed = True
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            body_parse_failed = True
+
+        if (
+            (message.routing_key or "") == settings.RABBITMQ_SUBMISSION_QUEUE
+            and body.get("action") == "manual_resume"
+            and body.get("mode") == "resume"
+        ):
+            fast_forwarded = await _try_fast_forward_completed_consolidation(
+                initial_state
+            )
+            if fast_forwarded is not None:
+                if not fast_forwarded:
+                    await message.reject(requeue=False)
                 return
-            if not isinstance(body, dict):
-                logger.error("MSG: Approval body is not a JSON object")
+
+        if (message.routing_key or "") == settings.RABBITMQ_APPROVAL_QUEUE:
+            if body_parse_failed:
+                logger.error("MSG: Approval body parse failed")
                 await message.reject(requeue=False)
                 return
             kind = body.get("kind", "cost_approval")

@@ -17,6 +17,21 @@ interface SankeyLink {
   value: number;
 }
 
+interface FlowMapEntry {
+  raw_title: string;
+  raw_source: string;
+  raw_severity: string;
+  raw_cwe?: string | null;
+  consolidated_title: string;
+  status: string;
+}
+
+interface ConsolidatedFindingLike {
+  title?: string | null;
+  severity?: string | null;
+  cwe?: string | null;
+}
+
 interface Props {
   mode: SankeyMode;
   sourceGroups: Record<string, number>;
@@ -26,6 +41,8 @@ interface Props {
   consolidatedCount: number;
   fullSankeyNodes?: SankeyNode[] | null;
   fullSankeyLinks?: SankeyLink[] | null;
+  flowMap?: FlowMapEntry[] | null;
+  consolidatedFindings?: ConsolidatedFindingLike[] | null;
 }
 
 const PALETTE = [
@@ -71,19 +88,36 @@ const COLORS: Record<string, string> = {
   INFORMATIONAL: "#64748b", INFO: "#64748b",
 };
 
+function hashColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  return PALETTE[Math.abs(hash) % PALETTE.length];
+}
+
 function nodeColor(nodeId: string): string {
   if (nodeId.startsWith("sast_")) {
     const tool = nodeId.replace("sast_", "");
-    return COLORS[tool] || "#64748b";
+    return COLORS[tool] || hashColor(tool);
   }
   if (nodeId.startsWith("raw_")) {
     if (nodeId.endsWith("_dropped")) return COLORS.dropped;
     if (nodeId.endsWith("_pass")) return COLORS.passthrough;
     return COLORS.merged;
   }
+  if (nodeId.startsWith("stage_")) {
+    const stage = nodeId.replace("stage_", "").toLowerCase();
+    if (stage === "dropped") return COLORS.dropped;
+    if (stage === "passthrough") return COLORS.passthrough;
+    return COLORS.merged;
+  }
   if (nodeId.startsWith("cons_")) {
     const sev = nodeId.replace("cons_", "");
-    return COLORS[sev] || "#64748b";
+    return COLORS[sev] || hashColor(sev);
+  }
+  if (nodeId.startsWith("group_")) return hashColor(nodeId);
+  if (nodeId.startsWith("out_")) {
+    const key = decodeURIComponent(nodeId.replace("out_", ""));
+    return COLORS[key] || hashColor(key);
   }
   if (nodeId === "dropped") return COLORS.dropped;
   return "#64748b";
@@ -96,10 +130,101 @@ function columnPosition(col: 0 | 1 | 2): number {
 }
 
 function columnForId(id: string): 0 | 1 | 2 {
-  if (id.startsWith("sast_")) return 0;
-  if (id.startsWith("raw_")) return 1;
-  if (id.startsWith("cons_") || id === "dropped") return 2;
+  if (id.startsWith("sast_") || id.startsWith("group_")) return 0;
+  if (id.startsWith("raw_") || id.startsWith("stage_")) return 1;
+  if (id.startsWith("cons_") || id.startsWith("out_") || id === "dropped") return 2;
   return 1;
+}
+
+function normaliseStatus(status: string | undefined): "merged" | "dropped" | "passthrough" {
+  const s = (status || "passthrough").toLowerCase();
+  if (s === "dropped") return "dropped";
+  if (s === "merged") return "merged";
+  return "passthrough";
+}
+
+function statusLabel(status: "merged" | "dropped" | "passthrough"): string {
+  if (status === "merged") return "Merged";
+  if (status === "dropped") return "Dropped";
+  return "Passthrough";
+}
+
+function compactLabel(label: string, max = 22): string {
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
+}
+
+function addCount(map: Map<string, number>, key: string, inc = 1): void {
+  map.set(key, (map.get(key) || 0) + inc);
+}
+
+function buildGroupedFlowSankey(
+  mode: Exclude<SankeyMode, "source_type">,
+  flowMap: FlowMapEntry[] | null | undefined,
+  consolidatedFindings: ConsolidatedFindingLike[] | null | undefined,
+): { nodes: SankeyNode[]; links: SankeyLink[] } | null {
+  if (!flowMap || flowMap.length === 0) return null;
+
+  const byTitle = new Map<string, ConsolidatedFindingLike>();
+  for (const finding of consolidatedFindings || []) {
+    if (finding.title) byTitle.set(finding.title, finding);
+  }
+
+  const groupCounts = new Map<string, number>();
+  const statusCounts = new Map<string, number>();
+  const outputCounts = new Map<string, number>();
+  const leftToStage = new Map<string, number>();
+  const stageToOutput = new Map<string, number>();
+
+  for (const fm of flowMap) {
+    const status = normaliseStatus(fm.status);
+    const consolidated = byTitle.get(fm.consolidated_title);
+    const group = (() => {
+      if (mode === "source") return fm.raw_source || "unknown";
+      if (mode === "agent") return fm.raw_source || "unknown";
+      if (mode === "severity") return (fm.raw_severity || "INFO").toUpperCase();
+      return fm.raw_cwe || "No CWE";
+    })();
+    const output = (() => {
+      if (status === "dropped") return "Dropped";
+      if (mode === "cwe") return consolidated?.cwe || "No CWE";
+      return (consolidated?.severity || "INFO").toUpperCase();
+    })();
+
+    const groupId = `group_${encodeURIComponent(group)}`;
+    const stageId = `stage_${status}`;
+    const outputId = output === "Dropped" ? "dropped" : `out_${encodeURIComponent(output)}`;
+
+    addCount(groupCounts, groupId);
+    addCount(statusCounts, stageId);
+    addCount(outputCounts, outputId);
+    addCount(leftToStage, `${groupId}→${stageId}`);
+    addCount(stageToOutput, `${stageId}→${outputId}`);
+  }
+
+  const nodes: SankeyNode[] = [];
+  for (const [id, count] of Array.from(groupCounts.entries()).sort((a, b) => b[1] - a[1])) {
+    const label = decodeURIComponent(id.replace("group_", ""));
+    nodes.push({ id, label: `${compactLabel(label)} (${count})` });
+  }
+  for (const [id, count] of Array.from(statusCounts.entries()).sort((a, b) => b[1] - a[1])) {
+    nodes.push({ id, label: `${statusLabel(normaliseStatus(id.replace("stage_", "")))} (${count})` });
+  }
+  for (const [id, count] of Array.from(outputCounts.entries()).sort((a, b) => b[1] - a[1])) {
+    const label = id === "dropped" ? "Dropped" : decodeURIComponent(id.replace("out_", ""));
+    nodes.push({ id, label: `${compactLabel(label)} (${count})` });
+  }
+
+  const links: SankeyLink[] = [];
+  for (const [key, value] of leftToStage.entries()) {
+    const [source, target] = key.split("→");
+    links.push({ source, target, value });
+  }
+  for (const [key, value] of stageToOutput.entries()) {
+    const [source, target] = key.split("→");
+    links.push({ source, target, value });
+  }
+
+  return { nodes, links };
 }
 
 function renderFullSankey(
@@ -199,6 +324,8 @@ export const ElaborateSankey: React.FC<Props> = ({
   consolidatedCount,
   fullSankeyNodes,
   fullSankeyLinks,
+  flowMap,
+  consolidatedFindings,
 }) => {
   // Fallback: simple single-column sankey data (always computed)
   const data = useMemo(() => {
@@ -226,9 +353,25 @@ export const ElaborateSankey: React.FC<Props> = ({
     return buildNodes(mode, groups);
   }, [mode, sourceGroups, severityGroups, cweGroups, agentGroups]);
 
-  // If we have full sankey data, render the rich three-column version
-  if (fullSankeyNodes && fullSankeyNodes.length > 0 && fullSankeyLinks && fullSankeyLinks.length > 0) {
+  const groupedFlow = useMemo(
+    () => mode === "source_type" ? null : buildGroupedFlowSankey(mode, flowMap, consolidatedFindings),
+    [mode, flowMap, consolidatedFindings],
+  );
+
+  // Type uses the backend's detailed SAST → raw-agent → final-severity view.
+  // Other modes build the same three-column shape from the flow map, grouped
+  // by the selected dimension.
+  if (
+    mode === "source_type"
+    && fullSankeyNodes
+    && fullSankeyNodes.length > 0
+    && fullSankeyLinks
+    && fullSankeyLinks.length > 0
+  ) {
     return <>{renderFullSankey(fullSankeyNodes, fullSankeyLinks)}</>;
+  }
+  if (groupedFlow && groupedFlow.nodes.length > 0 && groupedFlow.links.length > 0) {
+    return <>{renderFullSankey(groupedFlow.nodes, groupedFlow.links)}</>;
   }
 
   const leftNodes = data.nodes.filter(n => n.id !== "consolidated");

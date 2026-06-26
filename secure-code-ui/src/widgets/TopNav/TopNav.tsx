@@ -46,6 +46,16 @@ export const TopNav: React.FC = () => {
     (it) => !it.feature || isFeatureEnabled(it.feature),
   );
 
+  // Superusers get an extra "Admin" pill in the centre nav.
+  if (isSuperuser) {
+    navItems.push({
+      id: "admin",
+      label: "Admin",
+      match: "/admin",
+      to: "/admin/system",
+    });
+  }
+
   const activeId =
     navItems.find((it) => location.pathname.startsWith(it.match))?.id ?? null;
 

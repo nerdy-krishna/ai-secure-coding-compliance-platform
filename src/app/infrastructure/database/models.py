@@ -17,6 +17,7 @@ from sqlalchemy import (
     ARRAY,
     LargeBinary,
     Boolean,
+    UUID,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID, JSONB, ARRAY as PG_ARRAY
 from sqlalchemy.orm import relationship, Mapped, mapped_column
@@ -280,6 +281,43 @@ class ScanTask(Base):
     )
 
     scan: Mapped["Scan"] = relationship(back_populates="tasks")
+
+
+class ScanArtifact(Base):
+    """Versioned scan artifact for structured persistence of
+    immutable pipeline outputs (e.g. finding_lineage).
+
+    One (scan_id, artifact_type, version) row per generation.
+    """
+
+    __tablename__ = "scan_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_id",
+            "artifact_type",
+            "version",
+            name="uq_scan_artifacts_type_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        sa.ForeignKey("scans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    artifact_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class ScanEvent(Base):

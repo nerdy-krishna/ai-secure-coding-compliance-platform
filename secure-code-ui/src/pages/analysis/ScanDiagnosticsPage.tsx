@@ -1,5 +1,5 @@
-// Scan Diagnostics page — "Pipeline & Logs"
-// Tab 1: Findings Pipeline (Sankey + filters + expandable breakdown)
+// Scan Diagnostics page — "Finding Lineage & LLM Logs"
+// Tab 1: Finding Lineage (canonical graph from files to outputs)
 // Tab 2: LLM Calls (full interaction log with expandable details)
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -12,38 +12,35 @@ import { redactSensitive } from "../../shared/lib/redact";
 import { Icon } from "../../shared/ui/Icon";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
 import { PageHeader } from "../../shared/ui/PageHeader";
-import { ElaborateSankey, type SankeyMode } from "../../features/scans/ElaborateSankey";
+import { FindingLineage } from "../../features/scans/FindingLineage";
 
-type Tab = "pipeline" | "llm";
-
-const MODE_LABELS: Record<SankeyMode, string> = {
-  source: "By Source",
-  source_type: "By Type",
-  agent: "By Agent",
-  severity: "By Severity",
-  cwe: "By CWE",
-};
+type Tab = "lineage" | "llm";
 
 // ── Entry point ──────────────────────────────────────────────────────
 
 export const ScanDiagnosticsPage: React.FC = () => {
   const { scanId } = useParams<{ scanId: string }>();
-  const [tab, setTab] = useState<Tab>("pipeline");
+  const [tab, setTab] = useState<Tab>("lineage");
   const [debug, setDebug] = useState<ScanFindingsDebug | null>(null);
   const [interactions, setInteractions] = useState<LLMInteractionResponse[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sankeyMode, setSankeyMode] = useState<SankeyMode>("source_type");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!scanId) return;
     let cancelled = false;
     setLoading(true);
+    setError(null);
     Promise.all([
       debugService.getFindingsDebug(scanId),
       scanService.getLlmInteractionsForScan(scanId),
     ])
       .then(([d, i]) => { if (!cancelled) { setDebug(d); setInteractions(i); } })
-      .catch(() => {})
+      .catch((e) => {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to load diagnostics");
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [scanId]);
@@ -59,16 +56,25 @@ export const ScanDiagnosticsPage: React.FC = () => {
       />
 
       <div className="radio-group" style={{ width: "fit-content" }}>
-        <button className={tab === "pipeline" ? "active" : ""} onClick={() => setTab("pipeline")}>
-          <Icon.Layers size={13} /> Findings Pipeline
+        <button className={tab === "lineage" ? "active" : ""} onClick={() => setTab("lineage")}>
+          <Icon.Layers size={13} /> Finding Lineage
         </button>
         <button className={tab === "llm" ? "active" : ""} onClick={() => setTab("llm")}>
           <Icon.Terminal size={13} /> LLM Calls
         </button>
       </div>
 
-      {tab === "pipeline" && debug && (
-        <PipelineTab debug={debug} sankeyMode={sankeyMode} onModeChange={setSankeyMode} />
+      {error && (
+        <div className="surface" style={{ padding: 24, color: "var(--critical)" }}>
+          {error}
+        </div>
+      )}
+
+      {tab === "lineage" && scanId && (
+        <div style={{ display: "grid", gap: 20 }}>
+          <FindingLineage scanId={scanId} />
+          {debug && <FindingsBreakdown debug={debug} />}
+        </div>
       )}
 
       {tab === "llm" && scanId && (
@@ -78,58 +84,10 @@ export const ScanDiagnosticsPage: React.FC = () => {
   );
 };
 
-// ── Pipeline tab ────────────────────────────────────────────────────
+// ── Findings breakdown (with filters + expandable rows) ──────────────
 
 type Bucket = "sast" | "raw_llm" | "consolidated";
 const BUCKET_LABEL: Record<Bucket, string> = { sast: "SAST", raw_llm: "Raw LLM", consolidated: "Consolidated" };
-const BUCKET_COLOR: Record<Bucket, string> = { sast: "#f59e0b", raw_llm: "#6366f1", consolidated: "#10b981" };
-
-const PipelineTab: React.FC<{
-  debug: ScanFindingsDebug;
-  sankeyMode: SankeyMode;
-  onModeChange: (m: SankeyMode) => void;
-}> = ({ debug, sankeyMode, onModeChange }) => {
-  const totalRaw = debug.sast_findings.length + debug.raw_llm_findings.length;
-  return (
-    <div style={{ display: "grid", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>Group by:</span>
-        <div className="radio-group" style={{ width: "fit-content" }}>
-          {(Object.keys(MODE_LABELS) as SankeyMode[]).map((m) => (
-            <button key={m} className={sankeyMode === m ? "active" : ""} onClick={() => onModeChange(m)}>
-              {MODE_LABELS[m]}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="surface" style={{ padding: 24, display: "flex", justifyContent: "center" }}>
-        <ElaborateSankey
-          mode={sankeyMode}
-          sourceGroups={debug.source_groups}
-          severityGroups={debug.severity_groups}
-          cweGroups={debug.cwe_groups}
-          agentGroups={debug.agent_groups}
-          fullSankeyNodes={debug.full_sankey_nodes}
-          fullSankeyLinks={debug.full_sankey_links}
-          consolidatedCount={debug.consolidated_findings.length}
-        />
-      </div>
-
-      <div style={{ display: "flex", gap: 24, fontSize: 13, color: "var(--fg-muted)" }}>
-        <span>SAST: <b style={{ color: BUCKET_COLOR.sast }}>{debug.sast_findings.length}</b></span>
-        <span>Raw LLM: <b style={{ color: BUCKET_COLOR.raw_llm }}>{debug.raw_llm_findings.length}</b></span>
-        <span>Total pre: <b>{totalRaw}</b></span>
-        <span>Consolidated: <b style={{ color: BUCKET_COLOR.consolidated }}>{debug.consolidated_findings.length}</b></span>
-        <span>Dropped: <b style={{ color: "var(--critical)" }}>{totalRaw - debug.consolidated_findings.length}</b></span>
-      </div>
-
-      <FindingsBreakdown debug={debug} />
-    </div>
-  );
-};
-
-// ── Findings breakdown (with filters + expandable rows) ──────────────
 
 const SAST_CATEGORIES = ["Semgrep", "Bandit", "Gitleaks", "OSV"];
 const SOURCE_CATEGORIES = ["All Sources", "LLM", ...SAST_CATEGORIES];
@@ -190,7 +148,7 @@ const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) =>
   useEffect(() => { setExpandedId(null); }, [bucket, sevFilter, sourceCat]);
   useEffect(() => { if (sourceCat !== "LLM") setSourceAgent("All Agents"); }, [sourceCat]);
 
-  const resetFilters = () => { setBucket("raw_llm"); setSevFilter("All"); setSourceCat("All Sources"); setSourceAgent("All Agents"); };
+  const resetFilters = () => { setSevFilter("All"); setSourceCat("All Sources"); setSourceAgent("All Agents"); };
 
   return (
     <div className="surface" style={{ padding: 0 }}>

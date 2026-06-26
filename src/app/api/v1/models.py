@@ -1067,6 +1067,42 @@ class ScanFindingsDebugResponse(BaseModel):
     source_groups: Dict[str, int] = Field(default_factory=dict)
     severity_groups: Dict[str, int] = Field(default_factory=dict)
     cwe_groups: Dict[str, int] = Field(default_factory=dict)
+
+
+# ── Finding Lineage ────────────────────────────────────────────
+
+
+class LineageNode(BaseModel):
+    id: str
+    type: str
+    label: str
+    column: int = 0
+    count: int = 0
+    expandable: bool = True
+    expanded: bool = False
+    badges: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class LineageEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    value: int = 1
+
+
+class FindingLineageRequest(BaseModel):
+    expanded_node_ids: List[str] = Field(default_factory=list)
+    focused_node_id: Optional[str] = None
+    filters: Optional[Dict[str, List[str]]] = None
+    max_nodes: int = Field(default=250, ge=10, le=1000)
+
+
+class FindingLineageResponse(BaseModel):
+    nodes: List[LineageNode] = Field(default_factory=list)
+    edges: List[LineageEdge] = Field(default_factory=list)
+    lineage_quality: str = "inferred"
+    warnings: List[str] = Field(default_factory=list)
+    available_expansions: Dict[str, int] = Field(default_factory=dict)
     agent_groups: Dict[str, int] = Field(default_factory=dict)
     # Per-finding consolidation flow map (raw→consolidated mapping)
     flow_map: Optional[List[Dict[str, Any]]] = None

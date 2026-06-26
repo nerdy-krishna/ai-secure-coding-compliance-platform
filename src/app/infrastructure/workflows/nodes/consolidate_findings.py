@@ -47,8 +47,16 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _serialise_findings(findings: List[VulnerabilityFinding]) -> Dict[str, Any]:
-    return {"findings": [f.model_dump(mode="json") for f in findings]}
+ConsolidationResult = tuple[List[VulnerabilityFinding], list[dict[str, Any]]]
+
+
+def _serialise_findings(
+    findings: List[VulnerabilityFinding], flow_map: list[dict[str, Any]] | None = None
+) -> Dict[str, Any]:
+    return {
+        "findings": [f.model_dump(mode="json") for f in findings],
+        "flow_map": list(flow_map or []),
+    }
 
 
 def _deserialise_findings(payload: Dict[str, Any]) -> List[VulnerabilityFinding]:
@@ -56,6 +64,32 @@ def _deserialise_findings(payload: Dict[str, Any]) -> List[VulnerabilityFinding]
         VulnerabilityFinding.model_validate(item)
         for item in payload.get("findings", [])
     ]
+
+
+def _deserialise_consolidation_result(payload: Dict[str, Any]) -> ConsolidationResult:
+    """Read a durable consolidation result.
+
+    Older task rows contain only ``findings``. Treat their missing
+    flow-map as empty so manual resume remains backward compatible.
+    """
+    return _deserialise_findings(payload), list(payload.get("flow_map") or [])
+
+
+def _normalise_consolidation_result(result: Any) -> ConsolidationResult:
+    """Coerce legacy/internal consolidation return shapes to one contract.
+
+    The node's downstream loop expects ``(findings, flow_map)``. Older
+    branches returned a bare list of findings (passthrough/no-source /
+    reused durable result), which is ambiguous with a two-item findings
+    list and crashes with >2 findings. Accept both shapes defensively;
+    always return a tuple.
+    """
+    if isinstance(result, tuple) and len(result) == 2:
+        findings, flow_map = result
+        return list(findings or []), list(flow_map or [])
+    if isinstance(result, list):
+        return result, []
+    raise TypeError(f"Unexpected consolidation result shape: {type(result)!r}")
 
 
 async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
@@ -115,7 +149,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         source = live_codebase.get(file_path)
         if not source:
             # No source to reason over — pass the findings through.
-            return [_passthrough(f) for f in file_findings]
+            return [_passthrough(f) for f in file_findings], []
         input_payload = {
             "file_path": file_path,
             "source_hash": _stable_hash(source),
@@ -139,7 +173,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             )
             if reused is not None:
                 stats["reused"] += 1
-                return _deserialise_findings(reused)
+                return _deserialise_consolidation_result(reused)
             lease = await ledger.acquire_task(
                 scan_id=state["scan_id"],
                 task_type=CONSOLIDATION_TASK_TYPE,
@@ -154,7 +188,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             )
         if lease is None:
             stats["failed"] += 1
-            return [_passthrough(f) for f in file_findings]
+            return [_passthrough(f) for f in file_findings], []
         stats["rerun"] += 1
         try:
             async with semaphore:
@@ -167,13 +201,13 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
                 await ScanTaskLedgerService(task_db).fail_task(
                     lease.task.id, error=str(exc), retryable=True
                 )
-            return [_passthrough(f) for f in file_findings]
+            return [_passthrough(f) for f in file_findings], []
         async with AsyncSessionLocal() as task_db:
             await ScanTaskLedgerService(task_db).complete_task(
-                lease.task.id, result_payload=_serialise_findings(result)
+                lease.task.id, result_payload=_serialise_findings(result, flow)
             )
         stats["completed"] += 1
-        return result
+        return result, flow
 
     results = await asyncio.gather(
         *(_consolidate(fp, ff) for fp, ff in by_file.items()),
@@ -191,7 +225,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             )
             consolidated.extend(_passthrough(f) for f in by_file[file_path])
             continue
-        findings_list, flow = result
+        findings_list, flow = _normalise_consolidation_result(result)
         consolidated.extend(findings_list)
         all_flow_maps.extend(flow)
 

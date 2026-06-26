@@ -883,6 +883,28 @@ async def get_scan_findings_debug(
     return await service.get_findings_debug(scan_id, user)
 
 
+@router.post(
+    "/scans/{scan_id}/finding-lineage",
+    response_model=api_models.FindingLineageResponse,
+)
+async def get_finding_lineage(
+    scan_id: uuid.UUID,
+    request: api_models.FindingLineageRequest | None = None,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+):
+    """Return a render-ready Finding Lineage graph.
+
+    The endpoint returns nodes and edges for the canonical collapsed
+    lineage view (Files → Detection Sources → Domains →
+    Consolidation → Outputs). Send ``expanded_node_ids`` to expand
+    specific nodes; send ``focused_node_id`` to isolate a single
+    finding's lineage path."""
+    return await service.get_finding_lineage(
+        scan_id, user, request or api_models.FindingLineageRequest()
+    )
+
+
 @router.patch(
     "/scans/{scan_id}/findings/{finding_id}/disposition",
     response_model=api_models.FindingDispositionResponse,
