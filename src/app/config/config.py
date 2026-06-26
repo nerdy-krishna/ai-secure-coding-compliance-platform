@@ -331,27 +331,7 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: Optional[SecretStr] = None
     LANGFUSE_SECRET_KEY: Optional[SecretStr] = None
 
-    @field_validator("LANGFUSE_HOST")
-    def _validate_langfuse_host(cls, v: str) -> str:
-        # Enforce https for non-loopback hosts; loopback may use http for local dev
-        import ipaddress  # noqa: PLC0415
 
-        loopback_hostnames = {"localhost", "127.0.0.1", "::1"}
-        from urllib.parse import urlparse  # noqa: PLC0415
-
-        parsed = urlparse(v)
-        hostname = parsed.hostname or ""
-        is_loopback = hostname in loopback_hostnames
-        try:
-            is_loopback = is_loopback or ipaddress.ip_address(hostname).is_loopback
-        except ValueError:
-            pass
-        if not is_loopback and not v.startswith("https://"):
-            raise ValueError(
-                "LANGFUSE_HOST must use https:// for non-loopback hosts to prevent "
-                "LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY from leaking in plaintext."
-            )
-        return v
 
     @field_validator("FRONTEND_BASE_URL")
     def _validate_frontend_base_url(cls, v: Optional[str]) -> Optional[str]:
@@ -383,6 +363,28 @@ class Settings(BaseSettings):
             raise ValueError(
                 "SMTP_TLS and SMTP_SSL are mutually exclusive; set only one."
             )
+        # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
+        # When disabled the host URL is irrelevant — skip the check so
+        # Docker service hostnames (e.g. http://langfuse-web:3000) don't
+        # gatekeep the entire app startup.
+        if self.LANGFUSE_ENABLED:
+            import ipaddress  # noqa: PLC0415
+            from urllib.parse import urlparse  # noqa: PLC0415
+
+            host = self.LANGFUSE_HOST
+            loopback_hostnames = {"localhost", "127.0.0.1", "::1"}
+            parsed = urlparse(host)
+            hostname = parsed.hostname or ""
+            is_loopback = hostname in loopback_hostnames
+            try:
+                is_loopback = is_loopback or ipaddress.ip_address(hostname).is_loopback
+            except ValueError:
+                pass
+            if not is_loopback and not host.startswith("https://"):
+                raise ValueError(
+                    "LANGFUSE_HOST must use https:// for non-loopback hosts to prevent "
+                    "LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY from leaking in plaintext."
+                )
         # Production invariants (V13.4.2)
         if self.ENVIRONMENT == "production":
             if self.DB_ECHO:

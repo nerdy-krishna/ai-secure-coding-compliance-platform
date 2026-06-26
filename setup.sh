@@ -401,6 +401,22 @@ else
     fi
 fi
 rm -f .env.bak
+
+# VITE_ALLOWED_HOSTS: used by the Vite dev-server config and passed as a
+# Docker build arg. For cloud deploys with a domain, set to that domain;
+# otherwise leave empty (localhost is always allowed).
+if [ "$DEPLOYMENT_TYPE" = "cloud" ] && [ "$SSL_ENABLED" = "true" ] && [ -n "$SSL_DOMAIN" ]; then
+    _VITE_ALLOWED_HOSTS=$(_esc "$SSL_DOMAIN,${SSL_DOMAIN}:443")
+else
+    _VITE_ALLOWED_HOSTS=""
+fi
+if grep -q "^VITE_ALLOWED_HOSTS=" .env; then
+    sed -i.bak "s/^VITE_ALLOWED_HOSTS=.*$/VITE_ALLOWED_HOSTS=$_VITE_ALLOWED_HOSTS/" .env
+else
+    echo "VITE_ALLOWED_HOSTS=$_VITE_ALLOWED_HOSTS" >> .env
+fi
+rm -f .env.bak
+
 echo "[+] Configuration saved."
 
 
