@@ -42,6 +42,7 @@ if [ ! -f .env ]; then
     ENCRYPTION_KEY=$(python3 scripts/generate_secrets.py fernet)
     POSTGRES_PASSWORD=$(python3 scripts/generate_secrets.py random)
     RABBITMQ_DEFAULT_PASS=$(python3 scripts/generate_secrets.py random)
+    RABBITMQ_ERLANG_COOKIE=$(python3 scripts/generate_secrets.py random)
     QDRANT_API_KEY=$(python3 scripts/generate_secrets.py random)
     # Grafana (log_stack profile)
     GRAFANA_ADMIN_PASSWORD=$(python3 scripts/generate_secrets.py random)
@@ -63,6 +64,7 @@ if [ ! -f .env ]; then
     _ENCRYPTION_KEY=$(_esc "$ENCRYPTION_KEY")
     _POSTGRES_PASSWORD=$(_esc "$POSTGRES_PASSWORD")
     _RABBITMQ_DEFAULT_PASS=$(_esc "$RABBITMQ_DEFAULT_PASS")
+    _RABBITMQ_ERLANG_COOKIE=$(_esc "$RABBITMQ_ERLANG_COOKIE")
     _QDRANT_API_KEY=$(_esc "$QDRANT_API_KEY")
     _GRAFANA_ADMIN_PASSWORD=$(_esc "$GRAFANA_ADMIN_PASSWORD")
     _LANGFUSE_POSTGRES_PASSWORD=$(_esc "$LANGFUSE_POSTGRES_PASSWORD")
@@ -87,6 +89,7 @@ if [ ! -f .env ]; then
     sed "${sed_i[@]}" "s/^ENCRYPTION_KEY=REPLACE_ME.*$/ENCRYPTION_KEY=$_ENCRYPTION_KEY/" .env
     sed "${sed_i[@]}" "s/^POSTGRES_PASSWORD=REPLACE_ME.*$/POSTGRES_PASSWORD=$_POSTGRES_PASSWORD/" .env
     sed "${sed_i[@]}" "s/^RABBITMQ_DEFAULT_PASS=REPLACE_ME.*$/RABBITMQ_DEFAULT_PASS=$_RABBITMQ_DEFAULT_PASS/" .env
+    sed "${sed_i[@]}" "s/^RABBITMQ_ERLANG_COOKIE=REPLACE_ME.*$/RABBITMQ_ERLANG_COOKIE=$_RABBITMQ_ERLANG_COOKIE/" .env
     sed "${sed_i[@]}" "s|^QDRANT_API_KEY=change-me-qdrant-key|QDRANT_API_KEY=$_QDRANT_API_KEY|" .env
     # Observability / Grafana
     sed "${sed_i[@]}" "s/^GRAFANA_ADMIN_PASSWORD=REPLACE_ME.*$/GRAFANA_ADMIN_PASSWORD=$_GRAFANA_ADMIN_PASSWORD/" .env
@@ -174,6 +177,7 @@ else
     _sccap_upgrade_secret ENCRYPTION_KEY fernet
     _sccap_upgrade_secret POSTGRES_PASSWORD random
     _sccap_upgrade_secret RABBITMQ_DEFAULT_PASS random
+    _sccap_upgrade_secret RABBITMQ_ERLANG_COOKIE random
     _sccap_upgrade_secret QDRANT_API_KEY random 'change-me-qdrant-key'
     _sccap_upgrade_secret GRAFANA_ADMIN_PASSWORD random
     _sccap_upgrade_secret LANGFUSE_POSTGRES_PASSWORD random
