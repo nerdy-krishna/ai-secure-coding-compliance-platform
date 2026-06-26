@@ -112,15 +112,6 @@ const Dropzone: React.FC<{
         setDragging(false);
         handleFiles(e.dataTransfer.files);
       }}
-      onClick={() => fileInputRef.current?.click()}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          fileInputRef.current?.click();
-        }
-      }}
       style={{
         background: dragging ? "var(--primary-weak)" : "var(--bg-soft)",
         border:
@@ -131,6 +122,7 @@ const Dropzone: React.FC<{
         textAlign: "center",
         cursor: "pointer",
         transition: "all .15s var(--ease)",
+        userSelect: "none",
       }}
     >
       <input
@@ -174,20 +166,14 @@ const Dropzone: React.FC<{
         <button
           type="button"
           className="sccap-btn sccap-btn-sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            fileInputRef.current?.click();
-          }}
+          onClick={() => fileInputRef.current?.click()}
         >
           <Icon.File size={12} /> Choose files
         </button>
         <button
           type="button"
           className="sccap-btn sccap-btn-sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            folderInputRef.current?.click();
-          }}
+          onClick={() => folderInputRef.current?.click()}
         >
           <Icon.Folder size={12} /> Choose folder
         </button>
