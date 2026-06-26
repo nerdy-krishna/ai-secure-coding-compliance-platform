@@ -912,7 +912,10 @@ class ScanQueryService:
                     available_expansions=graph.get("available_expansions", {}),
                 )
         except Exception:
-            pass  # fall through to inferred
+            # Rollback the session so the transaction doesn't stay in an
+            # aborted state (e.g. when the scan_artifacts table is missing
+            # and the query fails). The fallback path needs a clean tx.
+            await self.repo.db.rollback()
 
         # Fallback: inferred lineage from findings
         from sqlalchemy import select
