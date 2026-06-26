@@ -59,8 +59,9 @@ class UserCreate(schemas.BaseUserCreate):
     Validation rules:
     - email: EmailStr, max 320 characters (RFC 5321).
     - password: 12–128 characters, at least two character classes.
-    - is_active / is_superuser / is_verified cannot be set by the client;
-      any values supplied are silently discarded (mass-assignment prevention).
+    - Privilege escalation is prevented by UserManager.create(safe=True)
+      which strips is_active/is_superuser/is_verified. The setup endpoint
+      calls create(safe=False) to create the initial superuser.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -70,10 +71,10 @@ class UserCreate(schemas.BaseUserCreate):
         ..., min_length=_MIN_PASSWORD_LEN, max_length=_MAX_PASSWORD_LEN
     )
 
-    # Disallow client-controlled privilege escalation.
-    is_active: bool = Field(default=True, exclude=True)
-    is_superuser: bool = Field(default=False, exclude=True)
-    is_verified: bool = Field(default=False, exclude=True)
+    # Guarded by UserManager.create(safe=True/False), not Pydantic exclude.
+    is_active: bool = Field(default=True)
+    is_superuser: bool = Field(default=False)
+    is_verified: bool = Field(default=False)
 
     @field_validator("password")
     @classmethod
