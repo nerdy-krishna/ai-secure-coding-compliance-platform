@@ -39,16 +39,6 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
 
-            # After the consolidation pass (#72), `state["findings"]` is
-            # the authoritative final finding set: merged root findings
-            # plus whatever survived the quality gate. The deterministic-
-            # prescan node inserted its raw rows earlier (so the prescan-
-            # approval card could render them) — clear those and write
-            # the consolidated set fresh so a merged cluster never leaves
-            # its pre-merge rows behind. The consolidation node strips
-            # `id` from every output finding, so `save_findings` inserts
-            # the whole set. Always delete first, even when `findings` is
-            # empty — the quality gate may have dropped everything.
             await repo.replace_findings_for_scan(scan_id, findings, batch=batch)
 
             if scan_type == "REMEDIATE" and final_file_map:
@@ -75,9 +65,15 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
             await ScanRepository(_db_start).record_scan_event(
                 scan_id, "GENERATING_REPORTS", EV_STARTED
             )
-    except Exception as _e:  # noqa: BLE001
+    except Exception as _e:
         logger.warning("GENERATING_REPORTS started-event emit failed: %s", _e)
-    severity_map = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFORMATIONAL": 0}
+    severity_map: Dict[str, int] = {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "INFORMATIONAL": 0,
+    }
     for f in findings:
         sev = (f.severity or "LOW").upper()
         if sev in severity_map:
@@ -118,10 +114,6 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
                 summary=summary_data,
                 risk_score=final_risk_score,
             )
-            # Stage-event audit trail — GENERATING_REPORTS marker so
-            # the timeline closes out the final stage. Wrapped in a
-            # nested try so a logging-side issue here doesn't roll
-            # back the just-persisted final-report transaction.
             try:
                 await repo.create_scan_event(
                     scan_id=scan_id,
@@ -140,4 +132,184 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
             "save_final_report_failed", extra={"scan_id": str(scan_id)}, exc_info=True
         )
         raise
+
+    # Persist exact finding_lineage artifact for new scans (non-fatal).
+    try:
+        await _persist_finding_lineage_artifact(scan_id, state, findings)
+    except Exception:
+        logger.warning(
+            "save_final_report: lineage artifact persistence failed "
+            "(non-fatal) for scan %s",
+            scan_id,
+            exc_info=True,
+        )
+
     return {}
+
+
+async def _persist_finding_lineage_artifact(
+    scan_id,
+    state: WorkerState,
+    findings: list,
+) -> None:
+    """Generate and persist a finding_lineage_v1 artifact for the scan."""
+    import hashlib
+    import json as _json
+
+    from sqlalchemy import select
+
+    from app.infrastructure.database import models as db_models
+    from app.infrastructure.database.repositories.scan_artifact_repo import (
+        ARTIFACT_TYPE_LINEAGE,
+        ScanArtifactRepository,
+    )
+
+    async with AsyncSessionLocal() as db:
+        all_findings = list(
+            (
+                await db.execute(
+                    select(db_models.Finding).where(
+                        db_models.Finding.scan_id == scan_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        flow_map_raw: list = []
+        events = list(
+            (
+                await db.execute(
+                    select(db_models.ScanEvent)
+                    .where(
+                        db_models.ScanEvent.scan_id == scan_id,
+                        db_models.ScanEvent.stage_name == "CONSOLIDATING",
+                    )
+                    .order_by(db_models.ScanEvent.timestamp.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if events and events[0].details:
+            raw = events[0].details.get("flow_map_json")
+            if isinstance(raw, str):
+                flow_map_raw = _json.loads(raw)
+            elif isinstance(raw, list):
+                flow_map_raw = raw
+
+        sast = [f for f in all_findings if getattr(f, "finding_bucket", "") == "sast"]
+        raw_llm = [
+            f for f in all_findings if getattr(f, "finding_bucket", "") == "raw_llm"
+        ]
+        consolidated = [
+            f
+            for f in all_findings
+            if getattr(f, "finding_bucket", "consolidated") == "consolidated"
+        ]
+        all_raw = sast + raw_llm
+
+        raw_records: list = []
+        for f in all_raw:
+            lid = getattr(f, "id", None)
+            key = _json.dumps(
+                [
+                    str(scan_id),
+                    getattr(f, "source", "") or "",
+                    getattr(f, "file_path", "") or "",
+                    getattr(f, "line_number", None) or 0,
+                    (getattr(f, "title", "") or "")[:200],
+                    (getattr(f, "cwe", "") or ""),
+                ],
+                sort_keys=True,
+            )
+            lineage_ref = f"raw:sha256:{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+            raw_records.append(
+                {
+                    "lineage_ref": lineage_ref,
+                    "db_id": lid,
+                    "title": getattr(f, "title", ""),
+                    "source": getattr(f, "source", "") or getattr(f, "agent_name", ""),
+                    "file_path": getattr(f, "file_path", ""),
+                    "severity": getattr(f, "severity", "INFO"),
+                    "cwe": getattr(f, "cwe", ""),
+                    "line_number": getattr(f, "line_number", None),
+                }
+            )
+
+        final_records: list = []
+        for f in consolidated:
+            fid = getattr(f, "id", None)
+            key = _json.dumps(
+                [
+                    str(scan_id),
+                    (getattr(f, "title", "") or "")[:200],
+                    (getattr(f, "cwe", "") or ""),
+                    (getattr(f, "remediation", "") or "")[:500],
+                ],
+                sort_keys=True,
+            )
+            lineage_ref = (
+                f"final:sha256:{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+            )
+            final_records.append(
+                {
+                    "lineage_ref": lineage_ref,
+                    "db_id": fid,
+                    "title": getattr(f, "title", ""),
+                    "severity": getattr(f, "severity", "INFO"),
+                    "cwe": getattr(f, "cwe", ""),
+                    "remediation": getattr(f, "remediation", ""),
+                }
+            )
+
+        links: list = []
+        for fm in flow_map_raw:
+            raw_title = fm.get("raw_title", "")
+            status = (fm.get("status") or "passthrough").lower()
+            cons_title = fm.get("consolidated_title", "")
+
+            raw_ref = None
+            for rec in raw_records:
+                if rec["title"] == raw_title:
+                    raw_ref = rec["lineage_ref"]
+                    break
+
+            final_ref = None
+            for rec in final_records:
+                if rec["title"] == cons_title:
+                    final_ref = rec["lineage_ref"]
+                    break
+
+            link: dict = {
+                "raw_ref": raw_ref,
+                "final_ref": final_ref,
+                "status": status,
+            }
+            if status == "dropped":
+                link["drop_reason"] = fm.get("false_positive_reason")
+                link["drop_kind"] = "false_positive"
+            links.append(link)
+
+        payload = {
+            "schema_version": 1,
+            "raw_findings": raw_records,
+            "final_findings": final_records,
+            "links": links,
+        }
+
+        await ScanArtifactRepository(db).upsert(
+            scan_id=scan_id,
+            artifact_type=ARTIFACT_TYPE_LINEAGE,
+            version=1,
+            payload=payload,
+        )
+        logger.info(
+            "Persisted finding_lineage artifact for scan %s: %d raw, %d final, %d links",
+            scan_id,
+            len(raw_records),
+            len(final_records),
+            len(links),
+        )

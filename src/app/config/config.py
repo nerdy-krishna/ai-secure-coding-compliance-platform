@@ -331,8 +331,6 @@ class Settings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: Optional[SecretStr] = None
     LANGFUSE_SECRET_KEY: Optional[SecretStr] = None
 
-
-
     @field_validator("FRONTEND_BASE_URL")
     def _validate_frontend_base_url(cls, v: Optional[str]) -> Optional[str]:
         if v and not v.startswith("https://"):
