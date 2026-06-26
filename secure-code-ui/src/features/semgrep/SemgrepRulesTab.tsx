@@ -546,6 +546,7 @@ const SemgrepRulesTab: React.FC = () => {
   const [editingSource, setEditingSource] = useState<RuleSourceRead | null>(null);
   const [runsSource, setRunsSource] = useState<RuleSourceRead | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const anyRunning = (sources: RuleSourceRead[]) =>
     sources.some((s) => s.last_sync_status === "running");
@@ -558,6 +559,31 @@ const SemgrepRulesTab: React.FC = () => {
       return Array.isArray(data) && anyRunning(data) ? 3000 : false;
     },
   });
+
+  // ── Selection helpers ──────────────────────────────────────────────────
+
+  const allIds = sources.map((s) => s.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+  const someSelected = selectedIds.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: RuleSourceUpdate }) =>
@@ -608,6 +634,62 @@ const SemgrepRulesTab: React.FC = () => {
     },
   });
 
+  // ── Bulk actions ──────────────────────────────────────────────────────
+
+  const bulkUpdate = useMutation({
+    mutationFn: async ({
+      ids,
+      data,
+    }: {
+      ids: string[];
+      data: RuleSourceUpdate;
+    }) => {
+      // Fire all updates in parallel and collect results.
+      const results = await Promise.allSettled(
+        ids.map((id) => ruleSourcesService.updateSource(id, data)),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) {
+        throw new Error(`${failed} of ${ids.length} updates failed`);
+      }
+    },
+    onSuccess: (_data, { ids }) => {
+      toast.success(`${ids.length} source${ids.length > 1 ? "s" : ""} updated.`);
+      queryClient.invalidateQueries({ queryKey: ["rule-sources"] });
+      clearSelection();
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err instanceof Error ? err.message : "Bulk update failed";
+      toast.error(msg);
+    },
+  });
+
+  const bulkSync = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(
+        ids.map((id) => ruleSourcesService.triggerSync(id)),
+      );
+      const failed = results.filter((r) => r.status === "rejected").length;
+      if (failed > 0) {
+        throw new Error(`${failed} of ${ids.length} syncs failed`);
+      }
+    },
+    onSuccess: (_data, ids) => {
+      toast.success(`Sync triggered for ${ids.length} source${ids.length > 1 ? "s" : ""}.`);
+      queryClient.invalidateQueries({ queryKey: ["rule-sources"] });
+      ids.forEach((id) =>
+        queryClient.invalidateQueries({ queryKey: ["sync-runs", id] }),
+      );
+      clearSelection();
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err instanceof Error ? err.message : "Bulk sync failed";
+      toast.error(msg);
+    },
+  });
+
   const toggleEnabled = (source: RuleSourceRead) => {
     updateMutation.mutate({ id: source.id, data: { enabled: !source.enabled } });
   };
@@ -619,6 +701,89 @@ const SemgrepRulesTab: React.FC = () => {
   return (
     <div style={{ display: "grid", gap: 12 }}>
       <SettingsPanel />
+
+      {/* ── Bulk action bar ─────────────────────────────────────── */}
+      {someSelected && (
+        <div
+          className="sccap-card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 16px",
+            background:
+              "linear-gradient(135deg, var(--primary-weak), var(--bg-elev))",
+            border: "1px solid var(--primary-weak)",
+          }}
+        >
+          <Icon.Check size={14} color="var(--primary)" />
+          <span style={{ fontWeight: 600, fontSize: 13, color: "var(--primary)" }}>
+            {selectedIds.size} selected
+          </span>
+          <div style={{ flex: 1 }} />
+          <button
+            className="sccap-btn sccap-btn-sm"
+            onClick={() =>
+              bulkUpdate.mutate({
+                ids: [...selectedIds],
+                data: { enabled: true },
+              })
+            }
+            disabled={bulkUpdate.isPending}
+          >
+            Enable
+          </button>
+          <button
+            className="sccap-btn sccap-btn-sm"
+            onClick={() =>
+              bulkUpdate.mutate({
+                ids: [...selectedIds],
+                data: { enabled: false },
+              })
+            }
+            disabled={bulkUpdate.isPending}
+          >
+            Disable
+          </button>
+          <button
+            className="sccap-btn sccap-btn-sm"
+            onClick={() =>
+              bulkUpdate.mutate({
+                ids: [...selectedIds],
+                data: { auto_sync: true },
+              })
+            }
+            disabled={bulkUpdate.isPending}
+          >
+            Auto-sync On
+          </button>
+          <button
+            className="sccap-btn sccap-btn-sm"
+            onClick={() =>
+              bulkUpdate.mutate({
+                ids: [...selectedIds],
+                data: { auto_sync: false },
+              })
+            }
+            disabled={bulkUpdate.isPending}
+          >
+            Auto-sync Off
+          </button>
+          <button
+            className="sccap-btn sccap-btn-primary sccap-btn-sm"
+            onClick={() => bulkSync.mutate([...selectedIds])}
+            disabled={bulkSync.isPending || bulkUpdate.isPending}
+          >
+            <Icon.Refresh size={12} /> Sync selected
+          </button>
+          <button
+            className="sccap-btn sccap-btn-ghost sccap-btn-sm"
+            onClick={clearSelection}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {isLoading ? (
         <div
@@ -635,6 +800,17 @@ const SemgrepRulesTab: React.FC = () => {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "var(--bg-soft)", borderBottom: "1px solid var(--border)" }}>
+                  <th style={{ padding: "10px 8px 10px 14px", width: 36 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected && !allSelected;
+                      }}
+                      onChange={toggleSelectAll}
+                      style={{ accentColor: "var(--primary)", cursor: "pointer" }}
+                    />
+                  </th>
                   {["Source", "License", "Last sync", "Rules", "Status", "Enabled", "Auto-sync", ""].map(
                     (h) => (
                       <th
@@ -664,7 +840,15 @@ const SemgrepRulesTab: React.FC = () => {
                     }}
                   >
                     {/* Source */}
-                    <td style={{ padding: "10px 14px" }}>
+                    <td style={{ padding: "10px 8px 10px 14px" }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(s.id)}
+                        onChange={() => toggleSelectOne(s.id)}
+                        style={{ accentColor: "var(--primary)" }}
+                      />
+                    </td>
+                    <td style={{ padding: "10px 8px 10px 4px" }}>
                       <div style={{ fontWeight: 600, color: "var(--fg)" }}>{s.display_name}</div>
                       <div style={{ fontSize: 11, color: "var(--fg-subtle)", marginTop: 1 }}>
                         {s.slug}

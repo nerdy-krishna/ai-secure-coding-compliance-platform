@@ -95,7 +95,7 @@ sources:
       excluded from scans by default unless you explicitly add NOASSERTION to
       the allowed licenses list and accept the associated risk.
     repo_url: https://github.com/kondukto-io/semgrep-rules
-    branch: main
+    branch: master
     subpath: null
     license_spdx: NOASSERTION
     author: Kondukto

@@ -58,9 +58,11 @@ def _normalize_rule(
 
     message = str(raw_rule.get("message", ""))[:2000]
 
-    # Canonical JSON for content hash — stable across runs
+    # Canonical JSON for content hash — stable across runs.
+    # YAML allows non-string keys (bool / number); cast to str so
+    # sorted() doesn't fail with mixed-type comparison errors.
     canonical = json.dumps(
-        {k: raw_rule[k] for k in sorted(raw_rule.keys())},
+        {str(k): raw_rule[k] for k in sorted(raw_rule.keys(), key=str)},
         sort_keys=True,
         default=str,
     )
