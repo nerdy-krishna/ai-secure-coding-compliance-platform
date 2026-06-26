@@ -300,25 +300,46 @@ def _is_processable_tree_entry(entry: Dict[str, Any]) -> bool:
     return True
 
 
-def list_repo_processable_files(repo_url: str) -> List[str]:
-    """Return processable source file paths for preview without cloning GitHub repos."""
+def list_repo_files(repo_url: str) -> List[Dict[str, Any]]:
+    """Return ALL source file paths with support status for preview."""
 
     _validate_repo_url(repo_url)
     github_repo = _parse_github_repo(repo_url)
     if github_repo is None:
-        return [f["path"] for f in clone_repo_and_get_files(repo_url)]
+        # Non-GitHub: clone and list all files
+        entries = []
+        for f in clone_repo_and_get_files(repo_url):
+            language = get_language_from_filename(f["path"]) or "unknown"
+            entries.append({
+                "path": f["path"],
+                "language": language,
+                "supported": language != "unknown",
+            })
+        return entries
 
     owner, repo = github_repo
-    paths = [
-        entry["path"]
-        for entry in _github_tree_entries(owner, repo)
-        if _is_processable_tree_entry(entry)
-    ]
-    if len(paths) > MAX_FILES:
+    entries = []
+    for entry in _github_tree_entries(owner, repo):
+        if entry.get("type") != "blob":
+            continue
+        path = entry.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        if path.startswith("/") or ".." in path.split("/") or "\x00" in path or "\\" in path:
+            continue
+        language = get_language_from_filename(path) or "unknown"
+        size = entry.get("size", 0)
+        entries.append({
+            "path": path,
+            "language": language,
+            "supported": language != "unknown" and isinstance(size, int) and 0 <= size <= MAX_FILE_BYTES,
+        })
+
+    if len(entries) > MAX_FILES:
         raise HTTPException(
             status_code=413, detail="Repository exceeds maximum file count"
         )
-    return sorted(paths)
+    return sorted(entries, key=lambda e: e["path"])
 
 
 def fetch_github_selected_files(

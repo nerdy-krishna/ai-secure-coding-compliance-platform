@@ -65,8 +65,8 @@ from app.api.v1.dependencies import (
     get_visible_user_ids_sse,
 )
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
-from app.shared.lib.git import list_repo_processable_files
-from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
+from app.shared.lib.git import list_repo_files
+from app.shared.lib.archive import extract_archive_to_files, is_archive_filename, list_archive_files
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -222,15 +222,14 @@ async def preview_archive_files(
         raise HTTPException(
             status_code=400, detail="Invalid or unsupported archive file provided."
         )
-    # V05.3.2: reject filenames with path separators or NULs.
     if (
         "/" in archive_file.filename
         or "\\" in archive_file.filename
         or "\x00" in archive_file.filename
     ):
         raise HTTPException(status_code=400, detail="Invalid archive filename.")
-    files_data = extract_archive_to_files(archive_file)
-    return {"files": [f["path"] for f in files_data]}
+    files_data = list_archive_files(archive_file)
+    return {"files": files_data}
 
 
 @router.post("/scans/preview-git", response_model=dict)
@@ -238,13 +237,12 @@ async def preview_git_files(
     request: api_models.GitRepoPreviewRequest,
     _user: db_models.User = Depends(current_active_user),
 ):
-    # V01.3.6 / V05.3.2: SSRF allowlist before any clone.
     _validate_repo_url(request.repo_url)
-    files = list_repo_processable_files(request.repo_url)
+    files = list_repo_files(request.repo_url)
     if not files:
         raise HTTPException(
             status_code=400,
-            detail="Repository cloned, but no processable files were found.",
+            detail="Repository cloned, but no files were found.",
         )
     return {"files": files}
 

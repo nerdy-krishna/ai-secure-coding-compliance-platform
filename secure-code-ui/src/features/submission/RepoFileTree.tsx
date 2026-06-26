@@ -20,14 +20,31 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "../../shared/ui/Icon";
 
+export interface RepoFile {
+  path: string;
+  /** Language inferred from extension, or "unknown" */
+  language?: string;
+  /** Whether this file can be scanned (has a supported extension) */
+  supported?: boolean;
+}
+
 export interface RepoFileTreeProps {
-  files: string[];
+  files: (string | RepoFile)[];
   /** Subset of `files` that is currently selected (controlled). */
   selected: Set<string>;
   /** Called whenever the selection changes. */
   onChange: (next: Set<string>) => void;
   /** Optional max height for the scroll area. */
   maxHeight?: number | string;
+}
+
+// Normalise mixed input to RepoFile objects.
+function normaliseFiles(files: (string | RepoFile)[]): RepoFile[] {
+  return files.map((f) =>
+    typeof f === "string"
+      ? { path: f, language: undefined, supported: true }
+      : f,
+  );
 }
 
 // Internal tree shape. Each node is either a folder (children populated)
@@ -89,6 +106,7 @@ interface RowProps {
   selected: Set<string>;
   expanded: Set<string>;
   query: string;
+  supportedMap: Map<string, boolean>;
   toggleSelect: (paths: string[], select: boolean) => void;
   toggleExpand: (path: string) => void;
 }
@@ -99,6 +117,7 @@ const TreeRow: React.FC<RowProps> = ({
   selected,
   expanded,
   query,
+  supportedMap,
   toggleSelect,
   toggleExpand,
 }) => {
@@ -107,6 +126,7 @@ const TreeRow: React.FC<RowProps> = ({
     () => (isFolder ? collectFilesUnder(node) : [node.path]),
     [node, isFolder],
   );
+  const isUnsupported = !isFolder && supportedMap.get(node.path) === false;
   const selectedCount = filesUnder.filter((p) => selected.has(p)).length;
   const isChecked = selectedCount > 0 && selectedCount === filesUnder.length;
   const isOpen = expanded.has(node.path) || query.length > 0;
@@ -153,12 +173,17 @@ const TreeRow: React.FC<RowProps> = ({
         <input
           type="checkbox"
           checked={isChecked}
+          disabled={isUnsupported}
           onChange={(e) => {
             e.stopPropagation();
             toggleSelect(filesUnder, e.target.checked);
           }}
           onClick={(e) => e.stopPropagation()}
-          style={{ cursor: "pointer" }}
+          style={{
+            cursor: isUnsupported ? "not-allowed" : "pointer",
+            accentColor: "var(--primary)",
+            opacity: isUnsupported ? 0.4 : 1,
+          }}
         />
         <span style={{ color: "var(--fg-muted)" }}>
           {isFolder ? <Icon.Folder size={12} /> : <Icon.File size={12} />}
@@ -170,9 +195,23 @@ const TreeRow: React.FC<RowProps> = ({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            color: isUnsupported ? "var(--fg-subtle)" : "var(--fg)",
+            opacity: isUnsupported ? 0.6 : 1,
           }}
         >
           {node.name}
+          {isUnsupported && (
+            <span
+              style={{
+                fontSize: 10,
+                color: "var(--warning)",
+                marginLeft: 6,
+                fontWeight: 400,
+              }}
+            >
+              unsupported
+            </span>
+          )}
         </span>
         {isFolder && (
           <span
@@ -205,6 +244,7 @@ const TreeRow: React.FC<RowProps> = ({
                 selected={selected}
                 expanded={expanded}
                 query={query}
+                supportedMap={supportedMap}
                 toggleSelect={toggleSelect}
                 toggleExpand={toggleExpand}
               />
@@ -221,15 +261,22 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   onChange,
   maxHeight = 360,
 }) => {
-  const root = useMemo(() => buildTree(files), [files]);
+  const normalised = useMemo(() => normaliseFiles(files), [files]);
+  const paths = useMemo(() => normalised.map((f) => f.path), [normalised]);
+  const supportedMap = useMemo(
+    () => new Map(normalised.map((f) => [f.path, f.supported ?? true])),
+    [normalised],
+  );
+  const root = useMemo(() => buildTree(paths), [paths]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set([""]));
   const [query, setQuery] = useState("");
 
-  // Default-select every file the first time the tree mounts so the
-  // picker behaves opt-out. If the parent later replaces `files` with
-  // a different list (e.g. user pasted a new git URL), do the same.
+  // Default-select only supported files
   useEffect(() => {
-    onChange(new Set(files));
+    const supportedPaths = normalised
+      .filter((f) => f.supported !== false)
+      .map((f) => f.path);
+    onChange(new Set(supportedPaths));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
 
@@ -245,14 +292,18 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   const toggleSelect = (paths: string[], select: boolean) => {
     const next = new Set(selected);
     for (const p of paths) {
+      // Cannot select unsupported files
+      if (select && supportedMap.get(p) === false) continue;
       if (select) next.add(p);
       else next.delete(p);
     }
     onChange(next);
   };
 
-  const totalCount = files.length;
-  const selectedCount = files.filter((f) => selected.has(f)).length;
+  const totalCount = paths.length;
+  const supportedCount = paths.filter((p) => supportedMap.get(p) !== false).length;
+  const unsupportedCount = totalCount - supportedCount;
+  const selectedCount = paths.filter((f) => selected.has(f)).length;
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
@@ -277,7 +328,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
         <button
           type="button"
           className="sccap-btn sccap-btn-sm sccap-btn-ghost"
-          onClick={() => onChange(new Set(files))}
+          onClick={() => onChange(new Set(paths.filter((p) => supportedMap.get(p) !== false)))}
         >
           Select all
         </button>
@@ -296,7 +347,12 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {selectedCount} / {totalCount} selected
+          {selectedCount} / {supportedCount}
+          {unsupportedCount > 0 && (
+            <span style={{ color: "var(--fg-subtle)", marginLeft: 4 }}>
+              ({unsupportedCount} unsupported)
+            </span>
+          )}
         </span>
       </div>
       <div
@@ -326,6 +382,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
                 selected={selected}
                 expanded={expanded}
                 query={query}
+                supportedMap={supportedMap}
                 toggleSelect={toggleSelect}
                 toggleExpand={toggleExpand}
               />

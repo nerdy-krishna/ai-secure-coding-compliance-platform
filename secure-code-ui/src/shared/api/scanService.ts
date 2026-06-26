@@ -1,4 +1,6 @@
+import type { RepoFile } from "../../features/submission/RepoFileTree";
 import {
+  type BulkFindingDispositionResponse,
   type BulkFindingDispositionResponse,
   type FindingDisposition,
   type FindingDispositionEvent,
@@ -88,10 +90,10 @@ export const scanService = {
    * Fetches the file list from a remote Git repository for preview.
    * V02.2.1: validates repoUrl is http(s) and <=512 chars to prevent SSRF.
    */
-  previewGitRepo: async (repoUrl: string): Promise<string[]> => {
+  previewGitRepo: async (repoUrl: string): Promise<RepoFile[]> => {
     assertHttpUrl(repoUrl); // V02.2.1: SSRF guard
     const requestPayload: GitRepoPreviewRequest = { repo_url: repoUrl };
-    const response = await apiClient.post<{ files: string[] }>(
+    const response = await apiClient.post<{ files: RepoFile[] }>(
       "/scans/preview-git",
       requestPayload
     );
@@ -102,13 +104,13 @@ export const scanService = {
    * Fetches the file list from an uploaded archive for preview.
    * V02.2.1 / V15.2.2: rejects empty files or files exceeding 500 MB.
    */
-  previewArchive: async (archiveFile: File): Promise<string[]> => {
+  previewArchive: async (archiveFile: File): Promise<RepoFile[]> => {
     if (archiveFile.size === 0 || archiveFile.size > MAX_ARCHIVE_BYTES) {
       throw new Error("Archive must be 1B-500MB");
     }
     const formData = new FormData();
     formData.append("archive_file", archiveFile);
-    const response = await apiClient.post<{ files: string[] }>(
+    const response = await apiClient.post<{ files: RepoFile[] }>(
       "/scans/preview-archive",
       formData
     );

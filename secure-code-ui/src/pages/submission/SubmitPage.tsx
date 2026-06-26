@@ -24,7 +24,7 @@ import type {
   ScanCoverageResponse,
 } from "../../shared/types/api";
 import { useAuth } from "../../shared/hooks/useAuth";
-import { RepoFileTree } from "../../features/submission/RepoFileTree";
+import { RepoFileTree, type RepoFile } from "../../features/submission/RepoFileTree";
 import ScanReadinessPanel from "../../features/semgrep/ScanReadinessPanel";
 import ScanCoverageWizard from "../../features/semgrep/ScanCoverageWizard";
 
@@ -271,7 +271,7 @@ const SubmitPage: React.FC = () => {
   // Preview-tree state. `previewFiles` is the flat list returned by
   // /scans/preview-git or /scans/preview-archive; `selectedFiles` is
   // the user's pick (default: every file).
-  const [previewFiles, setPreviewFiles] = useState<string[] | null>(null);
+  const [previewFiles, setPreviewFiles] = useState<RepoFile[] | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -358,15 +358,7 @@ const SubmitPage: React.FC = () => {
     try {
       const list = await scanService.previewGitRepo(v);
       setPreviewFiles(list);
-      setSelectedFiles(new Set(list));
-    } catch (err) {
-      const e = err as {
-        response?: { data?: { detail?: string } };
-        message?: string;
-      };
-      const detail =
-        e.response?.data?.detail ?? e.message ?? "Could not fetch the repo";
-      setPreviewError(typeof detail === "string" ? detail : "Could not fetch the repo");
+      setSelectedFiles(new Set(list.map((f) => f.path)));
     } finally {
       setPreviewLoading(false);
     }
@@ -378,7 +370,7 @@ const SubmitPage: React.FC = () => {
     try {
       const list = await scanService.previewArchive(f);
       setPreviewFiles(list);
-      setSelectedFiles(new Set(list));
+      setSelectedFiles(new Set(list.map((f) => f.path)));
     } catch (err) {
       const e = err as {
         response?: { data?: { detail?: string } };

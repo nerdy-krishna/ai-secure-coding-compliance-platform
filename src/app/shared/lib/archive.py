@@ -368,3 +368,160 @@ def is_archive_filename(filename: Optional[str]) -> bool:
         if filename_lower.endswith(ext):
             return True
     return False
+
+
+def _is_supported_source_extension(filename: str) -> bool:
+    """Check whether a filename has a supported source-code extension."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if not ext:
+        return False
+    from app.shared.lib.files import LANGUAGE_EXTENSIONS
+    return ext in LANGUAGE_EXTENSIONS
+
+
+def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
+    """
+    Extract an uploaded archive and return metadata for **all** entries.
+
+    Unlike ``extract_archive_to_files`` (which filters to processable files
+    and raises when none are found), this returns every regular file in the
+    archive, marking each as ``supported=True/False``. The caller (the UI
+    file-tree) uses support status to grey out unsupported entries.
+    """
+    if not archive_file.filename:
+        raise HTTPException(status_code=400, detail="Archive filename is missing.")
+
+    raw_filename = archive_file.filename
+    if (
+        "\x00" in raw_filename
+        or ".." in raw_filename
+        or os.sep in raw_filename
+        or (os.altsep and os.altsep in raw_filename)
+    ):
+        raise HTTPException(
+            status_code=400, detail="Archive filename contains invalid characters."
+        )
+
+    filename_lower = archive_file.filename.lower()
+    file_extension = ""
+    for ext in ALLOWED_ARCHIVE_EXTENSIONS:
+        if filename_lower.endswith(ext):
+            file_extension = ext
+            break
+
+    if not file_extension:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported archive format for file: {archive_file.filename}. "
+            f"Supported formats: {', '.join(ALLOWED_ARCHIVE_EXTENSIONS)}",
+        )
+
+    entries: List[Dict[str, Any]] = []
+    file_count = 0
+    total_size = 0
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        safe_name = (
+            os.path.basename(archive_file.filename)
+            .replace("\x00", "")
+            .replace("..", "_")
+        )
+        archive_path = os.path.join(temp_dir, safe_name)
+        try:
+            with open(archive_path, "wb") as f_out:
+                shutil.copyfileobj(archive_file.file, f_out)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Error saving uploaded archive.")
+        finally:
+            archive_file.file.close()
+
+        if not _verify_archive_magic(archive_path, file_extension):
+            raise HTTPException(
+                status_code=400,
+                detail="Archive content does not match its extension.",
+            )
+
+        extraction_dir = os.path.join(temp_dir, "extracted_content")
+        os.makedirs(extraction_dir, exist_ok=True)
+
+        try:
+            if file_extension == ".zip":
+                with zipfile.ZipFile(archive_path, "r") as zf:
+                    for mi in zf.infolist():
+                        if mi.is_dir():
+                            continue
+                        if (mi.external_attr >> 16) & 0o170000 == 0o120000:
+                            continue
+                        normalised = os.path.normpath(mi.filename)
+                        if os.path.isabs(normalised) or normalised.startswith(".."):
+                            continue
+                        if not _is_path_safe(extraction_dir, normalised):
+                            continue
+
+                        file_count += 1
+                        if file_count > MAX_FILES_IN_ARCHIVE:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Archive contains too many files (limit: {MAX_FILES_IN_ARCHIVE}).",
+                            )
+                        total_size += mi.file_size
+                        if total_size > MAX_UNCOMPRESSED_SIZE_BYTES:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Archive uncompressed size exceeds limit ({MAX_UNCOMPRESSED_SIZE_BYTES // (1024 * 1024)} MB).",
+                            )
+
+                        language = get_language_from_filename(mi.filename) or "unknown"
+                        supported = _is_supported_source_extension(mi.filename)
+                        entries.append({
+                            "path": mi.filename,
+                            "language": language,
+                            "supported": supported,
+                        })
+
+            elif file_extension.startswith(".tar") or file_extension in (".tgz", ".tbz2", ".txz"):
+                with tarfile.open(archive_path, "r:*") as tf:
+                    if hasattr(tarfile, "data_filter"):
+                        tf.extraction_filter = tarfile.data_filter
+
+                    for mi in tf.getmembers():
+                        if mi.issym() or mi.islnk():
+                            continue
+                        if not mi.isreg():
+                            continue
+
+                        file_count += 1
+                        if file_count > MAX_FILES_IN_ARCHIVE:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Archive contains too many files (limit: {MAX_FILES_IN_ARCHIVE}).",
+                            )
+                        total_size += mi.size
+                        if total_size > MAX_UNCOMPRESSED_SIZE_BYTES:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Archive uncompressed size exceeds limit ({MAX_UNCOMPRESSED_SIZE_BYTES // (1024 * 1024)} MB).",
+                            )
+                        if not _is_path_safe(extraction_dir, mi.name):
+                            continue
+
+                        language = get_language_from_filename(mi.name) or "unknown"
+                        supported = _is_supported_source_extension(mi.name)
+                        entries.append({
+                            "path": mi.name,
+                            "language": language,
+                            "supported": supported,
+                        })
+            else:
+                raise HTTPException(status_code=400, detail="Internal error: Unhandled archive type.")
+
+        except HTTPException:
+            raise
+        except Exception:
+            logger.error(
+                "archive.process_failed filename=%s", _safe(archive_file.filename),
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Error processing archive.")
+
+    return entries
