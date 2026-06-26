@@ -92,7 +92,14 @@ const Dropzone: React.FC<{
   helper: string;
 }> = ({ onFiles, multiple = false, accept, hint, helper }) => {
   const [dragging, setDragging] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFiles = (fl: FileList | null) => {
+    const files = Array.from(fl ?? []);
+    if (files.length) onFiles(files);
+  };
+
   return (
     <div
       onDragOver={(e) => {
@@ -103,16 +110,15 @@ const Dropzone: React.FC<{
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        const files = Array.from(e.dataTransfer.files ?? []);
-        if (files.length) onFiles(files);
+        handleFiles(e.dataTransfer.files);
       }}
-      onClick={() => inputRef.current?.click()}
+      onClick={() => fileInputRef.current?.click()}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          inputRef.current?.click();
+          fileInputRef.current?.click();
         }
       }}
       style={{
@@ -128,14 +134,25 @@ const Dropzone: React.FC<{
       }}
     >
       <input
-        ref={inputRef}
+        ref={fileInputRef}
         type="file"
         multiple={multiple}
         accept={accept}
         style={{ display: "none" }}
         onChange={(e) => {
-          const files = Array.from(e.target.files ?? []);
-          if (files.length) onFiles(files);
+          handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        /* @ts-expect-error webkitdirectory is widely supported */
+        webkitdirectory=""
+        directory=""
+        style={{ display: "none" }}
+        onChange={(e) => {
+          handleFiles(e.target.files);
           e.target.value = "";
         }}
       />
@@ -145,6 +162,35 @@ const Dropzone: React.FC<{
       <div style={{ fontWeight: 500, color: "var(--fg)" }}>{hint}</div>
       <div style={{ color: "var(--fg-muted)", fontSize: 12.5, marginTop: 4 }}>
         {helper}
+      </div>
+      <div
+        style={{
+          marginTop: 14,
+          display: "flex",
+          gap: 8,
+          justifyContent: "center",
+        }}
+      >
+        <button
+          type="button"
+          className="sccap-btn sccap-btn-sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            fileInputRef.current?.click();
+          }}
+        >
+          <Icon.File size={12} /> Choose files
+        </button>
+        <button
+          type="button"
+          className="sccap-btn sccap-btn-sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            folderInputRef.current?.click();
+          }}
+        >
+          <Icon.Folder size={12} /> Choose folder
+        </button>
       </div>
     </div>
   );
@@ -798,28 +844,16 @@ const SubmitPage: React.FC = () => {
                 <Dropzone
                   multiple
                   onFiles={(next) => {
-                    // V05.2.2: extension allowlist
-                    const allowed: File[] = [];
-                    for (const f of next) {
-                      const ext = "." + f.name.split(".").pop()?.toLowerCase();
-                      if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
-                        toast.error(`"${f.name}" has an unsupported extension and was skipped`);
-                        continue;
-                      }
-                      // V05.2.1: per-file size cap at drop time
-                      if (f.size > MAX_FILE_BYTES) {
-                        toast.error(`"${f.name}" exceeds 50 MB and was skipped`);
-                        continue;
-                      }
-                      allowed.push(f);
-                    }
-                    if (allowed.length === 0) return;
+                    // Accept all files — unsupported ones greyed out in tree.
                     setFiles((prev) => {
-                      // V05.2.1: aggregate size cap at drop time
                       const currentTotal = prev.reduce((s, f) => s + f.size, 0);
                       const accepted: File[] = [];
                       let running = currentTotal;
-                      for (const f of allowed) {
+                      for (const f of next) {
+                        if (f.size > MAX_FILE_BYTES) {
+                          toast.error(`"${f.name}" exceeds 50 MB and was skipped`);
+                          continue;
+                        }
                         if (running + f.size > MAX_TOTAL_BYTES) {
                           toast.error(`Adding "${f.name}" would exceed the 200 MB total limit; it was skipped`);
                           continue;
@@ -830,55 +864,40 @@ const SubmitPage: React.FC = () => {
                       return [...prev, ...accepted];
                     });
                   }}
-                  hint="Drop files here or click to browse"
-                  helper="Up to 200 files, 50 MB each, 200 MB total. Supported source-code extensions only. Binary files are ignored; potentially-malicious files are quarantined and reported."
+                  hint="Drop files or folders here, or click below to browse"
+                  helper="Unsupported extensions are shown greyed out and excluded from the scan. Max 50 MB per file, 200 MB total."
                 />
                 {files.length > 0 && (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      display: "grid",
-                      gap: 4,
-                      maxHeight: 200,
-                      overflowY: "auto",
-                    }}
-                  >
-                    {files.map((f, i) => (
-                      <div
-                        key={`${f.name}-${i}`}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          fontSize: 12.5,
-                          color: "var(--fg-muted)",
-                          padding: "4px 0",
-                        }}
-                      >
-                        <span
-                          className="mono"
-                          style={{
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                            maxWidth: 360,
-                          }}
-                        >
-                          {f.name}
-                        </span>
-                        <span
-                          onClick={() =>
-                            setFiles((prev) => prev.filter((_, j) => j !== i))
-                          }
-                          style={{
-                            cursor: "pointer",
-                            color: "var(--fg-subtle)",
-                            fontSize: 11,
-                          }}
-                        >
-                          Remove
-                        </span>
-                      </div>
-                    ))}
+                  <div style={{ marginTop: 12 }}>
+                    <RepoFileTree
+                      files={files.map((f) => {
+                        const ext = "." + (f.name.split(".").pop()?.toLowerCase() ?? "");
+                        return {
+                          path: f.webkitRelativePath || f.name,
+                          language: EXT_TO_LANG[ext] ?? "unknown",
+                          supported: ALLOWED_UPLOAD_EXTENSIONS.has(ext),
+                        };
+                      })}
+                      selected={
+                        new Set(
+                          files
+                            .filter((f) =>
+                              ALLOWED_UPLOAD_EXTENSIONS.has(
+                                "." + (f.name.split(".").pop()?.toLowerCase() ?? ""),
+                              ),
+                            )
+                            .map((f) => f.webkitRelativePath || f.name),
+                        )
+                      }
+                      onChange={(next) => {
+                        const nextSet = new Set(next);
+                        setFiles((prev) =>
+                          prev.filter(
+                            (f) => nextSet.has(f.webkitRelativePath || f.name),
+                          ),
+                        );
+                      }}
+                    />
                   </div>
                 )}
               </div>
