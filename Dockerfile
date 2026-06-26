@@ -152,6 +152,7 @@ COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
 COPY --chown=appuser:appuser ./src /app/src
 COPY --chown=appuser:appuser ./alembic /app/alembic
 COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
+COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 
 # Pre-warm the fastembed model cache so air-gapped / restricted-egress
 # deployments don't reach out to HuggingFace on first scan. Cache lives
@@ -159,7 +160,9 @@ COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
 # mitigation 7.
 RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
 
+RUN chmod +x /app/app-entrypoint.sh
 EXPOSE 8000
+ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # ---------- worker -------------------------------------------------------
@@ -247,6 +250,7 @@ USER appuser
 
 COPY --chown=appuser:appuser --from=worker-builder /app/.venv /app/.venv
 COPY --chown=appuser:appuser ./src /app/src
+COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 
 # Pre-warm the fastembed model cache (same as the api stage). Worker
 # performs the bulk of the embedder work during scans; baking the
@@ -264,4 +268,6 @@ RUN set -eux; \
     osv-scanner scan source --recursive /tmp/osv-warmup 2>/dev/null || true; \
     rmdir /tmp/osv-warmup || true
 
+RUN chmod +x /app/app-entrypoint.sh
+ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["python", "-m", "app.workers.consumer"]
