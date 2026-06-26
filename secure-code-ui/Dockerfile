@@ -35,6 +35,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Phase A consolidated nginx-https.conf with an __SSL_DOMAIN__ placeholder
 # that the entrypoint substitutes at runtime; the unused nginx.conf from
 # the old setup was deleted.
+COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-http.conf /etc/nginx/nginx-http.conf
 COPY nginx-https.conf /etc/nginx/nginx-https.conf
 
@@ -43,7 +44,9 @@ RUN chmod +x /docker-entrypoint.d/99-ssl-setup.sh
 
 RUN addgroup -S nginx-app && adduser -S -G nginx-app nginx-app \
     && chown -R nginx-app:nginx-app /usr/share/nginx/html /var/cache/nginx /var/log/nginx /etc/nginx \
-    && touch /var/run/nginx.pid && chown nginx-app:nginx-app /var/run/nginx.pid
+    && touch /var/run/nginx.pid && chown nginx-app:nginx-app /var/run/nginx.pid \
+    && mkdir -p /var/log/letsencrypt /var/lib/letsencrypt \
+    && chown -R nginx-app:nginx-app /etc/letsencrypt /var/log/letsencrypt /var/lib/letsencrypt
 USER nginx-app
 
 EXPOSE 80 443

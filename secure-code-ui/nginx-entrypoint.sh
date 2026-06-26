@@ -74,6 +74,11 @@ validate_email "$EMAIL"
 
 echo "Checking SSL certificates for $DOMAIN..."
 
+# Ensure certbot directories are writable (belt-and-suspenders with Dockerfile).
+# On some filesystems, chown inside the container doesn't survive volume mounts
+# or the USER switch, so we create them here as the running user if possible.
+mkdir -p /var/log/letsencrypt /var/lib/letsencrypt 2>/dev/null || true
+
 # V15.4.2: serialise cert acquisition with a lock to prevent TOCTOU races when
 # multiple replicas share the same ./certbot/conf volume.
 # Only one replica enters the bootstrap path at a time.
