@@ -83,9 +83,20 @@ export const ruleSourcesService = {
     )).data;
   },
 
-  // Scan coverage (authenticated, not admin-only)
-  checkCoverage: async (languages: string[]): Promise<ScanCoverageResponse> =>
-    (await apiClient.get<ScanCoverageResponse>("/scan-coverage/check", {
-      params: { "languages[]": languages },
-    })).data,
+  // Scan coverage (authenticated, not admin-only).
+  // 5-second timeout — a hung coverage check must not block submission.
+  checkCoverage: async (languages: string[]): Promise<ScanCoverageResponse> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      return (
+        await apiClient.get<ScanCoverageResponse>("/scan-coverage/check", {
+          params: { "languages[]": languages },
+          signal: controller.signal,
+        })
+      ).data;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
 };
