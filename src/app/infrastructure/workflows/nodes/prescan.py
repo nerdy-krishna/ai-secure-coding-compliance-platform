@@ -230,7 +230,14 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     # itself, so we get one subprocess.run call per scanner per scan,
     # not per file. OSV-Scanner (ADR-009) joins as the fourth scanner;
     # it returns a (findings, bom) tuple instead of just findings.
-    semaphore = asyncio.Semaphore(_CONCURRENT_SCANNER_LIMIT)
+    scanner_limit = _CONCURRENT_SCANNER_LIMIT
+    try:
+        from app.shared.lib.concurrency_limits import get_concurrency_limit
+        async with AsyncSessionLocal() as _db:
+            scanner_limit = await get_concurrency_limit(_db, "CONCURRENT_SCANNER_LIMIT")
+    except Exception:
+        pass
+    semaphore = asyncio.Semaphore(scanner_limit)
     prescan_findings: List[VulnerabilityFinding] = []
     bom_cyclonedx: Optional[Dict[str, Any]] = None
     try:

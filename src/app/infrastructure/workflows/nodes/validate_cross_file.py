@@ -110,7 +110,14 @@ async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"error_message": f"Could not start cross-file validator: {exc}"}
 
-    semaphore = asyncio.Semaphore(CONCURRENT_VALIDATION_LIMIT)
+    validation_limit = CONCURRENT_VALIDATION_LIMIT
+    try:
+        from app.shared.lib.concurrency_limits import get_concurrency_limit
+        async with AsyncSessionLocal() as _db:
+            validation_limit = await get_concurrency_limit(_db, "CONCURRENT_VALIDATION_LIMIT")
+    except Exception:
+        pass
+    semaphore = asyncio.Semaphore(validation_limit)
 
     async def _validate(idx: int, slices: CrossFileSlices):
         async with semaphore:

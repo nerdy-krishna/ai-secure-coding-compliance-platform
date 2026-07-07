@@ -73,6 +73,13 @@ const SystemConfigTab: React.FC = () => {
   const [pendingSessionHours, setPendingSessionHours] = useState<string>("24");
   const [savingSession, setSavingSession] = useState(false);
 
+  // Concurrency limits
+  const [llmLimit, setLlmLimit] = useState<string>("50");
+  const [scannerLimit, setScannerLimit] = useState<string>("10");
+  const [consolidationLimit, setConsolidationLimit] = useState<string>("10");
+  const [validationLimit, setValidationLimit] = useState<string>("10");
+  const [savingConcurrency, setSavingConcurrency] = useState(false);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -166,6 +173,24 @@ const SystemConfigTab: React.FC = () => {
         setSessionHours(h);
         setPendingSessionHours(String(h));
       }
+
+      // Load concurrency limits
+      const loadConc = (key: string, setter: (v: string) => void, fallback: string) => {
+        const c = all.find((x) => x.key === key);
+        if (c?.value) {
+          const v = typeof c.value === "number" ? c.value
+            : typeof c.value === "object" && c.value !== null
+            ? (c.value as Record<string, unknown>).value ?? (c.value as Record<string, unknown>).limit ?? fallback
+            : fallback;
+          setter(String(v));
+        } else {
+          setter(fallback);
+        }
+      };
+      loadConc("system.concurrency.llm_limit", setLlmLimit, "50");
+      loadConc("system.concurrency.scanner_limit", setScannerLimit, "10");
+      loadConc("system.concurrency.consolidation_limit", setConsolidationLimit, "10");
+      loadConc("system.concurrency.validation_limit", setValidationLimit, "10");
     } finally {
       setLoadingMeta(false);
     }
@@ -239,6 +264,36 @@ const SystemConfigTab: React.FC = () => {
       toast.error("Failed to update session lifetime.");
     } finally {
       setSavingSession(false);
+    }
+  };
+
+  const handleSaveConcurrency = async () => {
+    const pairs: [string, string][] = [
+      ["system.concurrency.llm_limit", llmLimit],
+      ["system.concurrency.scanner_limit", scannerLimit],
+      ["system.concurrency.consolidation_limit", consolidationLimit],
+      ["system.concurrency.validation_limit", validationLimit],
+    ];
+    for (const [, v] of pairs) {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n) || n < 1) {
+        toast.error("All limits must be at least 1.");
+        return;
+      }
+    }
+    setSavingConcurrency(true);
+    try {
+      await Promise.all(
+        pairs.map(([k, v]) =>
+          systemConfigService.update(k, { value: parseInt(v, 10) }),
+        ),
+      );
+      toast.success("Concurrency limits saved. Takes effect on next scan.");
+      queryClient.invalidateQueries({ queryKey: ["system-configs"] });
+    } catch {
+      toast.error("Failed to save concurrency limits.");
+    } finally {
+      setSavingConcurrency(false);
     }
   };
 
@@ -681,6 +736,55 @@ const SystemConfigTab: React.FC = () => {
         )}
       </SettingsCard>
 
+      <SettingsCard
+        title="Concurrency limits"
+        description="Max in-flight LLM and scanner calls. Changes take effect on the next scan — no restart needed. Increase for faster scans on high-RPM providers (DeepSeek, OpenAI T4). Decrease if you hit rate-limit errors."
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <LabeledNumber
+            label="LLM agents"
+            value={llmLimit}
+            onChange={setLlmLimit}
+            min={1}
+            max={500}
+            disabled={savingConcurrency || loadingMeta}
+          />
+          <LabeledNumber
+            label="SAST scanners"
+            value={scannerLimit}
+            onChange={setScannerLimit}
+            min={1}
+            max={50}
+            disabled={savingConcurrency || loadingMeta}
+          />
+          <LabeledNumber
+            label="Consolidation"
+            value={consolidationLimit}
+            onChange={setConsolidationLimit}
+            min={1}
+            max={100}
+            disabled={savingConcurrency || loadingMeta}
+          />
+          <LabeledNumber
+            label="Cross-file validation"
+            value={validationLimit}
+            onChange={setValidationLimit}
+            min={1}
+            max={50}
+            disabled={savingConcurrency || loadingMeta}
+          />
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button
+            className="sccap-btn sccap-btn-primary sccap-btn-sm"
+            onClick={handleSaveConcurrency}
+            disabled={savingConcurrency || loadingMeta}
+          >
+            {savingConcurrency ? "Saving…" : "Save limits"}
+          </button>
+        </div>
+      </SettingsCard>
+
       <div className="surface" style={{ padding: 0 }}>
         <div
           className="section-head"
@@ -958,6 +1062,30 @@ const SystemConfigTab: React.FC = () => {
     </div>
   );
 };
+
+const LabeledNumber: React.FC<{
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  min: number;
+  max: number;
+  disabled?: boolean;
+}> = ({ label, value, onChange, min, max, disabled }) => (
+  <label style={{ display: "grid", gap: 4 }}>
+    <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>{label}</span>
+    <input
+      type="number"
+      className="sccap-input"
+      min={min}
+      max={max}
+      step={1}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      style={{ maxWidth: 140 }}
+    />
+  </label>
+);
 
 const SettingsCard: React.FC<{
   title: string;

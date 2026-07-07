@@ -144,7 +144,14 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"error_message": f"Could not start finding consolidator: {exc}"}
 
-    semaphore = asyncio.Semaphore(CONCURRENT_CONSOLIDATION_LIMIT)
+    consolidation_limit = CONCURRENT_CONSOLIDATION_LIMIT
+    try:
+        from app.shared.lib.concurrency_limits import get_concurrency_limit
+        async with AsyncSessionLocal() as _db:
+            consolidation_limit = await get_concurrency_limit(_db, "CONCURRENT_CONSOLIDATION_LIMIT")
+    except Exception:
+        pass
+    semaphore = asyncio.Semaphore(consolidation_limit)
     stats = {"reused": 0, "rerun": 0, "failed": 0, "completed": 0}
 
     async def _consolidate(file_path: str, file_findings: List[VulnerabilityFinding]):

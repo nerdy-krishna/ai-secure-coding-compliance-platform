@@ -50,7 +50,7 @@ from app.shared.lib.llm_slots import (
     resolve_temperature,
 )
 
-from app.config.config import settings
+from app.shared.lib.concurrency_limits import get_concurrency_limit
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +182,14 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     )
 
     generic_agent_graph = build_generic_specialized_agent_graph()
+    # Read concurrency limit from system_config (dynamic, no restart needed)
+    async with AsyncSessionLocal() as _db:
+        llm_limit = await get_concurrency_limit(_db, "CONCURRENT_LLM_LIMIT")
     # One concurrency pool per distinct reasoning-LLM config. Two lanes
     # on different configs (different providers, independent rate
-    # limits) each get a pool of CONCURRENT_LLM_LIMIT; two lanes on the
-    # same config share one pool. Single-LLM scans keep one pool.
+    # limits) each get a pool; two lanes on the same config share one.
     semaphores: Dict[Any, asyncio.Semaphore] = {
-        lane.pool_key: asyncio.Semaphore(settings.CONCURRENT_LLM_LIMIT) for lane in lanes
+        lane.pool_key: asyncio.Semaphore(llm_limit) for lane in lanes
     }
 
     # Resolve each lane's LLM-config display name once, for finding
