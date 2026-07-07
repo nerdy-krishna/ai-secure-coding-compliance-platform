@@ -30,8 +30,8 @@ from langgraph.graph import END, StateGraph
 from langgraph.pregel import Pregel
 
 from app.config.config import settings
+
 from app.infrastructure.workflows.nodes.analyze import (
-    CONCURRENT_LLM_LIMIT,
     analyze_files_parallel_node,
 )
 from app.infrastructure.workflows.nodes.classify import classify_files_node
@@ -58,7 +58,6 @@ from app.infrastructure.workflows.nodes.cost import (
 )
 from app.infrastructure.workflows.nodes.error import handle_error_node
 from app.infrastructure.workflows.nodes.prescan import (
-    CONCURRENT_SCANNER_LIMIT,
     PRESCAN_FILE_BYTE_LIMIT,
     blocked_pre_llm_node,
     deterministic_prescan_node,
@@ -96,6 +95,13 @@ from app.shared.lib.scan_status import (  # noqa: F401
     STATUS_REMEDIATION_COMPLETED,
 )
 
+# Re-export concurrency limits at module level for backwards compat
+# (tests and other modules import these from worker_graph).
+CONCURRENT_LLM_LIMIT = settings.CONCURRENT_LLM_LIMIT
+CONCURRENT_SCANNER_LIMIT = settings.CONCURRENT_SCANNER_LIMIT
+CONCURRENT_CONSOLIDATION_LIMIT = settings.CONCURRENT_CONSOLIDATION_LIMIT
+CONCURRENT_VALIDATION_LIMIT = settings.CONCURRENT_VALIDATION_LIMIT
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,10 +111,10 @@ __all__ = [
     "RelevantAgent",
     "get_workflow",
     "close_workflow_resources",
-    # Constants (back-compat with any caller that still imports them
-    # from worker_graph rather than from the new node modules):
     "CONCURRENT_LLM_LIMIT",
     "CONCURRENT_SCANNER_LIMIT",
+    "CONCURRENT_CONSOLIDATION_LIMIT",
+    "CONCURRENT_VALIDATION_LIMIT",
     "PRESCAN_FILE_BYTE_LIMIT",
     "CHUNK_ONLY_IF_LARGER_THAN",
     "HAS_TREE_SITTER",

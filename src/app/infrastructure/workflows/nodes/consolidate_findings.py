@@ -34,10 +34,12 @@ from app.shared.lib.llm_slots import (
 )
 from app.shared.lib.scan_progress import EV_STARTED
 
+from app.config.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Bounds concurrent per-file consolidation calls on the reasoning slot.
-CONCURRENT_CONSOLIDATION_LIMIT = 5
+CONCURRENT_CONSOLIDATION_LIMIT = settings.CONCURRENT_CONSOLIDATION_LIMIT
 CONSOLIDATION_TASK_TYPE = "consolidation:file"
 CONSOLIDATION_TASK_VERSION = "consolidation-file-v1"
 

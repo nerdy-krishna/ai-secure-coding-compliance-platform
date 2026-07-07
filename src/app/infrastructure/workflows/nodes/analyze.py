@@ -50,9 +50,10 @@ from app.shared.lib.llm_slots import (
     resolve_temperature,
 )
 
+from app.config.config import settings
+
 logger = logging.getLogger(__name__)
 
-CONCURRENT_LLM_LIMIT = 5
 ANALYSIS_TASK_TYPE = "analysis"
 ANALYSIS_TASK_VERSION = "analysis-task-v1"
 
@@ -186,7 +187,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     # limits) each get a pool of CONCURRENT_LLM_LIMIT; two lanes on the
     # same config share one pool. Single-LLM scans keep one pool.
     semaphores: Dict[Any, asyncio.Semaphore] = {
-        lane.pool_key: asyncio.Semaphore(CONCURRENT_LLM_LIMIT) for lane in lanes
+        lane.pool_key: asyncio.Semaphore(settings.CONCURRENT_LLM_LIMIT) for lane in lanes
     }
 
     # Resolve each lane's LLM-config display name once, for finding

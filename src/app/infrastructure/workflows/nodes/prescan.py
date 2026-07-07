@@ -25,6 +25,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from langgraph.types import interrupt
 
+from app.config.config import settings
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
@@ -89,7 +90,8 @@ def _derive_languages(file_paths: "Iterable[str]") -> list[str]:
 # Bounds parallel SAST scanner subprocess invocations in the
 # `deterministic_prescan_node`. Mirrors the LLM-side cap so a worker
 # busy with a large prescan cannot saturate the host.
-CONCURRENT_SCANNER_LIMIT = 5
+# Default overridden by settings.CONCURRENT_SCANNER_LIMIT.
+_CONCURRENT_SCANNER_LIMIT = settings.CONCURRENT_SCANNER_LIMIT
 # Files larger than this are skipped during the prescan (M6 — defense
 # against pathological inputs that pin scanner CPU).
 # Per-file size cap for the SAST prescan. Was 1 MiB; raised to
@@ -228,7 +230,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     # itself, so we get one subprocess.run call per scanner per scan,
     # not per file. OSV-Scanner (ADR-009) joins as the fourth scanner;
     # it returns a (findings, bom) tuple instead of just findings.
-    semaphore = asyncio.Semaphore(CONCURRENT_SCANNER_LIMIT)
+    semaphore = asyncio.Semaphore(_CONCURRENT_SCANNER_LIMIT)
     prescan_findings: List[VulnerabilityFinding] = []
     bom_cyclonedx: Optional[Dict[str, Any]] = None
     try:

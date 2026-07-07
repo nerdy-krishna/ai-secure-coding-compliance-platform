@@ -242,6 +242,45 @@ class Settings(BaseSettings):
         default=2 * 60 * 60, description="Max seconds a single scan workflow may run."
     )
 
+    # --- Concurrency limits (per-lane / per-workflow-node semaphores) ---
+    # These bound in-flight LLM / scanner / validation calls so a single
+    # scan or a burst of scans doesn't exhaust provider rate limits or
+    # worker system resources (file descriptors, memory).
+    #
+    # Provider RPM ceilings (2026-07 reference) — per-lane semaphore ×
+    # ~1 req/s = approximate steady-state RPM:
+    #   DeepSeek Pro  500 RPM  |  Flash  2500 RPM
+    #   OpenAI GPT-4o (T1) 500 RPM  |  GPT-4o-mini 10000 RPM
+    #   Anthropic Claude (T4) 4000 RPM  |  (T1) 50 RPM
+    #   Gemini 1.5 Flash (paid) 1500 RPM  |  Pro (paid) 360 RPM
+    #
+    # Defaults target generous but safe values for the typical tier.
+    # Override via .env for high-tier accounts or self-hosted models.
+    CONCURRENT_LLM_LIMIT: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Max concurrent LLM calls per reasoning lane.",
+    )
+    CONCURRENT_SCANNER_LIMIT: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Max concurrent SAST scanner subprocesses (prescan).",
+    )
+    CONCURRENT_CONSOLIDATION_LIMIT: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Max concurrent file-consolidation LLM calls.",
+    )
+    CONCURRENT_VALIDATION_LIMIT: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Max concurrent cross-file validation LLM calls.",
+    )
+
     # --- RAG vector store (Qdrant only; ADR-008 supersedes ADR-007) ---
     QDRANT_HOST: str = "qdrant"
     QDRANT_PORT: int = 6333

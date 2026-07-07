@@ -41,10 +41,12 @@ from app.shared.lib.llm_slots import (
 )
 from app.shared.lib.scan_progress import EV_STARTED
 
+from app.config.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Bounds concurrent per-finding validation calls on the reasoning slot.
-CONCURRENT_VALIDATION_LIMIT = 5
+CONCURRENT_VALIDATION_LIMIT = settings.CONCURRENT_VALIDATION_LIMIT
 
 
 async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
