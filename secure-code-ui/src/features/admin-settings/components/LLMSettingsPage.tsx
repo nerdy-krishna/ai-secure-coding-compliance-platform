@@ -23,6 +23,7 @@ const LLM_PROVIDERS = [
   "anthropic",
   "deepseek",
   "xai",
+  "custom_openai",
 ] as const;
 type Provider = (typeof LLM_PROVIDERS)[number];
 
@@ -34,6 +35,7 @@ interface FormState {
   name: string;
   provider: Provider;
   model_name: string;
+  base_url: string;
   tokenizer: string;
   input_cost_per_million: string;
   output_cost_per_million: string;
@@ -47,6 +49,7 @@ const EMPTY_FORM: FormState = {
   name: "",
   provider: "anthropic",
   model_name: "",
+  base_url: "",
   tokenizer: "",
   input_cost_per_million: "",
   output_cost_per_million: "",
@@ -113,6 +116,7 @@ const LLMSettingsPage: React.FC = () => {
           ? (editing.provider as Provider)
           : "anthropic",
         model_name: editing.model_name,
+        base_url: editing.base_url ?? "",
         tokenizer: editing.tokenizer ?? "",
         input_cost_per_million: String(editing.input_cost_per_million ?? ""),
         output_cost_per_million: String(editing.output_cost_per_million ?? ""),
@@ -211,6 +215,11 @@ const LLMSettingsPage: React.FC = () => {
       toast.error("Invalid provider.");
       return;
     }
+    // custom_openai requires a base_url.
+    if (form.provider === "custom_openai" && !form.base_url.trim()) {
+      toast.error("Base URL is required for Custom OpenAI provider.");
+      return;
+    }
     if (!editing && !form.api_key) {
       toast.error("API key is required for new configurations.");
       return;
@@ -220,6 +229,7 @@ const LLMSettingsPage: React.FC = () => {
       name: form.name,
       provider: form.provider,
       model_name: form.model_name,
+      base_url: form.base_url || null,
       tokenizer: form.tokenizer || null,
       input_cost_per_million: input,
       output_cost_per_million: output,
@@ -240,6 +250,7 @@ const LLMSettingsPage: React.FC = () => {
         name: payload.name,
         provider: payload.provider,
         model_name: payload.model_name,
+        base_url: payload.base_url,
         tokenizer: payload.tokenizer,
         input_cost_per_million: payload.input_cost_per_million,
         output_cost_per_million: payload.output_cost_per_million,
@@ -328,6 +339,19 @@ const LLMSettingsPage: React.FC = () => {
                 required
               />
             </Field>
+            {form.provider === "custom_openai" && (
+              <Field label="Base URL" hint="(required for custom)">
+                <input
+                  className="sccap-input mono"
+                  placeholder="http://vllm.internal:8000/v1"
+                  value={form.base_url}
+                  onChange={(e) =>
+                    setForm({ ...form, base_url: e.target.value })
+                  }
+                  required
+                />
+              </Field>
+            )}
             <Field label="Tokenizer" hint="(optional, inferred)">
               <input
                 className="sccap-input mono"

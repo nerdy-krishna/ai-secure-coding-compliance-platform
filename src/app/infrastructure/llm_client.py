@@ -173,6 +173,18 @@ class LLMClient:
                 model_name,
                 provider=GoogleProvider(api_key=self.decrypted_api_key),
             )
+        if self.provider_name == "custom_openai":
+            custom_url = getattr(self.db_llm_config, "base_url", None)
+            if not custom_url:
+                raise ValueError(
+                    "custom_openai provider requires a base_url in the LLM configuration"
+                )
+            return OpenAIModel(
+                model_name,
+                provider=OpenAIProvider(
+                    api_key=self.decrypted_api_key, base_url=custom_url
+                ),
+            )
         base_url = self._OPENAI_COMPATIBLE_BASE_URLS.get(self.provider_name)
         if base_url is not None:
             return OpenAIModel(

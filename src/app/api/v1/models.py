@@ -113,15 +113,20 @@ class LLMConfigurationBase(BaseModel):
         min_length=1,
         max_length=200,
     )
-    provider: Literal["openai", "anthropic", "google", "deepseek", "xai"] = Field(
+    provider: Literal["openai", "anthropic", "google", "deepseek", "xai", "custom_openai"] = Field(
         ...,
-        description="The LLM provider. One of: 'openai', 'anthropic', 'google', 'deepseek', 'xai'.",
+        description="The LLM provider. Use 'custom_openai' for self-hosted / Azure / Bedrock endpoints.",
     )
     model_name: str = Field(
         ...,
         description="The specific model name (e.g., 'gpt-4o', 'gemini-1.5-pro').",
         min_length=1,
         max_length=200,
+    )
+    base_url: Optional[str] = Field(
+        None,
+        description="Base URL for OpenAI-compatible endpoints. Required for 'custom_openai' provider. E.g. http://vllm:8000/v1 or https://contoso.openai.azure.com/openai/deployments/gpt-4o",
+        max_length=512,
     )
     tokenizer: Optional[str] = Field(
         None,
@@ -238,14 +243,19 @@ class LLMConfigurationUpdate(BaseModel):
     name: Optional[str] = Field(
         None, description="A unique, user-friendly name for the LLM configuration."
     )
-    provider: Optional[Literal["openai", "anthropic", "google", "deepseek", "xai"]] = (
+    provider: Optional[Literal["openai", "anthropic", "google", "deepseek", "xai", "custom_openai"]] = (
         Field(
             None,
-            description="The LLM provider. One of: 'openai', 'anthropic', 'google', 'deepseek', 'xai'.",
+            description="The LLM provider. Use 'custom_openai' for self-hosted / Azure / Bedrock endpoints.",
         )
     )
     model_name: Optional[str] = Field(
         None, description="The specific model name (e.g., 'gpt-4o', 'gemini-1.5-pro')."
+    )
+    base_url: Optional[str] = Field(
+        None,
+        description="Base URL for OpenAI-compatible endpoints.",
+        max_length=512,
     )
     tokenizer: Optional[str] = Field(
         None,

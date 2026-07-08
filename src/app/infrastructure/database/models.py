@@ -539,6 +539,9 @@ class LLMConfiguration(Base):
     )
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Base URL for OpenAI-compatible providers (self-hosted vLLM/Ollama,
+    # Azure OpenAI, AWS Bedrock via proxy, etc.). Null for native providers.
+    base_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     tokenizer: Mapped[Optional[str]] = mapped_column(String(100))
     # classification: Secret / level=Confidential
     # protection: Fernet-encrypted at rest; must NOT be included in any LLMConfigurationRead Pydantic schema or API response
