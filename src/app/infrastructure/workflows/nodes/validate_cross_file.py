@@ -113,8 +113,11 @@ async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
     validation_limit = CONCURRENT_VALIDATION_LIMIT
     try:
         from app.shared.lib.concurrency_limits import get_concurrency_limit
+
         async with AsyncSessionLocal() as _db:
-            validation_limit = await get_concurrency_limit(_db, "CONCURRENT_VALIDATION_LIMIT")
+            validation_limit = await get_concurrency_limit(
+                _db, "CONCURRENT_VALIDATION_LIMIT"
+            )
     except Exception:
         pass
     semaphore = asyncio.Semaphore(validation_limit)

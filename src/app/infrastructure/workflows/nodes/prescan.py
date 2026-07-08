@@ -233,6 +233,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     scanner_limit = _CONCURRENT_SCANNER_LIMIT
     try:
         from app.shared.lib.concurrency_limits import get_concurrency_limit
+
         async with AsyncSessionLocal() as _db:
             scanner_limit = await get_concurrency_limit(_db, "CONCURRENT_SCANNER_LIMIT")
     except Exception:

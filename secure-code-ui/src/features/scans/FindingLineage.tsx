@@ -139,7 +139,7 @@ function ColumnHeaders() {
 function LineageNodeComponent({ data }: { data: Record<string, unknown> }) {
   const { label, nodeType, expandable, expanded, badges, hasChildren, childCount } = data as {
     label?: string;
-    nodeType?: string;
+    nodeType: string;
     expandable?: boolean;
     expanded?: boolean;
     badges?: Array<{ label: string; tone: string }>;

@@ -75,7 +75,8 @@ fastembed = "~0.8"
 pydantic = ">=2.12,<3.0.0"  # pydantic-ai 1.86 requires >=2.12
 pydantic-settings = "^2.9.1"
 python = "~3.12"
-joserfc = ">=1.6.8"  # GHSA-gg9x-qcx2-xmrh — transitive via Authlib, pinned here for CVE fix
+joserfc = ">=1.6.8"  # GHSA-gg9x-qcx2-xmrh + GHSA-wphv-vfrh-23q5 — transitive via Authlib, pinned here for CVE fix
+aiosmtplib = ">=5.1.1"  # GHSA-v3q9-hj7j-63hq
 python-dotenv = ">=1.1.0,<2.0.0"
 sqlalchemy = {extras = ["asyncio"], version = ">=2.0.41,<3.0.0"}
 tiktoken = "^0.12.0"  # bumped for pydantic-ai-slim[openai] compat

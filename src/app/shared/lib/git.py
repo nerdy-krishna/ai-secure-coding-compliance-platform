@@ -310,11 +310,13 @@ def list_repo_files(repo_url: str) -> List[Dict[str, Any]]:
         entries = []
         for f in clone_repo_and_get_files(repo_url):
             language = get_language_from_filename(f["path"]) or "unknown"
-            entries.append({
-                "path": f["path"],
-                "language": language,
-                "supported": language != "unknown",
-            })
+            entries.append(
+                {
+                    "path": f["path"],
+                    "language": language,
+                    "supported": language != "unknown",
+                }
+            )
         return entries
 
     owner, repo = github_repo
@@ -325,15 +327,24 @@ def list_repo_files(repo_url: str) -> List[Dict[str, Any]]:
         path = entry.get("path")
         if not isinstance(path, str) or not path:
             continue
-        if path.startswith("/") or ".." in path.split("/") or "\x00" in path or "\\" in path:
+        if (
+            path.startswith("/")
+            or ".." in path.split("/")
+            or "\x00" in path
+            or "\\" in path
+        ):
             continue
         language = get_language_from_filename(path) or "unknown"
         size = entry.get("size", 0)
-        entries.append({
-            "path": path,
-            "language": language,
-            "supported": language != "unknown" and isinstance(size, int) and 0 <= size <= MAX_FILE_BYTES,
-        })
+        entries.append(
+            {
+                "path": path,
+                "language": language,
+                "supported": language != "unknown"
+                and isinstance(size, int)
+                and 0 <= size <= MAX_FILE_BYTES,
+            }
+        )
 
     if len(entries) > MAX_FILES:
         raise HTTPException(

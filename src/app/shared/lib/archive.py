@@ -376,6 +376,7 @@ def _is_supported_source_extension(filename: str) -> bool:
     if not ext:
         return False
     from app.shared.lib.files import LANGUAGE_EXTENSIONS
+
     return ext in LANGUAGE_EXTENSIONS
 
 
@@ -431,7 +432,9 @@ def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
             with open(archive_path, "wb") as f_out:
                 shutil.copyfileobj(archive_file.file, f_out)
         except Exception:
-            raise HTTPException(status_code=500, detail="Error saving uploaded archive.")
+            raise HTTPException(
+                status_code=500, detail="Error saving uploaded archive."
+            )
         finally:
             archive_file.file.close()
 
@@ -473,13 +476,19 @@ def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
 
                         language = get_language_from_filename(mi.filename) or "unknown"
                         supported = _is_supported_source_extension(mi.filename)
-                        entries.append({
-                            "path": mi.filename,
-                            "language": language,
-                            "supported": supported,
-                        })
+                        entries.append(
+                            {
+                                "path": mi.filename,
+                                "language": language,
+                                "supported": supported,
+                            }
+                        )
 
-            elif file_extension.startswith(".tar") or file_extension in (".tgz", ".tbz2", ".txz"):
+            elif file_extension.startswith(".tar") or file_extension in (
+                ".tgz",
+                ".tbz2",
+                ".txz",
+            ):
                 with tarfile.open(archive_path, "r:*") as tf:
                     if hasattr(tarfile, "data_filter"):
                         tf.extraction_filter = tarfile.data_filter
@@ -507,19 +516,24 @@ def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
 
                         language = get_language_from_filename(mi.name) or "unknown"
                         supported = _is_supported_source_extension(mi.name)
-                        entries.append({
-                            "path": mi.name,
-                            "language": language,
-                            "supported": supported,
-                        })
+                        entries.append(
+                            {
+                                "path": mi.name,
+                                "language": language,
+                                "supported": supported,
+                            }
+                        )
             else:
-                raise HTTPException(status_code=400, detail="Internal error: Unhandled archive type.")
+                raise HTTPException(
+                    status_code=400, detail="Internal error: Unhandled archive type."
+                )
 
         except HTTPException:
             raise
         except Exception:
             logger.error(
-                "archive.process_failed filename=%s", _safe(archive_file.filename),
+                "archive.process_failed filename=%s",
+                _safe(archive_file.filename),
                 exc_info=True,
             )
             raise HTTPException(status_code=500, detail="Error processing archive.")

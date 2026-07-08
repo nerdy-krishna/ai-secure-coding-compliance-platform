@@ -147,8 +147,11 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
     consolidation_limit = CONCURRENT_CONSOLIDATION_LIMIT
     try:
         from app.shared.lib.concurrency_limits import get_concurrency_limit
+
         async with AsyncSessionLocal() as _db:
-            consolidation_limit = await get_concurrency_limit(_db, "CONCURRENT_CONSOLIDATION_LIMIT")
+            consolidation_limit = await get_concurrency_limit(
+                _db, "CONCURRENT_CONSOLIDATION_LIMIT"
+            )
     except Exception:
         pass
     semaphore = asyncio.Semaphore(consolidation_limit)

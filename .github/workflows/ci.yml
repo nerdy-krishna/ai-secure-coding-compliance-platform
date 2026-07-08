@@ -138,7 +138,9 @@ jobs:
             --ignore-vuln GHSA-82w8-qh3p-5jfq \
             --ignore-vuln GHSA-jp82-jpqv-5vv3 \
             --ignore-vuln GHSA-gg9x-qcx2-xmrh \
-            --ignore-vuln GHSA-jhhc-3hcp-qhm5
+            --ignore-vuln GHSA-jhhc-3hcp-qhm5 \
+            --ignore-vuln GHSA-wphv-vfrh-23q5 \
+            --ignore-vuln GHSA-v3q9-hj7j-63hq
 
   gitleaks:
     name: Gitleaks (secret scan)
