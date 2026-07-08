@@ -22,7 +22,7 @@ Security properties enforced by ``clone_repo_and_get_files``:
   wall time. (Bounded clone protects V15.1.3 availability.)
 * Refuses repositories whose total on-disk size exceeds
   ``MAX_TOTAL_BYTES`` (500 MB) or that contain more than
-  ``MAX_FILES`` (5 000) files. Skips individual files larger than
+  ``MAX_FILES`` (10 000) files. Skips individual files larger than
   ``MAX_FILE_BYTES`` (5 MB).
 * ``os.walk`` runs with ``followlinks=False`` and per-file realpath
   containment checks so a malicious symlink cannot escape the temp
@@ -69,7 +69,7 @@ MAX_URL_LEN = 2048
 URL_PRINTABLE_RE = re.compile(r"^[A-Za-z0-9._:/?=&#%+\-]+$")
 
 # Resource caps
-MAX_FILES = 5_000
+MAX_FILES = 10_000
 MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB per file
 MAX_TOTAL_BYTES = 500 * 1024 * 1024  # 500 MB total tree
 CLONE_TIMEOUT_SECONDS = 120

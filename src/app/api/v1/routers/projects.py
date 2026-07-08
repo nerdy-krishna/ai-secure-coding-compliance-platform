@@ -9,7 +9,7 @@ Upload policy (V05.1.1):
     - Maximum number of files: 5000 per submission (router cap).
     - Maximum number of selected_files entries: 5000.
     - Maximum uncompressed archive size: ``MAX_UNCOMPRESSED_SIZE_BYTES``
-      (100 MB) and ``MAX_FILES_IN_ARCHIVE`` (5000), both enforced by
+      (100 MB) and ``MAX_FILES_IN_ARCHIVE`` (10000), both enforced by
       ``app.shared.lib.archive``.
     - Repository URLs: must be ``https://`` (or ``git+https://``) and the
       host must appear in the SSRF allowlist below; otherwise the router
