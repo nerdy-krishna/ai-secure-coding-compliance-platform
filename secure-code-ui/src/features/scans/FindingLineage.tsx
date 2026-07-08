@@ -136,8 +136,16 @@ function ColumnHeaders() {
 
 // ── Custom node ────────────────────────────────────────────────────
 
-function LineageNodeComponent({ data }: { data: any }) {
-  const { label, nodeType, expandable, expanded, badges, hasChildren, childCount } = data;
+function LineageNodeComponent({ data }: { data: Record<string, unknown> }) {
+  const { label, nodeType, expandable, expanded, badges, hasChildren, childCount } = data as {
+    label?: string;
+    nodeType?: string;
+    expandable?: boolean;
+    expanded?: boolean;
+    badges?: Array<{ label: string; tone: string }>;
+    hasChildren?: boolean;
+    childCount?: number;
+  };
   const color = TYPE_COLORS[nodeType] || "#6366f1";
   const badgeList: Array<{ label: string; tone: string }> = Array.isArray(badges) ? badges : [];
 
@@ -164,7 +172,7 @@ function LineageNodeComponent({ data }: { data: any }) {
           ({childCount})
         </span>
       )}
-      {badgeList.map((b: any, i: number) => (
+      {badgeList.map((b: { label: string; tone: string }, i: number) => (
         <span key={i} style={{
           fontSize: 8, padding: "1px 5px", borderRadius: 4,
           background: (BADGE_COLORS[b.tone] || "#64748b") + "20",
@@ -318,7 +326,7 @@ export const FindingLineage: React.FC<Props> = ({ scanId }) => {
   }, [searchParams, setSearchParams]);
 
   const onNodeClick = useCallback((_e: React.MouseEvent, node: RFNode) => {
-    const d: any = node.data;
+    const d = node.data as Record<string, unknown> | undefined;
     if (!d) return;
     setSelected({
       id: node.id,

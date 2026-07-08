@@ -66,7 +66,7 @@ from app.api.v1.dependencies import (
 )
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
 from app.shared.lib.git import list_repo_files
-from app.shared.lib.archive import extract_archive_to_files, is_archive_filename, list_archive_files
+from app.shared.lib.archive import is_archive_filename, list_archive_files
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
