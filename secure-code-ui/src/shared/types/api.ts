@@ -52,8 +52,9 @@ export interface TokenResponse {
 export interface LLMConfiguration {
   id: string;
   name: string;
-  provider: "openai" | "anthropic" | "google" | "deepseek" | "xai";
+  provider: "openai" | "anthropic" | "google" | "deepseek" | "xai" | "custom_openai";
   model_name: string;
+  base_url?: string | null;
   tokenizer?: string;
   input_cost_per_million: number;
   output_cost_per_million: number;
@@ -66,8 +67,9 @@ export interface LLMConfiguration {
 
 export interface LLMConfigurationCreate {
   name: string;
-  provider: "openai" | "anthropic" | "google" | "deepseek" | "xai";
+  provider: "openai" | "anthropic" | "google" | "deepseek" | "xai" | "custom_openai";
   model_name: string;
+  base_url?: string | null;
   tokenizer?: string | null;
   input_cost_per_million?: number;
   output_cost_per_million?: number;
