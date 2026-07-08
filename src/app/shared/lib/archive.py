@@ -56,7 +56,7 @@ def _verify_archive_magic(archive_path: str, file_extension: str) -> bool:
 # Configuration for archive extraction security
 # These could be moved to settings if more dynamic configuration is needed
 MAX_UNCOMPRESSED_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
-MAX_FILES_IN_ARCHIVE = 1000
+MAX_FILES_IN_ARCHIVE = 5000
 ALLOWED_ARCHIVE_EXTENSIONS = (
     ".zip",
     ".tar.gz",
