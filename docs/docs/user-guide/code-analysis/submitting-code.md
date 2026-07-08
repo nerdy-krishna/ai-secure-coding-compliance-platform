@@ -13,15 +13,20 @@ Dashboard.
 
 Pick exactly one on the top of the page:
 
-1. **File upload** — drag-and-drop files or browse. Useful for quick
-   one-off reviews.
+1. **File upload** — drag-and-drop files or entire folders. Use the
+   **Choose files** or **Choose folder** buttons. Supported source-code
+   extensions are auto-selected; unsupported files appear **greyed out**
+   in the tree and are excluded from the scan. Max 50 MB per file,
+   200 MB total.
 2. **Git repository** — paste a public Git URL. For GitHub repos,
    **Preview** lists the source tree via the GitHub API (no clone
    required) and individual source files are fetched from raw URLs
    at scan time. Non-GitHub repos fall back to a temp-dir clone for
-   both preview and submission.
+   both preview and submission. Max 10,000 files.
 3. **Archive upload** — `.zip` or `.tar.gz`. Similar preview flow;
    the contents are extracted into the file tree for pruning.
+   Unsupported files appear greyed out. Max 10,000 files, 100 MB
+   uncompressed.
 
 ## Selective-files tree
 

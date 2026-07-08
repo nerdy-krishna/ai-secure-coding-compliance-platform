@@ -32,6 +32,35 @@ fields on a configuration are **overrides**, not required values:
   override as authoritative for both pre-call estimation and
   post-call actuals.
 
+## Supported providers
+
+| Provider | Type | Notes |
+|---|---|---|
+| `openai` | Native | GPT-4o, GPT-4o-mini, O-series |
+| `anthropic` | Native | Claude Sonnet 4.5, Claude Opus 4 |
+| `google` | Native | Gemini 1.5 / 2.0 Pro, Flash |
+| `deepseek` | OpenAI-compatible | DeepSeek V4 Pro, Reasoner |
+| `xai` | OpenAI-compatible | Grok-2, Grok-3 |
+| `custom_openai` | OpenAI-compatible | **Any endpoint speaking OpenAI Chat Completions** |
+
+The `custom_openai` provider accepts a `base_url` field and works with:
+
+- **Self-hosted models**: vLLM, Ollama, LM Studio, TGI, LocalAI
+- **Enterprise clouds**: Azure OpenAI, AWS Bedrock (via LiteLLM proxy), Google Vertex AI proxy
+- **API gateways**: Groq, Together AI, OpenRouter, Fireworks, Anyscale
+
+Example custom_openai payload:
+
+```json
+{
+  "name": "vLLM Llama-3-70B",
+  "provider": "custom_openai",
+  "model_name": "meta-llama/Llama-3-70b",
+  "base_url": "http://10.0.1.50:8000/v1",
+  "api_key": "not-used-for-local"
+}
+```
+
 See [Architecture → LLM Integration](../architecture/llm-integration.md)
 for the full data flow.
 

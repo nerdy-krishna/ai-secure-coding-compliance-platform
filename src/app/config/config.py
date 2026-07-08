@@ -233,6 +233,16 @@ class Settings(BaseSettings):
     XAI_TOKENS_PER_MINUTE: int = Field(
         default=30000, ge=1, description="Max TPM for xAI (Grok) models."
     )
+    CUSTOM_OPENAI_REQUESTS_PER_MINUTE: int = Field(
+        default=10_000,
+        ge=1,
+        description="Max RPM for custom_openai provider (self-hosted or enterprise proxy). Deafult is high — admins should lower for paid SaaS proxies.",
+    )
+    CUSTOM_OPENAI_TOKENS_PER_MINUTE: int = Field(
+        default=100_000_000,
+        ge=1,
+        description="Max TPM for custom_openai provider. Default is effectively unlimited for self-hosted.",
+    )
 
     # --- Worker ---
     # Hard upper bound for a single scan workflow invocation. If exceeded, the

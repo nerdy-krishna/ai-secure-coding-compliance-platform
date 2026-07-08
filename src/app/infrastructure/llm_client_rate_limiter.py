@@ -46,6 +46,10 @@ def _provider_settings() -> Dict[str, Tuple[int, int]]:
             settings.XAI_REQUESTS_PER_MINUTE,
             settings.XAI_TOKENS_PER_MINUTE,
         ),
+        "custom_openai": (
+            settings.CUSTOM_OPENAI_REQUESTS_PER_MINUTE,
+            settings.CUSTOM_OPENAI_TOKENS_PER_MINUTE,
+        ),
     }
 
 
