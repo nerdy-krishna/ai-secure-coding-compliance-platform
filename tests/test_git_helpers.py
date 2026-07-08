@@ -41,8 +41,10 @@ def test_github_preview_uses_tree_api_without_total_repo_size_limit(monkeypatch)
     monkeypatch.setattr(gitlib, "_github_api_json", fake_api_json)
     monkeypatch.setattr(gitlib, "clone_repo_and_get_files", fail_clone)
 
-    assert gitlib.list_repo_processable_files("https://github.com/owner/repo") == [
-        "src/app.py"
+    assert gitlib.list_repo_files("https://github.com/owner/repo") == [
+        {"path": "assets/picture.jpg", "language": "unknown", "supported": False},
+        {"path": "data/huge.bin", "language": "unknown", "supported": False},
+        {"path": "src/app.py", "language": "python", "supported": True},
     ]
 
 
