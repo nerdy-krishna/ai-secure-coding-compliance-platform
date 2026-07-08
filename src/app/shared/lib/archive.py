@@ -377,7 +377,7 @@ def _is_supported_source_extension(filename: str) -> bool:
         return False
     from app.shared.lib.files import LANGUAGE_EXTENSIONS
 
-    return ext in LANGUAGE_EXTENSIONS
+    return f".{ext}" in LANGUAGE_EXTENSIONS
 
 
 def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
