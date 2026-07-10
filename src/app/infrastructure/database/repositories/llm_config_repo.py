@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # `api.v1.models.LLMConfigurationBase` and the providers
 # `llm_client._build_model` can actually construct. DeepSeek and xAI
 # are reached through the OpenAI-compatible path in the client.
-_SUPPORTED_PROVIDERS = {"openai", "anthropic", "google", "deepseek", "xai"}
+_SUPPORTED_PROVIDERS = {"openai", "anthropic", "google", "deepseek", "xai", "custom_openai"}
 
 # Substrings that strongly identify which provider a model name belongs
 # to. Used to catch a provider/model mismatch (e.g. a DeepSeek model
