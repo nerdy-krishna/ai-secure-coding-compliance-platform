@@ -360,6 +360,18 @@ class ScanRepository:
             )
             raise
 
+    async def set_error_message(self, scan_id: uuid.UUID, error_message: str):
+        """Persist a human-readable error message for a failed scan.
+        
+        Must be called in the same transaction as update_status.
+        """
+        stmt = (
+            update(db_models.Scan)
+            .where(db_models.Scan.id == scan_id)
+            .values(error_message=error_message[:2000])
+        )
+        await self.db.execute(stmt)
+
     async def update_bom_cyclonedx(self, scan_id: uuid.UUID, bom: dict) -> None:
         """Persist the CycloneDX SBOM produced by OSV-Scanner during the
         deterministic pre-pass. ADR-009 / §3.6."""

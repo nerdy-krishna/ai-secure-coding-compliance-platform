@@ -1417,9 +1417,8 @@ const ScanRunningPage: React.FC = () => {
             >
               Scan failed
             </div>
-            <div style={{ color: "var(--fg)", fontSize: 13 }}>
-              Check the worker logs for details, or try resubmitting the same
-              source. The scan record is preserved under the Projects list.
+            <div style={{ color: "var(--fg)", fontSize: 13, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+              {errorMessage || "Check the worker logs for details, or try resubmitting the same source. The scan record is preserved under the Projects list."}
             </div>
           </div>
         )}

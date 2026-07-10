@@ -907,6 +907,10 @@ class ConsolidationStats(BaseModel):
 
 class AnalysisResultDetailResponse(BaseModel):
     status: str
+    # Human-readable failure reason when status is FAILED. Populated
+    # from scan_events or the workflow error handler. Empty string for
+    # non-failed scans.
+    error_message: str = ""
     # Always-present pointers to the scan's owning project. Top-level
     # so callers (e.g. ScanRunningPage) can route back to the project
     # even when `summary_report` is null because the scan never reached

@@ -186,6 +186,9 @@ class Scan(Base):
     # (zip/rar), or 'git' (cloned repository). NULL for pre-existing
     # scans. Surfaced in the results-page scan-info panel + reports.
     source_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # Human-readable failure reason surfaced to the user when status=FAILED.
+    # Populated by handle_error_node; null for successful/cancelled scans.
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context_bundles: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSONB)
     summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
     # CycloneDX SBOM emitted by OSV-Scanner during the deterministic

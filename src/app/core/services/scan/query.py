@@ -359,6 +359,7 @@ class ScanQueryService:
 
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
+            error_message=scan.error_message or "",
             project_id=scan.project_id,
             project_name=scan.project.name if scan.project else "N/A",
             summary_report=summary_report_response,

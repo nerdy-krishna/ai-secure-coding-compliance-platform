@@ -405,6 +405,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         # fine; 0 findings because every LLM call raised is not.
         lane_calls: Dict[str, int] = {}
         lane_failures: Dict[str, int] = {}
+        lane_errors: Dict[str, set] = {}  # first few unique error messages per lane
         reused_tasks = 0
         failed_tasks = 0
 
@@ -590,6 +591,9 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                 lane_calls[lane_name] = lane_calls.get(lane_name, 0) + 1
                 if isinstance(r, BaseException):
                     lane_failures[lane_name] = lane_failures.get(lane_name, 0) + 1
+                    errs = lane_errors.setdefault(lane_name, set())
+                    if len(errs) < 3:
+                        errs.add(str(r))
                     logger.error(
                         "agent: ainvoke raised",
                         extra={
@@ -697,6 +701,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             "fixes": file_fixes,
             "lane_calls": lane_calls,
             "lane_failures": lane_failures,
+            "lane_errors": {k: list(v)[:3] for k, v in lane_errors.items()},
             "reused_tasks": reused_tasks,
             "failed_tasks": failed_tasks,
             "skipped_tasks": 0,
@@ -713,6 +718,10 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     # Per-lane totals aggregated across files (#93).
     lane_calls: Dict[str, int] = {}
     lane_failures: Dict[str, int] = {}
+    # Collect the first unique error message from each lane for the
+    # top-level failure banner — saves the user from digging through
+    # worker logs.
+    all_lane_errors: Dict[str, set] = {}
     failed_file_tasks = 0
     reused_task_total = 0
     failed_task_total = 0
@@ -730,6 +739,9 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             lane_calls[_lane] = lane_calls.get(_lane, 0) + int(_n)
         for _lane, _n in (r.get("lane_failures") or {}).items():
             lane_failures[_lane] = lane_failures.get(_lane, 0) + int(_n)
+        for _lane, _errs in (r.get("lane_errors") or {}).items():
+            s = all_lane_errors.setdefault(_lane, set())
+            s.update(_errs)
         reused_task_total += int(r.get("reused_tasks", 0) or 0)
         failed_task_total += int(r.get("failed_tasks", 0) or 0)
         skipped_task_total += int(r.get("skipped_tasks", 0) or 0)
@@ -766,6 +778,13 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     # with 0 findings reports total_agent_calls > 0 and 0 failures —
     # that's still a successful scan.
     if total_agent_calls > 0 and total_agent_failures == total_agent_calls:
+        # Build a human-readable error summary from the first
+        # captured agent error per lane.
+        error_lines: List[str] = []
+        for lane_name, errs in sorted(all_lane_errors.items()):
+            for err_msg in list(errs)[:1]:  # first error per lane
+                error_lines.append(f"[{lane_name}] {err_msg}")
+        detail = "\n".join(error_lines) if error_lines else "No error details captured from agents."
         logger.error(
             "analyze: every agent invocation failed — marking scan FAILED",
             extra={
@@ -780,8 +799,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             "proposed_fixes": [],
             "error_message": (
                 f"Analyze stage failed: all {total_agent_calls} agent "
-                f"invocations errored across {len(file_results)} file(s). "
-                "Check worker logs for `agent: ainvoke raised` entries."
+                f"invocations errored across {len(file_results)} file(s).\n{detail}"
             ),
         }
 
