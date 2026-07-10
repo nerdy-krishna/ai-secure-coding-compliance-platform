@@ -330,6 +330,9 @@ const ScanRunningPage: React.FC = () => {
         if (cancelled) return;
         if (typeof r.status === "string" && r.status.length < 64) {
           setStatus(r.status);
+          if ((r as any).error_message) {
+            setErrorMessage((r as any).error_message);
+          }
         }
         setHasResumableArtifacts(Boolean(r.has_resumable_artifacts));
         if (r.cost_details) {
