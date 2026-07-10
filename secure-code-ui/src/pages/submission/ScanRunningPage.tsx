@@ -202,6 +202,7 @@ const ScanRunningPage: React.FC = () => {
   // for the few hundred ms before the one-shot getScanResult resolves.
   // Renders a small loading skeleton until the first known status.
   const [status, setStatus] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>("");
   // Whether the scan opted in to cross-file validation (#82). Seeded
   // from the one-shot getScanResult below; drives the extra stage row.
   const [crossFileValidation, setCrossFileValidation] = useState(false);
