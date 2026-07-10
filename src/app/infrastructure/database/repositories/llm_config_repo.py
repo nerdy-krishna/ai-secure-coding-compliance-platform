@@ -165,6 +165,8 @@ class LLMConfigRepository:
             name=config.name,
             provider=config.provider,
             model_name=config.model_name,
+            base_url=config.base_url,
+            tokenizer=config.tokenizer,
             encrypted_api_key=encrypted_key,
             input_cost_per_million=config.input_cost_per_million,
             output_cost_per_million=config.output_cost_per_million,
