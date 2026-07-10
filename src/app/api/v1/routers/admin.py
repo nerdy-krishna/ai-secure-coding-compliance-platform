@@ -25,7 +25,7 @@ async def create_llm_configuration(
         "admin.llm_config.created",
         extra={
             "actor_id": str(user.id),
-            "name": config.name,
+            "config_name": config.name,
             "provider": config.provider,
             "model_name": config.model_name,
         },
