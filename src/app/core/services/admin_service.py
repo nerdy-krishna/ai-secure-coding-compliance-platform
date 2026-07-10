@@ -3,6 +3,7 @@ import logging
 import uuid
 from typing import List, Optional
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
 from app.infrastructure.database.repositories.framework_repo import FrameworkRepository
 from app.infrastructure.database.repositories.agent_repo import AgentRepository
@@ -80,6 +81,18 @@ class AdminService:
                 extra={"action": "create_config"},
             )
             raise HTTPException(status_code=400, detail=str(e)) from e
+        except IntegrityError as e:
+            msg = str(e).lower()
+            if "unique" in msg or "duplicate" in msg:
+                detail = f"A configuration with the name '{config_create.name}' already exists."
+            else:
+                detail = "A database constraint prevented saving this configuration."
+            logger.info(
+                "LLM config create rejected by DB constraint: %s",
+                detail,
+                extra={"action": "create_config"},
+            )
+            raise HTTPException(status_code=409, detail=detail) from e
         except Exception:
             logger.error(
                 "Admin repo call failed",
@@ -112,6 +125,18 @@ class AdminService:
                 extra={"action": "update_config", "config_id": str(config_id)},
             )
             raise HTTPException(status_code=400, detail=str(e)) from e
+        except IntegrityError as e:
+            msg = str(e).lower()
+            if "unique" in msg or "duplicate" in msg:
+                detail = "A configuration with that name already exists."
+            else:
+                detail = "A database constraint prevented this update."
+            logger.info(
+                "LLM config update rejected by DB constraint: %s",
+                detail,
+                extra={"action": "update_config", "config_id": str(config_id)},
+            )
+            raise HTTPException(status_code=409, detail=detail) from e
         except Exception:
             logger.error(
                 "Admin repo call failed",
@@ -141,6 +166,14 @@ class AdminService:
         )
         try:
             deleted = await self.llm_repo.delete(config_id)
+        except IntegrityError as e:
+            detail = "Cannot delete this configuration — it is still referenced by scans or chat sessions. Remove those references first."
+            logger.info(
+                "LLM config delete rejected by FK constraint: %s",
+                str(e),
+                extra={"action": "delete_config", "config_id": str(config_id)},
+            )
+            raise HTTPException(status_code=409, detail=detail) from e
         except Exception:
             logger.error(
                 "Admin repo call failed",

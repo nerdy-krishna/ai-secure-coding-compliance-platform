@@ -66,11 +66,17 @@ function axiosDetail(err: unknown): string {
   };
   const status = e.response?.status ?? 0;
   const detail = e.response?.data?.detail;
-  // Log verbose details for developers only; never surface raw backend internals in the UI.
-  const verbose = Array.isArray(detail)
+  // Extract the human-readable detail from the backend response.
+  // FastAPI validation errors come as [{msg: "..."}, ...]; service errors
+  // come as a plain string.
+  const backendMsg = Array.isArray(detail)
     ? detail.map((d) => d.msg).join(", ")
-    : detail || e.message || "Unknown error";
-  console.error("[LLMSettingsPage] backend error:", verbose);
+    : typeof detail === "string"
+      ? detail
+      : e.message || "Unknown error";
+  // Show backend detail verbatim; fall back to status-based generic messages
+  // only when the backend sends nothing useful.
+  if (backendMsg && backendMsg !== "Unknown error") return backendMsg;
   if (status >= 500) return "Server error — please retry.";
   if (status >= 400) return "Could not save the configuration.";
   return "An unexpected error occurred.";
