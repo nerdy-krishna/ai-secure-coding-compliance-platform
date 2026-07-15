@@ -708,6 +708,7 @@ const SubmitPage: React.FC = () => {
     const dismissed = langs.length === 0 || sessionStorage.getItem(key) === "1";
 
     if (!dismissed && langs.length > 0) {
+      setSubmitting(true);
       try {
         const cov = await ruleSourcesService.checkCoverage(langs);
         const hasUncovered = langs.some((l) => {
@@ -715,14 +716,20 @@ const SubmitPage: React.FC = () => {
           return e && !e.covered;
         });
         if (hasUncovered) {
+          setSubmitting(false);
+          toast.warn("Some languages have no Semgrep rules configured — review before continuing.");
           setCoverageData(cov);
           setCoverageLanguages(langs);
           setCoverageWizardOpen(true);
           return; // Wait for wizard decision
         }
+        // Coverage check passed — unblock button for actual submission.
+        setSubmitting(false);
       } catch {
         // Ignore coverage check failures; don't block submission
+        setSubmitting(false);
       }
+    }
     }
 
     await doSubmit();
