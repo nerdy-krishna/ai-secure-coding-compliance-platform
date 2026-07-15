@@ -730,7 +730,6 @@ const SubmitPage: React.FC = () => {
         setSubmitting(false);
       }
     }
-    }
 
     await doSubmit();
   };
