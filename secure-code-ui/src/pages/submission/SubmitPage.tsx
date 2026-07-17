@@ -695,43 +695,42 @@ const SubmitPage: React.FC = () => {
   const handleSubmit = async () => {
     if (!canSubmit) return;
 
-    // Detect languages from uploaded files for coverage check
+    // Fire-and-forget coverage check — never blocks submission.
+    // If uncovered languages are found, the wizard opens AFTER the
+    // scan is already queued.
     const fileNames =
       mode === "upload"
         ? files.map((f) => f.name)
         : (mode === "archive" || mode === "git") && previewFiles
           ? previewFiles.map((f) => f.path)
           : [];
-
     const langs = detectLanguages(fileNames);
     const key = coverageKey(langs);
     const dismissed = langs.length === 0 || sessionStorage.getItem(key) === "1";
 
+    // Kick off submission immediately.
+    const submitPromise = doSubmit();
+
+    // In parallel (non-blocking): check coverage and show wizard if needed.
     if (!dismissed && langs.length > 0) {
-      setSubmitting(true);
-      try {
-        const cov = await ruleSourcesService.checkCoverage(langs);
-        const hasUncovered = langs.some((l) => {
-          const e = cov.coverage[l];
-          return e && !e.covered;
-        });
-        if (hasUncovered) {
-          setSubmitting(false);
-          toast.warn("Some languages have no Semgrep rules configured — review before continuing.");
-          setCoverageData(cov);
-          setCoverageLanguages(langs);
-          setCoverageWizardOpen(true);
-          return; // Wait for wizard decision
-        }
-        // Coverage check passed — unblock button for actual submission.
-        setSubmitting(false);
-      } catch {
-        // Ignore coverage check failures; don't block submission
-        setSubmitting(false);
-      }
+      ruleSourcesService
+        .checkCoverage(langs)
+        .then((cov) => {
+          const hasUncovered = langs.some((l) => {
+            const e = cov.coverage[l];
+            return e && !e.covered;
+          });
+          if (hasUncovered) {
+            toast.warn("Some languages have no Semgrep rules configured.");
+            setCoverageData(cov);
+            setCoverageLanguages(langs);
+            setCoverageWizardOpen(true);
+          }
+        })
+        .catch(() => {}); // never block
     }
 
-    await doSubmit();
+    await submitPromise;
   };
 
   return (
