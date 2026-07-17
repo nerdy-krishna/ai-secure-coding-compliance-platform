@@ -582,12 +582,11 @@ async def _build_initial_state(
 
 
 async def _handle_message(message: AbstractIncomingMessage) -> None:
-    """Top-level message handler. ACK on success, reject (no requeue) on failure.
+    """Top-level message handler.
 
-    The `async with message.process(...)` context manager ACKs the message on
-    clean exit and NACKs on exception. We use `requeue=False` so poison
-    messages don't loop; FAILED scan status is already persisted by
-    `_run_workflow_for_scan` for UI visibility.
+    Submission-queue messages are processed inline (sequential, one at a
+    time). Approval-queue messages spawn a background task so the consumer
+    isn't blocked while another scan's full analysis runs.
     """
     logger.info(
         "MSG: Received from queue '%s' (delivery_tag=%s).",
@@ -595,76 +594,97 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         message.delivery_tag,
     )
 
-    async with message.process(requeue=False, ignore_processed=True):
-        initial_state = await _build_initial_state(message)
-        if initial_state is None:
-            # Parse failures: reject explicitly so the message isn't requeued.
-            await message.reject(requeue=False)
+    initial_state = await _build_initial_state(message)
+    if initial_state is None:
+        await message.reject(requeue=False)
+        return
+
+    resume_payload: Optional[dict] = None
+    body: dict[str, Any] = {}
+    body_parse_failed = False
+    try:
+        parsed_body = json.loads(message.body.decode("utf-8"))
+        if isinstance(parsed_body, dict):
+            body = parsed_body
+        else:
+            body_parse_failed = True
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        body_parse_failed = True
+
+    if (
+        (message.routing_key or "") == settings.RABBITMQ_SUBMISSION_QUEUE
+        and body.get("action") == "manual_resume"
+        and body.get("mode") == "resume"
+    ):
+        fast_forwarded = await _try_fast_forward_completed_consolidation(
+            initial_state
+        )
+        if fast_forwarded is not None:
+            if not fast_forwarded:
+                await message.reject(requeue=False)
             return
 
-        resume_payload: Optional[dict] = None
-        body: dict[str, Any] = {}
-        body_parse_failed = False
-        try:
-            parsed_body = json.loads(message.body.decode("utf-8"))
-            if isinstance(parsed_body, dict):
-                body = parsed_body
-            else:
-                body_parse_failed = True
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            body_parse_failed = True
-
-        if (
-            (message.routing_key or "") == settings.RABBITMQ_SUBMISSION_QUEUE
-            and body.get("action") == "manual_resume"
-            and body.get("mode") == "resume"
+    if (message.routing_key or "") == settings.RABBITMQ_APPROVAL_QUEUE:
+        if body_parse_failed:
+            logger.error("MSG: Approval body parse failed")
+            await message.reject(requeue=False)
+            return
+        kind = body.get("kind", "cost_approval")
+        if kind not in _KIND_TO_EXPECTED_STATUS:
+            logger.error("MSG: Unknown approval kind %r; rejecting", kind)
+            await message.reject(requeue=False)
+            return
+        if not isinstance(body.get("approved", True), bool) or not isinstance(
+            body.get("override_critical_secret", False), bool
         ):
-            fast_forwarded = await _try_fast_forward_completed_consolidation(
-                initial_state
-            )
-            if fast_forwarded is not None:
-                if not fast_forwarded:
-                    await message.reject(requeue=False)
-                return
+            logger.error("MSG: Approval body has non-bool flag(s)")
+            await message.reject(requeue=False)
+            return
+        resume_payload = {
+            "scan_id": str(initial_state["scan_id"]),
+            "kind": kind,
+            "approved": body.get("approved", True),
+            "override_critical_secret": body.get("override_critical_secret", False),
+            "approver_user_id": body.get("user_id"),
+        }
+        # Spawn background task — don't block the consumer while
+        # the full analysis runs (can take 5–30 min of LLM calls).
+        asyncio.create_task(
+            _run_workflow_task(initial_state, resume_payload, message)
+        )
+        return
 
-        if (message.routing_key or "") == settings.RABBITMQ_APPROVAL_QUEUE:
-            if body_parse_failed:
-                logger.error("MSG: Approval body parse failed")
-                await message.reject(requeue=False)
-                return
-            kind = body.get("kind", "cost_approval")
-            if kind not in _KIND_TO_EXPECTED_STATUS:
-                logger.error("MSG: Unknown approval kind %r; rejecting", kind)
-                await message.reject(requeue=False)
-                return
-            if not isinstance(body.get("approved", True), bool) or not isinstance(
-                body.get("override_critical_secret", False), bool
-            ):
-                logger.error("MSG: Approval body has non-bool flag(s)")
-                await message.reject(requeue=False)
-                return
-            # Forward the discriminator + decision verbatim. The kind
-            # validation in `_run_workflow_for_scan` re-checks against
-            # the scan's current pause status before resume; the worker
-            # graph's `_route_after_prescan_approval` then uses
-            # `approved` and `override_critical_secret` to pick the
-            # next node.
-            resume_payload = {
-                "scan_id": str(initial_state["scan_id"]),
-                "kind": kind,
-                "approved": body.get("approved", True),
-                "override_critical_secret": body.get("override_critical_secret", False),
-                "approver_user_id": body.get("user_id"),
-            }
-
+    # Submission queue: process inline with the context manager for
+    # proper ACK/NACK semantics.
+    async with message.process(requeue=False, ignore_processed=True):
         success = await _run_workflow_for_scan(
             initial_state, resume_payload=resume_payload
         )
         if not success:
-            # Explicit reject so `message.process`'s implicit ack doesn't
-            # win. `reject(requeue=False)` is idempotent with
-            # `ignore_processed=True`.
             await message.reject(requeue=False)
+
+
+# Track in-flight analysis workflows so we don't overwhelm the LLM
+# provider. The CONCURRENT_LLM_LIMIT semaphore already gates individual
+# agent calls; this semaphore puts an upper bound on concurrent scan
+# analysis to prevent memory/DB-connection exhaustion.
+_analysis_semaphore = asyncio.Semaphore(3)
+
+
+async def _run_workflow_task(
+    initial_state: WorkerState,
+    resume_payload: Optional[dict],
+    message: AbstractIncomingMessage,
+) -> None:
+    """Background task wrapper that ACKs/NACKs the message after completion."""
+    async with _analysis_semaphore:
+        success = await _run_workflow_for_scan(
+            initial_state, resume_payload=resume_payload
+        )
+        if not success:
+            await message.reject(requeue=False)
+        else:
+            await message.ack()
 
 
 class WorkerRunner:
@@ -725,7 +745,7 @@ class WorkerRunner:
             # one scan at a time per worker. Increase if you want per-worker
             # parallelism across scans (analyze_files_parallel already gives
             # us intra-scan parallelism via the CONCURRENT_LLM_LIMIT semaphore).
-            await channel.set_qos(prefetch_count=1)
+            await channel.set_qos(prefetch_count=5)
 
             queues = []
             for queue_name in (
