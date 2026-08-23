@@ -483,8 +483,12 @@ async def request_override(
             status_code=409,
             detail="An override request is only required in critical mode.",
         )
-    if payload.expires_at > datetime.now(timezone.utc) + timedelta(hours=24):
-        raise HTTPException(status_code=422, detail="Override expiry exceeds 24 hours.")
+    now = datetime.now(timezone.utc)
+    if payload.expires_at <= now or payload.expires_at > now + timedelta(hours=24):
+        raise HTTPException(
+            status_code=422,
+            detail="Override expiry must be in the next 24 hours.",
+        )
     canonical = _override_canonical(payload)
     fingerprint = target_fingerprint(
         resource_type="usage_budget_override", target_id=str(payload.policy_id)
@@ -500,7 +504,7 @@ async def request_override(
             payload_digest_value=payload_digest(canonical),
             idempotency_key=idempotency_key,
             expires_at=min(
-                payload.expires_at, datetime.now(timezone.utc) + timedelta(hours=24)
+                payload.expires_at, now + timedelta(hours=24)
             ),
         )
     except AuthorizationConflictError as exc:
