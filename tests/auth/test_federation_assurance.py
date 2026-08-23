@@ -14,8 +14,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from pydantic import SecretStr
+from starlette.requests import Request
 
-from app.infrastructure.auth.sso import oidc, saml
+from app.infrastructure.auth.sso import audit, oidc, saml
 from app.infrastructure.auth.sso.domains import (
     new_challenge,
     normalize_domain,
@@ -223,6 +224,33 @@ class DomainOwnershipTests(unittest.IsolatedAsyncioTestCase):
             "TXT",
             lifetime=5.0,
         )
+
+
+class AuditPrivacyTests(unittest.TestCase):
+    def test_auth_audit_hashes_network_and_coarsens_user_agent(self) -> None:
+        request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "scheme": "https",
+                "path": "/",
+                "raw_path": b"/",
+                "query_string": b"",
+                "headers": [
+                    (
+                        b"user-agent",
+                        b"Mozilla/5.0 Macintosh Chrome/140.0 secret-build",
+                    )
+                ],
+                "client": ("203.0.113.42", 12345),
+                "server": ("sccap.example.test", 443),
+            }
+        )
+        extras = audit._request_extras(request)
+        self.assertNotEqual(extras["ip"], "203.0.113.42")
+        self.assertEqual(len(extras["ip"] or ""), 40)
+        self.assertEqual(extras["user_agent"], "Chrome on macOS")
+        self.assertNotIn("user@example.com", audit.hash_email("user@example.com"))
 
 
 if __name__ == "__main__":

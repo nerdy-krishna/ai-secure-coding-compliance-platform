@@ -5,8 +5,9 @@ title: Authentication
 
 # Authentication
 
-SCCAP uses fastapi-users with a JWT Bearer access token and a custom
-HttpOnly refresh cookie. Public self-registration is not mounted: the
+SCCAP separates browser and automation authentication. Browsers use an opaque,
+server-side session in an HttpOnly cookie; API, MCP, and CI clients may use a
+short-lived JWT Bearer access token. Public self-registration is not mounted: the
 first-run `/setup` flow creates the initial superuser, and superusers create
 later local accounts from **Admin → Users**.
 
@@ -19,15 +20,17 @@ Content-Type: application/x-www-form-urlencoded
 username=user@example.com&password=...
 ```
 
-The JSON body contains `{ "access_token": "...", "token_type": "bearer" }`.
-The response also issues `SecureCodePlatformRefresh` as an HttpOnly,
-SameSite=Strict cookie. It is Secure in normal deployments; the explicit
-HTTP-only local-development profile disables Secure so localhost refresh can
-work. Token responses are marked `Cache-Control: no-store`.
+The response retains `{ "access_token": "...", "token_type": "bearer" }` for
+non-browser compatibility. The SPA does not persist or send that token. It uses
+the opaque `__Host-SCCAPSession` cookie (`SCCAPSessionDev` only in the explicit
+HTTP local profile), which is `Secure`, `HttpOnly`, `SameSite=Strict`, and scoped
+to `/`. Token and session responses are marked `Cache-Control: no-store`.
 
-Access tokens default to 60 minutes (`ACCESS_TOKEN_LIFETIME_SECONDS`). Refresh
-tokens default to seven days, but one login session has a 24-hour absolute
-ceiling by default (`SESSION_ABSOLUTE_LIFETIME_SECONDS`).
+Browser sessions default to a 60-minute inactivity deadline and a 24-hour
+absolute deadline. Activity can move only the inactivity deadline. Every
+password, OIDC, SAML, and WebAuthn login creates the same server-side session
+record, including authentication method, provider, privacy-reduced device
+metadata, current credential generation, and revocation state.
 
 ## Refresh
 
@@ -36,26 +39,36 @@ POST /api/v1/auth/refresh
 Cookie: SecureCodePlatformRefresh=...
 ```
 
-There is no request body and browser JavaScript cannot read the cookie. A valid
-request returns a new access token and rotates the refresh cookie while
-preserving the login session's original issue time. Inactive users, expired or
-wrong-type tokens, an exceeded absolute lifetime, and an expired bound IdP
-session are rejected with `401`.
+There is no request body. Cookie-authenticated unsafe requests require the exact
+configured Origin and an `X-CSRF-Token` obtained from
+`GET /api/v1/auth/session/csrf`. Refresh rotates the opaque credential generation
+with a database lock. Reuse of a prior generation revokes that session family;
+inactive users, idle/absolute expiry, and expired bound IdP sessions return
+`401`.
 
-The current refresh JWT is stateless: rotation does not yet provide one-time
-reuse detection or a server-side device/session inventory. Those controls are
-tracked in the production roadmap.
+Session inventory and revocation endpoints are:
+
+- `GET /api/v1/auth/sessions`
+- `DELETE /api/v1/auth/sessions/{session_id}`
+- `POST /api/v1/auth/sessions/revoke-others`
+- same-tenant administrator variants under
+  `/api/v1/admin/users/{user_id}/sessions`
+
+Tenants may set a per-user concurrent-session limit. The default enforcement
+mode is `deny_new`; `revoke_oldest` must be selected explicitly.
 
 ## Logout
 
 ```http
-POST /api/v1/auth/logout
-Authorization: Bearer <access_token>
+POST /api/v1/auth/session/logout
+Cookie: __Host-SCCAPSession=...
+Origin: https://app.example.com
+X-CSRF-Token: ...
 ```
 
-Logout expires the refresh cookie, returns no-store headers, and asks the
-browser to clear cache, cookies, and storage. The UI also cancels its proactive
-refresh timer and clears the access token.
+Logout first revokes the server-side row, then expires browser cookies and asks
+the browser to clear cache, cookies, and storage. Bearer clients continue to use
+`POST /api/v1/auth/logout`.
 
 ## Password reset
 
@@ -72,12 +85,27 @@ configured, the new user receives a password-setup/reset link.
 
 ## SSO, passkeys, and SCIM
 
-- OIDC: `/api/v1/auth/sso/{name}/login` and `/{name}/callback`.
-- SAML: `/api/v1/auth/sso/{name}/login`, `/{name}/acs`, and `/{name}/metadata`.
+- OIDC: `/api/v1/auth/sso/{name}/login`, `/{name}/callback`, and signed
+  `POST /{name}/backchannel-logout`.
+- SAML: `/api/v1/auth/sso/{name}/login`, `/{name}/acs`, `/{name}/metadata`,
+  and signed GET/POST `/{name}/slo`.
 - Passkeys: `/api/v1/auth/webauthn/{register,login}/{begin,finish}` plus the
   authenticated credentials endpoints.
 - SCIM 2.0: `/scim/v2`; administrator token management is under
   `/api/v1/admin/scim/tokens`.
+
+OIDC discovery is pinned to the configured HTTPS issuer and public endpoints;
+algorithms are allowlisted and an unknown `kid` refreshes JWKS once. SAML strict
+mode requires signed messages/assertions and an SP signing keypair, with up to
+three temporary IdP rollover certificates. SAML assertions and federation
+logout message IDs are claimed once in PostgreSQL to prevent replay.
+
+Before an administrator can add a domain to an SSO provider or enable JIT, the
+tenant must prove DNS ownership through the TXT challenge endpoints under
+`/api/v1/admin/tenants/{tenant_id}/domains`. JIT users and group mappings remain
+tenant-bound and cannot grant superuser status. SCIM `active=false`, identity
+replacement, and deletion revoke active browser sessions in the same database
+transaction.
 
 ## Setup gate
 

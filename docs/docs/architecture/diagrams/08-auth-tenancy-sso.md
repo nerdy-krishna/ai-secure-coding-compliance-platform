@@ -25,7 +25,7 @@ flowchart LR
       WA["py_webauthn<br/>attestation + assertion + counter"]:::app
       JIT["JIT provisioning<br/>provisioning.py<br/>(allowed_email_domains, jit_policy)"]:::app
       Audit["auth audit middleware<br/>audit.py"]:::app
-      DB[("Postgres<br/>user · oauth_accounts · saml_subjects<br/>webauthn_credentials · sso_providers<br/>auth_audit_events · scim_tokens · tenants<br/>user_groups · user_group_memberships")]:::data
+      DB[("Postgres<br/>user · auth_sessions · tenant_verified_domains<br/>oauth_accounts · saml_subjects · federation_replay_markers<br/>webauthn_credentials · sso_providers · auth_audit_events<br/>scim_tokens · tenants · user_groups · memberships")]:::data
     end
 
     Pwd --> FU
@@ -70,56 +70,58 @@ sequenceDiagram
     SPA->>API: GET /auth/sso/{name}/callback (browser follows redirect)
     API->>IDP: POST /token (PKCE verifier, code)
     IDP-->>API: id_token (JWT) + access_token
-    API->>API: verify id_token (RS256 via JWKS, iss, aud, exp, nonce)
+    API->>API: pin discovery issuer/endpoints<br/>allowlist alg · verify JWKS signature, iss, aud, exp, nonce<br/>refresh JWKS once for an unknown kid
     API->>DB: resolve user via oauth_accounts(provider_id, account_id)
     alt user exists
       API->>DB: update last_seen
     else first time
-      API->>API: JIT decision<br/>(email domain ∈ allowed_email_domains, jit_policy)
+      API->>DB: require verified tenant DNS domain
+      API->>API: tenant-bound JIT decision<br/>(email domain ∈ allowed_email_domains, jit_policy)
       alt auto-create
         API->>DB: INSERT user + INSERT oauth_accounts
       else needs approval
         API->>DB: INSERT auth_audit_events (jit_pending)<br/>return 403
       end
     end
-    API->>DB: INSERT auth_audit_events (sso_login_success, ip, ua, provider_id)
-    API-->>SPA: 302 to /auth/sso/complete#access_token=<jwt>&exp=…
-    SPA->>SPA: SsoCallbackPage extracts token from fragment<br/>loginWithAccessToken(jwt)
-    SPA->>SPA: localStorage.setItem("accessToken", jwt)
-    SPA->>SPA: schedule proactive refresh
+    API->>DB: INSERT auth_sessions + auth_audit_events<br/>(provider, tenant, keyed network hash, coarse device)
+    API-->>SPA: Set-Cookie: __Host-SCCAPSession=opaque; HttpOnly<br/>302 to /auth/sso/complete (no token in URL)
+    SPA->>API: GET /auth/session/me then /auth/session/csrf
 ```
 
 ---
 
-## 3. JWT lifecycle (access + refresh)
+## 3. Browser-session and bearer lifecycle
 
 ```mermaid
 flowchart LR
-    subgraph Mint["Mint tokens"]
+    subgraph Mint["Authenticate"]
       A1["POST /auth/login (form)"]:::edge
       A2["GET OIDC callback / POST SAML ACS"]:::edge
       A3["POST /auth/webauthn/login/finish"]:::edge
     end
 
-    subgraph Tokens
-      AT["Access JWT<br/>HS256 · exp = ACCESS_TOKEN_LIFETIME_SECONDS (60 min default)<br/>aud=fastapi-users:auth · subject=user id"]:::secret
-      RT["Refresh JWT<br/>HttpOnly + SameSite=strict cookie<br/>Secure except explicit local HTTP profile<br/>exp = REFRESH_TOKEN_LIFETIME_SECONDS (7 d default)<br/>absolute cap = SESSION_ABSOLUTE_LIFETIME_SECONDS (24 h)"]:::secret
+    subgraph Credentials
+      BS["Opaque browser credential<br/>HttpOnly · Secure · SameSite=Strict<br/>server row: 60 min idle / 24 h absolute<br/>generation rotation + reuse revocation"]:::secret
+      CSRF["Memory-only CSRF proof<br/>session-bound MAC + exact Origin"]:::secret
+      AT["Bearer JWT for API/MCP/CI clients<br/>never persisted by the SPA"]:::secret
       SSE["SSE stream token<br/>aud=sse:scan-stream · 60 s TTL<br/>bound to scan_id"]:::secret
     end
 
     subgraph Use
-      Axios["axios req interceptor<br/>Authorization: Bearer <AT>"]:::app
-      Refresh["axios resp 401 →<br/>POST /auth/refresh (cookie auto-sent)<br/>+ proactive refresh 5 min before exp"]:::app
-      Logout["POST /auth/logout<br/>clears localStorage + cookie"]:::app
+      Axios["axios withCredentials<br/>unsafe calls add X-CSRF-Token"]:::app
+      Refresh["POST /auth/refresh<br/>row lock · rotate generation<br/>prior generation revokes family"]:::app
+      Inventory["own/admin same-tenant inventory<br/>revoke one/all-other/all"]:::app
+      Logout["POST /auth/session/logout<br/>revoke row, then clear cookies/storage"]:::app
     end
 
-    A1 & A2 & A3 --> AT
-    A1 & A2 & A3 --> RT
-    AT --> Axios
-    Axios -- "401" --> Refresh -- "new AT" --> Axios
+    A1 & A2 & A3 --> BS
+    BS --> Axios
+    CSRF --> Axios
+    Axios --> Refresh --> BS
+    BS --> Inventory
+    A1 & A2 & A3 -. "automation compatibility" .-> AT
     AT --> SSE
-    Logout -- "clears" --> AT
-    Logout -- "clears" --> RT
+    Logout -- "revokes" --> BS
 
     classDef edge fill:#e0f2fe,stroke:#0369a1,color:#082f49;
     classDef app  fill:#e0e7ff,stroke:#4338ca,color:#1e1b4b;
@@ -173,7 +175,7 @@ sequenceDiagram
     API-->>IDM: 200 { Resources: [{id, userName, emails, active, …}] }
 
     IDM->>API: POST /Users { ... }
-    API->>DB: INSERT user (tenant scoped via token)
+    API->>DB: INSERT user (cannot set superuser)
     API-->>IDM: 201 { id, userName, ... }
 
     IDM->>API: PATCH /Users/{id} { Operations: [...] }
@@ -181,7 +183,7 @@ sequenceDiagram
     API-->>IDM: 200
 
     IDM->>API: DELETE /Users/{id}
-    API->>DB: soft-delete (is_active = false) or hard delete
+    API->>DB: soft-delete (is_active = false)<br/>revoke active auth_sessions atomically
     API-->>IDM: 204
 
     IDM->>API: POST /Groups · PATCH /Groups/{id} (members)
@@ -225,19 +227,21 @@ superusers create later local users through `/admin/users`.
 
 | Token            | Where                                  | TTL                                                                  | Audience            |
 |------------------|----------------------------------------|----------------------------------------------------------------------|---------------------|
-| Access JWT       | `localStorage.accessToken` + `Authorization: Bearer` | `ACCESS_TOKEN_LIFETIME_SECONDS` (default 3600 s)                  | `fastapi-users:auth` |
-| Refresh JWT      | HttpOnly + SameSite=Strict cookie; Secure except explicit HTTP local development | `REFRESH_TOKEN_LIFETIME_SECONDS` (default 604 800 s) capped by `SESSION_ABSOLUTE_LIFETIME_SECONDS` (default 86 400 s, max 7 d) | `fastapi-users:auth` |
+| Browser session  | `__Host-SCCAPSession` HttpOnly cookie (`SCCAPSessionDev` locally) | 60 min idle / 24 h absolute by default; tenant may shorten | opaque MAC credential |
+| CSRF proof       | JavaScript memory + `X-CSRF-Token`       | bound to current browser-session UUID                              | session MAC           |
+| Access JWT       | Explicit `Authorization: Bearer` for API/MCP/CI; never SPA storage | `ACCESS_TOKEN_LIFETIME_SECONDS` | `fastapi-users:auth` |
+| Legacy refresh JWT | HttpOnly compatibility cookie          | capped by browser-session absolute deadline                        | `fastapi-users:auth` |
 | SSE stream token | URL query param `?access_token=…`      | 60 seconds                                                           | `sse:scan-stream`   |
 | SCIM bearer      | `Authorization: Bearer <token>`        | No expiry (rotatable; revocable via admin UI)                        | `scim`              |
 | Passkey assertion challenge | Server-issued per attempt    | 60 s                                                                 | n/a                 |
 
-### Refresh logic (client side, `apiClient.ts` + `AuthProvider.tsx`)
+### Browser session logic (`apiClient.ts` + `AuthProvider.tsx`)
 
-- **Proactive**: `PROACTIVE_LEAD_MS = 5 × 60 × 1000` — schedules a refresh 5 minutes before the access JWT's `exp`.
-- **Reactive**: Axios response interceptor catches `401`, calls `refreshAccessToken()`, retries the original request.
-- **Single-flight**: a module-level `refreshInFlight: Promise<string> | null` ensures only one refresh runs at a time.
-- **Circuit breaker**: 3 consecutive refresh failures → 30 s blackout; further calls go straight to `/login`.
-- **Cross-tab sync**: `storage` event listener + 5 s polling re-reads `accessToken` so multiple tabs stay aligned.
+- The SPA synchronously removes the retired `localStorage.accessToken` value and never writes a replacement.
+- Bootstrap calls `/auth/session/me` and `/auth/session/csrf`; the CSRF value remains module-memory only.
+- Activity touches are coalesced. A warning appears two minutes before the idle or absolute deadline.
+- Two concurrent rotations serialize on the session row. Presenting the prior generation revokes only that family.
+- A tenant may configure a per-user limit with `deny_new` (default) or explicit `revoke_oldest` enforcement.
 
 ### Multi-tenancy scoping
 
@@ -283,11 +287,11 @@ A configurable `security.master_admin_user_id` system config key designates the 
 
 | Column                   | Notes                                                              |
 |--------------------------|--------------------------------------------------------------------|
-| `protocol`               | CHECK constraint: `oidc`, `saml`, `ldap`                           |
+| `protocol`               | `oidc` or `saml`                                                     |
 | `enabled`                | UI toggle                                                          |
 | `config`                 | Fernet-encrypted JSONB. Secret fields (`client_secret`, `sp_private_key`) are redacted in API responses |
-| `allowed_email_domains`  | Array of domains permitted to auto-create via JIT                  |
-| `force_for_domains`      | Array; if matched, password login is rejected (`/auth/login-guard`)|
+| `allowed_email_domains`  | Verified tenant domains permitted to link/JIT                      |
+| `force_for_domains`      | Verified subset; password login is rejected (`/auth/login-guard`)  |
 | `jit_policy`             | `auto` · `approve` · `deny`                                        |
 
 PATCH accepts the sentinel `"<<unchanged>>"` for any secret field so admins can update non-secret fields without re-entering keys.
@@ -304,7 +308,10 @@ Single append-only table. Sample event types:
 - `mfa_enrolled`, `mfa_disabled`
 - `scim_user_created`, `scim_user_deleted`
 
-Stored fields: `ts`, `event`, `user_id`, `provider_id`, `ip` (after `TRUSTED_PROXY_CIDRS` resolution), `user_agent`, `email_hash` (PII protection), `details` (JSONB).
+Stored fields include `ts`, actor/subject/session/provider/tenant IDs, outcome,
+keyed network hash (after trusted-proxy resolution), coarse browser/OS label,
+`email_hash`, and allowlisted details. Cookies, bearer tokens, authorization
+codes, assertions, raw claims, secrets, and plaintext email are never stored.
 
 Exposed for export via `GET /api/v1/admin/sso/audit?cursor=…&limit=…` (cursor-paginated).
 

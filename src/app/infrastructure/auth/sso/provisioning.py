@@ -237,6 +237,8 @@ async def _sync_groups_from_idp(
                     event=audit.EVENT_GROUP_UNMAPPED,
                     user_id=user.id,
                     provider_id=provider.id,
+                    tenant_id=provider.tenant_id,
+                    outcome="no_op",
                     request=request,
                     details={"idp_group": idp_group},
                 )
@@ -255,6 +257,8 @@ async def _sync_groups_from_idp(
                     event=audit.EVENT_GROUP_UNMAPPED,
                     user_id=user.id,
                     provider_id=provider.id,
+                    tenant_id=provider.tenant_id,
+                    outcome="denied",
                     request=request,
                     details={
                         "idp_group": idp_group,
@@ -271,7 +275,10 @@ async def _sync_groups_from_idp(
                 session,
                 event=audit.EVENT_GROUP_MAPPED,
                 user_id=user.id,
+                actor_user_id=user.id,
                 provider_id=provider.id,
+                tenant_id=provider.tenant_id,
+                outcome="success",
                 request=request,
                 details={"idp_group": idp_group, "sccap_group": mapped},
             )
@@ -359,6 +366,8 @@ async def provision_or_link_oidc(
             session,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
             email=norm_email,
             request=request,
             details={"reason": "email_unverified_at_idp"},
@@ -370,6 +379,17 @@ async def provision_or_link_oidc(
     user = await _find_user_by_email(session, norm_email)
     if user is not None:
         if provider.tenant_id is None or user.tenant_id != provider.tenant_id:
+            await audit.record(
+                session,
+                event=audit.EVENT_SSO_LINK_REFUSED,
+                user_id=user.id,
+                provider_id=provider.id,
+                tenant_id=provider.tenant_id,
+                outcome="denied",
+                email=norm_email,
+                request=request,
+                details={"reason": "cross_tenant_link"},
+            )
             raise SsoProvisioningDenied("cross-tenant SSO account linking is refused")
         # Refuse to silently link to a pre-existing admin (M4).
         if user.is_superuser:
@@ -378,6 +398,8 @@ async def provision_or_link_oidc(
                 event=audit.EVENT_SSO_LINK_REFUSED,
                 user_id=user.id,
                 provider_id=provider.id,
+                tenant_id=provider.tenant_id,
+                outcome="denied",
                 email=norm_email,
                 request=request,
                 details={"reason": "preexisting_superuser_account"},
@@ -398,7 +420,10 @@ async def provision_or_link_oidc(
             session,
             event=audit.EVENT_SSO_LINKED,
             user_id=user.id,
+            actor_user_id=user.id,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="success",
             email=norm_email,
             request=request,
         )
@@ -418,6 +443,8 @@ async def provision_or_link_oidc(
             session,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
             email=norm_email,
             request=request,
             details={"reason": "jit_policy_deny"},
@@ -444,7 +471,10 @@ async def provision_or_link_oidc(
         session,
         event=audit.EVENT_SSO_PROVISIONED,
         user_id=user.id,
+        actor_user_id=user.id,
         provider_id=provider.id,
+        tenant_id=provider.tenant_id,
+        outcome="success" if is_active else "pending",
         email=norm_email,
         request=request,
         details={"jit_policy": provider.jit_policy, "is_active": is_active},
@@ -539,6 +569,17 @@ async def provision_or_link_saml(
     user = await _find_user_by_email(session, norm_email)
     if user is not None:
         if provider.tenant_id is None or user.tenant_id != provider.tenant_id:
+            await audit.record(
+                session,
+                event=audit.EVENT_SSO_LINK_REFUSED,
+                user_id=user.id,
+                provider_id=provider.id,
+                tenant_id=provider.tenant_id,
+                outcome="denied",
+                email=norm_email,
+                request=request,
+                details={"reason": "cross_tenant_link"},
+            )
             raise SsoProvisioningDenied("cross-tenant SSO account linking is refused")
         if user.is_superuser:
             await audit.record(
@@ -546,6 +587,8 @@ async def provision_or_link_saml(
                 event=audit.EVENT_SSO_LINK_REFUSED,
                 user_id=user.id,
                 provider_id=provider.id,
+                tenant_id=provider.tenant_id,
+                outcome="denied",
                 email=norm_email,
                 request=request,
                 details={"reason": "preexisting_superuser_account"},
@@ -565,7 +608,10 @@ async def provision_or_link_saml(
             session,
             event=audit.EVENT_SSO_LINKED,
             user_id=user.id,
+            actor_user_id=user.id,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="success",
             email=norm_email,
             request=request,
         )
@@ -584,6 +630,8 @@ async def provision_or_link_saml(
             session,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
             email=norm_email,
             request=request,
             details={"reason": "jit_policy_deny"},
@@ -611,7 +659,10 @@ async def provision_or_link_saml(
         session,
         event=audit.EVENT_SSO_PROVISIONED,
         user_id=user.id,
+        actor_user_id=user.id,
         provider_id=provider.id,
+        tenant_id=provider.tenant_id,
+        outcome="success" if is_active else "pending",
         email=norm_email,
         request=request,
         details={"jit_policy": provider.jit_policy, "is_active": is_active},

@@ -24,6 +24,7 @@ Threat-model mitigations:
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import (
@@ -54,6 +55,7 @@ from app.infrastructure.auth.sso.provisioning import (
     provision_or_link_saml,
 )
 from app.infrastructure.auth.sso.repository import SsoProviderRepository
+from app.infrastructure.auth.sso.replay import claim_message_once
 from app.infrastructure.auth.sso.state_cookie import (
     COOKIE_NAME as STATE_COOKIE_NAME,
     BadSignature,
@@ -294,6 +296,7 @@ async def oidc_callback(
             request=request,
             details={"reason": "idp_error", "idp_error": str(error)[:128]},
         )
+        await db.commit()
         return _redirect_to_frontend_with_error("idp_error")
 
     if not code or not state:
@@ -339,9 +342,12 @@ async def oidc_callback(
             db,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
             request=request,
             details={"reason": "id_token_validation_failed", "msg": str(exc)[:200]},
         )
+        await db.commit()
         return _redirect_to_frontend_with_error("token_validation_failed")
 
     try:
@@ -359,8 +365,10 @@ async def oidc_callback(
             idp_token_expires_at=userinfo.idp_token_expires_at,
         )
     except SsoProvisioningEmailUnverified:
+        await db.commit()
         return _redirect_to_frontend_with_error("email_unverified_at_idp")
     except SsoProvisioningSuperuserLink:
+        await db.commit()
         return _redirect_to_frontend_with_error("superuser_link_refused")
     except SsoProvisioningPending:
         # F3: the JIT-created (inactive) user + audit row are written in
@@ -370,8 +378,19 @@ async def oidc_callback(
         await db.commit()
         return _redirect_to_frontend_with_error("pending_admin_approval")
     except SsoProvisioningDenied:
+        await db.commit()
         return _redirect_to_frontend_with_error("denied")
     except SsoProvisioningError:
+        await audit.record(
+            db,
+            event=audit.EVENT_SSO_LOGIN_FAILURE,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="failure",
+            request=request,
+            details={"reason": "provisioning_failed"},
+        )
+        await db.commit()
         return _redirect_to_frontend_with_error("provisioning_failed")
 
     # All checks pass — mint session.
@@ -390,7 +409,10 @@ async def oidc_callback(
         db,
         event=audit.EVENT_SSO_LOGIN_SUCCESS,
         user_id=identity.user.id,
+        actor_user_id=identity.user.id,
         provider_id=provider.id,
+        tenant_id=provider.tenant_id,
+        outcome="success",
         email=userinfo.email,
         request=request,
         details={
@@ -464,10 +486,33 @@ async def saml_acs(
             db,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
             request=request,
             details={"reason": "saml_assertion_invalid", "msg": str(exc)[:200]},
         )
+        await db.commit()
         return _redirect_to_frontend_with_error("saml_assertion_invalid")
+
+    replay_key = identity_attrs.assertion_id or identity_attrs.message_id
+    if not await claim_message_once(
+        db,
+        provider_id=provider.id,
+        kind="saml_assertion",
+        message_id=replay_key,
+        expires_at=identity_attrs.replay_expires_at,
+    ):
+        await audit.record(
+            db,
+            event=audit.EVENT_SSO_LOGIN_FAILURE,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
+            request=request,
+            details={"reason": "saml_assertion_replay"},
+        )
+        await db.commit()
+        return _redirect_to_frontend_with_error("saml_assertion_replay")
 
     mapped = saml.map_attributes(cfg, identity_attrs.attributes)
     email = (
@@ -478,9 +523,12 @@ async def saml_acs(
             db,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
             request=request,
             details={"reason": "saml_email_missing"},
         )
+        await db.commit()
         return _redirect_to_frontend_with_error("saml_email_missing")
 
     try:
@@ -497,6 +545,7 @@ async def saml_acs(
             group_mapping=cfg.group_mapping,
         )
     except SsoProvisioningSuperuserLink:
+        await db.commit()
         return _redirect_to_frontend_with_error("superuser_link_refused")
     except SsoProvisioningPending:
         # F3: the JIT-created (inactive) user + audit row are written in
@@ -506,8 +555,19 @@ async def saml_acs(
         await db.commit()
         return _redirect_to_frontend_with_error("pending_admin_approval")
     except SsoProvisioningDenied:
+        await db.commit()
         return _redirect_to_frontend_with_error("denied")
     except SsoProvisioningError:
+        await audit.record(
+            db,
+            event=audit.EVENT_SSO_LOGIN_FAILURE,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="failure",
+            request=request,
+            details={"reason": "provisioning_failed"},
+        )
+        await db.commit()
         return _redirect_to_frontend_with_error("provisioning_failed")
 
     extras = Response()
@@ -524,7 +584,10 @@ async def saml_acs(
         db,
         event=audit.EVENT_SSO_LOGIN_SUCCESS,
         user_id=identity.user.id,
+        actor_user_id=identity.user.id,
         provider_id=provider.id,
+        tenant_id=provider.tenant_id,
+        outcome="success",
         email=email,
         request=request,
         details={
@@ -578,6 +641,26 @@ async def oidc_backchannel_logout(
         )
         await db.commit()
         raise HTTPException(status_code=400, detail="invalid logout_token")
+
+    issued_at = datetime.fromtimestamp(int(claims["iat"]), tz=timezone.utc)
+    if not await claim_message_once(
+        db,
+        provider_id=provider.id,
+        kind="oidc_logout",
+        message_id=str(claims["jti"]),
+        expires_at=issued_at + timedelta(minutes=2),
+    ):
+        await audit.record(
+            db,
+            event=audit.EVENT_SSO_LOGOUT,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
+            request=request,
+            details={"protocol": "oidc", "reason": "logout_token_replay"},
+        )
+        await db.commit()
+        raise HTTPException(status_code=400, detail="replayed logout_token")
 
     sessions = AuthSessionRepository(db)
     sid = claims.get("sid")
@@ -649,6 +732,24 @@ async def _handle_saml_slo(
         )
         await db.commit()
         raise HTTPException(status_code=400, detail="invalid SAML logout message")
+    if result.message_id and not await claim_message_once(
+        db,
+        provider_id=provider.id,
+        kind="saml_logout",
+        message_id=result.message_id,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    ):
+        await audit.record(
+            db,
+            event=audit.EVENT_SSO_LOGOUT,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
+            request=request,
+            details={"protocol": "saml", "reason": "logout_message_replay"},
+        )
+        await db.commit()
+        raise HTTPException(status_code=400, detail="replayed SAML logout message")
 
     sessions = AuthSessionRepository(db)
     revoked = 0

@@ -47,9 +47,12 @@ ENCRYPTION_KEY=your-super-secret-generated-key-goes-here
 | `APP_PORT` | Port for the backend FastAPI app | `8000` | Ensure this port is available |
 | `SECRET_KEY` | Used to sign JWT tokens | `your-random-secret` | Must be unique and strong |
 | `ALLOWED_ORIGINS` | Allowed origins for CORS | `http://localhost:5173` | No trailing slash |
-| `ACCESS_TOKEN_LIFETIME_SECONDS` | Access token expiry time | `3600` | 60 minutes; the browser refreshes before expiry |
-| `REFRESH_TOKEN_LIFETIME_SECONDS` | Refresh token lifetime | `604800` | 7 days |
-| `SSL_DEV_INSECURE` | Explicit HTTP-only local-development opt-in | `false` | Compose also uses it to allow the refresh cookie over HTTP; forbidden with `ENVIRONMENT=production` |
+| `ACCESS_TOKEN_LIFETIME_SECONDS` | Non-browser Bearer token expiry | `3600` | The SPA does not persist this token |
+| `REFRESH_TOKEN_LIFETIME_SECONDS` | Legacy compatibility refresh lifetime | `604800` | Still capped by the browser-session absolute deadline |
+| `SESSION_IDLE_LIFETIME_SECONDS` | Browser inactivity deadline | `3600` | Activity can extend only this deadline |
+| `SESSION_ABSOLUTE_LIFETIME_SECONDS` | Browser absolute deadline | `86400` | Rotation cannot extend it; hard maximum is 7 days |
+| `SESSION_TOUCH_INTERVAL_SECONDS` | Minimum interval between activity writes | `300` | Reduces database write amplification |
+| `SSL_DEV_INSECURE` | Explicit HTTP-only local-development opt-in | `false` | Uses `SCCAPSessionDev`; forbidden with `ENVIRONMENT=production` |
 
 ---
 

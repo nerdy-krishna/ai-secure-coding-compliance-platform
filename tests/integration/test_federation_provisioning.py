@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi_users.password import PasswordHelper
@@ -13,6 +14,7 @@ from app.infrastructure.auth.sso.provisioning import (
     provision_or_link_oidc,
 )
 from app.infrastructure.auth.sso.repository import SsoProviderRepository
+from app.infrastructure.auth.sso.replay import claim_message_once
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import (
     SsoProvider,
@@ -135,6 +137,27 @@ class FederationProvisioningIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 select(User).where(User.email == "user@unverified.example.com")
             )
             self.assertIsNone(created)
+
+    async def test_federation_message_id_is_claimed_only_once(self) -> None:
+        async with AsyncSessionLocal() as db:
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+            first = await claim_message_once(
+                db,
+                provider_id=self.provider_id,
+                kind="saml_assertion",
+                message_id="assertion-fixture-1",
+                expires_at=expires_at,
+            )
+            second = await claim_message_once(
+                db,
+                provider_id=self.provider_id,
+                kind="saml_assertion",
+                message_id="assertion-fixture-1",
+                expires_at=expires_at,
+            )
+            await db.commit()
+        self.assertTrue(first)
+        self.assertFalse(second)
 
 
 if __name__ == "__main__":

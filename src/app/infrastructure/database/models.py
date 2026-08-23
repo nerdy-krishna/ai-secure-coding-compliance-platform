@@ -2042,6 +2042,39 @@ class SamlSubject(Base):
     )
 
 
+class FederationReplayMarker(Base):
+    """Short-lived durable replay marker for SAML and OIDC messages."""
+
+    __tablename__ = "federation_replay_markers"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    provider_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("sso_providers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    message_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id",
+            "kind",
+            "message_hash",
+            name="uq_federation_replay_provider_kind_message",
+        ),
+    )
+
+
 class WebAuthnCredential(Base):
     """Registered WebAuthn / FIDO2 authenticator (passkey, hardware key,
     platform authenticator). One row per credential — a user may have

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from .models import SamlConfig
@@ -42,6 +43,9 @@ class SamlIdentity:
     name_id_format: str
     session_index: Optional[str]
     attributes: Dict[str, List[str]]
+    message_id: str
+    assertion_id: Optional[str]
+    replay_expires_at: datetime
 
 
 @dataclass(slots=True)
@@ -49,6 +53,7 @@ class SamlLogout:
     redirect_url: Optional[str]
     name_id: Optional[str]
     session_indexes: List[str]
+    message_id: Optional[str]
 
 
 def _build_settings_dict(
@@ -180,12 +185,34 @@ def process_acs(
 
     if not name_id:
         raise ValueError("SAML response missing NameID")
+    message_id = auth.get_last_message_id()
+    if not message_id:
+        raise ValueError("SAML response missing message ID")
+    raw_expiry = auth.get_last_assertion_not_on_or_after()
+    try:
+        if isinstance(raw_expiry, datetime):
+            replay_expires_at = raw_expiry
+        elif isinstance(raw_expiry, (int, float)):
+            replay_expires_at = datetime.fromtimestamp(raw_expiry, tz=timezone.utc)
+        elif isinstance(raw_expiry, str) and raw_expiry:
+            replay_expires_at = datetime.fromisoformat(raw_expiry.replace("Z", "+00:00"))
+        else:
+            raise ValueError
+    except (ValueError, OSError, OverflowError):
+        replay_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    if replay_expires_at.tzinfo is None:
+        replay_expires_at = replay_expires_at.replace(tzinfo=timezone.utc)
 
     return SamlIdentity(
         name_id=str(name_id),
         name_id_format=str(name_id_format),
         session_index=str(session_index) if session_index else None,
         attributes={k: list(v) for k, v in attributes.items()},
+        message_id=str(message_id),
+        assertion_id=(
+            str(auth.get_last_assertion_id()) if auth.get_last_assertion_id() else None
+        ),
+        replay_expires_at=replay_expires_at,
     )
 
 
@@ -251,6 +278,9 @@ def process_slo(
         redirect_url=str(url) if url else None,
         name_id=name_id,
         session_indexes=session_indexes,
+        message_id=(
+            str(auth.get_last_message_id()) if auth.get_last_message_id() else None
+        ),
     )
 
 

@@ -18,6 +18,7 @@ Convention:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import ipaddress
 import logging
 import uuid
@@ -119,12 +120,58 @@ def _client_ip_from_request(request: Request) -> Optional[str]:
     return fallback_origin or peer
 
 
+def _privacy_hash(value: Optional[str], *, domain: bytes) -> Optional[str]:
+    if not value:
+        return None
+    configured = settings.SECRET_KEY
+    secret = (
+        configured.get_secret_value()
+        if hasattr(configured, "get_secret_value")
+        else str(configured)
+    )
+    # The legacy `ip` column is String(45), so retain 40 hex chars. This is
+    # correlation-only metadata and cannot be reversed into an address.
+    return hmac.new(
+        secret.encode("utf-8"), domain + value.encode("utf-8"), hashlib.sha256
+    ).hexdigest()[:40]
+
+
+def _coarse_user_agent(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    browser = "Browser"
+    for marker, name in (
+        ("Edg/", "Edge"),
+        ("Firefox/", "Firefox"),
+        ("Chrome/", "Chrome"),
+        ("Safari/", "Safari"),
+    ):
+        if marker in value:
+            browser = name
+            break
+    platform = "Unknown OS"
+    for marker, name in (
+        ("Android", "Android"),
+        ("iPhone", "iOS"),
+        ("iPad", "iOS"),
+        ("Windows", "Windows"),
+        ("Macintosh", "macOS"),
+        ("Linux", "Linux"),
+    ):
+        if marker in value:
+            platform = name
+            break
+    return f"{browser} on {platform}"
+
+
 def _request_extras(request: Optional[Request]) -> Dict[str, Optional[str]]:
     if request is None:
         return {"ip": None, "user_agent": None}
-    ip = _client_ip_from_request(request)
+    ip = _privacy_hash(
+        _client_ip_from_request(request), domain=b"sccap/auth-audit/ip/v1\0"
+    )
     ua_full = request.headers.get("user-agent")
-    ua = ua_full[:512] if ua_full else None
+    ua = _coarse_user_agent(ua_full)
     return {"ip": ip, "user_agent": ua}
 
 

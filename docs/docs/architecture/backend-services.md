@@ -82,9 +82,12 @@ scope filter on every list endpoint.
 
 ## Auth
 
-`fastapi-users` with `BearerTransport`. Tokens are JWTs signed with
-`SECRET_KEY`. The custom `/auth/refresh` accepts a refresh token and
-returns a new access token. Routes that need superuser access use the
+`fastapi-users` retains `BearerTransport` for API/MCP/CI clients. Browsers use
+an opaque MACed credential in an HttpOnly cookie backed by `auth_sessions`.
+Unsafe cookie-authenticated requests require an exact Origin and a
+session-bound CSRF header. `/auth/refresh` rotates the credential generation
+under a row lock; reuse revokes that family. Password, OIDC, SAML, and WebAuthn
+all mint this same browser-session record. Routes that need superuser access use the
 `current_superuser` dependency; regular authenticated routes use
 `current_active_user`; SSE streams use `current_active_user_sse`
 (reads the token from a query param since browsers can't set headers

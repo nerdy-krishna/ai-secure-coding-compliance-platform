@@ -71,9 +71,10 @@ thread, while restart deletes it before starting over.
 
 ## Security and tenancy
 
-- Bearer JWT access and refresh tokens back password authentication.
-- OIDC and SAML providers, SCIM provisioning, WebAuthn credentials, and forced-SSO domains are
-  implemented and feature/configuration gated where applicable.
+- Browsers use opaque HttpOnly server-side sessions with idle/absolute deadlines, CSRF proof,
+  rotation/reuse detection, inventory, and revocation. Explicit API/MCP/CI clients retain Bearer JWTs.
+- OIDC and SAML signature/issuer/replay/logout controls, SCIM provisioning/deprovisioning,
+  WebAuthn credentials, and DNS-verified forced-SSO domains are feature/configuration gated.
 - Fernet encryption protects persisted LLM and SMTP secrets.
 - Tenant scope and group-derived visible-user scope must pass through every user-owned list query.
 - Correlation identifiers propagate from HTTP requests through messages and worker logs.
