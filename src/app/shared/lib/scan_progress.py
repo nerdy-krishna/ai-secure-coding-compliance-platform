@@ -59,6 +59,7 @@ ACTIVITY_KINDS: Final[frozenset[str]] = frozenset(
         "degradation",
         "decision",
         "cancellation",
+        "budget",
         "terminal",
     }
 )
@@ -96,6 +97,7 @@ def activity_kind_for(stage_name: str, event_status: str) -> str:
         "FAILED",
         "BLOCKED_PRE_LLM",
         "BLOCKED_USER_DECLINE",
+        "BUDGET_EXHAUSTED",
     }:
         return "terminal"
     if status == EV_RETRYING or "RETRY" in stage:

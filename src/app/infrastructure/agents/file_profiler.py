@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.schemas import FileProfile
+from app.core.services.usage_budget_service import BudgetExceededError
 from app.infrastructure.llm_client import LLMClient, get_llm_client
 from app.infrastructure.database.repositories.llm_usage_repo import (
     LLMUsageContext,
@@ -207,6 +208,8 @@ class FileProfiler:
                     scan_id=self._scan_id,
                 ),
             )
+        except BudgetExceededError:
+            raise
         except Exception as exc:  # noqa: BLE001 — never abort the scan
             logger.warning("file_profiler: profiling raised for %s: %s", file_path, exc)
             return _fallback_profile(file_path)

@@ -40,6 +40,11 @@ from app.infrastructure.database.repositories.authorization_repo import (
     payload_digest,
     target_fingerprint,
 )
+from app.core.services.usage_budget_service import BudgetExceededError
+from app.infrastructure.workflows.budget import (
+    release_scan_budget,
+    reserve_scan_gate_budget,
+)
 from app.shared.lib.permissions import (
     SCAN_APPROVE,
     SCAN_APPROVE_SELF,
@@ -49,6 +54,7 @@ from app.shared.lib.permissions import (
 from app.shared.lib.scan_visibility import can_view_scan
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
+    STATUS_BUDGET_EXHAUSTED,
     STATUS_CANCELLED,
     STATUS_FAILED,
     STATUS_PENDING_APPROVAL,
@@ -311,6 +317,63 @@ class ScanLifecycleService:
                         f"current status: {scan.status}"
                     ),
                 )
+
+            if request.approved and request.kind in {
+                "profiling_approval",
+                "cost_approval",
+            }:
+                try:
+                    await reserve_scan_gate_budget(
+                        self.repo.db,
+                        scan_id,
+                        gate_kind=request.kind,
+                        details=(gate.evidence or {}).get("cost_details") or {},
+                        actor_user_id=user.id,
+                    )
+                except BudgetExceededError as exc:
+                    safe_reason = exc.as_detail()
+                    await release_scan_budget(
+                        self.repo.db, scan_id, reason=str(exc.code)
+                    )
+                    changed = await self.repo.update_status(
+                        scan_id,
+                        STATUS_BUDGET_EXHAUSTED,
+                        allowed_current_statuses=(expected_status,),
+                        commit=False,
+                    )
+                    if not changed:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail="Scan state changed during budget admission.",
+                        )
+                    await self.repo.set_error_message(scan_id, str(exc.code))
+                    await self.repo.create_scan_event(
+                        scan_id=scan_id,
+                        stage_name="BUDGET_ENFORCEMENT",
+                        status="BLOCKED",
+                        details=safe_reason,
+                        activity_kind="budget",
+                        commit=False,
+                    )
+                    await self.gates.close_active(
+                        scan_id, state="cancelled", commit=False
+                    )
+                    attempt = await ScanAttemptRepository(
+                        self.repo.db
+                    ).mark_current_terminal(scan_id, status="failed", commit=False)
+                    if attempt is not None:
+                        from app.infrastructure.database.repositories.evidence_repo import (
+                            EvidenceRepository,
+                        )
+
+                        await EvidenceRepository(self.repo.db).finalize_attempt(
+                            attempt.id, actor_user_id=user.id, commit=False
+                        )
+                    await self.repo.db.commit()
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=safe_reason,
+                    ) from exc
 
             # Claim the gate with compare-and-set. Approved and declined
             # decisions both become queued durable work, preventing a second
@@ -772,6 +835,9 @@ class ScanLifecycleService:
                     commit=False,
                 )
             await self.gates.close_active(scan_id, state="cancelled", commit=False)
+            await release_scan_budget(
+                self.repo.db, scan_id, reason="scan_cancelled"
+            )
             attempt = await ScanAttemptRepository(self.repo.db).mark_current_terminal(
                 scan_id, status="cancelled", commit=False
             )

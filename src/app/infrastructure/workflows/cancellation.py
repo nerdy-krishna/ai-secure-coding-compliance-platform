@@ -15,6 +15,11 @@ from app.shared.lib.owned_subprocess import (
     terminate_owned_processes,
 )
 from app.shared.lib.scan_status import STATUS_CANCELLED
+from app.core.services.usage_budget_service import BudgetExceededError
+from app.infrastructure.workflows.budget import (
+    ScanBudgetExhausted,
+    mark_scan_budget_exhausted,
+)
 
 
 class ScanCancellationRequested(Exception):
@@ -125,7 +130,11 @@ async def invoke_with_forceful_cancellation(
             invocation.cancel()
             try:
                 await invocation
-            except (asyncio.CancelledError, ScanCancellationRequested):
+            except (
+                asyncio.CancelledError,
+                ScanCancellationRequested,
+                ScanBudgetExhausted,
+            ):
                 pass
             await record_cancellation_phase(
                 scan_id, "COMPLETED", terminated_processes=terminated
@@ -137,7 +146,11 @@ async def invoke_with_forceful_cancellation(
         invocation.cancel()
         try:
             await invocation
-        except (asyncio.CancelledError, ScanCancellationRequested):
+        except (
+            asyncio.CancelledError,
+            ScanCancellationRequested,
+            ScanBudgetExhausted,
+        ):
             pass
         raise
     finally:
@@ -165,7 +178,12 @@ def cancellation_aware(
         scan_id = state.get("scan_id")
         if scan_id is not None and await is_scan_cancelled(scan_id):
             raise ScanCancellationRequested(str(scan_id))
-        result = await node(state)
+        try:
+            result = await node(state)
+        except BudgetExceededError as exc:
+            if scan_id is not None:
+                await mark_scan_budget_exhausted(scan_id, exc)
+            raise ScanBudgetExhausted(str(scan_id)) from exc
         if stage_name is None:
             return result
 

@@ -42,6 +42,10 @@ from app.infrastructure.database.repositories.approval_gate_repo import (
     approval_gate_payload,
 )
 from app.infrastructure.workflows.state import WorkerState
+from app.infrastructure.workflows.budget import (
+    raise_first_budget_denial,
+    release_scan_budget,
+)
 from app.shared.lib import cost_estimation
 from app.shared.lib.llm_estimation import calibrate_estimate
 from app.shared.lib.file_classification import should_skip_llm_profile
@@ -277,6 +281,9 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
 
     if not files:
         logger.info("profile_files: scan_id=%s no files to profile", scan_id)
+        async with AsyncSessionLocal() as db:
+            await release_scan_budget(db, scan_id, reason="profiling_completed")
+            await db.commit()
         return {"file_profiles": {}}
 
     # The tree-sitter repository map grounds the profiler with each
@@ -317,6 +324,7 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
         *(_profile(p, c) for p, c in files.items()),
         return_exceptions=True,
     )
+    raise_first_budget_denial(results)
     file_profiles: Dict[str, Any] = {}
     for result in results:
         if isinstance(result, BaseException):
@@ -348,6 +356,10 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
 
     async with AsyncSessionLocal() as db:
         repo = ScanRepository(db)
+        # Profiling has no more billable work after the gather completes.
+        # Return unused conservative tranche capacity before the separate
+        # analysis gate asks for its own envelope.
+        await release_scan_budget(db, scan_id, reason="profiling_completed")
         await repo.update_scan_artifacts(scan_id, {"file_profiles": file_profiles})
         await repo.record_scan_event(scan_id, "PROFILING_FILES", EV_COMPLETED)
 

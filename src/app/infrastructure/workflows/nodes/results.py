@@ -18,6 +18,7 @@ from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.database.repositories.llm_usage_repo import LLMUsageRepository
 from app.infrastructure.workflows.state import WorkerState
+from app.infrastructure.workflows.budget import release_scan_budget
 from app.shared.lib.risk_score import compute_cvss_aggregate
 from app.shared.lib.risk_severity import risk_severity_for_score
 from app.shared.lib.scan_progress import EV_STARTED
@@ -143,6 +144,7 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
     try:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
+            await release_scan_budget(db, scan_id, reason="scan_completed")
             # Close the estimate feedback loop before terminal status is
             # persisted. Future preflights consume these same canonical
             # analysis events as model/stage calibration observations.

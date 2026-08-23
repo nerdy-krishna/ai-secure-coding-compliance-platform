@@ -87,6 +87,25 @@ class LLMEstimateCalibrationTests(unittest.TestCase):
             result["total_estimated_cost"], result["expected_estimated_cost"]
         )
 
+    def test_estimator_does_not_apply_legacy_global_monetary_ceiling(self) -> None:
+        config = SimpleNamespace(
+            id="expensive-cfg",
+            provider="openai",
+            model_name="test-model",
+            input_cost_per_million=1_000_000.0,
+            output_cost_per_million=1_000_000.0,
+        )
+
+        result = estimate_cost_two_slot(
+            reasoning_config=config,
+            reasoning_input_tokens=1_000,
+            utility_config=config,
+            utility_input_tokens=1_000,
+            output_token_percentage=1.0,
+        )
+
+        self.assertGreater(result["upper_bound_estimated_cost"], 100.0)
+
 
 if __name__ == "__main__":
     unittest.main()

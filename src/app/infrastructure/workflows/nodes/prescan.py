@@ -56,6 +56,7 @@ from app.infrastructure.scanners.semgrep_rules import derive_semgrep_languages
 from app.infrastructure.scanners.semgrep_runner import run_semgrep
 from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.workflows.state import WorkerState
+from app.infrastructure.workflows.budget import release_scan_budget
 from app.shared.lib.file_classification import should_skip_semgrep
 from app.shared.lib.finding_lineage_identity import raw_finding_id
 from app.shared.lib.scan_progress import (
@@ -703,6 +704,7 @@ async def blocked_pre_llm_node(state: WorkerState) -> Dict[str, Any]:
     # Findings were already persisted by `deterministic_prescan_node`;
     # do NOT re-save here (would dupe rows). Just flip the status.
     async with AsyncSessionLocal() as db:
+        await release_scan_budget(db, scan_id, reason="blocked_pre_llm")
         await ScanRepository(db).update_status(scan_id, STATUS_BLOCKED_PRE_LLM)
     return {}
 
@@ -727,6 +729,7 @@ async def user_decline_node(state: WorkerState) -> Dict[str, Any]:
         len(findings),
     )
     async with AsyncSessionLocal() as db:
+        await release_scan_budget(db, scan_id, reason="user_declined")
         await ScanRepository(db).update_status(scan_id, STATUS_BLOCKED_USER_DECLINE)
     return {}
 

@@ -23,6 +23,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import BaseModel, Field
 
 from app.core.schemas import FixResult, LLMInteraction
+from app.core.services.usage_budget_service import BudgetExceededError
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.llm_usage_repo import (
     LLMUsageContext,
@@ -164,6 +165,14 @@ class PatchEvidenceValidator:
                     scan_id=self._scan_id,
                 ),
             )
+        except BudgetExceededError:
+            await self._finish_provider_call(
+                idempotency_key,
+                reservation_token,
+                status="failed",
+                usage_event_id=None,
+            )
+            raise
         except Exception as exc:  # noqa: BLE001 - fail closed at trust boundary
             await self._finish_provider_call(
                 idempotency_key,

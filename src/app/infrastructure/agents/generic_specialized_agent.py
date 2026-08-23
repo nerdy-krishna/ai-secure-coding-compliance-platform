@@ -5,6 +5,7 @@ import cvss
 from typing import Dict, Any, Optional, cast, List
 
 from app.infrastructure.observability.mask import mask as _mask_secrets
+from app.core.services.usage_budget_service import BudgetExceededError
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
@@ -47,9 +48,9 @@ _CODE_BUNDLE_MARKER = "\x00<<<CODE_BUNDLE_PLACEHOLDER>>>\x00"
 
 _SCANNER_FINDINGS_DESCRIPTION_CAP = 200
 
-# V02.4.1 / V02.3.2 — per-file resource ceilings
+# V02.4.1 / V02.3.2 — non-financial per-file safety ceilings. Monetary
+# admission is enforced centrally by the durable hierarchical budget service.
 MAX_LLM_CALLS_PER_FILE = 80
-MAX_COST_PER_FILE_USD = 1.0
 MAX_FINDINGS_PER_FILE = 50
 
 
@@ -769,9 +770,8 @@ async def analysis_node(
     if not llm_client:
         return {"error": f"[{agent_name}] Failed to initialize LLM client."}
 
-    # V02.4.1 — per-file LLM call / cost ceilings
+    # V02.4.1 — per-file LLM-call safety ceiling
     _llm_call_count = 0
-    _llm_accumulated_cost: float = 0.0
 
     _llm_call_count += 1
     llm_response = await llm_client.generate_structured_output(
@@ -820,9 +820,6 @@ async def analysis_node(
         output_tokens=llm_response.completion_tokens,
         total_tokens=llm_response.total_tokens,
     )
-    # V02.4.1 — accumulate cost from initial analysis call
-    _llm_accumulated_cost += llm_response.cost or 0.0
-
     async with AsyncSessionLocal() as db:
         repo = ScanRepository(db)
         await repo.save_llm_interaction(interaction_data=interaction)
@@ -852,17 +849,12 @@ async def analysis_node(
         initial_results.findings = initial_results.findings[:MAX_FINDINGS_PER_FILE]
 
     for finding_index, initial_finding in enumerate(initial_results.findings, start=1):
-        # V02.4.1 — check per-file LLM call / cost ceilings before each sub-call
+        # V02.4.1 — keep the non-financial call-chain ceiling. The central
+        # budget reservation at each provider boundary owns monetary limits.
         if _llm_call_count >= MAX_LLM_CALLS_PER_FILE:
             logger.warning(
                 "agent: LLM call ceiling reached; returning partial results",
                 extra={"agent": agent_name, "call_count": _llm_call_count},
-            )
-            break
-        if _llm_accumulated_cost >= MAX_COST_PER_FILE_USD:
-            logger.warning(
-                "agent: cost ceiling reached; returning partial results",
-                extra={"agent": agent_name, "cost_usd": _llm_accumulated_cost},
             )
             break
         finding_obj = _build_finding_object(
@@ -1037,6 +1029,8 @@ async def _verify_and_correct_snippet(
                 logger.warning(
                     "agent: LLM failed to provide corrected snippet on this attempt"
                 )
+        except BudgetExceededError:
+            raise
         except Exception:
             logger.error("agent: error during LLM snippet correction", exc_info=True)
 

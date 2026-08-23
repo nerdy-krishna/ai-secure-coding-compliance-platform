@@ -27,6 +27,7 @@ from app.infrastructure.database import AsyncSessionLocal
 from app.core.services.scan.task_ledger import ScanTaskLedgerService
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
+from app.infrastructure.workflows.budget import raise_first_budget_denial
 from app.shared.lib.llm_slots import (
     LLMStep,
     resolve_llm_config_id,
@@ -250,6 +251,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         *(_consolidate(fp, ff) for fp, ff in by_file.items()),
         return_exceptions=True,
     )
+    raise_first_budget_denial(results)
 
     consolidated: List[VulnerabilityFinding] = []
     all_flow_maps: list[dict] = []

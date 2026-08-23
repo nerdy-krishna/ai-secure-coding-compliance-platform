@@ -24,6 +24,7 @@ from app.config.config import settings
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
+    STATUS_BUDGET_EXHAUSTED,
     STATUS_COMPLETED,
     STATUS_REMEDIATION_COMPLETED,
 )
@@ -134,7 +135,11 @@ async def notify_scan_completed(scan_id: Any) -> None:
             status = scan.status
             if status in (STATUS_COMPLETED, STATUS_REMEDIATION_COMPLETED):
                 outcome = "completed"
-            elif status in (STATUS_BLOCKED_PRE_LLM, STATUS_BLOCKED_USER_DECLINE):
+            elif status in (
+                STATUS_BLOCKED_PRE_LLM,
+                STATUS_BLOCKED_USER_DECLINE,
+                STATUS_BUDGET_EXHAUSTED,
+            ):
                 outcome = "blocked"
             else:
                 outcome = "failed"

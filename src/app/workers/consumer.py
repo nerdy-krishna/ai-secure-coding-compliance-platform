@@ -48,6 +48,10 @@ from app.infrastructure.workflows.cancellation import (
     invoke_with_forceful_cancellation,
     record_cancellation_phase,
 )
+from app.infrastructure.workflows.budget import (
+    ScanBudgetExhausted,
+    release_scan_budget,
+)
 from app.infrastructure.workflows.worker_graph import (
     close_workflow_resources,
     get_workflow,
@@ -56,6 +60,7 @@ from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
+    STATUS_BUDGET_EXHAUSTED,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_FAILED,
@@ -95,6 +100,7 @@ _TERMINAL_STATUSES_FOR_CLEANUP = frozenset(
         STATUS_CANCELLED,
         STATUS_BLOCKED_PRE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
+        STATUS_BUDGET_EXHAUSTED,
     }
 )
 
@@ -130,6 +136,7 @@ async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
                     STATUS_CANCELLED: "cancelled",
                     STATUS_BLOCKED_PRE_LLM: "completed",
                     STATUS_BLOCKED_USER_DECLINE: "completed",
+                    STATUS_BUDGET_EXHAUSTED: "failed",
                 }.get(scan.status)
                 if attempt_status is not None:
                     from app.infrastructure.database.repositories.evidence_repo import (
@@ -604,6 +611,15 @@ async def _run_workflow_for_scan(
             "WORKFLOW: Scan %s observed durable cancellation; stopping before next node.",
             scan_id_str_log,
         )
+    except ScanBudgetExhausted:
+        # The workflow boundary atomically released unused scan holds and
+        # persisted BUDGET_EXHAUSTED.  Treat this as an expected terminal
+        # outcome so the generic failure path cannot overwrite it.
+        success = True
+        logger.info(
+            "WORKFLOW: Scan %s stopped at the next billable boundary after budget exhaustion.",
+            scan_id_str_log,
+        )
     except Exception:
         logger.error(
             "WORKFLOW: Exception during worker_workflow invocation",
@@ -665,6 +681,7 @@ async def _run_workflow_for_scan(
 
             async with AsyncSessionLocal() as db:
                 repo = ScanRepository(db)
+                await release_scan_budget(db, scan_id_uuid, reason="worker_failed")
                 await repo.update_status(scan_id_uuid, STATUS_FAILED)
             logger.info(
                 "WORKFLOW: Set scan status to FAILED in DB for SID: %s%s",

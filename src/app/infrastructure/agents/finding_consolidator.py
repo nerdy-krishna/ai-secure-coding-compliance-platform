@@ -30,6 +30,7 @@ import cvss
 from pydantic import BaseModel, Field
 
 from app.core.schemas import AffectedLocation, VulnerabilityFinding
+from app.core.services.usage_budget_service import BudgetExceededError
 from app.infrastructure.llm_client import LLMClient, get_llm_client
 from app.infrastructure.database.repositories.llm_usage_repo import (
     LLMUsageContext,
@@ -200,6 +201,8 @@ class FindingConsolidator:
                     scan_id=self._scan_id,
                 ),
             )
+        except BudgetExceededError:
+            raise
         except Exception as exc:  # noqa: BLE001 — never lose findings
             logger.warning(
                 "finding_consolidator: consolidation raised for %s: %s",

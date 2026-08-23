@@ -697,6 +697,7 @@ async def stream_scan_progress(
         # ADR-009 terminal states from the prescan-approval gate.
         "BLOCKED_PRE_LLM",
         "BLOCKED_USER_DECLINE",
+        "BUDGET_EXHAUSTED",
     }
     # §3.10a: prefer LISTEN/NOTIFY-driven re-reads over a per-client
     # 1 Hz Postgres poll. The bus dispatches a notification whenever

@@ -16,6 +16,10 @@ STATUS_COMPLETED: Final[str] = "COMPLETED"
 STATUS_REMEDIATION_COMPLETED: Final[str] = "REMEDIATION_COMPLETED"
 STATUS_FAILED: Final[str] = "FAILED"
 STATUS_CANCELLED: Final[str] = "CANCELLED"
+# Terminal partial-result state set when hierarchical budget admission denies
+# the next billable model call.  Work already paid for remains persisted; the
+# workflow must not report success or retry the denied call implicitly.
+STATUS_BUDGET_EXHAUSTED: Final[str] = "BUDGET_EXHAUSTED"
 # Pause set by the new `pending_prescan_approval_node` after the
 # deterministic SAST pre-pass returns one or more findings. The graph
 # `interrupt()`s here; the operator reviews findings on the scan-running
@@ -61,6 +65,7 @@ ALL_SCAN_STATUSES: Final[frozenset[str]] = frozenset(
         STATUS_REMEDIATION_COMPLETED,
         STATUS_FAILED,
         STATUS_CANCELLED,
+        STATUS_BUDGET_EXHAUSTED,
         STATUS_BLOCKED_PRE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
     }
@@ -89,6 +94,7 @@ TERMINAL_SCAN_STATUSES: Final[frozenset[str]] = frozenset(
         *COMPLETED_SCAN_STATUSES,
         STATUS_FAILED,
         STATUS_CANCELLED,
+        STATUS_BUDGET_EXHAUSTED,
         STATUS_BLOCKED_PRE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
     }
@@ -109,6 +115,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_GENERATING_REPORTS,
             STATUS_FAILED,
             STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
         }
     ),
     STATUS_ANALYZING_CONTEXT: frozenset(
@@ -118,6 +125,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_PENDING_PROFILING_APPROVAL,
             STATUS_FAILED,
             STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
         }
     ),
     STATUS_PENDING_PRESCAN_APPROVAL: frozenset(
@@ -127,6 +135,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
         }
     ),
     STATUS_PENDING_PROFILING_APPROVAL: frozenset(
@@ -135,6 +144,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
         }
     ),
     STATUS_PENDING_APPROVAL: frozenset(
@@ -143,6 +153,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
         }
     ),
     STATUS_QUEUED_FOR_SCAN: frozenset(
@@ -154,10 +165,16 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
         }
     ),
     STATUS_RUNNING_AGENTS: frozenset(
-        {STATUS_GENERATING_REPORTS, STATUS_FAILED, STATUS_CANCELLED}
+        {
+            STATUS_GENERATING_REPORTS,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
+        }
     ),
     STATUS_GENERATING_REPORTS: frozenset(
         {
@@ -165,12 +182,14 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_REMEDIATION_COMPLETED,
             STATUS_FAILED,
             STATUS_CANCELLED,
+            STATUS_BUDGET_EXHAUSTED,
         }
     ),
     STATUS_COMPLETED: frozenset(),
     STATUS_REMEDIATION_COMPLETED: frozenset(),
     STATUS_FAILED: frozenset(),
     STATUS_CANCELLED: frozenset(),
+    STATUS_BUDGET_EXHAUSTED: frozenset(),
     STATUS_BLOCKED_PRE_LLM: frozenset(),
     STATUS_BLOCKED_USER_DECLINE: frozenset(),
 }

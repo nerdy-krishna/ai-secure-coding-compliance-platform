@@ -30,6 +30,7 @@ from app.infrastructure.agents.cross_file_validator import (
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
+from app.infrastructure.workflows.budget import raise_first_budget_denial
 from app.shared.analysis_tools.cross_file_slicer import (
     CrossFileSlicer,
     CrossFileSlices,
@@ -131,6 +132,7 @@ async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
         *(_validate(idx, slices) for idx, slices in eligible),
         return_exceptions=True,
     )
+    raise_first_budget_denial(results)
 
     # Apply verdicts non-destructively: copy every finding, stamp the
     # status onto the eligible ones. Pre-filter-skipped findings keep a

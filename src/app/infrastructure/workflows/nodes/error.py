@@ -12,6 +12,7 @@ from typing import Any, Dict
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.workflows.state import WorkerState
+from app.infrastructure.workflows.budget import release_scan_budget
 from app.shared.lib.scan_status import STATUS_FAILED
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ async def handle_error_node(state: WorkerState) -> Dict[str, Any]:
     try:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
+            await release_scan_budget(db, scan_id, reason="scan_failed")
             changed = await repo.update_status(scan_id, STATUS_FAILED, commit=False)
             # A concurrent user cancellation remains authoritative and must
             # not acquire a misleading workflow-failure message.

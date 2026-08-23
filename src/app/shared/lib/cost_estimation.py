@@ -21,7 +21,6 @@ from typing import Any, Dict, Mapping, Optional
 
 import litellm
 
-from app.config.config import settings
 from app.infrastructure.database import models as db_models
 from app.shared.lib.llm_estimation import EstimateCalibration, calibrate_estimate
 from app.shared.lib.llm_usage import PriceSnapshot
@@ -300,11 +299,6 @@ def estimate_cost_for_prompt(
         predicted_output_tokens,
         total_estimated_cost,
     )
-    MAX_PER_SCAN_USD = getattr(settings, "MAX_PER_SCAN_ESTIMATED_COST_USD", 100.0)
-    if upper_bound_estimated_cost > MAX_PER_SCAN_USD:
-        raise ValueError(
-            f"Conservative estimated cost ${upper_bound_estimated_cost:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
-        )
     return {
         "input_cost": input_cost,
         "predicted_output_cost": predicted_output_cost,
@@ -349,8 +343,9 @@ def estimate_cost_two_slot(
     Each slot's input tokens are priced at *that slot's* configured
     rate; the slot totals are summed. When the same config sits in
     multiple slots the result equals a single-config estimate over the
-    combined token count. The per-scan ceiling is applied to the
-    combined total, not to any slot alone.
+    combined token count. Budget admission is deliberately separate from
+    estimation: the durable tenant policy service evaluates the combined
+    conservative envelope at the approval boundary.
 
     When ``secondary_reasoning_config`` is supplied (#93 — the opt-in
     second reasoning LLM), the analysis pass is priced a second time at
@@ -409,11 +404,6 @@ def estimate_cost_two_slot(
     upper_total = sum(s["upper_bound_estimated_cost"] for s in priced)
     active_priced = [s for s in priced if s["upper_bound_input_tokens"] > 0] or priced
 
-    MAX_PER_SCAN_USD = getattr(settings, "MAX_PER_SCAN_ESTIMATED_COST_USD", 100.0)
-    if upper_total > MAX_PER_SCAN_USD:
-        raise ValueError(
-            f"Conservative estimated cost ${upper_total:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
-        )
     logger.debug(
         "Two-slot cost estimate: reasoning=$%.6f utility=$%.6f "
         "secondary=$%.6f total=$%.6f",

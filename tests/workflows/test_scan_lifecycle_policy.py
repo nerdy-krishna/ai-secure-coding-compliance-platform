@@ -9,6 +9,7 @@ from app.shared.lib.scan_status import (
     STATUS_ANALYZING_CONTEXT,
     STATUS_BLOCKED_PRE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
+    STATUS_BUDGET_EXHAUSTED,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_FAILED,
@@ -80,6 +81,17 @@ class LifecycleDispatchContractTests(unittest.TestCase):
         for active in ACTIVE_SCAN_STATUSES:
             self.assertTrue(is_scan_status_transition_allowed(active, STATUS_FAILED))
             self.assertTrue(is_scan_status_transition_allowed(active, STATUS_CANCELLED))
+            self.assertTrue(
+                is_scan_status_transition_allowed(active, STATUS_BUDGET_EXHAUSTED)
+            )
+
+        self.assertIn(STATUS_BUDGET_EXHAUSTED, TERMINAL_SCAN_STATUSES)
+        self.assertNotIn(STATUS_BUDGET_EXHAUSTED, ACTIVE_SCAN_STATUSES)
+        self.assertFalse(
+            is_scan_status_transition_allowed(
+                STATUS_BUDGET_EXHAUSTED, STATUS_QUEUED, manual=True
+            )
+        )
 
         self.assertTrue(
             is_scan_status_transition_allowed(

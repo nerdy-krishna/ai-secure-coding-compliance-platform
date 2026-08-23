@@ -30,6 +30,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.core.services.usage_budget_service import BudgetExceededError
 from app.infrastructure.llm_client import LLMClient, get_llm_client
 from app.infrastructure.database.repositories.llm_usage_repo import (
     LLMUsageContext,
@@ -142,6 +143,8 @@ class CrossFileValidator:
                     scan_id=self._scan_id,
                 ),
             )
+        except BudgetExceededError:
+            raise
         except Exception as exc:  # noqa: BLE001 — fail safe, never raise
             logger.warning(
                 "cross_file_validator: validation raised for %s: %s",

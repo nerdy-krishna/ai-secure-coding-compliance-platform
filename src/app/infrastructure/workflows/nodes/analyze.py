@@ -25,6 +25,8 @@ from app.core.schemas import (
     VulnerabilityFinding,
 )
 from app.core.services.scan.task_ledger import ScanTaskLedgerService
+from app.core.services.usage_budget_service import BudgetExceededError
+from app.infrastructure.workflows.budget import raise_first_budget_denial
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.agents.generic_specialized_agent import (
     build_generic_specialized_agent_graph,
@@ -493,6 +495,12 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                                 )
                             ),
                         )
+                    except BudgetExceededError as exc:
+                        async with AsyncSessionLocal() as task_db:
+                            await ScanTaskLedgerService(task_db).fail_task(
+                                lease.task.id, error=exc.code, retryable=False
+                            )
+                        raise
                     except Exception as exc:
                         async with AsyncSessionLocal() as task_db:
                             await ScanTaskLedgerService(task_db).fail_task(
@@ -523,6 +531,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                 tasks.append(_invoke_durable())
 
             agent_results = await asyncio.gather(*tasks, return_exceptions=True)
+            raise_first_budget_denial(agent_results)
             # Per-agent diagnostics — historically this loop swallowed
             # every exception and None silently, which is why scans
             # were completing with 0 findings even though N agent
@@ -660,6 +669,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     # agent calls regardless of which file they belong to).
     file_tasks = [analyze_one_file(fp) for fp in live_codebase.keys()]
     file_results = await asyncio.gather(*file_tasks, return_exceptions=True)
+    raise_first_budget_denial(file_results)
 
     all_scan_findings: List[VulnerabilityFinding] = []
     all_fix_candidates: List[FixResult] = []
