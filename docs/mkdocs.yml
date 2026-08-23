@@ -177,6 +177,7 @@ nav:
   - Operations:
       - Identity and Session Recovery: operations/identity-session-recovery.md
       - Tenant Authorization Rollout: operations/tenant-authorization-rollout.md
+      - Usage Budget Enforcement: operations/usage-budget-enforcement.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

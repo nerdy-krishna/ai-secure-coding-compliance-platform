@@ -79,7 +79,7 @@ flowchart TB
     API["/api/v1/rag/documents/ingest<br/>/api/v1/rag/ingest-security-standard"]:::app
     Parse["Parser<br/>(pandas for CSV, native JSON,<br/>PDF text extract, MD chunker)"]:::app
     Sanitize["Sanitizer<br/>· allowed cols: control_family, control_title,<br/>  section, category, language<br/>· strip newlines/backticks<br/>· max 256 chars per value"]:::app
-    Prep["RAGPreprocessorService<br/>(rag_preprocessor_service.py)<br/>· Semaphore(10)<br/>· MAX_DOC_TEXT_CHARS=8000<br/>· MAX_JOB_COST_USD=$25"]:::app
+    Prep["RAGPreprocessorService<br/>(rag_preprocessor_service.py)<br/>· Semaphore(10)<br/>· MAX_DOC_TEXT_CHARS=8000<br/>· MAX_JOB_COST_USD=$25 compatibility guard"]:::app
     Cost["Cost estimator<br/>count_tokens × pricing →<br/>estimated_cost"]:::app
     JobP["rag_preprocessing_jobs<br/>status=PENDING_APPROVAL"]:::data
     Approve{Admin approves<br/>cost gate}:::gate
@@ -105,6 +105,10 @@ flowchart TB
     classDef obs  fill:#fef3c7,stroke:#b45309,color:#451a03;
     classDef gate fill:#ede9fe,stroke:#6d28d9,color:#2e1065,stroke-dasharray: 4 3;
 ```
+
+The `$25` job-level ceiling remains a compatibility guard. Each enrichment
+model call also passes through durable tenant/group/user request, UTC-day, and
+UTC-month budget policies before provider invocation.
 
 ### Job lifecycle — `rag_preprocessing_jobs` state machine
 

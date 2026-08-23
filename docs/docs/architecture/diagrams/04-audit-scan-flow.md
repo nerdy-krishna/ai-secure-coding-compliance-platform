@@ -25,6 +25,7 @@ sequenceDiagram
     participant W as LangGraph Worker
     participant SC as Deterministic scanners<br/>Bandit · Semgrep · Gitleaks · OSV
     participant RAG as Qdrant RAG
+    participant BUD as Usage budget<br/>reservations
     participant LLM as LLM provider<br/>(Pydantic AI)
     participant SSE as SSE stream<br/>(GET /scans/{id}/stream)
 
@@ -98,6 +99,7 @@ sequenceDiagram
 
     Dev->>SPA: approve cost
     SPA->>API: POST /scans/{id}/approve {kind: cost_approval, approved: true}
+    API->>BUD: reserve analysis envelope<br/>(scan attempt + day/month policies)
     API->>MQ: publish analysis_approved_queue (via outbox)
     MQ-->>W: resume
 
@@ -105,8 +107,10 @@ sequenceDiagram
       Note over W,LLM: Node 7 - analyze_files_parallel_node (16-way fan-out)
       W->>RAG: search_by_framework(framework, file_excerpt) · top-k
       RAG-->>W: enriched control snippets
+      W->>BUD: reserve child hold before provider call
       W->>LLM: per-finding agent call<br/>Pydantic AI structured output<br/>cache_control on system prompt
       LLM-->>W: parsed VulnerabilityFinding + FixResult
+      W->>BUD: settle canonical usage event
       W->>DB: insert llm_interactions (tokens, cost, latency)
       W->>DB: insert scan_events (FILE_ANALYZED with file_path, findings_count, fixes_count)
       W-->>SSE: scan_event per file
@@ -161,6 +165,10 @@ stateDiagram-v2
 
     GENERATING_REPORTS --> REMEDIATION_COMPLETED : scan_type = REMEDIATE<br/>(see diagram 05)
 
+    RUNNING_AGENTS --> BUDGET_EXHAUSTED : next billable call denied<br/>partial evidence retained
+    CORRELATING --> BUDGET_EXHAUSTED
+    GENERATING_REPORTS --> BUDGET_EXHAUSTED
+
     RUNNING_AGENTS --> FAILED : worker error / timeout
     CORRELATING --> FAILED
     GENERATING_REPORTS --> FAILED
@@ -174,6 +182,7 @@ stateDiagram-v2
     BLOCKED_PRE_LLM --> [*]
     EXPIRED --> [*]
     FAILED --> [*]
+    BUDGET_EXHAUSTED --> [*]
 ```
 
 ---
@@ -243,6 +252,7 @@ Both carry `DeliveryMode.PERSISTENT`; the `sccap-bounded-queues` RabbitMQ policy
 | `BLOCKED_PRE_LLM`       | Non-overridable critical secret; LLM tokens never spent                                                     |
 | `EXPIRED`               | Prescan-approval sweeper timed the scan out after 30 min                                                    |
 | `FAILED`                | Worker exception; full trace persisted via Fluentd → Loki + `scans.error_message`                            |
+| `BUDGET_EXHAUSTED`      | Next model call exceeded a durable policy; partial evidence remains and unused holds are released            |
 
 ### Cleanup
 

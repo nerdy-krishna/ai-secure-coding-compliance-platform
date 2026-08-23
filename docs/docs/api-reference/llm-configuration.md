@@ -36,6 +36,13 @@ text-only fallback when no versioned price override exists:
   categories. Zero is valid for a category explicitly priced at zero;
   omitted categories are rejected.
 
+Before provider admission, SCCAP creates a durable conservative hold against
+every applicable tenant, group, and user usage-budget policy. The canonical
+event settles that hold after the response; a provider call with missing
+accounting is conserved rather than released. See
+[Usage budget enforcement](../operations/usage-budget-enforcement.md) for
+policy windows, administration endpoints, and failure behavior.
+
 ## Supported providers
 
 | Provider | Type | Notes |
