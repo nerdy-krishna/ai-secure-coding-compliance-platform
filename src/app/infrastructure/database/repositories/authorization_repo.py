@@ -270,6 +270,8 @@ class AuthorizationRepository:
             return row
         if row.status != "approved":
             raise AuthorizationDeniedError("action request is not approved")
+        if row.expires_at <= datetime.now(timezone.utc):
+            raise AuthorizationConflictError("action request expired")
         if row.payload_digest != payload_digest_value:
             raise AuthorizationDeniedError("approved payload changed")
         if row.requester_permission not in requester_permissions:

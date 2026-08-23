@@ -28,6 +28,11 @@ export interface BrowserSessionRead {
   absolute_expires_at: string;
 }
 
+export interface RoleChangeRequestRead {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "expired" | "executed" | "cancelled";
+}
+
 export const authService = {
   // Login
   // FastAPI Users' /auth/login endpoint expects form data (username, password)
@@ -131,6 +136,30 @@ export const authService = {
     data: { is_active?: boolean; is_verified?: boolean },
   ): Promise<AdminUserRead> => {
     const response = await apiClient.patch<AdminUserRead>(`/admin/users/${userId}`, data);
+    return response.data;
+  },
+
+  adminUpdateUserRoles: async (
+    userId: number,
+    roleKeys: string[],
+    actionRequestId?: string,
+  ): Promise<AdminUserRead> => {
+    const response = await apiClient.patch<AdminUserRead>(`/admin/users/${userId}/roles`, {
+      role_keys: roleKeys,
+      action_request_id: actionRequestId || undefined,
+    });
+    return response.data;
+  },
+
+  adminRequestUserRoleChange: async (
+    userId: number,
+    roleKeys: string[],
+  ): Promise<RoleChangeRequestRead> => {
+    const response = await apiClient.post<RoleChangeRequestRead>(
+      `/admin/users/${userId}/role-change-requests`,
+      { role_keys: roleKeys },
+      { headers: { "X-Idempotency-Key": crypto.randomUUID() } },
+    );
     return response.data;
   },
 

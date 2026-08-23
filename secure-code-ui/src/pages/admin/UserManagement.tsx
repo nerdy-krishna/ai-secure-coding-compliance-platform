@@ -1,6 +1,6 @@
 // secure-code-ui/src/pages/admin/UserManagement.tsx
 //
-// Tenant user management — create, edit active/verified state, and delete.
+// Tenant user management — create, edit status/roles, and delete.
 // Rows are clickable to open an edit drawer. The master admin (lowest user id =
 // setup admin) has a deletion lock; only their own actions are blocked — other
 // admins cannot delete them either.
@@ -28,7 +28,17 @@ interface EditState {
   user: AdminUserRead;
   is_active: boolean;
   is_verified: boolean;
+  role_keys: string[];
+  action_request_id: string;
 }
+
+const TENANT_ROLES = [
+  "tenant_admin",
+  "security_approver",
+  "analyst",
+  "developer",
+  "auditor",
+] as const;
 
 function roleLabel(role: string): string {
   return role
@@ -121,6 +131,8 @@ const UserManagementTab: React.FC = () => {
       user: u,
       is_active: u.is_active,
       is_verified: u.is_verified,
+      role_keys: u.role_keys.filter((role) => role !== "platform_owner"),
+      action_request_id: "",
     });
     setDeleteConfirmOpen(false);
   };
@@ -135,10 +147,45 @@ const UserManagementTab: React.FC = () => {
 
     setSaving(true);
     try {
-      const updated = await authService.adminUpdateUser(editState.user.id, {
-        is_active: editState.is_active,
-        is_verified: editState.is_verified,
-      });
+      let updated = editState.user;
+      const statusDirty =
+        editState.is_active !== editState.user.is_active ||
+        editState.is_verified !== editState.user.is_verified;
+      if (statusDirty) {
+        updated = await authService.adminUpdateUser(editState.user.id, {
+          is_active: editState.is_active,
+          is_verified: editState.is_verified,
+        });
+      }
+      const originalRoles = editState.user.role_keys
+        .filter((role) => role !== "platform_owner")
+        .sort();
+      const desiredRoles = [...editState.role_keys].sort();
+      const rolesDirty = originalRoles.join(",") !== desiredRoles.join(",");
+      if (rolesDirty) {
+        try {
+          updated = await authService.adminUpdateUserRoles(
+            editState.user.id,
+            desiredRoles,
+            editState.action_request_id.trim() || undefined,
+          );
+        } catch (err: unknown) {
+          const response = (err as { response?: { status?: number; data?: { detail?: string } } })
+            ?.response;
+          if (response?.status === 409 && !editState.action_request_id.trim()) {
+            const request = await authService.adminRequestUserRoleChange(
+              editState.user.id,
+              desiredRoles,
+            );
+            setEditState({ ...editState, action_request_id: request.id });
+            toast.warn(
+              `Approval request ${request.id} created. A distinct tenant admin must approve it; then save again to execute.`,
+            );
+            return;
+          }
+          throw err;
+        }
+      }
       toast.success("User updated.");
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
       closeEdit();
@@ -174,7 +221,9 @@ const UserManagementTab: React.FC = () => {
   // Dirty check for the edit modal save button
   const editDirty = editState
     ? editState.is_active !== editState.user.is_active ||
-      editState.is_verified !== editState.user.is_verified
+      editState.is_verified !== editState.user.is_verified ||
+      editState.user.role_keys.filter((role) => role !== "platform_owner").sort().join(",") !==
+        [...editState.role_keys].sort().join(",")
     : false;
 
   const isMasterAdmin = (u: AdminUserRead) => u.id === masterAdminId;
@@ -498,14 +547,50 @@ const UserManagementTab: React.FC = () => {
             />
             <div style={{ display: "grid", gap: 6 }}>
               <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>Roles</span>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {editState.user.role_keys.map((role) => (
-                  <span className="chip" key={role}>{roleLabel(role)}</span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {TENANT_ROLES.map((role) => (
+                  <label
+                    key={role}
+                    style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={editState.role_keys.includes(role)}
+                      onChange={(event) => {
+                        const next = event.target.checked
+                          ? [...editState.role_keys, role]
+                          : editState.role_keys.filter((key) => key !== role);
+                        if (next.length === 0) {
+                          toast.error("At least one tenant role is required.");
+                          return;
+                        }
+                        setEditState({
+                          ...editState,
+                          role_keys: next,
+                          action_request_id: "",
+                        });
+                      }}
+                    />
+                    {roleLabel(role)}
+                  </label>
                 ))}
               </div>
               <span style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}>
-                Role changes use the tenant authorization workflow.
+                In critical mode, permission increases require approval by a distinct tenant admin.
               </span>
+              <label style={{ display: "grid", gap: 5, marginTop: 4 }}>
+                <span style={{ fontSize: 11.5, color: "var(--fg-muted)" }}>
+                  Approved action request ID (only for critical elevation)
+                </span>
+                <input
+                  className="sccap-input"
+                  value={editState.action_request_id}
+                  placeholder="Created automatically, or paste an approved request ID"
+                  onChange={(event) =>
+                    setEditState({ ...editState, action_request_id: event.target.value })
+                  }
+                />
+              </label>
             </div>
           </div>
         )}

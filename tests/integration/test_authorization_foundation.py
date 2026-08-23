@@ -350,6 +350,33 @@ class AuthorizationFoundationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             self.assertEqual(row.status, "executed")
 
+    async def test_approved_request_cannot_execute_after_expiry(self) -> None:
+        request_id, digest, _fingerprint = await self._create_request(
+            f"waiver:{uuid4()}"
+        )
+        async with AsyncSessionLocal() as db:
+            repo = AuthorizationRepository(db)
+            row = await repo.decide_action_request(
+                request_id=request_id,
+                tenant_id=self.tenant_id,
+                approver_user_id=self.approver_a_id,
+                approver_permissions={WAIVER_APPROVE},
+                requester_permissions={WAIVER_REQUEST},
+                approved=True,
+                reason="reviewed before expiry",
+            )
+            row.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await db.commit()
+        async with AsyncSessionLocal() as db:
+            with self.assertRaises(AuthorizationConflictError):
+                await AuthorizationRepository(db).mark_executed(
+                    request_id=request_id,
+                    tenant_id=self.tenant_id,
+                    payload_digest_value=digest,
+                    requester_permissions={WAIVER_REQUEST},
+                    approver_permissions={WAIVER_APPROVE},
+                )
+
     async def test_authorization_audit_is_append_only(self) -> None:
         async with AsyncSessionLocal() as db:
             repo = AuthorizationRepository(db)

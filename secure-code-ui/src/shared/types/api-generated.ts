@@ -1586,6 +1586,46 @@ export interface paths {
         patch: operations["admin_update_user_api_v1_admin_users__user_id__patch"];
         trace?: never;
     };
+    "/api/v1/admin/users/{user_id}/role-change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Admin User Role Change
+         * @description Request distinct approval for an exact critical-mode privilege increase.
+         */
+        post: operations["request_admin_user_role_change_api_v1_admin_users__user_id__role_change_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/users/{user_id}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Admin Update User Roles
+         * @description Replace one tenant user's roles, enforcing critical-mode elevation SoD.
+         */
+        patch: operations["admin_update_user_roles_api_v1_admin_users__user_id__roles_patch"];
+        trace?: never;
+    };
     "/api/v1/admin/rule-sources/settings": {
         parameters: {
             query?: never;
@@ -3088,6 +3128,18 @@ export interface components {
             is_verified: boolean;
             /** Role Keys */
             role_keys: string[];
+        };
+        /** AdminUserRoleChangeRequestCreate */
+        AdminUserRoleChangeRequestCreate: {
+            /** Role Keys */
+            role_keys: string[];
+        };
+        /** AdminUserRoleUpdate */
+        AdminUserRoleUpdate: {
+            /** Role Keys */
+            role_keys: string[];
+            /** Action Request Id */
+            action_request_id?: string | null;
         };
         /** AdminUserUpdate */
         AdminUserUpdate: {
@@ -5863,6 +5915,8 @@ export interface components {
             tenant_id: string;
             /** Password */
             password: string;
+            /** Reason */
+            reason: string;
         };
         /** TenantEntryRead */
         TenantEntryRead: {
@@ -9060,6 +9114,78 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AdminUserUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_admin_user_role_change_api_v1_admin_users__user_id__role_change_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Idempotency-Key": string;
+            };
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserRoleChangeRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_update_user_roles_api_v1_admin_users__user_id__roles_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserRoleUpdate"];
             };
         };
         responses: {

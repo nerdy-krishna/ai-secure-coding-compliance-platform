@@ -2,16 +2,22 @@ import logging
 import secrets
 import string
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict, EmailStr
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 import sqlalchemy as sa
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
+from app.api.v1.dependencies import (
+    get_current_permissions,
+    get_current_user_tenant_id,
+    require_permission,
+)
+from app.api.v1.routers.authorization import ActionRequestRead, action_request_to_read
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.manager import UserManager, get_user_manager
 from app.infrastructure.database.models import RoleAssignment, User
@@ -19,7 +25,23 @@ from app.infrastructure.auth.sso import audit
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
-from app.shared.lib.permissions import ANALYST, IDENTITY_MANAGE, IDENTITY_READ
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationConflictError,
+    AuthorizationDeniedError,
+    AuthorizationRepository,
+    payload_digest,
+    target_fingerprint,
+)
+from app.shared.lib.permissions import (
+    ANALYST,
+    AUDITOR,
+    DEVELOPER,
+    IDENTITY_MANAGE,
+    IDENTITY_READ,
+    SECURITY_APPROVER,
+    TENANT_ADMIN,
+    permissions_for_roles,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +76,39 @@ class AdminUserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_superuser: Optional[bool] = None
     is_verified: Optional[bool] = None
+
+
+TENANT_ROLE_KEYS = frozenset(
+    {TENANT_ADMIN, SECURITY_APPROVER, ANALYST, DEVELOPER, AUDITOR}
+)
+
+
+class AdminUserRoleUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role_keys: list[str] = Field(..., min_length=1, max_length=len(TENANT_ROLE_KEYS))
+    action_request_id: uuid.UUID | None = None
+
+    @field_validator("role_keys")
+    @classmethod
+    def validate_role_keys(cls, value: list[str]) -> list[str]:
+        normalized = sorted(set(value))
+        if len(normalized) != len(value):
+            raise ValueError("role_keys must be unique")
+        if not set(normalized).issubset(TENANT_ROLE_KEYS):
+            raise ValueError("role_keys contains a non-tenant role")
+        return normalized
+
+
+class AdminUserRoleChangeRequestCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role_keys: list[str] = Field(..., min_length=1, max_length=len(TENANT_ROLE_KEYS))
+
+    @field_validator("role_keys")
+    @classmethod
+    def validate_role_keys(cls, value: list[str]) -> list[str]:
+        return AdminUserRoleUpdate.validate_role_keys(value)
 
 
 async def _get_master_admin_id(session: AsyncSession) -> int:
@@ -130,6 +185,35 @@ def _to_admin_read(user: User, role_keys: list[str]) -> AdminUserRead:
         is_verified=user.is_verified,
         role_keys=role_keys,
     )
+
+
+async def _tenant_role_keys_for_user(
+    session: AsyncSession, *, user_id: int, tenant_id: uuid.UUID
+) -> list[str]:
+    rows = await session.scalars(
+        select(RoleAssignment.role_key)
+        .where(
+            RoleAssignment.user_id == user_id,
+            RoleAssignment.tenant_id == tenant_id,
+        )
+        .order_by(RoleAssignment.role_key)
+    )
+    return [str(role_key) for role_key in rows.all()]
+
+
+def _role_change_payload(role_keys: list[str]) -> dict[str, list[str]]:
+    return {"role_keys": sorted(role_keys)}
+
+
+def _role_change_fingerprint(*, tenant_id: uuid.UUID, user_id: int) -> str:
+    return target_fingerprint(
+        resource_type="user_role_assignment",
+        target_id=f"{tenant_id}:{user_id}",
+    )
+
+
+def _is_privilege_elevation(*, current: list[str], desired: list[str]) -> bool:
+    return not permissions_for_roles(desired).issubset(permissions_for_roles(current))
 
 
 @router.post(
@@ -334,6 +418,202 @@ async def admin_update_user(
         },
     )
     return _to_admin_read(target, role_keys[target.id])
+
+
+@router.post(
+    "/users/{user_id}/role-change-requests",
+    response_model=ActionRequestRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(IDENTITY_MANAGE))],
+)
+async def request_admin_user_role_change(
+    user_id: int,
+    payload: AdminUserRoleChangeRequestCreate,
+    idempotency_key: str = Header(..., alias="X-Idempotency-Key", max_length=128),
+    acting_user: User = Depends(current_active_user),
+    permissions: frozenset[str] = Depends(get_current_permissions),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
+    user_manager: UserManager = Depends(get_user_manager),
+) -> ActionRequestRead:
+    """Request distinct approval for an exact critical-mode privilege increase."""
+
+    session = user_manager.user_db.session
+    target = await session.scalar(
+        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    repo = AuthorizationRepository(session)
+    if await repo.separation_of_duties_mode(tenant_id=tenant_id) != "critical":
+        raise HTTPException(
+            status_code=409,
+            detail="A distinct-actor request is only used in critical mode.",
+        )
+    current = await _tenant_role_keys_for_user(
+        session, user_id=target.id, tenant_id=tenant_id
+    )
+    if not _is_privilege_elevation(current=current, desired=payload.role_keys):
+        raise HTTPException(
+            status_code=409,
+            detail="The requested role change is not a privilege elevation.",
+        )
+
+    fingerprint = _role_change_fingerprint(tenant_id=tenant_id, user_id=target.id)
+    try:
+        action = await repo.create_action_request(
+            tenant_id=tenant_id,
+            requester_user_id=acting_user.id,
+            requester_permission=IDENTITY_MANAGE,
+            approver_permission=IDENTITY_MANAGE,
+            target_type="user_role_change",
+            target_fingerprint_value=fingerprint,
+            payload_digest_value=payload_digest(_role_change_payload(payload.role_keys)),
+            idempotency_key=idempotency_key,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+    except AuthorizationConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    repo.record_audit(
+        tenant_id=tenant_id,
+        principal_kind="human",
+        principal_id=str(acting_user.id),
+        permission=IDENTITY_MANAGE,
+        resource_type="user_role_assignment",
+        target_fingerprint_value=fingerprint,
+        outcome="requested",
+        reason_code="privilege_elevation_requested",
+        action_request_id=action.id,
+    )
+    await session.commit()
+    return action_request_to_read(
+        action, actor_user_id=acting_user.id, permissions=permissions
+    )
+
+
+@router.patch(
+    "/users/{user_id}/roles",
+    response_model=AdminUserRead,
+    dependencies=[Depends(require_permission(IDENTITY_MANAGE))],
+)
+async def admin_update_user_roles(
+    user_id: int,
+    payload: AdminUserRoleUpdate,
+    acting_user: User = Depends(current_active_user),
+    permissions: frozenset[str] = Depends(get_current_permissions),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
+    user_manager: UserManager = Depends(get_user_manager),
+) -> AdminUserRead:
+    """Replace one tenant user's roles, enforcing critical-mode elevation SoD."""
+
+    session = user_manager.user_db.session
+    target = await session.scalar(
+        select(User)
+        .where(User.id == user_id, User.tenant_id == tenant_id)
+        .with_for_update()
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    current = await _tenant_role_keys_for_user(
+        session, user_id=target.id, tenant_id=tenant_id
+    )
+    if current == payload.role_keys:
+        effective = await _role_keys_for_users(
+            session, user_ids=[target.id], tenant_id=tenant_id
+        )
+        return _to_admin_read(target, effective[target.id])
+
+    repo = AuthorizationRepository(session)
+    fingerprint = _role_change_fingerprint(tenant_id=tenant_id, user_id=target.id)
+    requires_approval = (
+        await repo.separation_of_duties_mode(tenant_id=tenant_id) == "critical"
+        and _is_privilege_elevation(current=current, desired=payload.role_keys)
+    )
+    approver_id: int | None = None
+    outcome = "allowed"
+    reason_code = "tenant_roles_replaced"
+    if requires_approval:
+        if payload.action_request_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail="An approved distinct-actor action request is required.",
+            )
+        action = await repo.get_action_request(
+            request_id=payload.action_request_id, tenant_id=tenant_id
+        )
+        if (
+            action is None
+            or action.requester_user_id != acting_user.id
+            or action.target_type != "user_role_change"
+            or action.target_fingerprint != fingerprint
+        ):
+            raise HTTPException(status_code=404, detail="Action request not found.")
+        approver_permissions = await repo.permissions_for_user_id(
+            user_id=action.approver_user_id or -1,
+            tenant_id=tenant_id,
+        )
+        try:
+            await repo.mark_executed(
+                request_id=action.id,
+                tenant_id=tenant_id,
+                payload_digest_value=payload_digest(
+                    _role_change_payload(payload.role_keys)
+                ),
+                requester_permissions=permissions,
+                approver_permissions=approver_permissions,
+            )
+        except (AuthorizationConflictError, AuthorizationDeniedError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        approver_id = action.approver_user_id
+        outcome = "executed"
+        reason_code = "approved_privilege_elevation_executed"
+    elif payload.action_request_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="An action request is not applicable to this role change.",
+        )
+
+    await session.execute(
+        delete(RoleAssignment).where(
+            RoleAssignment.user_id == target.id,
+            RoleAssignment.tenant_id == tenant_id,
+        )
+    )
+    session.add_all(
+        RoleAssignment(
+            user_id=target.id,
+            tenant_id=tenant_id,
+            role_key=role_key,
+            created_by_user_id=acting_user.id,
+        )
+        for role_key in payload.role_keys
+    )
+    repo.record_audit(
+        tenant_id=tenant_id,
+        principal_kind="human",
+        principal_id=str(acting_user.id),
+        permission=IDENTITY_MANAGE,
+        resource_type="user_role_assignment",
+        target_fingerprint_value=fingerprint,
+        outcome=outcome,
+        reason_code=reason_code,
+        action_request_id=payload.action_request_id,
+        approver_principal_id=str(approver_id) if approver_id is not None else None,
+    )
+    await session.commit()
+    logger.warning(
+        "authorization.tenant_roles_replaced",
+        extra={
+            "actor_id": acting_user.id,
+            "target_fingerprint": fingerprint,
+            "approval_required": requires_approval,
+        },
+    )
+    effective = await _role_keys_for_users(
+        session, user_ids=[target.id], tenant_id=tenant_id
+    )
+    return _to_admin_read(target, effective[target.id])
 
 
 @router.delete(
