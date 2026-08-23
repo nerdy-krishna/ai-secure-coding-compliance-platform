@@ -16,7 +16,13 @@ from app.infrastructure.auth.session import (
     decode_session_credential,
 )
 from app.infrastructure.database.database import AsyncSessionLocal, engine
-from app.infrastructure.database.models import AuthSession, Tenant, User
+from app.infrastructure.database.models import (
+    AuthSession,
+    RoleAssignment,
+    Tenant,
+    User,
+)
+from app.shared.lib.permissions import TENANT_ADMIN
 from tests.integration.support import integration_test
 
 
@@ -64,6 +70,13 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             db.add_all([user, same_tenant_user, foreign_user])
             await db.flush()
+            db.add(
+                RoleAssignment(
+                    user_id=user.id,
+                    tenant_id=user.tenant_id,
+                    role_key=TENANT_ADMIN,
+                )
+            )
             same_session = await BrowserSessionService(db).create(
                 same_tenant_user,
                 auth_method="password",

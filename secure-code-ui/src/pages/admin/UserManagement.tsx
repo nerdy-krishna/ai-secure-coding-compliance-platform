@@ -1,6 +1,6 @@
 // secure-code-ui/src/pages/admin/UserManagement.tsx
 //
-// Admin user management — create, edit (active/verified/superuser flags), delete.
+// Tenant user management — create, edit active/verified state, and delete.
 // Rows are clickable to open an edit drawer. The master admin (lowest user id =
 // setup admin) has a deletion lock; only their own actions are blocked — other
 // admins cannot delete them either.
@@ -12,31 +12,29 @@ import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import { useToast } from "../../shared/ui/Toast";
 
-// V08.4.2: superuser-confirmation modal state type
-interface SuperuserConfirmState {
-  open: boolean;
-  pendingForm: CreateForm | null;
-}
-
 interface CreateForm {
   email: string;
   is_active: boolean;
-  is_superuser: boolean;
   is_verified: boolean;
 }
 
 const INITIAL_FORM: CreateForm = {
   email: "",
   is_active: true,
-  is_superuser: false,
   is_verified: false,
 };
 
 interface EditState {
   user: AdminUserRead;
   is_active: boolean;
-  is_superuser: boolean;
   is_verified: boolean;
+}
+
+function roleLabel(role: string): string {
+  return role
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function initials(email: string): string {
@@ -58,17 +56,12 @@ const UserManagementTab: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<CreateForm>(INITIAL_FORM);
   const [search, setSearch] = useState("");
-  // V08.4.2: track whether the step-up confirmation modal is open
-  const [superuserConfirm, setSuperuserConfirm] = useState<SuperuserConfirmState>({ open: false, pendingForm: null });
-  const [stepUpLoading, setStepUpLoading] = useState(false);
 
   // Edit modal state
   const [editState, setEditState] = useState<EditState | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // Escalation confirm for edit modal superuser toggle
-  const [editSuperuserConfirm, setEditSuperuserConfirm] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -101,30 +94,11 @@ const UserManagementTab: React.FC = () => {
     }
 
     // V02.2.3: warn on inconsistent flag combinations before submitting
-    if (form.is_superuser && !form.is_active) {
-      toast.warn("Creating an inactive superuser — confirm this is intentional.");
-    }
     if (form.is_verified && !form.is_active) {
       toast.warn("Creating an inactive verified user — confirm this is intentional.");
     }
 
-    // V08.4.2: require explicit step-up confirmation when granting superuser
-    if (form.is_superuser) {
-      setSuperuserConfirm({ open: true, pendingForm: { ...form } });
-      setCreating(false);
-      return;
-    }
-
     await doCreateUser(form);
-  };
-
-  // V08.4.2: called after the operator confirms the privilege-escalation modal.
-  const handleSuperuserConfirmed = async () => {
-    if (!superuserConfirm.pendingForm) return;
-    setStepUpLoading(true);
-    await doCreateUser(superuserConfirm.pendingForm);
-    setSuperuserConfirm({ open: false, pendingForm: null });
-    setStepUpLoading(false);
   };
 
   const doCreateUser = async (payload: CreateForm) => {
@@ -146,33 +120,23 @@ const UserManagementTab: React.FC = () => {
     setEditState({
       user: u,
       is_active: u.is_active,
-      is_superuser: u.is_superuser,
       is_verified: u.is_verified,
     });
     setDeleteConfirmOpen(false);
-    setEditSuperuserConfirm(false);
   };
 
   const closeEdit = () => {
     setEditState(null);
     setDeleteConfirmOpen(false);
-    setEditSuperuserConfirm(false);
   };
 
   const handleSaveEdit = async () => {
     if (!editState) return;
 
-    // Ask for escalation confirmation if superuser is being granted
-    if (editState.is_superuser && !editState.user.is_superuser && !editSuperuserConfirm) {
-      setEditSuperuserConfirm(true);
-      return;
-    }
-
     setSaving(true);
     try {
       const updated = await authService.adminUpdateUser(editState.user.id, {
         is_active: editState.is_active,
-        is_superuser: editState.is_superuser,
         is_verified: editState.is_verified,
       });
       toast.success("User updated.");
@@ -183,7 +147,6 @@ const UserManagementTab: React.FC = () => {
       toast.error(msg ?? "Failed to update user.");
     } finally {
       setSaving(false);
-      setEditSuperuserConfirm(false);
     }
   };
 
@@ -211,7 +174,6 @@ const UserManagementTab: React.FC = () => {
   // Dirty check for the edit modal save button
   const editDirty = editState
     ? editState.is_active !== editState.user.is_active ||
-      editState.is_superuser !== editState.user.is_superuser ||
       editState.is_verified !== editState.user.is_verified
     : false;
 
@@ -223,7 +185,7 @@ const UserManagementTab: React.FC = () => {
       <div>
         <h1 style={{ color: "var(--fg)" }}>Users</h1>
         <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-          Manage accounts, superuser roles, and verification status.
+          Manage accounts and verification status in the active tenant.
         </div>
       </div>
 
@@ -306,10 +268,10 @@ const UserManagementTab: React.FC = () => {
                           width: 28,
                           height: 28,
                           borderRadius: 8,
-                          background: u.is_superuser
+                          background: u.role_keys.includes("platform_owner")
                             ? "var(--primary-weak)"
                             : "var(--bg-soft)",
-                          color: u.is_superuser
+                          color: u.role_keys.includes("platform_owner")
                             ? "var(--primary)"
                             : "var(--fg-muted)",
                           display: "grid",
@@ -376,11 +338,16 @@ const UserManagementTab: React.FC = () => {
                     )}
                   </td>
                   <td>
-                    {u.is_superuser ? (
-                      <span className="chip chip-ai">Superuser</span>
-                    ) : (
-                      <span className="chip">User</span>
-                    )}
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {u.role_keys.map((role) => (
+                        <span
+                          className={`chip ${role === "platform_owner" ? "chip-ai" : ""}`}
+                          key={role}
+                        >
+                          {roleLabel(role)}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td style={{ textAlign: "right" }}>
                     <div
@@ -429,7 +396,7 @@ const UserManagementTab: React.FC = () => {
 
       {/* ── Edit user modal ───────────────────────────────────────────── */}
       <Modal
-        open={!!editState && !deleteConfirmOpen && !editSuperuserConfirm}
+        open={!!editState && !deleteConfirmOpen}
         onClose={closeEdit}
         title={`Edit user`}
         footer={
@@ -481,10 +448,10 @@ const UserManagementTab: React.FC = () => {
                   width: 32,
                   height: 32,
                   borderRadius: 8,
-                  background: editState.user.is_superuser
+                  background: editState.user.role_keys.includes("platform_owner")
                     ? "var(--primary-weak)"
                     : "var(--bg-inset)",
-                  color: editState.user.is_superuser
+                  color: editState.user.role_keys.includes("platform_owner")
                     ? "var(--primary)"
                     : "var(--fg-muted)",
                   display: "grid",
@@ -529,54 +496,19 @@ const UserManagementTab: React.FC = () => {
               value={editState.is_verified}
               onChange={(v) => setEditState({ ...editState, is_verified: v })}
             />
-            <ToggleRow
-              label="Superuser"
-              hint="Grants full access to all admin surfaces."
-              value={editState.is_superuser}
-              onChange={(v) => setEditState({ ...editState, is_superuser: v })}
-              disabled={isSelf(editState.user)}
-            />
+            <div style={{ display: "grid", gap: 6 }}>
+              <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>Roles</span>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {editState.user.role_keys.map((role) => (
+                  <span className="chip" key={role}>{roleLabel(role)}</span>
+                ))}
+              </div>
+              <span style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}>
+                Role changes use the tenant authorization workflow.
+              </span>
+            </div>
           </div>
         )}
-      </Modal>
-
-      {/* ── Superuser escalation confirmation (edit) ─────────────────── */}
-      <Modal
-        open={editSuperuserConfirm}
-        onClose={() => !saving && setEditSuperuserConfirm(false)}
-        title="Confirm privilege escalation"
-        footer={
-          <>
-            <button
-              className="sccap-btn sccap-btn-sm"
-              onClick={() => setEditSuperuserConfirm(false)}
-              disabled={saving}
-            >
-              Cancel
-            </button>
-            <button
-              className="sccap-btn sccap-btn-danger sccap-btn-sm"
-              onClick={handleSaveEdit}
-              disabled={saving}
-            >
-              {saving ? "Saving…" : "Confirm & save"}
-            </button>
-          </>
-        }
-      >
-        <div style={{ display: "grid", gap: 12 }}>
-          <p style={{ color: "var(--fg)", margin: 0 }}>
-            <strong>This grants full administrative powers</strong> to{" "}
-            <code style={{ fontFamily: "var(--font-mono)" }}>
-              {editState?.user.email}
-            </code>
-            .
-          </p>
-          <p style={{ color: "var(--fg-muted)", fontSize: 13, margin: 0 }}>
-            The user will be able to access all admin surfaces, manage other
-            users, and modify system settings. This action is logged.
-          </p>
-        </div>
       </Modal>
 
       {/* ── Delete confirmation ───────────────────────────────────────── */}
@@ -666,12 +598,6 @@ const UserManagementTab: React.FC = () => {
             onChange={(v) => setForm({ ...form, is_active: v })}
           />
           <ToggleRow
-            label="Superuser"
-            hint="Grants access to all admin surfaces."
-            value={form.is_superuser}
-            onChange={(v) => setForm({ ...form, is_superuser: v })}
-          />
-          <ToggleRow
             label="Verified"
             hint="Skip the email-verification step."
             value={form.is_verified}
@@ -680,45 +606,6 @@ const UserManagementTab: React.FC = () => {
           {/* Hidden submit so Enter on the email field still fires handleCreate. */}
           <button type="submit" style={{ display: "none" }} />
         </form>
-      </Modal>
-
-      {/* V08.4.2 — Privilege-escalation confirmation + step-up re-auth gate (create flow). */}
-      <Modal
-        open={superuserConfirm.open}
-        onClose={() => !stepUpLoading && setSuperuserConfirm({ open: false, pendingForm: null })}
-        title="Confirm privilege escalation"
-        footer={
-          <>
-            <button
-              className="sccap-btn sccap-btn-sm"
-              onClick={() => setSuperuserConfirm({ open: false, pendingForm: null })}
-              disabled={stepUpLoading}
-            >
-              Cancel
-            </button>
-            <button
-              className="sccap-btn sccap-btn-danger sccap-btn-sm"
-              onClick={handleSuperuserConfirmed}
-              disabled={stepUpLoading}
-            >
-              {stepUpLoading ? "Verifying…" : "Confirm & re-authenticate"}
-            </button>
-          </>
-        }
-      >
-        <div style={{ display: "grid", gap: 12 }}>
-          <p style={{ color: "var(--fg)", margin: 0 }}>
-            <strong>This grants full administrative powers</strong> to{" "}
-            <code style={{ fontFamily: "var(--font-mono)" }}>
-              {superuserConfirm.pendingForm?.email}
-            </code>
-            .
-          </p>
-          <p style={{ color: "var(--fg-muted)", fontSize: 13, margin: 0 }}>
-            Continuing will trigger a step-up re-authentication check to confirm
-            your identity before the account is created. This action is logged.
-          </p>
-        </div>
       </Modal>
     </div>
   );

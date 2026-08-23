@@ -7,13 +7,15 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.auth.backend import (
     get_custom_cookie_jwt_strategy,
     mark_auth_response_no_store,
 )
-from app.infrastructure.auth.core import current_active_user, current_superuser
+from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
+from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.session import SessionError, decode_session_credential
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.database.database import get_db
@@ -21,6 +23,7 @@ from app.infrastructure.database.models import AuthSession, User
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
+from app.shared.lib.permissions import IDENTITY_MANAGE, IDENTITY_READ
 
 
 router = APIRouter()
@@ -81,13 +84,13 @@ async def _clear_current_session(response: Response) -> None:
 
 async def _tenant_scoped_target(
     db: AsyncSession,
-    actor: User,
+    tenant_id: uuid.UUID,
     user_id: int,
 ) -> User:
-    target = await db.get(User, user_id)
-    # Issue 17 introduces a distinct cross-tenant system-admin permission. Until
-    # then, even a superuser session-admin action is confined to its tenant.
-    if target is None or target.tenant_id != actor.tenant_id:
+    target = await db.scalar(
+        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+    )
+    if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return target
 
@@ -176,14 +179,16 @@ async def revoke_other_sessions(
 @router.get(
     "/admin/users/{user_id}/sessions",
     response_model=list[AuthSessionRead],
+    dependencies=[Depends(require_permission(IDENTITY_READ))],
 )
 async def admin_list_user_sessions(
     request: Request,
     user_id: int = Path(..., ge=1),
-    actor: User = Depends(current_superuser),
+    actor: User = Depends(current_active_user),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[AuthSessionRead]:
-    target = await _tenant_scoped_target(db, actor, user_id)
+    target = await _tenant_scoped_target(db, tenant_id, user_id)
     rows = await AuthSessionRepository(db).list_for_user(target.id)
     current_session_id = _request_session_id(request) if target.id == actor.id else None
     await audit.record(
@@ -203,15 +208,17 @@ async def admin_list_user_sessions(
 @router.delete(
     "/admin/users/{user_id}/sessions/{session_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(IDENTITY_MANAGE))],
 )
 async def admin_revoke_user_session(
     request: Request,
     user_id: int = Path(..., ge=1),
     session_id: uuid.UUID = Path(...),
-    actor: User = Depends(current_superuser),
+    actor: User = Depends(current_active_user),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    target = await _tenant_scoped_target(db, actor, user_id)
+    target = await _tenant_scoped_target(db, tenant_id, user_id)
     repo = AuthSessionRepository(db)
     row = await repo.get_for_update(session_id)
     if row is None or row.user_id != target.id:
@@ -240,14 +247,16 @@ async def admin_revoke_user_session(
 @router.post(
     "/admin/users/{user_id}/sessions/revoke-all",
     response_model=RevocationResult,
+    dependencies=[Depends(require_permission(IDENTITY_MANAGE))],
 )
 async def admin_revoke_all_user_sessions(
     request: Request,
     user_id: int = Path(..., ge=1),
-    actor: User = Depends(current_superuser),
+    actor: User = Depends(current_active_user),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
 ) -> Response | RevocationResult:
-    target = await _tenant_scoped_target(db, actor, user_id)
+    target = await _tenant_scoped_target(db, tenant_id, user_id)
     revoked = await AuthSessionRepository(db).revoke_all_for_user(
         target.id,
         reason="admin_revoked_all",

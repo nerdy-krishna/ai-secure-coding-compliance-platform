@@ -1,13 +1,10 @@
 // secure-code-ui/src/shared/api/authService.ts
 import apiClient from "../../shared/api/apiClient";
-import type { components } from "../types/api-generated";
 import {
   type TokenResponse,
   type UserLoginData,
   type UserRead,
 } from "../types/api";
-
-type AdminUserCreate = components["schemas"]["AdminUserCreate"];
 
 export interface AdminUserRead {
   id: number;
@@ -15,6 +12,7 @@ export interface AdminUserRead {
   is_active: boolean;
   is_superuser: boolean;
   is_verified: boolean;
+  role_keys: string[];
 }
 
 export interface BrowserSessionRead {
@@ -106,16 +104,20 @@ export const authService = {
     await apiClient.post("/auth/reset-password", { token, password });
   },
 
-  adminCreateUser: async (userData: AdminUserCreate): Promise<UserRead> => {
+  adminCreateUser: async (userData: {
+    email: string;
+    is_active: boolean;
+    is_verified: boolean;
+  }): Promise<AdminUserRead> => {
     // V15.3.3: explicit payload prevents unintended mass-assignment; backend guards remain authoritative.
     // Password is generated server-side; admin only supplies email + privilege flags.
     const payload = {
       email: userData.email,
-      is_superuser: userData.is_superuser,
+      is_superuser: false,
       is_active: userData.is_active,
       is_verified: userData.is_verified,
     };
-    const response = await apiClient.post<UserRead>("/admin/users", payload);
+    const response = await apiClient.post<AdminUserRead>("/admin/users", payload);
     return response.data;
   },
 
@@ -126,7 +128,7 @@ export const authService = {
 
   adminUpdateUser: async (
     userId: number,
-    data: { is_active?: boolean; is_superuser?: boolean; is_verified?: boolean },
+    data: { is_active?: boolean; is_verified?: boolean },
   ): Promise<AdminUserRead> => {
     const response = await apiClient.patch<AdminUserRead>(`/admin/users/${userId}`, data);
     return response.data;

@@ -1,6 +1,7 @@
 import logging
 import secrets
 import string
+import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -8,15 +9,17 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.auth.core import current_superuser
+from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
+from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.manager import UserManager, get_user_manager
-from app.infrastructure.database.models import User
-from app.infrastructure.auth.schemas import UserRead
+from app.infrastructure.database.models import RoleAssignment, User
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
+from app.shared.lib.permissions import ANALYST, IDENTITY_MANAGE, IDENTITY_READ
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ class AdminUserRead(BaseModel):
     is_active: bool
     is_superuser: bool
     is_verified: bool
+    role_keys: List[str]
 
 
 class AdminUserCreate(BaseModel):
@@ -52,7 +56,7 @@ class AdminUserUpdate(BaseModel):
     is_verified: Optional[bool] = None
 
 
-async def _get_master_admin_id(session) -> int:
+async def _get_master_admin_id(session: AsyncSession) -> int:
     """Return the id of the master admin (force-SSO escape hatch).
 
     Reads the cached constant persisted at first-user bootstrap (M6 — see
@@ -90,50 +94,97 @@ async def _get_master_admin_id(session) -> int:
     )
 
 
+async def _role_keys_for_users(
+    session: AsyncSession,
+    *,
+    user_ids: list[int],
+    tenant_id: uuid.UUID,
+) -> dict[int, list[str]]:
+    if not user_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(RoleAssignment.user_id, RoleAssignment.role_key)
+            .where(
+                RoleAssignment.user_id.in_(user_ids),
+                sa.or_(
+                    RoleAssignment.tenant_id == tenant_id,
+                    RoleAssignment.tenant_id.is_(None),
+                ),
+            )
+            .order_by(RoleAssignment.role_key)
+        )
+    ).all()
+    result: dict[int, list[str]] = {user_id: [] for user_id in user_ids}
+    for user_id, role_key in rows:
+        result[int(user_id)].append(str(role_key))
+    return result
+
+
+def _to_admin_read(user: User, role_keys: list[str]) -> AdminUserRead:
+    return AdminUserRead(
+        id=user.id,
+        email=user.email,
+        is_active=user.is_active,
+        is_superuser=user.is_superuser,
+        is_verified=user.is_verified,
+        role_keys=role_keys,
+    )
+
+
 @router.post(
     "/users",
-    response_model=UserRead,
+    response_model=AdminUserRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(current_superuser)],
+    dependencies=[Depends(require_permission(IDENTITY_MANAGE))],
 )
 async def admin_create_user(
     user_in: AdminUserCreate,
+    acting_user: User = Depends(current_active_user),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     user_manager: UserManager = Depends(get_user_manager),
 ):
     """
     Creates a new user and sends them a password setup email.
-    Accessible only to superusers.
+    Creates a least-privilege analyst in the caller's active tenant.
     """
+    if user_in.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Platform ownership cannot be granted through tenant user creation.",
+        )
     logger.info("admin.users.create_attempt")
-    # Check if user already exists
-    try:
-        existing_user = await user_manager.get_by_email(user_in.email)
-        if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this email already exists.",
-            )
-    except Exception:
-        pass  # get_by_email might raise if not found
 
     # Generate a strong, random placeholder password
     alphabet = string.ascii_letters + string.digits + string.punctuation
     placeholder_password = "".join(secrets.choice(alphabet) for i in range(32))
 
     try:
-        # We need a proper user dict for fastapi_users user_manager.create
-        from app.infrastructure.auth.schemas import UserCreate
-
-        create_schema = UserCreate(
-            email=user_in.email,
-            password=placeholder_password,
-            is_active=user_in.is_active,
-            is_superuser=user_in.is_superuser,
-            is_verified=user_in.is_verified,
-        )
+        session = user_manager.user_db.session
         try:
-            created_user = await user_manager.create(create_schema, safe=True)
+            created_user = await user_manager.user_db.create(
+                {
+                    "email": str(user_in.email).lower(),
+                    "hashed_password": user_manager.password_helper.hash(
+                        placeholder_password
+                    ),
+                    "is_active": user_in.is_active,
+                    "is_superuser": False,
+                    "is_verified": user_in.is_verified,
+                    "tenant_id": tenant_id,
+                }
+            )
+            session.add(
+                RoleAssignment(
+                    user_id=created_user.id,
+                    tenant_id=tenant_id,
+                    role_key=ANALYST,
+                    created_by_user_id=acting_user.id,
+                )
+            )
+            await session.commit()
         except IntegrityError:
+            await session.rollback()
             # TOCTOU backstop: concurrent request with same email hit the DB unique constraint
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -147,11 +198,11 @@ async def admin_create_user(
             "admin.users.created",
             extra={
                 "user_id": str(created_user.id),
-                "is_superuser": user_in.is_superuser,
+                "is_superuser": False,
                 "is_active": user_in.is_active,
             },
         )
-        return created_user
+        return _to_admin_read(created_user, [ANALYST])
 
     except HTTPException:
         raise
@@ -169,16 +220,17 @@ async def admin_create_user(
 @router.get(
     "/users",
     response_model=List[AdminUserRead],
-    dependencies=[Depends(current_superuser)],
+    dependencies=[Depends(require_permission(IDENTITY_READ))],
 )
 async def admin_list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     user_manager: UserManager = Depends(get_user_manager),
 ):
     """
-    Lists all users with pagination.
-    Accessible only to superusers.
+    List users in the caller's active tenant with pagination.
+    Requires tenant identity-read permission.
     Results are paginated via skip/limit parameters (default: skip=0, limit=100, max limit=1000).
     """
     users = []
@@ -187,51 +239,62 @@ async def admin_list_users(
     # The session is obtained from user_manager.user_db.session as provided by the dependency.
     try:
         result = await user_manager.user_db.session.execute(
-            select(User).order_by(User.id).offset(skip).limit(limit)
+            select(User)
+            .where(User.tenant_id == tenant_id)
+            .order_by(User.id)
+            .offset(skip)
+            .limit(limit)
         )
-        users = result.scalars().all()
+        users = list(result.scalars().all())
+        role_keys = await _role_keys_for_users(
+            user_manager.user_db.session,
+            user_ids=[user.id for user in users],
+            tenant_id=tenant_id,
+        )
         logger.info("admin.users.listed", extra={"result_count": len(users)})
     except Exception:
         logger.exception("admin.users.list_failed")
         raise HTTPException(status_code=500, detail="Could not retrieve users")
-    return users
+    return [_to_admin_read(user, role_keys[user.id]) for user in users]
 
 
 @router.patch(
     "/users/{user_id}",
     response_model=AdminUserRead,
-    dependencies=[Depends(current_superuser)],
+    dependencies=[Depends(require_permission(IDENTITY_MANAGE))],
 )
 async def admin_update_user(
     request: Request,
     user_id: int,
     update: AdminUserUpdate,
-    acting_user: User = Depends(current_superuser),
+    acting_user: User = Depends(current_active_user),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     user_manager: UserManager = Depends(get_user_manager),
 ):
     """
-    Update a user's active/verified/superuser flags.
-    Accessible only to superusers.
-    An admin cannot demote their own superuser status.
+    Update a tenant user's active and verified flags.
+    Legacy superuser state is visible for compatibility but cannot be changed here.
     """
     session = user_manager.user_db.session
-    result = await session.execute(select(User).where(User.id == user_id))
+    result = await session.execute(
+        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+    )
     target = result.scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    # Prevent self-demotion of superuser flag
-    if update.is_superuser is False and target.id == acting_user.id:
+    if (
+        update.is_superuser is not None
+        and update.is_superuser != target.is_superuser
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot remove your own superuser status.",
+            detail="Legacy superuser state cannot be changed through tenant administration.",
         )
 
     was_active = target.is_active
     if update.is_active is not None:
         target.is_active = update.is_active
-    if update.is_superuser is not None:
-        target.is_superuser = update.is_superuser
     if update.is_verified is not None:
         target.is_verified = update.is_verified
 
@@ -256,6 +319,11 @@ async def admin_update_user(
 
     await session.commit()
     await session.refresh(target)
+    role_keys = await _role_keys_for_users(
+        session,
+        user_ids=[target.id],
+        tenant_id=tenant_id,
+    )
 
     logger.info(
         "admin.users.updated",
@@ -265,27 +333,30 @@ async def admin_update_user(
             "changes": update.model_dump(exclude_none=True),
         },
     )
-    return target
+    return _to_admin_read(target, role_keys[target.id])
 
 
 @router.delete(
     "/users/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(current_superuser)],
+    dependencies=[Depends(require_permission(IDENTITY_MANAGE))],
 )
 async def admin_delete_user(
     request: Request,
     user_id: int,
-    acting_user: User = Depends(current_superuser),
+    acting_user: User = Depends(current_active_user),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     user_manager: UserManager = Depends(get_user_manager),
 ):
     """
-    Delete a user account.
-    Accessible only to superusers.
+    Delete a user account in the caller's active tenant.
+    Requires tenant identity-manage permission.
     The master admin (first-created user) and the acting user themselves cannot be deleted.
     """
     session = user_manager.user_db.session
-    result = await session.execute(select(User).where(User.id == user_id))
+    result = await session.execute(
+        select(User).where(User.id == user_id, User.tenant_id == tenant_id)
+    )
     target = result.scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="User not found.")
