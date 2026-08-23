@@ -1,4 +1,3 @@
-// secure-code-ui/src/app/providers/AuthProvider.tsx
 import { AxiosError } from "axios";
 import React, {
   useCallback,
@@ -7,258 +6,257 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
+
 import apiClient, {
-  cancelProactiveRefresh,
-  scheduleProactiveRefresh,
+  setBrowserSessionEstablished,
 } from "../../shared/api/apiClient";
 import { authService } from "../../shared/api/authService";
 import {
-  type TokenResponse,
+  type SetupStatusResponse,
   type UserLoginData,
   type UserRead,
-  type SetupStatusResponse,
 } from "../../shared/types/api";
 import { AuthContext, type AuthContextType } from "./AuthContext";
 
-// SECURITY (V15.1.5 dangerous functionality): JWT access token is held in localStorage to enable
-// cross-tab silent refresh. This is XSS-recoverable; CSP + sanitised React rendering are the
-// compensating controls. See .agent/threat-model.md row "client-token-storage" for the explicit
-// risk acceptance.
-const ACCESS_TOKEN_KEY = "accessToken";
-
-// V02.4.1: Module-scoped timestamp to enforce a minimum 1-second interval between login attempts,
-// providing client-side anti-automation defense in depth (server rate-limiting remains authoritative).
+const WARNING_LEAD_MS = 2 * 60 * 1000;
+const USER_ACTIVITY_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 let lastLoginAt = 0;
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({
-  children,
-}) => {
-  const [user, setUser] = useState<UserRead | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(
-    localStorage.getItem(ACCESS_TOKEN_KEY),
-  );
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [initialAuthChecked, setInitialAuthChecked] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isSetupCompleted, setIsSetupCompleted] = useState<boolean | null>(
-    null,
-  );
-  const bootstrapStarted = useRef(false);
+// Purge the retired browser bearer credential before the provider's first
+// render. The API client never reads this key.
+if (typeof window !== "undefined") window.localStorage.removeItem("accessToken");
 
-  const clearError = useCallback(() => {
-    setError(null);
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<UserRead | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [initialAuthChecked, setInitialAuthChecked] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isSetupCompleted, setIsSetupCompleted] = useState<boolean | null>(null);
+  const [sessionWarning, setSessionWarning] = useState(false);
+  const bootstrapStarted = useRef(false);
+  const warningTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const absoluteDeadlineMs = useRef<number | null>(null);
+  const idleDurationMs = useRef<number | null>(null);
+  const lastServerActivityMs = useRef(0);
+
+  const clearTimers = useCallback(() => {
+    if (warningTimer.current) clearTimeout(warningTimer.current);
+    if (expiryTimer.current) clearTimeout(expiryTimer.current);
+    warningTimer.current = null;
+    expiryTimer.current = null;
   }, []);
+
+  const clearSession = useCallback(() => {
+    clearTimers();
+    absoluteDeadlineMs.current = null;
+    idleDurationMs.current = null;
+    setSessionWarning(false);
+    setBrowserSessionEstablished(false);
+    setUser(null);
+  }, [clearTimers]);
+
+  const scheduleDeadline = useCallback(
+    (idleDeadlineMs: number, absoluteMs: number) => {
+      clearTimers();
+      absoluteDeadlineMs.current = absoluteMs;
+      const deadline = Math.min(idleDeadlineMs, absoluteMs);
+      const warningDelay = deadline - Date.now() - WARNING_LEAD_MS;
+      const expiryDelay = deadline - Date.now();
+      if (warningDelay <= 0) setSessionWarning(true);
+      else warningTimer.current = setTimeout(() => setSessionWarning(true), warningDelay);
+      expiryTimer.current = setTimeout(() => clearSession(), Math.max(0, expiryDelay));
+    },
+    [clearSession, clearTimers],
+  );
+
+  const loadSessionDeadline = useCallback(async () => {
+    const sessions = await authService.listSessions();
+    const current = sessions.find((session) => session.current);
+    if (!current) throw new Error("Current browser session is missing");
+    const idleDeadline = Date.parse(current.idle_expires_at);
+    const absoluteDeadline = Date.parse(current.absolute_expires_at);
+    const lastSeen = Date.parse(current.last_seen_at);
+    idleDurationMs.current = Math.max(0, idleDeadline - lastSeen);
+    lastServerActivityMs.current = Date.now();
+    scheduleDeadline(idleDeadline, absoluteDeadline);
+  }, [scheduleDeadline]);
+
+  const establishBrowserSession = useCallback(async () => {
+    const currentUser = await authService.getCurrentUser();
+    setBrowserSessionEstablished(true);
+    await authService.bootstrapCsrf();
+    setUser(currentUser);
+    await loadSessionDeadline();
+    window.dispatchEvent(new CustomEvent("sccap:auth-changed"));
+  }, [loadSessionDeadline]);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const checkSetupStatus = useCallback(async () => {
     try {
-      const response =
-        await apiClient.get<SetupStatusResponse>("/setup/status");
+      const response = await apiClient.get<SetupStatusResponse>("/setup/status");
       setIsSetupCompleted(response.data.is_setup_completed);
     } catch (e) {
-      // V16.2.5: Never log the raw axios error — it contains the Bearer token in request headers.
       console.error("AuthProvider: Failed to check setup status:", {
         message: (e as { message?: string })?.message,
         status: (e as { response?: { status?: number } })?.response?.status,
       });
-      // Wait for backend services to come up instead of assuming setup is incomplete
       setIsSetupCompleted(null);
     }
   }, []);
 
-  // Effect to synchronize the accessToken state with localStorage
-  useEffect(() => {
-    if (accessToken) {
-      localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    } else {
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-    }
-  }, [accessToken]);
-
-  // Effect to detect silent token refreshes performed by the apiClient interceptor.
-  // The interceptor writes the new token directly to localStorage, so we listen
-  // for 'storage' events and also poll for changes to keep React state in sync.
-  useEffect(() => {
-    // Cross-tab sync via the 'storage' event
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.key === ACCESS_TOKEN_KEY) {
-        setAccessToken(event.newValue);
-      }
-    };
-    window.addEventListener("storage", handleStorageChange);
-
-    // Same-tab sync: the interceptor updates localStorage in the same tab,
-    // which does NOT fire 'storage' events. Poll periodically to catch it.
-    const intervalId = setInterval(() => {
-      const storedToken = localStorage.getItem(ACCESS_TOKEN_KEY);
-      setAccessToken((prev) => (storedToken !== prev ? storedToken : prev));
-    }, 5000); // Check every 5 seconds
-
-    return () => {
-      window.removeEventListener("storage", handleStorageChange);
-      clearInterval(intervalId);
-    };
-  }, []);
-
-  const fetchAndSetUser = useCallback(async () => {
-    if (!localStorage.getItem(ACCESS_TOKEN_KEY)) {
-      setUser(null);
-      return;
-    }
-    // V15.4.1: Capture the token value before the async call so we can guard against
-    // a concurrent interceptor refresh clobbering a newer token in the catch path.
-    const tokenAtRequestTime = localStorage.getItem(ACCESS_TOKEN_KEY);
-    try {
-      const response = await apiClient.get<UserRead>("/users/me");
-      setUser(response.data);
-    } catch (e) {
-      // V16.2.5: Never log the raw axios error — it contains the Bearer token in request headers.
-      console.error(
-        "AuthProvider: Failed to fetch user (token likely invalid/expired):",
-        {
-          message: (e as { message?: string })?.message,
-          status: (e as { response?: { status?: number } })?.response?.status,
-        },
-      );
-      // V15.4.1: Only clear the token if it hasn't been replaced by a successful interceptor
-      // refresh that ran concurrently — prevents a stale error from clobbering the new token.
-      if (localStorage.getItem(ACCESS_TOKEN_KEY) === tokenAtRequestTime) {
-        setUser(null);
-        setAccessToken(null);
-      }
-    }
-  }, []);
-
-  // Run the application bootstrap once. Access-token rotation must not put the
-  // whole application back into its initial loading state every hour.
   useEffect(() => {
     if (initialAuthChecked || bootstrapStarted.current) return;
     bootstrapStarted.current = true;
-
     const initializeAuth = async () => {
       setIsLoading(true);
-
-      // Check setup status first
       await checkSetupStatus();
-
-      if (accessToken) {
-        // Arm the proactive refresh timer on app boot so a tab that
-        // already has a valid token (resumed session) keeps it warm.
-        scheduleProactiveRefresh(accessToken);
-        await fetchAndSetUser();
+      try {
+        await establishBrowserSession();
+      } catch (e) {
+        if ((e as { response?: { status?: number } })?.response?.status !== 401) {
+          console.error("AuthProvider: Session bootstrap failed:", {
+            message: (e as { message?: string })?.message,
+            status: (e as { response?: { status?: number } })?.response?.status,
+          });
+        }
+        clearSession();
+      } finally {
+        setInitialAuthChecked(true);
+        setIsLoading(false);
       }
-      setInitialAuthChecked(true);
-      setIsLoading(false);
     };
-    initializeAuth();
-  }, [accessToken, fetchAndSetUser, checkSetupStatus, initialAuthChecked]);
+    void initializeAuth();
+  }, [checkSetupStatus, clearSession, establishBrowserSession, initialAuthChecked]);
 
-  const login = useCallback(async (credentials: UserLoginData) => {
-    // V02.4.1: Enforce minimum 1-second interval between login attempts (client-side defense in depth).
-    const now = Date.now();
-    if (now - lastLoginAt < 1000) {
-      setError("Please wait a moment before retrying.");
-      throw new Error("Please wait a moment before retrying.");
-    }
-    lastLoginAt = now;
+  useEffect(() => {
+    const onExpired = () => clearSession();
+    window.addEventListener("sccap:session-expired", onExpired);
+    return () => {
+      window.removeEventListener("sccap:session-expired", onExpired);
+    };
+  }, [clearSession]);
 
-    // V02.2.1: Enforce non-empty and length bounds before sending credentials to the network.
-    // 320 chars = RFC-5321 max email length. The password bound matches the
-    // request schema and prevents the UI accepting input the API rejects.
-    if (
-      !credentials.username ||
-      credentials.username.length > 320 ||
-      !credentials.password ||
-      credentials.password.length > 256
-    ) {
-      setError("Invalid credentials format");
-      setIsLoading(false);
-      throw new Error("client validation");
-    }
+  // Coalesced browser activity touch: visible user activity can extend the idle
+  // deadline, while the server-side absolute deadline remains unchanged.
+  useEffect(() => {
+    if (!user) return;
+    const touch = () => {
+      if (Date.now() - lastServerActivityMs.current < USER_ACTIVITY_TOUCH_INTERVAL_MS)
+        return;
+      lastServerActivityMs.current = Date.now();
+      void authService
+        .getCurrentUser()
+        .then(() => {
+          if (!idleDurationMs.current || !absoluteDeadlineMs.current) return;
+          setSessionWarning(false);
+          scheduleDeadline(
+            Date.now() + idleDurationMs.current,
+            absoluteDeadlineMs.current,
+          );
+        })
+        .catch(() => {});
+    };
+    window.addEventListener("pointerdown", touch, { passive: true });
+    window.addEventListener("keydown", touch);
+    return () => {
+      window.removeEventListener("pointerdown", touch);
+      window.removeEventListener("keydown", touch);
+    };
+  }, [scheduleDeadline, user]);
 
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response: TokenResponse = await authService.loginUser(credentials);
-      localStorage.setItem("accessToken", response.access_token);
-      setAccessToken(response.access_token);
-      // Arm proactive refresh so the user doesn't see a 401 flash near
-      // access-token expiry.
-      scheduleProactiveRefresh(response.access_token);
-      // Fetch user immediately so is_superuser is available for the
-      // route guard before the loading state is released — otherwise
-      // superusers get bounced to /account/dashboard as a non-admin.
-      await fetchAndSetUser();
-    } catch (err: unknown) {
-      // V16.2.5: Never log the raw axios error — it contains the Bearer token in request headers.
-      console.error("AuthProvider: Login failed:", {
-        message: (err as { message?: string })?.message,
-        status: (err as { response?: { status?: number } })?.response?.status,
-      });
-      let errorMessage =
-        "Login failed. Please check your username and password.";
-      if (err instanceof AxiosError && err.response?.data?.detail) {
-        // V16.4.1: Sanitise backend-supplied strings to prevent log-forgery via CRLF injection.
-        const sanitise = (s: string) => s.replace(/[\r\n]/g, " ");
-        errorMessage =
-          typeof err.response.data.detail === "string"
-            ? sanitise(err.response.data.detail)
-            : JSON.stringify(err.response.data.detail);
+  const login = useCallback(
+    async (credentials: UserLoginData) => {
+      const now = Date.now();
+      if (now - lastLoginAt < 1000) {
+        setError("Please wait a moment before retrying.");
+        throw new Error("Please wait a moment before retrying.");
       }
-      setError(errorMessage);
-      setAccessToken(null);
-      setUser(null);
-      throw err;
+      lastLoginAt = now;
+      if (
+        !credentials.username ||
+        credentials.username.length > 320 ||
+        !credentials.password ||
+        credentials.password.length > 256
+      ) {
+        setError("Invalid credentials format");
+        throw new Error("client validation");
+      }
+
+      setIsLoading(true);
+      setError(null);
+      try {
+        await authService.loginUser(credentials);
+        await establishBrowserSession();
+      } catch (err: unknown) {
+        console.error("AuthProvider: Login failed:", {
+          message: (err as { message?: string })?.message,
+          status: (err as { response?: { status?: number } })?.response?.status,
+        });
+        let errorMessage = "Login failed. Please check your username and password.";
+        if (err instanceof AxiosError && err.response?.data?.detail) {
+          const sanitise = (value: string) => value.replace(/[\r\n]/g, " ");
+          errorMessage =
+            typeof err.response.data.detail === "string"
+              ? sanitise(err.response.data.detail)
+              : JSON.stringify(err.response.data.detail);
+        }
+        setError(errorMessage);
+        clearSession();
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [clearSession, establishBrowserSession],
+  );
+
+  const completeBrowserLogin = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      await establishBrowserSession();
     } finally {
       setIsLoading(false);
     }
-  }, [fetchAndSetUser]);
-
-  const loginWithAccessToken = useCallback((token: string): void => {
-    if (!token) return;
-    localStorage.setItem("accessToken", token);
-    setAccessToken(token);
-    // Match the password-login path so the user doesn't see a 401 flash
-    // a few minutes after a passkey / SSO sign-in.
-    scheduleProactiveRefresh(token);
-    // Fetch user profile so is_superuser is available for route guards.
-    // The useEffect will also fire, but this ensures it's populated before
-    // the next render.
-    fetchAndSetUser();
-  }, [fetchAndSetUser]);
+  }, [establishBrowserSession]);
 
   const logout = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
-      if (accessToken) {
-        await authService.logoutUser();
-      }
+      if (user) await authService.logoutUser();
     } catch (err: unknown) {
-      // V16.2.5: Never log the raw axios error — it contains the Bearer token in request headers.
-      console.error(
-        "AuthProvider: API Logout failed but proceeding with client-side logout:",
-        {
-          message: (err as { message?: string })?.message,
-          status: (err as { response?: { status?: number } })?.response?.status,
-        },
-      );
+      console.error("AuthProvider: API logout failed; clearing local state:", {
+        message: (err as { message?: string })?.message,
+        status: (err as { response?: { status?: number } })?.response?.status,
+      });
     } finally {
-      cancelProactiveRefresh();
-      setAccessToken(null);
-      setUser(null);
+      clearSession();
       setIsLoading(false);
+      window.dispatchEvent(new CustomEvent("sccap:auth-changed"));
     }
-  }, [accessToken]);
+  }, [clearSession, user]);
+
+  const stayActive = useCallback(async () => {
+    try {
+      await authService.getCurrentUser();
+      await loadSessionDeadline();
+      setSessionWarning(false);
+    } catch {
+      clearSession();
+    }
+  }, [clearSession, loadSessionDeadline]);
 
   const contextValue: AuthContextType = {
     user,
-    accessToken,
+    isAuthenticated: user !== null,
     isLoading,
     initialAuthChecked,
     isSetupCompleted,
     error,
     login,
-    loginWithAccessToken,
+    completeBrowserLogin,
     logout,
     clearError,
     checkSetupStatus,
@@ -266,8 +264,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
   return (
     <AuthContext.Provider value={contextValue}>
-      {" "}
-      {children}{" "}
+      {children}
+      {sessionWarning && user && (
+        <div className="session-warning-backdrop" role="presentation">
+          <section
+            className="surface session-warning-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="session-warning-title"
+          >
+            <h2 id="session-warning-title">Your session is ending soon</h2>
+            <p>
+              Save any unsaved work now. Activity can extend the inactivity
+              deadline, but the overall sign-in limit cannot be extended.
+            </p>
+            <div className="session-warning-actions">
+              <button className="sccap-btn" type="button" onClick={() => void logout()}>
+                Sign out
+              </button>
+              <button
+                className="sccap-btn sccap-btn-primary"
+                type="button"
+                onClick={() => void stayActive()}
+              >
+                Stay active
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 };

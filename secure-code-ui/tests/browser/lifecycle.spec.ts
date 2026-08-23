@@ -170,8 +170,6 @@ test("SSE reconnect resumes by cursor, cancellation completes, and terminal UI p
   const beforeCancel = await log.innerText();
   expect(beforeCancel.match(/Browser bootstrap/g)).toHaveLength(1);
 
-  const accessToken = await page.evaluate(() => localStorage.getItem("accessToken"));
-  expect(accessToken).toBeTruthy();
   await page.getByRole("button", { name: "Stop scan" }).click();
   const cancellation = page.waitForResponse(
     (response) =>
@@ -182,7 +180,6 @@ test("SSE reconnect resumes by cursor, cancellation completes, and terminal UI p
   await cancellation;
   const terminalResponse = await page.request.get(
     `/api/v1/scans/${fixture.replay_scan_id}/result`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
   );
   expect(terminalResponse.status()).toBe(200);
   const terminal = (await terminalResponse.json()) as {

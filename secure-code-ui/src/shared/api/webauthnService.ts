@@ -194,8 +194,8 @@ export const webauthnService = {
   /**
    * Full passkey-login ceremony for a given email. Calls /login/begin
    * → invokes navigator.credentials.get() → POSTs to /login/finish.
-   * Returns { access_token, token_type } on success; the caller stores
-   * the token via AuthProvider.loginWithAccessToken().
+   * The legacy response still includes an access token for compatibility,
+   * but browser callers ignore it and bootstrap the HttpOnly session cookie.
    */
   async login(email: string): Promise<{ access_token: string; token_type: string }> {
     if (!this.isSupported()) throw new Error("WebAuthn not supported in this browser");

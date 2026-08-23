@@ -1,20 +1,18 @@
 // secure-code-ui/src/pages/auth/SsoCallbackPage.tsx
 //
-// Landing page for SSO redirects from the backend. The backend mints the
-// access token + sets the refresh cookie, then redirects here with the
-// access token in the URL fragment (#access_token=...). We strip the
-// fragment IMMEDIATELY (M9 — first synchronous statement after read) and
-// then forward the user to the dashboard.
+// Landing page for SSO redirects from the backend. The backend sets the
+// HttpOnly browser-session cookie and redirects here without any credential
+// in the URL. Error fragments are stripped immediately.
 //
 // On error: backend redirects with #error=<code>; we show a friendly
 // screen with a Back-to-login button.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../../shared/hooks/useAuth";
 import { Icon } from "../../shared/ui/Icon";
 
 interface CallbackHashState {
-  accessToken: string | null;
   errorCode: string | null;
 }
 
@@ -25,47 +23,33 @@ function readAndStripHash(): CallbackHashState {
   // Referer, but a third-party script's network request would include
   // document.referrer (which still holds the URL before replaceState).
   if (typeof window === "undefined") {
-    return { accessToken: null, errorCode: null };
+    return { errorCode: null };
   }
   const raw = window.location.hash.startsWith("#")
     ? window.location.hash.slice(1)
     : window.location.hash;
   const params = new URLSearchParams(raw);
-  const accessToken = params.get("access_token");
   const errorCode = params.get("error");
   // Strip the fragment from the URL.
   if (window.history && window.history.replaceState) {
     const cleanUrl = window.location.pathname + window.location.search;
     window.history.replaceState(null, document.title, cleanUrl);
   }
-  return { accessToken, errorCode };
+  return { errorCode };
 }
 
 const SsoCallbackPage: React.FC = () => {
   const navigate = useNavigate();
+  const { completeBrowserLogin } = useAuth();
   const initial = useMemo(readAndStripHash, []);
   const [errorCode, setErrorCode] = useState<string | null>(initial.errorCode);
 
   useEffect(() => {
-    if (initial.accessToken) {
-      try {
-        localStorage.setItem("accessToken", initial.accessToken);
-      } catch {
-        setErrorCode("storage_error");
-        return;
-      }
-      // Force a full reload to /analysis/results so AuthProvider re-mounts
-      // with the fresh accessToken from localStorage. Avoids races where
-      // useEffect fires before the new token is picked up.
-      navigate("/analysis/results", { replace: true });
-      // Belt-and-braces: also set window.location to ensure the AuthProvider
-      // useEffect sees the new token via storage event/poll.
-      window.location.assign("/analysis/results");
-    } else if (!initial.errorCode) {
-      // No token AND no error — landed here via direct navigation.
-      setErrorCode("no_token_in_url");
-    }
-  }, [initial.accessToken, initial.errorCode, navigate]);
+    if (initial.errorCode) return;
+    void completeBrowserLogin()
+      .then(() => navigate("/account/dashboard", { replace: true }))
+      .catch(() => setErrorCode("session_not_established"));
+  }, [completeBrowserLogin, initial.errorCode, navigate]);
 
   const message = errorMessageFor(errorCode);
 

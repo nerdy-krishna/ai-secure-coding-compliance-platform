@@ -56,7 +56,7 @@ function notifyScanTerminal(
 }
 
 export const ScanWatcher: React.FC = () => {
-  const { accessToken } = useAuth();
+  const { isAuthenticated } = useAuth();
   const notificationPerm = useNotificationPermission();
 
   // Per-scan last-seen status. Seeded on the first poll WITHOUT
@@ -68,7 +68,7 @@ export const ScanWatcher: React.FC = () => {
   const { data } = useQuery({
     queryKey: ["scan-watcher"],
     queryFn: () => scanService.getScanHistory(1, 20, undefined, "desc"),
-    enabled: !!accessToken,
+    enabled: isAuthenticated,
     // Poll faster while a scan is active so completion is caught
     // promptly; back off when everything is idle.
     refetchInterval: (query) => {
@@ -84,10 +84,10 @@ export const ScanWatcher: React.FC = () => {
   // permission is granted, so scan-completion notifications fire even
   // when the SCCAP tab is closed. Idempotent + best-effort.
   useEffect(() => {
-    if (accessToken && desktopAllowed) {
+    if (isAuthenticated && desktopAllowed) {
       void ensureWebPushSubscription();
     }
-  }, [accessToken, desktopAllowed]);
+  }, [isAuthenticated, desktopAllowed]);
 
   useEffect(() => {
     const items = data?.items ?? [];

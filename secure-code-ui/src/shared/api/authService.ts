@@ -17,6 +17,19 @@ export interface AdminUserRead {
   is_verified: boolean;
 }
 
+export interface BrowserSessionRead {
+  id: string;
+  current: boolean;
+  auth_method: string;
+  assurance_level: string;
+  device_label: string | null;
+  network_observed: boolean;
+  authenticated_at: string;
+  last_seen_at: string;
+  idle_expires_at: string;
+  absolute_expires_at: string;
+}
+
 export const authService = {
   // Login
   // FastAPI Users' /auth/login endpoint expects form data (username, password)
@@ -47,24 +60,33 @@ export const authService = {
     return response.data;
   },
 
-  // Refresh Token
-  refreshToken: async (): Promise<TokenResponse> => {
-    // The refresh token is in an HttpOnly cookie, so the browser sends it automatically.
-    // We just need to hit the refresh endpoint at the correct path.
-    const response = await apiClient.post<TokenResponse>("/auth/refresh");
-    return response.data;
-  },
-
   // Get Current User
   getCurrentUser: async (): Promise<UserRead> => {
-    const response = await apiClient.get<UserRead>("/users/me");
-    // CORRECT PATH: relative to baseURL
+    const response = await apiClient.get<UserRead>("/auth/session/me");
     return response.data;
+  },
+  bootstrapCsrf: async (): Promise<void> => {
+    await apiClient.get("/auth/session/csrf");
   },
   // Logout
   logoutUser: async (): Promise<unknown> => {
-    // FastAPI Users /auth/logout
-    const response = await apiClient.post("/auth/logout");
+    const response = await apiClient.post("/auth/session/logout");
+    return response.data;
+  },
+
+  listSessions: async (): Promise<BrowserSessionRead[]> => {
+    const response = await apiClient.get<BrowserSessionRead[]>("/auth/sessions");
+    return response.data;
+  },
+
+  revokeSession: async (sessionId: string): Promise<void> => {
+    await apiClient.delete(`/auth/sessions/${sessionId}`);
+  },
+
+  revokeOtherSessions: async (): Promise<{ revoked: number }> => {
+    const response = await apiClient.post<{ revoked: number }>(
+      "/auth/sessions/revoke-others",
+    );
     return response.data;
   },
 

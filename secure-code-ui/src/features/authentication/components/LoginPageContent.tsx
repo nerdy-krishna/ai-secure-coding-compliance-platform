@@ -24,7 +24,7 @@ const SSO_LOGIN_URL = (providerName: string) =>
 const LoginPageContent: React.FC = () => {
   const {
     login,
-    loginWithAccessToken,
+    completeBrowserLogin,
     error: authError,
     isLoading: authLoading,
     clearError,
@@ -281,8 +281,8 @@ const LoginPageContent: React.FC = () => {
             }
             setPasskeyLoading(true);
             try {
-              const res = await webauthnService.login(email);
-              loginWithAccessToken(res.access_token);
+              await webauthnService.login(email);
+              await completeBrowserLogin();
             } catch (err: unknown) {
               const e = err as {
                 response?: { data?: { detail?: string } };

@@ -15,6 +15,7 @@ import React, {
   useState,
 } from "react";
 import { preferencesService } from "../../shared/api/preferencesService";
+import { useAuth } from "../../shared/hooks/useAuth";
 
 export type SccapTheme = "light" | "dark";
 export type SccapVariant = "A" | "B";
@@ -72,9 +73,9 @@ function _scheduleSync(prefs: {
   theme: SccapTheme;
   variant: SccapVariant;
   accent: string;
-}) {
+}, authenticated: boolean) {
   if (typeof window === "undefined") return;
-  if (!window.localStorage.getItem("accessToken")) return;
+  if (!authenticated) return;
   if (_syncTimer) clearTimeout(_syncTimer);
   _syncTimer = setTimeout(() => {
     preferencesService
@@ -92,6 +93,7 @@ function _scheduleSync(prefs: {
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
+  const { isAuthenticated } = useAuth();
   const [theme, setThemeState] = useState<SccapTheme>(() =>
     readStored<SccapTheme>(STORAGE_KEYS.theme, "light", ["light", "dark"]),
   );
@@ -111,16 +113,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
-  // On mount: pull preferences from the server.  Only run when the
-  // user has an access token — the login page has no token and the
-  // 401 interceptor would redirect to /login, causing a reload loop.
+  // Pull preferences after the HttpOnly browser session is established.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const token = window.localStorage.getItem("accessToken");
-    if (!token) {
+    if (!isAuthenticated) {
       setServerSynced(true);
       return;
     }
+    setServerSynced(false);
     let cancelled = false;
     preferencesService
       .get()
@@ -169,9 +169,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => {
       cancelled = true;
     };
-    // Run once on mount.
+    // Re-run when authentication changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAuthenticated]);
 
   // Write attributes + persist to localStorage on every change.
   useEffect(() => {
@@ -181,9 +181,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({
     window.localStorage.setItem(STORAGE_KEYS.variant, variant);
     // Sync to server (debounced) once initial fetch settles.
     if (serverSynced) {
-      _scheduleSync({ theme, variant, accent });
+      _scheduleSync({ theme, variant, accent }, isAuthenticated);
     }
-  }, [theme, variant, accent, serverSynced]);
+  }, [theme, variant, accent, serverSynced, isAuthenticated]);
 
   // Accent override.
   useEffect(() => {

@@ -2,7 +2,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
-import { ThemeProvider } from "./app/providers/ThemeProvider";
 import "./app/styles/index.css";
 // SCCAP design foundations — tokens (CSS custom properties) and
 // primitive utility classes (.sccap-btn, .chip, .surface, …).
@@ -11,8 +10,6 @@ import "./app/styles/primitives.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <App />
-    </ThemeProvider>
+    <App />
   </React.StrictMode>,
 );

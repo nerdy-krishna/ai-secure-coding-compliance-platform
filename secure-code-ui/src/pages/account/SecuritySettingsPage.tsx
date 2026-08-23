@@ -1,9 +1,6 @@
 // secure-code-ui/src/pages/account/SecuritySettingsPage.tsx
 //
-// Per-user security settings. Currently scoped to passkey (WebAuthn)
-// management — list registered passkeys, register a new one, and
-// remove an existing one. Future scope: per-user MFA toggles, recent
-// auth-event timeline, active sessions.
+// Per-user security settings: active browser sessions and passkeys.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "../../shared/ui/Icon";
@@ -13,6 +10,11 @@ import {
   webauthnService,
   type PasskeySummary,
 } from "../../shared/api/webauthnService";
+import {
+  authService,
+  type BrowserSessionRead,
+} from "../../shared/api/authService";
+import { useAuth } from "../../shared/hooks/useAuth";
 
 const RowChip: React.FC<{ children: React.ReactNode; tone?: "muted" | "ok" }> = ({
   children,
@@ -50,6 +52,10 @@ const fmt = (iso: string | null): string => {
 
 const SecuritySettingsPage: React.FC = () => {
   const toast = useToast();
+  const { logout } = useAuth();
+  const [sessions, setSessions] = useState<BrowserSessionRead[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
   const [passkeys, setPasskeys] = useState<PasskeySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
@@ -76,8 +82,49 @@ const SecuritySettingsPage: React.FC = () => {
 
   useEffect(() => {
     void refresh();
+    void refreshSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshSessions = async () => {
+    try {
+      setSessions(await authService.listSessions());
+    } catch {
+      toast.error("Failed to load active sessions");
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const onRevokeSession = async (session: BrowserSessionRead) => {
+    const label = session.current ? "this session" : session.device_label || "this session";
+    if (!window.confirm(`Sign out ${label}?`)) return;
+    setRevokingSessionId(session.id);
+    try {
+      await authService.revokeSession(session.id);
+      if (session.current) {
+        await logout();
+        return;
+      }
+      toast.success("Session signed out.");
+      await refreshSessions();
+    } catch {
+      toast.error("Failed to sign out that session");
+    } finally {
+      setRevokingSessionId(null);
+    }
+  };
+
+  const onRevokeOthers = async () => {
+    if (!window.confirm("Sign out every other browser session?")) return;
+    try {
+      const result = await authService.revokeOtherSessions();
+      toast.success(`${result.revoked} other session(s) signed out.`);
+      await refreshSessions();
+    } catch {
+      toast.error("Failed to sign out other sessions");
+    }
+  };
 
   const onRegister = async () => {
     if (!supported) {
@@ -127,6 +174,68 @@ const SecuritySettingsPage: React.FC = () => {
 
   return (
     <div className="fade-in" style={{ display: "grid", gap: 20, maxWidth: 760 }}>
+      <div className="sccap-card">
+        <SectionHead
+          title={
+            <>
+              <Icon.Shield size={16} /> Active sessions
+            </>
+          }
+          right={
+            <button
+              className="sccap-btn sccap-btn-sm"
+              type="button"
+              disabled={sessionsLoading || sessions.length < 2}
+              onClick={() => void onRevokeOthers()}
+            >
+              Sign out other sessions
+            </button>
+          }
+        />
+        <p style={{ color: "var(--fg-muted)", fontSize: 13, margin: "4px 0 14px" }}>
+          Review browsers signed in to your account. Network details are privacy-reduced.
+        </p>
+        {sessionsLoading ? (
+          <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>Loading…</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {sessions.map((session) => (
+              <div
+                key={session.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 12,
+                  padding: 12,
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  background: "var(--bg-soft)",
+                }}
+              >
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <strong>{session.device_label || "Browser session"}</strong>
+                    {session.current && <RowChip tone="ok">Current</RowChip>}
+                    <RowChip>{session.auth_method}</RowChip>
+                  </div>
+                  <div style={{ color: "var(--fg-muted)", fontSize: 12, marginTop: 6 }}>
+                    Last active {fmt(session.last_seen_at)} · Overall expiry {fmt(session.absolute_expires_at)}
+                  </div>
+                </div>
+                <button
+                  className="sccap-btn sccap-btn-sm sccap-btn-ghost"
+                  type="button"
+                  disabled={revokingSessionId === session.id}
+                  onClick={() => void onRevokeSession(session)}
+                >
+                  {revokingSessionId === session.id ? "Signing out…" : "Sign out"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="sccap-card">
         <SectionHead
           title={

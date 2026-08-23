@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import { useAuth } from "../shared/hooks/useAuth";
 import { AuthProvider } from "./providers/AuthProvider";
+import { ThemeProvider } from "./providers/ThemeProvider";
 import { FeatureProvider } from "./providers/FeatureProvider";
 import { useFeatures } from "../shared/hooks/useFeatures";
 import { ToastProvider } from "../shared/ui/Toast";
@@ -95,7 +96,7 @@ interface RouteGuardProps {
  * The `requires` prop selects the post-setup-gate behavior.
  */
 const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
-  const { accessToken, user, initialAuthChecked, isLoading, isSetupCompleted } =
+  const { isAuthenticated, user, initialAuthChecked, isLoading, isSetupCompleted } =
     useAuth();
 
   if (!initialAuthChecked || isLoading || isSetupCompleted === null) {
@@ -107,7 +108,7 @@ const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
   }
 
   if (requires === "root-redirect") {
-    return accessToken ? (
+    return isAuthenticated ? (
       <Navigate to="/account/dashboard" replace />
     ) : (
       <Navigate to="/login" replace />
@@ -115,7 +116,7 @@ const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
   }
 
   if (requires === "unauth") {
-    return accessToken ? (
+    return isAuthenticated ? (
       <Navigate to="/" replace />
     ) : (
       <AuthLayout>
@@ -125,7 +126,7 @@ const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
   }
 
   // Both "auth" and "superuser" need a token.
-  if (!accessToken) {
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
@@ -165,10 +166,8 @@ function AppContent() {
         <Route element={<RouteGuard requires="unauth" />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          {/* SSO callback landing — gated as "unauth" so the user lands here
-              after the IdP redirect (no token in localStorage yet); the
-              page itself stores the token from the URL fragment, then
-              navigates to /analysis/results. */}
+          {/* SSO callback landing. The HttpOnly session cookie is already set;
+              this page asks AuthProvider to bootstrap it. */}
           <Route path="/auth/sso/complete" element={<SsoCallbackPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
         </Route>
@@ -269,9 +268,11 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <AuthProvider>
-          <FeatureProvider>
-            <AppContent />
-          </FeatureProvider>
+          <ThemeProvider>
+            <FeatureProvider>
+              <AppContent />
+            </FeatureProvider>
+          </ThemeProvider>
         </AuthProvider>
       </ToastProvider>
     </QueryClientProvider>

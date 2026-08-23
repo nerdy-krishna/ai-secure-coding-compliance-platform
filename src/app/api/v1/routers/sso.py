@@ -4,7 +4,7 @@ Endpoints:
 
 * ``GET  /sso/providers``                 — list enabled providers (login page)
 * ``GET  /sso/{name}/login``              — initiate auth (OIDC redirect or SAML AuthnRequest)
-* ``GET  /sso/{name}/callback``           — OIDC code exchange, mint JWT, redirect to frontend
+* ``GET  /sso/{name}/callback``           — OIDC code exchange, mint session, redirect to frontend
 * ``POST /sso/{name}/acs``                — SAML AssertionConsumerService
 * ``GET  /sso/{name}/metadata``           — SAML SP metadata XML
 * ``POST /sso/{name}/slo``                — SAML LogoutRequest/Response (POST-binding)
@@ -15,7 +15,7 @@ changes (slug edits) are visible in operator-facing IdP config screens.
 
 Threat-model mitigations:
   * **M2** state cookie (``state_cookie.py``) instead of in-process LRU.
-  * **M9** access token returned via URL fragment; Referrer-Policy + Cache-Control hardening on the redirect.
+  * **M9** browser credentials stay in HttpOnly cookies and never enter the redirect URL.
   * **M3** SAML POST size capped at 256 KiB before any parsing.
   * **M14** httpx timeouts inherited from ``oidc.py``.
   * Audit row written on every success / failure.
@@ -74,10 +74,7 @@ _SAML_MAX_BODY_BYTES = 256 * 1024
 
 
 def _frontend_complete_url() -> str:
-    """The page the user lands on after a successful SSO callback.
-
-    Frontend reads the ``access_token`` from the URL fragment, then strips it.
-    """
+    """The page the user lands on after a successful SSO callback."""
     return f"{settings.frontend_base_url.rstrip('/')}/auth/sso/complete"
 
 
@@ -95,14 +92,10 @@ def _api_callback_url(provider_name: str, suffix: str = "callback") -> str:
 
 
 def _redirect_to_frontend(
-    *, access_token: str, response_extras: Optional[Response] = None
+    *, response_extras: Optional[Response] = None
 ) -> RedirectResponse:
-    """Return a RedirectResponse with the access token in the URL fragment.
-
-    Sets ``Referrer-Policy: no-referrer``, ``Cache-Control: no-store`` so the
-    URL-with-fragment isn't logged or cached (M9).
-    """
-    target = f"{_frontend_complete_url()}#access_token={access_token}&token_type=bearer"
+    """Return to the SPA after setting the HttpOnly browser-session cookie."""
+    target = _frontend_complete_url()
     resp = RedirectResponse(url=target, status_code=status.HTTP_303_SEE_OTHER)
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -377,7 +370,7 @@ async def oidc_callback(
     # All checks pass — mint session.
     extras = Response()
     oidc_sid = userinfo.full_claims.get("sid")
-    access_token = await _issue_session(
+    await _issue_session(
         extras,
         identity.user,
         auth_method="oidc",
@@ -399,7 +392,7 @@ async def oidc_callback(
         },
     )
     await db.commit()
-    redirect = _redirect_to_frontend(access_token=access_token, response_extras=extras)
+    redirect = _redirect_to_frontend(response_extras=extras)
     clear_state_cookie(redirect)
     return redirect
 
@@ -511,7 +504,7 @@ async def saml_acs(
         return _redirect_to_frontend_with_error("provisioning_failed")
 
     extras = Response()
-    access_token = await _issue_session(
+    await _issue_session(
         extras,
         identity.user,
         auth_method="saml",
@@ -533,7 +526,7 @@ async def saml_acs(
         },
     )
     await db.commit()
-    redirect = _redirect_to_frontend(access_token=access_token, response_extras=extras)
+    redirect = _redirect_to_frontend(response_extras=extras)
     clear_state_cookie(redirect)
     return redirect
 
