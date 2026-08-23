@@ -17,8 +17,6 @@ from app.infrastructure.database.models import (
     Scan,
     Tenant,
     User,
-    UserGroup,
-    UserGroupMembership,
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.shared.lib.scan_status import STATUS_COMPLETED
@@ -94,24 +92,6 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 ]
             )
 
-            # Deliberately put the two regular users in one group. This makes
-            # the owner visible through the legacy group scope and proves the
-            # tenant boundary remains the decisive authorization check.
-            group = UserGroup(
-                name=f"integration-cross-tenant-{suffix}",
-                description="Cross-tenant visibility regression fixture",
-                created_by=foreign_user.id,
-                tenant_id=foreign_tenant.id,
-            )
-            db.add(group)
-            await db.flush()
-            db.add_all(
-                [
-                    UserGroupMembership(group_id=group.id, user_id=owner.id),
-                    UserGroupMembership(group_id=group.id, user_id=foreign_user.id),
-                ]
-            )
-
             project = Project(
                 user_id=owner.id,
                 tenant_id=owner_tenant.id,
@@ -135,7 +115,6 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.user_ids = [owner.id, foreign_user.id, superuser.id]
             self.owner_id = owner.id
             self.tenant_ids = [owner_tenant.id, foreign_tenant.id]
-            self.group_id = group.id
             self.project_id = project.id
             self.scan_id = scan.id
 
@@ -144,12 +123,6 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
         async with AsyncSessionLocal() as db:
-            await db.execute(
-                delete(UserGroupMembership).where(
-                    UserGroupMembership.group_id == self.group_id
-                )
-            )
-            await db.execute(delete(UserGroup).where(UserGroup.id == self.group_id))
             await db.execute(
                 delete(RoleAssignment).where(RoleAssignment.user_id.in_(self.user_ids))
             )

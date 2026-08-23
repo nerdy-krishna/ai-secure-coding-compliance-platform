@@ -291,7 +291,10 @@ async def _authorized_user(
         if SCAN_READ_TENANT in permissions:
             visible_user_ids = None
         else:
-            peers = await UserGroupRepository(session).get_peer_user_ids(user.id)
+            peers = await UserGroupRepository(session).get_peer_user_ids(
+                user.id,
+                tenant_id=tenant_id,
+            )
             visible_user_ids = [user.id, *sorted(peers)]
         yield _McpAuthorizationContext(
             user=user,

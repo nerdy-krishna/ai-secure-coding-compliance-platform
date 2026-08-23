@@ -1598,10 +1598,13 @@ class SystemConfiguration(Base):
 
 class UserGroup(Base):
     __tablename__ = "user_groups"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_user_groups_tenant_name"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     created_by: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     # V02.3.4 — optimistic-locking version counter; bumped on every UPDATE.

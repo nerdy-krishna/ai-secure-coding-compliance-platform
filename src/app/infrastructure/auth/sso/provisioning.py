@@ -215,7 +215,10 @@ async def _sync_groups_from_idp(
 
     repo = UserGroupRepository(session)
     try:
-        existing_groups = await repo.list_groups_for_user(user.id)
+        existing_groups = await repo.list_groups_for_user(
+            user.id,
+            tenant_id=provider.tenant_id,
+        )
         existing_names = {g.name for g in existing_groups}
         all_groups = await repo.list_groups(tenant_id=provider.tenant_id)
         groups_by_name = {g.name: g for g in all_groups}
@@ -270,7 +273,11 @@ async def _sync_groups_from_idp(
                 pass
             continue
         try:
-            await repo.add_member_in_transaction(target.id, user.id)
+            await repo.add_member_in_transaction(
+                target.id,
+                user.id,
+                tenant_id=provider.tenant_id,
+            )
             await audit.record(
                 session,
                 event=audit.EVENT_GROUP_MAPPED,

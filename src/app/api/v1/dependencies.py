@@ -218,6 +218,7 @@ async def get_visible_user_ids(
     return await scan_scope.visible_user_ids(
         user,
         repo,
+        tenant_id=effective_tenant_id(user.tenant_id),
         tenant_wide=SCAN_READ_TENANT in permissions,
     )
 
@@ -257,6 +258,7 @@ async def get_visible_user_ids_sse(
     return await scan_scope.visible_user_ids(
         user,
         repo,
+        tenant_id=effective_tenant_id(user.tenant_id),
         tenant_wide=SCAN_READ_TENANT in permissions,
     )
 

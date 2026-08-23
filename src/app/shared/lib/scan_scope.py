@@ -18,6 +18,7 @@ tenant" — never cross-tenant access.
 from __future__ import annotations
 
 from typing import List, Optional
+import uuid
 
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.repositories.user_group_repo import (
@@ -29,6 +30,7 @@ async def visible_user_ids(
     user: db_models.User,
     repo: UserGroupRepository,
     *,
+    tenant_id: uuid.UUID,
     tenant_wide: bool = False,
 ) -> Optional[List[int]]:
     """Return resource-visible user IDs, or ``None`` for tenant-wide read.
@@ -39,5 +41,5 @@ async def visible_user_ids(
     """
     if tenant_wide:
         return None
-    peers = await repo.get_peer_user_ids(user.id)
+    peers = await repo.get_peer_user_ids(user.id, tenant_id=tenant_id)
     return [user.id, *sorted(peers)]
