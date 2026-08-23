@@ -33,6 +33,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.config.config import settings
 from app.core.config_cache import SystemConfigCache
 from app.infrastructure.auth.sso import audit
+from app.infrastructure.auth.sso.domains import domain_is_verified_for_provider
 from app.infrastructure.auth.sso.repository import SsoProviderRepository
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import AsyncSessionLocal, get_db
@@ -74,7 +75,9 @@ async def _resolve_forced_provider(
         return None
     for row in rows:
         ff = row.force_for_domains or []
-        if domain in {d.lower() for d in ff}:
+        if domain in {d.lower() for d in ff} and await domain_is_verified_for_provider(
+            session, row, domain
+        ):
             return row
     return None
 

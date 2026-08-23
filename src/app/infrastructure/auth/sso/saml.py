@@ -86,6 +86,10 @@ def _build_settings_dict(
             "url": str(config.idp_slo_url),
             "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
         }
+    if config.idp_x509_cert_rollover:
+        idp_block["x509certMulti"] = {
+            "signing": [config.idp_x509_cert, *config.idp_x509_cert_rollover]
+        }
 
     security: Dict[str, Any] = {
         "authnRequestsSigned": bool(config.sign_requests),

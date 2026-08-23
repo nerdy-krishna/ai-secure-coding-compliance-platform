@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.database import models as db_models
 
 from . import audit
+from .domains import domain_is_verified_for_provider
 from .repository import SsoProviderRepository
 
 logger = logging.getLogger(__name__)
@@ -84,13 +85,6 @@ def _domain_of(email: str) -> str:
     return parts[1] if len(parts) == 2 else ""
 
 
-def _domain_allowed(provider: db_models.SsoProvider, email: str) -> bool:
-    allowed = provider.allowed_email_domains
-    if not allowed:
-        return True
-    return _domain_of(email) in {d.lower() for d in allowed}
-
-
 async def _find_user_by_email(
     session: AsyncSession, email: str
 ) -> Optional[db_models.User]:
@@ -106,6 +100,7 @@ async def _create_jit_user(
     email: str,
     *,
     is_active: bool,
+    tenant_id: uuid.UUID,
 ) -> db_models.User:
     """JIT-create a SCCAP user from SSO claims.
 
@@ -154,6 +149,7 @@ async def _create_jit_user(
             "is_active": is_active,
             "is_superuser": False,
             "is_verified": True,
+            "tenant_id": tenant_id,
         }
         user = await user_db.create(user_dict)
     finally:
@@ -211,6 +207,8 @@ async def _sync_groups_from_idp(
     """
     if not idp_groups or not group_mapping:
         return
+    if provider.tenant_id is None:
+        return
     from app.infrastructure.database.repositories.user_group_repo import (
         UserGroupRepository,
     )
@@ -219,7 +217,7 @@ async def _sync_groups_from_idp(
     try:
         existing_groups = await repo.list_groups_for_user(user.id)
         existing_names = {g.name for g in existing_groups}
-        all_groups = await repo.list_groups()
+        all_groups = await repo.list_groups(tenant_id=provider.tenant_id)
         groups_by_name = {g.name: g for g in all_groups}
     except Exception:
         logger.warning(
@@ -268,7 +266,7 @@ async def _sync_groups_from_idp(
                 pass
             continue
         try:
-            await repo.add_member(target.id, user.id)
+            await repo.add_member_in_transaction(target.id, user.id)
             await audit.record(
                 session,
                 event=audit.EVENT_GROUP_MAPPED,
@@ -310,19 +308,6 @@ async def provision_or_link_oidc(
     after the user is established. ``is_superuser`` is NEVER affected.
     """
     norm_email = _normalize_email(email)
-    if not _domain_allowed(provider, norm_email):
-        await audit.record(
-            session,
-            event=audit.EVENT_SSO_LOGIN_FAILURE,
-            provider_id=provider.id,
-            email=norm_email,
-            request=request,
-            details={"reason": "domain_not_allowed", "domain": _domain_of(norm_email)},
-        )
-        raise SsoProvisioningDenied(
-            f"email domain not in allowed list for provider {provider.name!r}"
-        )
-
     repo = SsoProviderRepository(session)
     existing_link = await repo.find_oauth_account(provider.id, sub)
     if existing_link is not None:
@@ -351,6 +336,23 @@ async def provision_or_link_oidc(
         )
         return ProvisionedIdentity(user=user, is_new_user=False, is_new_link=False)
 
+    if not await domain_is_verified_for_provider(
+        session, provider, _domain_of(norm_email)
+    ):
+        await audit.record(
+            session,
+            event=audit.EVENT_SSO_LOGIN_FAILURE,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
+            email=norm_email,
+            request=request,
+            details={"reason": "domain_not_verified"},
+        )
+        raise SsoProvisioningDenied(
+            f"email domain is not verified for provider {provider.name!r}"
+        )
+
     # No link yet. Look up by email.
     if require_email_verified and not email_verified:
         await audit.record(
@@ -367,6 +369,8 @@ async def provision_or_link_oidc(
 
     user = await _find_user_by_email(session, norm_email)
     if user is not None:
+        if provider.tenant_id is None or user.tenant_id != provider.tenant_id:
+            raise SsoProvisioningDenied("cross-tenant SSO account linking is refused")
         # Refuse to silently link to a pre-existing admin (M4).
         if user.is_superuser:
             await audit.record(
@@ -388,6 +392,7 @@ async def provision_or_link_oidc(
             account_id=sub,
             account_email=norm_email,
             idp_token_expires_at=idp_token_expires_at,
+            tenant_id=provider.tenant_id,
         )
         await audit.record(
             session,
@@ -419,13 +424,21 @@ async def provision_or_link_oidc(
         )
         raise SsoProvisioningDenied("provider jit_policy=deny; no auto-provisioning")
 
+    if provider.tenant_id is None:
+        raise SsoProvisioningDenied("provider is not assigned to a tenant")
     is_active = provider.jit_policy != "approve"
-    user = await _create_jit_user(session, norm_email, is_active=is_active)
+    user = await _create_jit_user(
+        session,
+        norm_email,
+        is_active=is_active,
+        tenant_id=provider.tenant_id,
+    )
     await repo.create_oauth_link(
         user_id=user.id,
         provider_id=provider.id,
         account_id=sub,
         account_email=norm_email,
+        tenant_id=provider.tenant_id,
     )
     await audit.record(
         session,
@@ -478,19 +491,6 @@ async def provision_or_link_saml(
     affected by group sync.
     """
     norm_email = _normalize_email(email)
-    if not _domain_allowed(provider, norm_email):
-        await audit.record(
-            session,
-            event=audit.EVENT_SSO_LOGIN_FAILURE,
-            provider_id=provider.id,
-            email=norm_email,
-            request=request,
-            details={"reason": "domain_not_allowed", "domain": _domain_of(norm_email)},
-        )
-        raise SsoProvisioningDenied(
-            f"email domain not in allowed list for provider {provider.name!r}"
-        )
-
     # Resolve IdP-asserted groups once for use in every branch below.
     idp_groups: List[str] = []
     if saml_attributes and group_attribute:
@@ -519,8 +519,27 @@ async def provision_or_link_saml(
         )
         return ProvisionedIdentity(user=user, is_new_user=False, is_new_link=False)
 
+    if not await domain_is_verified_for_provider(
+        session, provider, _domain_of(norm_email)
+    ):
+        await audit.record(
+            session,
+            event=audit.EVENT_SSO_LOGIN_FAILURE,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
+            email=norm_email,
+            request=request,
+            details={"reason": "domain_not_verified"},
+        )
+        raise SsoProvisioningDenied(
+            f"email domain is not verified for provider {provider.name!r}"
+        )
+
     user = await _find_user_by_email(session, norm_email)
     if user is not None:
+        if provider.tenant_id is None or user.tenant_id != provider.tenant_id:
+            raise SsoProvisioningDenied("cross-tenant SSO account linking is refused")
         if user.is_superuser:
             await audit.record(
                 session,
@@ -540,6 +559,7 @@ async def provision_or_link_saml(
             name_id=name_id,
             name_id_format=name_id_format,
             session_index=session_index,
+            tenant_id=provider.tenant_id,
         )
         await audit.record(
             session,
@@ -570,14 +590,22 @@ async def provision_or_link_saml(
         )
         raise SsoProvisioningDenied("provider jit_policy=deny; no auto-provisioning")
 
+    if provider.tenant_id is None:
+        raise SsoProvisioningDenied("provider is not assigned to a tenant")
     is_active = provider.jit_policy != "approve"
-    user = await _create_jit_user(session, norm_email, is_active=is_active)
+    user = await _create_jit_user(
+        session,
+        norm_email,
+        is_active=is_active,
+        tenant_id=provider.tenant_id,
+    )
     await repo.create_saml_link(
         user_id=user.id,
         provider_id=provider.id,
         name_id=name_id,
         name_id_format=name_id_format,
         session_index=session_index,
+        tenant_id=provider.tenant_id,
     )
     await audit.record(
         session,

@@ -43,6 +43,7 @@ from app.config.config import settings
 from app.infrastructure.auth.backend import get_custom_cookie_jwt_strategy
 from app.infrastructure.auth.session import provider_session_digest
 from app.infrastructure.auth.sso import audit, oidc, saml
+from app.infrastructure.auth.sso.domains import domain_is_verified_for_provider
 from app.infrastructure.auth.sso.provisioning import (
     SsoProvisioningDenied,
     SsoProvisioningEmailUnverified,
@@ -189,7 +190,9 @@ async def list_enabled_providers(
         if domain:
             for row in rows:
                 ff = row.force_for_domains or []
-                if domain in {d.lower() for d in ff}:
+                if domain in {
+                    d.lower() for d in ff
+                } and await domain_is_verified_for_provider(db, row, domain):
                     forced = {
                         "id": str(row.id),
                         "name": row.name,

@@ -86,6 +86,7 @@ class SsoProviderRepository:
         allowed_email_domains: Optional[List[str]] = None,
         force_for_domains: Optional[List[str]] = None,
         jit_policy: str = "auto",
+        tenant_id: uuid.UUID | None = None,
     ) -> db_models.SsoProvider:
         # Validate the config plaintext BEFORE encryption.
         parse_provider_config(protocol, config_plain)
@@ -98,6 +99,7 @@ class SsoProviderRepository:
             allowed_email_domains=allowed_email_domains,
             force_for_domains=force_for_domains,
             jit_policy=jit_policy,
+            tenant_id=tenant_id,
         )
         self.session.add(row)
         await self.session.flush()
@@ -175,6 +177,7 @@ class SsoProviderRepository:
         account_id: str,
         account_email: str,
         idp_token_expires_at: Optional[datetime] = None,
+        tenant_id: uuid.UUID | None = None,
     ) -> db_models.OAuthAccount:
         row = db_models.OAuthAccount(
             user_id=user_id,
@@ -182,6 +185,7 @@ class SsoProviderRepository:
             account_id=account_id,
             account_email=account_email,
             idp_token_expires_at=idp_token_expires_at,
+            tenant_id=tenant_id,
         )
         self.session.add(row)
         await self.session.flush()
@@ -213,6 +217,7 @@ class SsoProviderRepository:
         name_id: str,
         name_id_format: str,
         session_index: Optional[str] = None,
+        tenant_id: uuid.UUID | None = None,
     ) -> db_models.SamlSubject:
         row = db_models.SamlSubject(
             user_id=user_id,
@@ -220,6 +225,7 @@ class SsoProviderRepository:
             name_id=name_id,
             name_id_format=name_id_format,
             session_index=session_index,
+            tenant_id=tenant_id,
         )
         self.session.add(row)
         await self.session.flush()

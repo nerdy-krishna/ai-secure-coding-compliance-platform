@@ -32,6 +32,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.sso import audit, oidc, saml
+from app.infrastructure.auth.sso.domains import (
+    DomainVerificationError,
+    ensure_verified_provider_domains,
+)
 from app.infrastructure.auth.sso.models import (
     OidcConfig,
     SamlConfig,
@@ -232,21 +236,34 @@ async def create_provider(
         parse_provider_config(payload.protocol, payload.config)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"invalid config: {exc}")
+    try:
+        allowed_domains, forced_domains = await ensure_verified_provider_domains(
+            db,
+            tenant_id=user.tenant_id,
+            allowed_domains=payload.allowed_email_domains,
+            forced_domains=payload.force_for_domains,
+            jit_policy=payload.jit_policy,
+        )
+    except DomainVerificationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     row = await repo.create(
         name=payload.name,
         display_name=payload.display_name,
         protocol=payload.protocol,
         config_plain=payload.config,
         enabled=payload.enabled,
-        allowed_email_domains=payload.allowed_email_domains,
-        force_for_domains=payload.force_for_domains,
+        allowed_email_domains=allowed_domains,
+        force_for_domains=forced_domains,
         jit_policy=payload.jit_policy,
+        tenant_id=user.tenant_id,
     )
     await audit.record(
         db,
         event=audit.EVENT_PROVIDER_CREATED,
-        user_id=user.id,
+        actor_user_id=user.id,
         provider_id=row.id,
+        tenant_id=row.tenant_id,
+        outcome="success",
         request=request,
         details={"name": payload.name, "protocol": payload.protocol},
     )
@@ -300,13 +317,39 @@ async def update_provider(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"invalid config: {exc}")
 
+    effective_allowed = (
+        payload.allowed_email_domains
+        if payload.allowed_email_domains is not None
+        else row.allowed_email_domains
+    )
+    effective_forced = (
+        payload.force_for_domains
+        if payload.force_for_domains is not None
+        else row.force_for_domains
+    )
+    effective_jit = payload.jit_policy or row.jit_policy
+    try:
+        normalized_allowed, normalized_forced = await ensure_verified_provider_domains(
+            db,
+            tenant_id=row.tenant_id,
+            allowed_domains=effective_allowed,
+            forced_domains=effective_forced,
+            jit_policy=effective_jit,
+        )
+    except DomainVerificationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     updated = await repo.update_fields(
         provider_id,
         display_name=payload.display_name,
         enabled=payload.enabled,
         config_plain=config_plain,
-        allowed_email_domains=payload.allowed_email_domains,
-        force_for_domains=payload.force_for_domains,
+        allowed_email_domains=(
+            normalized_allowed if payload.allowed_email_domains is not None else None
+        ),
+        force_for_domains=(
+            normalized_forced if payload.force_for_domains is not None else None
+        ),
         jit_policy=payload.jit_policy,
     )
     if updated is None:
@@ -314,8 +357,10 @@ async def update_provider(
     await audit.record(
         db,
         event=audit.EVENT_PROVIDER_UPDATED,
-        user_id=user.id,
+        actor_user_id=user.id,
         provider_id=provider_id,
+        tenant_id=row.tenant_id,
+        outcome="success",
         request=request,
         details={
             "fields": [

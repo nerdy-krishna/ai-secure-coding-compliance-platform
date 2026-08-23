@@ -26,7 +26,15 @@ from urllib.parse import urlparse
 
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, SecretStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +219,9 @@ class SamlConfig(BaseModel):
     idp_slo_url: Optional[HttpUrl] = None
     # PEM-encoded X.509 cert (BEGIN/END CERTIFICATE wrapper required).
     idp_x509_cert: str = Field(..., min_length=64, max_length=16384)
+    # Additional currently-valid signing certs during an IdP key rollover.
+    # Keep the overlap short and remove retired certificates after cutover.
+    idp_x509_cert_rollover: List[str] = Field(default_factory=list, max_length=3)
 
     sp_entity_id: str = Field(..., min_length=1, max_length=512)
     sp_acs_url: HttpUrl  # Our /api/v1/auth/sso/{id}/acs URL
@@ -252,6 +263,14 @@ class SamlConfig(BaseModel):
         # Polish-1: cryptography.x509 parse — fail at admin Save, not first login.
         return _parse_pem_cert(v, field_name="idp_x509_cert")
 
+    @field_validator("idp_x509_cert_rollover")
+    @classmethod
+    def _idp_rollover_certs_pem_check(cls, values: List[str]) -> List[str]:
+        return [
+            _parse_pem_cert(value, field_name="idp_x509_cert_rollover")
+            for value in values
+        ]
+
     @field_validator("sp_x509_cert")
     @classmethod
     def _sp_cert_pem_check(cls, v: Optional[str]) -> Optional[str]:
@@ -269,6 +288,14 @@ class SamlConfig(BaseModel):
             return v
         _parse_pem_private_key(raw, field_name="sp_private_key")
         return v
+
+    @model_validator(mode="after")
+    def _signed_requests_require_sp_keypair(self) -> "SamlConfig":
+        if self.sign_requests and (not self.sp_x509_cert or not self.sp_private_key):
+            raise ValueError(
+                "sign_requests requires both sp_x509_cert and sp_private_key"
+            )
+        return self
 
 
 # Discriminated union for runtime dispatch. The protocol value comes from

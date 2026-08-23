@@ -1825,6 +1825,48 @@ class Tenant(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    verified_domains: Mapped[List["TenantVerifiedDomain"]] = relationship(
+        back_populates="tenant", cascade="all, delete-orphan"
+    )
+
+
+class TenantVerifiedDomain(Base):
+    """DNS-proven tenant domain used to authorize SSO routing and JIT."""
+
+    __tablename__ = "tenant_verified_domains"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    domain: Mapped[str] = mapped_column(String(253), nullable=False, unique=True)
+    # SHA-256 of a 256-bit random challenge. The challenge itself is shown
+    # once to the admin and must be recovered from DNS for verification.
+    verification_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending"
+    )
+    verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    tenant: Mapped["Tenant"] = relationship(back_populates="verified_domains")
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "status IN ('pending', 'verified')",
+            name="ck_tenant_verified_domains_status",
+        ),
+    )
+
 
 # --- Enterprise SSO -----------------------------------------------------------
 # `sso_providers` is the row-per-IdP table. The SP can have multiple OIDC and

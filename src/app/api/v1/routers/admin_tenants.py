@@ -35,6 +35,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.sso import audit
+from app.infrastructure.auth.sso.domains import (
+    DomainVerificationError,
+    mark_verified,
+    new_challenge,
+    normalize_domain,
+    verify_dns_challenge,
+)
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
 
@@ -75,6 +82,26 @@ class TenantUpdate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=128)
 
 
+class DomainCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    domain: str = Field(..., min_length=3, max_length=253)
+
+
+class DomainRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: _uuid.UUID
+    tenant_id: _uuid.UUID
+    domain: str
+    status: str
+    verified_at: datetime | None
+    created_at: datetime
+
+
+class DomainChallengeRead(DomainRead):
+    txt_name: str
+    txt_value: str
+
+
 async def _require_superuser(
     current_user: db_models.User = Depends(current_active_user),
 ) -> db_models.User:
@@ -94,6 +121,157 @@ def _to_read(row: db_models.Tenant) -> TenantRead:
         updated_at=row.updated_at,
         is_default=(row.id == DEFAULT_TENANT_ID),
     )
+
+
+async def _get_tenant_or_404(
+    db: AsyncSession, tenant_id: _uuid.UUID
+) -> db_models.Tenant:
+    row = await db.get(db_models.Tenant, tenant_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="tenant not found")
+    return row
+
+
+@router.get("/{tenant_id}/domains", response_model=List[DomainRead])
+async def list_verified_domains(
+    tenant_id: _uuid.UUID = Path(...),
+    db: AsyncSession = Depends(get_db),
+    _user: db_models.User = Depends(_require_superuser),
+) -> List[DomainRead]:
+    await _get_tenant_or_404(db, tenant_id)
+    rows = (
+        await db.scalars(
+            select(db_models.TenantVerifiedDomain)
+            .where(db_models.TenantVerifiedDomain.tenant_id == tenant_id)
+            .order_by(db_models.TenantVerifiedDomain.domain)
+        )
+    ).all()
+    return [DomainRead.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/{tenant_id}/domains",
+    response_model=DomainChallengeRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_domain_challenge(
+    request: Request,
+    payload: DomainCreate,
+    tenant_id: _uuid.UUID = Path(...),
+    db: AsyncSession = Depends(get_db),
+    user: db_models.User = Depends(_require_superuser),
+) -> DomainChallengeRead:
+    await _get_tenant_or_404(db, tenant_id)
+    try:
+        normalized = normalize_domain(payload.domain)
+    except DomainVerificationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    existing = await db.scalar(
+        select(db_models.TenantVerifiedDomain).where(
+            db_models.TenantVerifiedDomain.domain == normalized
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="domain is already claimed")
+    challenge = new_challenge(normalized)
+    row = db_models.TenantVerifiedDomain(
+        tenant_id=tenant_id,
+        domain=normalized,
+        verification_token_hash=challenge.token_hash,
+    )
+    db.add(row)
+    await db.flush()
+    await audit.record(
+        db,
+        event="tenant.domain.challenge_created",
+        actor_user_id=user.id,
+        tenant_id=tenant_id,
+        outcome="success",
+        request=request,
+        details={"domain": normalized},
+    )
+    await db.commit()
+    return DomainChallengeRead(
+        **DomainRead.model_validate(row).model_dump(),
+        txt_name=challenge.txt_name,
+        txt_value=challenge.txt_value,
+    )
+
+
+@router.post("/{tenant_id}/domains/{domain_id}/verify", response_model=DomainRead)
+async def verify_tenant_domain(
+    request: Request,
+    tenant_id: _uuid.UUID = Path(...),
+    domain_id: _uuid.UUID = Path(...),
+    db: AsyncSession = Depends(get_db),
+    user: db_models.User = Depends(_require_superuser),
+) -> DomainRead:
+    row = await db.scalar(
+        select(db_models.TenantVerifiedDomain).where(
+            db_models.TenantVerifiedDomain.id == domain_id,
+            db_models.TenantVerifiedDomain.tenant_id == tenant_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="domain challenge not found")
+    verified = row.status == "verified" or await verify_dns_challenge(row)
+    if not verified:
+        await audit.record(
+            db,
+            event="tenant.domain.verification_failed",
+            actor_user_id=user.id,
+            tenant_id=tenant_id,
+            outcome="denied",
+            request=request,
+            details={"domain": row.domain},
+        )
+        await db.commit()
+        raise HTTPException(status_code=409, detail="DNS TXT challenge not found")
+    if row.status != "verified":
+        mark_verified(row)
+    await audit.record(
+        db,
+        event="tenant.domain.verified",
+        actor_user_id=user.id,
+        tenant_id=tenant_id,
+        outcome="success",
+        request=request,
+        details={"domain": row.domain},
+    )
+    await db.commit()
+    return DomainRead.model_validate(row)
+
+
+@router.delete(
+    "/{tenant_id}/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_tenant_domain(
+    request: Request,
+    tenant_id: _uuid.UUID = Path(...),
+    domain_id: _uuid.UUID = Path(...),
+    db: AsyncSession = Depends(get_db),
+    user: db_models.User = Depends(_require_superuser),
+) -> None:
+    row = await db.scalar(
+        select(db_models.TenantVerifiedDomain).where(
+            db_models.TenantVerifiedDomain.id == domain_id,
+            db_models.TenantVerifiedDomain.tenant_id == tenant_id,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="domain not found")
+    domain = row.domain
+    await db.delete(row)
+    await audit.record(
+        db,
+        event="tenant.domain.deleted",
+        actor_user_id=user.id,
+        tenant_id=tenant_id,
+        outcome="success",
+        request=request,
+        details={"domain": domain},
+    )
+    await db.commit()
 
 
 @router.get("", response_model=List[TenantRead])

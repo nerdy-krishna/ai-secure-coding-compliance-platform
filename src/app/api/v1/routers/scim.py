@@ -540,7 +540,15 @@ async def patch_user(
         op = (op_obj.op or "").lower()
         path = (op_obj.path or "").strip()
         if op == "replace" and path.lower() == "active":
-            new_active = bool(op_obj.value)
+            if isinstance(op_obj.value, bool):
+                new_active = op_obj.value
+            elif isinstance(op_obj.value, str) and op_obj.value.lower() in {
+                "true",
+                "false",
+            }:
+                new_active = op_obj.value.lower() == "true"
+            else:
+                return _scim_error(400, "active must be a boolean")
             if not new_active and _is_master_admin(user):
                 return _scim_error(
                     403,
@@ -568,6 +576,8 @@ async def patch_user(
         db,
         event=EVENT_SCIM_USER_UPDATED,
         user_id=user.id,
+        tenant_id=user.tenant_id,
+        outcome="success",
         request=request,
         details={"path": "active", "active": user.is_active},
     )
@@ -620,6 +630,8 @@ async def delete_user(
         db,
         event=EVENT_SCIM_USER_DEACTIVATED,
         user_id=user.id,
+        tenant_id=user.tenant_id,
+        outcome="success",
         email=user.email,
         request=request,
         details={"reason": "scim_deactivated_user"},

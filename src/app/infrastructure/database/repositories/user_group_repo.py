@@ -158,13 +158,17 @@ class UserGroupRepository:
         logger.info("user_group.deleted", extra={"group_id": str(group_id)})
         return True
 
-    async def list_groups(self) -> List[db_models.UserGroup]:
+    async def list_groups(
+        self, *, tenant_id: uuid.UUID | None = None
+    ) -> List[db_models.UserGroup]:
         stmt = (
             select(db_models.UserGroup)
             .options(selectinload(db_models.UserGroup.memberships))
             .order_by(db_models.UserGroup.name)
             .limit(_MAX_GROUPS_PER_LIST)
         )
+        if tenant_id is not None:
+            stmt = stmt.where(db_models.UserGroup.tenant_id == tenant_id)
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
@@ -215,6 +219,25 @@ class UserGroupRepository:
             "user_group.member.added",
             extra={"group_id": str(group_id), "user_id": user_id, "role": role},
         )
+        return membership
+
+    async def add_member_in_transaction(
+        self, group_id: uuid.UUID, user_id: int, *, role: str = "member"
+    ) -> db_models.UserGroupMembership:
+        """Idempotently add a member without committing the caller's unit of work."""
+        stmt = (
+            pg_insert(db_models.UserGroupMembership)
+            .values(group_id=group_id, user_id=user_id, role=role)
+            .on_conflict_do_update(
+                index_elements=["group_id", "user_id"],
+                set_={"role": role},
+            )
+            .returning(db_models.UserGroupMembership)
+        )
+        result = await self.db.execute(stmt)
+        membership = result.scalars().first()
+        if membership is None:  # pragma: no cover - RETURNING is mandatory
+            raise SQLAlchemyError("membership upsert returned no row")
         return membership
 
     async def remove_member(self, group_id: uuid.UUID, user_id: int) -> bool:
