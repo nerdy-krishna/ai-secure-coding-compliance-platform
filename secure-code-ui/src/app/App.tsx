@@ -38,6 +38,8 @@ import SsoProvidersPage from "../pages/admin/SsoProvidersPage";
 import SsoAuditPage from "../pages/admin/SsoAuditPage";
 import ScimTokensPage from "../pages/admin/ScimTokensPage";
 import TenantsPage from "../pages/admin/TenantsPage";
+import AuthorizationPage from "../pages/admin/AuthorizationPage";
+import { hasAnyPermission } from "../shared/lib/permissions";
 import SecurityAdvisorPage from "../pages/chat/SecurityAdvisorPage";
 import CompliancePage from "../pages/compliance/CompliancePage";
 import SubmitPage from "../pages/submission/SubmitPage";
@@ -81,11 +83,12 @@ import ResetPasswordPage from "../features/authentication/components/ResetPasswo
 type RouteRequirement =
   | "auth" // Authenticated user → renders inside DashboardLayout.
   | "unauth" // Unauthenticated only (login / forgot-password) → AuthLayout.
-  | "superuser" // Authenticated + is_superuser → DashboardLayout.
+  | "permission" // Authenticated + one required stable permission.
   | "root-redirect"; // No render; redirect based on auth state.
 
 interface RouteGuardProps {
   requires: RouteRequirement;
+  anyPermission?: readonly string[];
 }
 
 /**
@@ -95,7 +98,7 @@ interface RouteGuardProps {
  *  - the same "setup not completed → /setup" forced redirect.
  * The `requires` prop selects the post-setup-gate behavior.
  */
-const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
+const RouteGuard: React.FC<RouteGuardProps> = ({ requires, anyPermission = [] }) => {
   const { isAuthenticated, user, initialAuthChecked, isLoading, isSetupCompleted } =
     useAuth();
 
@@ -125,12 +128,12 @@ const RouteGuard: React.FC<RouteGuardProps> = ({ requires }) => {
     );
   }
 
-  // Both "auth" and "superuser" need a token.
+  // Both authenticated variants need a valid server-side session.
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
-  if (requires === "superuser" && !user?.is_superuser) {
+  if (requires === "permission" && !hasAnyPermission(user?.permissions, anyPermission)) {
     return <Navigate to="/account/dashboard" replace />;
   }
 
@@ -212,30 +215,13 @@ function AppContent() {
           />
         </Route>
 
-        <Route element={<RouteGuard requires="superuser" />}>
+        <Route element={<RouteGuard requires="permission" anyPermission={["platform.config.manage"]} />}>
           <Route path="/admin/system" element={<SystemConfigTab />} />
           <Route path="/admin/features" element={<FeaturesPage />} />
-          <Route path="/admin/findings" element={<AdminFindingsPage />} />
           <Route path="/admin/appearance" element={<AppearanceSettingsPage />} />
           <Route path="/account/settings/llm" element={<LLMSettingsPage />} />
-          <Route element={<FeatureRoute feature="multi_user" />}>
-            <Route path="/admin/users" element={<UserManagementTab />} />
-          </Route>
-          <Route element={<FeatureRoute feature="user_groups" />}>
-            <Route path="/admin/user-groups" element={<UserGroupsPage />} />
-          </Route>
           <Route element={<FeatureRoute feature="email" />}>
             <Route path="/admin/smtp" element={<SMTPSettingsTab />} />
-          </Route>
-          <Route element={<FeatureRoute feature="sso" />}>
-            <Route path="/admin/sso/providers" element={<SsoProvidersPage />} />
-            <Route path="/admin/sso/audit" element={<SsoAuditPage />} />
-          </Route>
-          <Route element={<FeatureRoute feature="scim" />}>
-            <Route path="/admin/scim/tokens" element={<ScimTokensPage />} />
-          </Route>
-          <Route element={<FeatureRoute feature="multi_tenant" />}>
-            <Route path="/admin/tenants" element={<TenantsPage />} />
           </Route>
           <Route element={<FeatureRoute feature="admin_authoring" />}>
             <Route path="/admin/agents" element={<AgentManagementPage />} />
@@ -252,6 +238,41 @@ function AppContent() {
             path="/admin/rag"
             element={<Navigate to="/compliance" replace />}
           />
+        </Route>
+
+        <Route element={<RouteGuard requires="permission" anyPermission={["audit.read"]} />}>
+          <Route path="/admin/findings" element={<AdminFindingsPage />} />
+          <Route element={<FeatureRoute feature="sso" />}>
+            <Route path="/admin/sso/audit" element={<SsoAuditPage />} />
+          </Route>
+        </Route>
+        <Route element={<RouteGuard requires="permission" anyPermission={["identity.read"]} />}>
+          <Route element={<FeatureRoute feature="multi_user" />}>
+            <Route path="/admin/users" element={<UserManagementTab />} />
+          </Route>
+        </Route>
+        <Route element={<RouteGuard requires="permission" anyPermission={["group.manage"]} />}>
+          <Route element={<FeatureRoute feature="user_groups" />}>
+            <Route path="/admin/user-groups" element={<UserGroupsPage />} />
+          </Route>
+        </Route>
+        <Route element={<RouteGuard requires="permission" anyPermission={["tenant.policy.manage"]} />}>
+          <Route element={<FeatureRoute feature="sso" />}>
+            <Route path="/admin/sso/providers" element={<SsoProvidersPage />} />
+          </Route>
+        </Route>
+        <Route element={<RouteGuard requires="permission" anyPermission={["service_principal.manage"]} />}>
+          <Route element={<FeatureRoute feature="scim" />}>
+            <Route path="/admin/scim/tokens" element={<ScimTokensPage />} />
+          </Route>
+        </Route>
+        <Route element={<RouteGuard requires="permission" anyPermission={["platform.tenant.manage"]} />}>
+          <Route element={<FeatureRoute feature="multi_tenant" />}>
+            <Route path="/admin/tenants" element={<TenantsPage />} />
+          </Route>
+        </Route>
+        <Route element={<RouteGuard requires="auth" />}>
+          <Route path="/admin/authorization" element={<AuthorizationPage />} />
         </Route>
 
         <Route path="/" element={<RouteGuard requires="root-redirect" />} />

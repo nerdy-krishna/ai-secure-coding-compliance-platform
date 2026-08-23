@@ -23,6 +23,10 @@ from app.infrastructure.auth.session import (
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.models import User
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+)
+from app.infrastructure.database.tenant_context import effective_tenant_id
 
 
 router = APIRouter(prefix="/auth/session")
@@ -53,8 +57,18 @@ async def _current_session(
 @router.get("/me", response_model=UserRead)
 async def browser_session_me(
     user: User = Depends(current_active_user),
-) -> User:
-    return user
+    db: AsyncSession = Depends(get_db),
+) -> UserRead:
+    repo = AuthorizationRepository(db)
+    tenant_id = effective_tenant_id(user.tenant_id)
+    role_keys = await repo.role_keys_for_user(user=user, tenant_id=tenant_id)
+    permissions = await repo.permissions_for_user(user=user, tenant_id=tenant_id)
+    return UserRead.model_validate(user).model_copy(
+        update={
+            "role_keys": sorted(role_keys),
+            "permissions": sorted(permissions),
+        }
+    )
 
 
 @router.get("/csrf")

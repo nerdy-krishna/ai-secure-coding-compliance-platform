@@ -12,6 +12,7 @@ import { useTheme } from "../../app/providers/ThemeProvider";
 import { Icon } from "../../shared/ui/Icon";
 import { NotificationCenter } from "../../shared/ui/NotificationCenter";
 import { SearchCombobox } from "./SearchCombobox";
+import { ADMIN_AREA_PERMISSIONS, hasAnyPermission } from "../../shared/lib/permissions";
 
 interface NavItem {
   id: string;
@@ -40,19 +41,23 @@ export const TopNav: React.FC = () => {
   const { user } = useAuth();
   const { isFeatureEnabled } = useFeatures();
   const isSuperuser = !!user?.is_superuser;
+  const hasAdminAccess = hasAnyPermission(
+    user?.permissions,
+    ADMIN_AREA_PERMISSIONS,
+  );
 
   // Hide nav items whose backing feature is disabled (modular setup).
   const navItems = NAV_ITEMS.filter(
     (it) => !it.feature || isFeatureEnabled(it.feature),
   );
 
-  // Superusers get an extra "Admin" pill in the centre nav.
-  if (isSuperuser) {
+  // Stable capabilities, not the compatibility superuser bit, expose admin UX.
+  if (hasAdminAccess) {
     navItems.push({
       id: "admin",
       label: "Admin",
       match: "/admin",
-      to: "/admin/system",
+      to: "/admin/authorization",
     });
   }
 

@@ -455,9 +455,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Finding Disposition
-         * @description Delete a finding's triage disposition — reset it to untriaged
-         *     and wipe its history (PRD #96). Superuser-only: regular users can
-         *     add and change dispositions but cannot delete them.
+         * @description Reset a finding's triage disposition to the untriaged state.
          */
         delete: operations["delete_finding_disposition_api_v1_scans__scan_id__findings__finding_id__disposition_delete"];
         options?: never;
@@ -472,6 +470,40 @@ export interface paths {
         patch: operations["set_finding_disposition_api_v1_scans__scan_id__findings__finding_id__disposition_patch"];
         trace?: never;
     };
+    "/api/v1/scans/{scan_id}/findings/{finding_id}/waiver-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Finding Waiver */
+        post: operations["request_finding_waiver_api_v1_scans__scan_id__findings__finding_id__waiver_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans/{scan_id}/findings/{finding_id}/waiver-requests/{action_request_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Finding Waiver */
+        post: operations["execute_finding_waiver_api_v1_scans__scan_id__findings__finding_id__waiver_requests__action_request_id__execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/scans/{scan_id}/findings/disposition": {
         parameters: {
             query?: never;
@@ -484,8 +516,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Finding Dispositions Bulk
-         * @description Bulk-delete triage dispositions for many of a scan's findings
-         *     (PRD #96). Superuser-only. All-or-nothing on finding ids.
+         * @description Bulk-reset triage dispositions; all finding ids must match.
          */
         delete: operations["delete_finding_dispositions_bulk_api_v1_scans__scan_id__findings_disposition_delete"];
         options?: never;
@@ -531,7 +562,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Scan
-         * @description Deletes a single scan (superuser only).
+         * @description Delete a scan inside the caller's control scope.
          */
         delete: operations["delete_scan_api_v1_scans__scan_id__delete"];
         options?: never;
@@ -551,7 +582,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Project
-         * @description Delets a project and all its scans (superuser only).
+         * @description Delete a project inside the caller's control scope.
          */
         delete: operations["delete_project_api_v1_projects__project_id__delete"];
         options?: never;
@@ -1510,8 +1541,8 @@ export interface paths {
         };
         /**
          * Admin List Users
-         * @description Lists all users with pagination.
-         *     Accessible only to superusers.
+         * @description List users in the caller's active tenant with pagination.
+         *     Requires tenant identity-read permission.
          *     Results are paginated via skip/limit parameters (default: skip=0, limit=100, max limit=1000).
          */
         get: operations["admin_list_users_api_v1_admin_users_get"];
@@ -1519,7 +1550,7 @@ export interface paths {
         /**
          * Admin Create User
          * @description Creates a new user and sends them a password setup email.
-         *     Accessible only to superusers.
+         *     Creates a least-privilege analyst in the caller's active tenant.
          */
         post: operations["admin_create_user_api_v1_admin_users_post"];
         delete?: never;
@@ -1540,8 +1571,8 @@ export interface paths {
         post?: never;
         /**
          * Admin Delete User
-         * @description Delete a user account.
-         *     Accessible only to superusers.
+         * @description Delete a user account in the caller's active tenant.
+         *     Requires tenant identity-manage permission.
          *     The master admin (first-created user) and the acting user themselves cannot be deleted.
          */
         delete: operations["admin_delete_user_api_v1_admin_users__user_id__delete"];
@@ -1549,9 +1580,8 @@ export interface paths {
         head?: never;
         /**
          * Admin Update User
-         * @description Update a user's active/verified/superuser flags.
-         *     Accessible only to superusers.
-         *     An admin cannot demote their own superuser status.
+         * @description Update a tenant user's active and verified flags.
+         *     Legacy superuser state is visible for compatibility but cannot be changed here.
          */
         patch: operations["admin_update_user_api_v1_admin_users__user_id__patch"];
         trace?: never;
@@ -1992,6 +2022,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/sso/{name}/backchannel-logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Oidc Backchannel Logout */
+        post: operations["oidc_backchannel_logout_api_v1_auth_sso__name__backchannel_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/sso/{name}/slo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Saml Slo Redirect */
+        get: operations["saml_slo_redirect_api_v1_auth_sso__name__slo_get"];
+        put?: never;
+        /** Saml Slo Post */
+        post: operations["saml_slo_post_api_v1_auth_sso__name__slo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/sso/{name}/metadata": {
         parameters: {
             query?: never;
@@ -2421,6 +2486,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/tenants/{tenant_id}/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Verified Domains */
+        get: operations["list_verified_domains_api_v1_admin_tenants__tenant_id__domains_get"];
+        put?: never;
+        /** Create Domain Challenge */
+        post: operations["create_domain_challenge_api_v1_admin_tenants__tenant_id__domains_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tenants/{tenant_id}/domains/{domain_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify Tenant Domain */
+        post: operations["verify_tenant_domain_api_v1_admin_tenants__tenant_id__domains__domain_id__verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tenants/{tenant_id}/domains/{domain_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Tenant Domain */
+        delete: operations["delete_tenant_domain_api_v1_admin_tenants__tenant_id__domains__domain_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/tenants": {
         parameters: {
             query?: never;
@@ -2433,6 +2550,26 @@ export interface paths {
         put?: never;
         /** Create Tenant */
         post: operations["create_tenant_api_v1_admin_tenants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/tenants/entry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Tenant Entry
+         * @description Reauthenticate a platform owner and bind a short-lived selected tenant.
+         */
+        post: operations["create_tenant_entry_api_v1_admin_tenants_entry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2484,13 +2621,78 @@ export interface paths {
         head?: never;
         /**
          * Update User Tenant
-         * @description Assign or clear a user's tenant.
-         *
-         *     Superuser-only. Validates the target tenant exists when non-null,
-         *     refuses self-target, and writes an audit event in the same
-         *     transaction as the UPDATE.
+         * @description Move a non-acting user from the selected source to one destination.
          */
         patch: operations["update_user_tenant_api_v1_admin_users__user_id__tenant_patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/authorization/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Authorization Policy */
+        get: operations["get_authorization_policy_api_v1_admin_authorization_policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Authorization Policy */
+        patch: operations["update_authorization_policy_api_v1_admin_authorization_policy_patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/authorization/policy-change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Policy Relaxation */
+        post: operations["request_policy_relaxation_api_v1_admin_authorization_policy_change_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/authorization/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Action Requests */
+        get: operations["list_action_requests_api_v1_admin_authorization_actions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/authorization/actions/{request_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Action Request */
+        post: operations["decide_action_request_api_v1_admin_authorization_actions__request_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/auth/forgot-password": {
@@ -2757,6 +2959,50 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActionDecision */
+        ActionDecision: {
+            /** Approved */
+            approved: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** ActionRequestRead */
+        ActionRequestRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Requester Permission */
+            requester_permission: string;
+            /** Approver Permission */
+            approver_permission: string;
+            /** Target Type */
+            target_type: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected" | "expired" | "executed" | "cancelled";
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decided At */
+            decided_at: string | null;
+            /** Executed At */
+            executed_at: string | null;
+            /** Is Requester */
+            is_requester: boolean;
+            /** Can Decide */
+            can_decide: boolean;
+        };
         /**
          * AdminFindingItem
          * @description Narrow projection of `Finding` for the admin list view.
@@ -2840,6 +3086,8 @@ export interface components {
             is_superuser: boolean;
             /** Is Verified */
             is_verified: boolean;
+            /** Role Keys */
+            role_keys: string[];
         };
         /** AdminUserUpdate */
         AdminUserUpdate: {
@@ -3133,6 +3381,24 @@ export interface components {
              * Format: date-time
              */
             absolute_expires_at: string;
+        };
+        /** AuthorizationPolicyRead */
+        AuthorizationPolicyRead: {
+            /**
+             * Separation Of Duties Mode
+             * @enum {string}
+             */
+            separation_of_duties_mode: "off" | "critical";
+        };
+        /** AuthorizationPolicyUpdate */
+        AuthorizationPolicyUpdate: {
+            /**
+             * Separation Of Duties Mode
+             * @enum {string}
+             */
+            separation_of_duties_mode: "off" | "critical";
+            /** Action Request Id */
+            action_request_id?: string | null;
         };
         /** BearerResponse */
         BearerResponse: {
@@ -3453,6 +3719,63 @@ export interface components {
             ssl: boolean;
             /** Password */
             password: string;
+        };
+        /** DomainChallengeRead */
+        DomainChallengeRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Domain */
+            domain: string;
+            /** Status */
+            status: string;
+            /** Verified At */
+            verified_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Txt Name */
+            txt_name: string;
+            /** Txt Value */
+            txt_value: string;
+        };
+        /** DomainCreate */
+        DomainCreate: {
+            /** Domain */
+            domain: string;
+        };
+        /** DomainRead */
+        DomainRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Domain */
+            domain: string;
+            /** Status */
+            status: string;
+            /** Verified At */
+            verified_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * EnrichedDocument
@@ -4214,6 +4537,14 @@ export interface components {
             page: number;
             /** Page Size */
             page_size: number;
+        };
+        /** PolicyChangeRequestCreate */
+        PolicyChangeRequestCreate: {
+            /**
+             * Separation Of Duties Mode
+             * @constant
+             */
+            separation_of_duties_mode: "off";
         };
         /** PreferencesBody */
         PreferencesBody: {
@@ -5515,6 +5846,35 @@ export interface components {
             slug: string;
             /** Display Name */
             display_name: string;
+            /** Session Concurrency Limit */
+            session_concurrency_limit?: number | null;
+            /**
+             * Session Concurrency Mode
+             * @default deny_new
+             */
+            session_concurrency_mode: string;
+        };
+        /** TenantEntryCreate */
+        TenantEntryCreate: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Password */
+            password: string;
+        };
+        /** TenantEntryRead */
+        TenantEntryRead: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Entry Token */
+            entry_token: string;
+            /** Expires In */
+            expires_in: number;
         };
         /** TenantRead */
         TenantRead: {
@@ -5527,6 +5887,10 @@ export interface components {
             slug: string;
             /** Display Name */
             display_name: string;
+            /** Session Concurrency Limit */
+            session_concurrency_limit: number | null;
+            /** Session Concurrency Mode */
+            session_concurrency_mode: string;
             /**
              * Created At
              * Format: date-time
@@ -5546,7 +5910,11 @@ export interface components {
         /** TenantUpdate */
         TenantUpdate: {
             /** Display Name */
-            display_name: string;
+            display_name?: string | null;
+            /** Session Concurrency Limit */
+            session_concurrency_limit?: number | null;
+            /** Session Concurrency Mode */
+            session_concurrency_mode?: string | null;
         };
         /** UpdateSmtpProfileRequest */
         UpdateSmtpProfileRequest: {
@@ -5639,6 +6007,10 @@ export interface components {
              * @default false
              */
             is_superuser: boolean;
+            /** Role Keys */
+            role_keys?: string[];
+            /** Permissions */
+            permissions?: string[];
         };
         /** UserTenantRead */
         UserTenantRead: {
@@ -5646,13 +6018,19 @@ export interface components {
             id: number;
             /** Email */
             email: string;
-            /** Tenant Id */
-            tenant_id: string | null;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
         };
         /** UserTenantUpdate */
         UserTenantUpdate: {
-            /** Tenant Id */
-            tenant_id?: string | null;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
         };
         /**
          * UserUpdate
@@ -6527,6 +6905,81 @@ export interface operations {
             path: {
                 scan_id: string;
                 finding_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindingDispositionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingDispositionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_finding_waiver_api_v1_scans__scan_id__findings__finding_id__waiver_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Idempotency-Key": string;
+            };
+            path: {
+                scan_id: string;
+                finding_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindingDispositionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_finding_waiver_api_v1_scans__scan_id__findings__finding_id__waiver_requests__action_request_id__execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+                finding_id: number;
+                action_request_id: string;
             };
             cookie?: never;
         };
@@ -8552,7 +9005,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserRead"];
+                    "application/json": components["schemas"]["AdminUserRead"];
                 };
             };
             /** @description Validation Error */
@@ -9402,6 +9855,97 @@ export interface operations {
         };
     };
     saml_acs_api_v1_auth_sso__name__acs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    oidc_backchannel_logout_api_v1_auth_sso__name__backchannel_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    saml_slo_redirect_api_v1_auth_sso__name__slo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    saml_slo_post_api_v1_auth_sso__name__slo_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -10469,6 +11013,134 @@ export interface operations {
             };
         };
     };
+    list_verified_domains_api_v1_admin_tenants__tenant_id__domains_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_domain_challenge_api_v1_admin_tenants__tenant_id__domains_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainChallengeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_tenant_domain_api_v1_admin_tenants__tenant_id__domains__domain_id__verify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_tenant_domain_api_v1_admin_tenants__tenant_id__domains__domain_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: string;
+                domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tenants_api_v1_admin_tenants_get: {
         parameters: {
             query?: never;
@@ -10509,6 +11181,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_tenant_entry_api_v1_admin_tenants_entry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantEntryCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantEntryRead"];
                 };
             };
             /** @description Validation Error */
@@ -10639,6 +11344,160 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserTenantRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_authorization_policy_api_v1_admin_authorization_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizationPolicyRead"];
+                };
+            };
+        };
+    };
+    update_authorization_policy_api_v1_admin_authorization_policy_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthorizationPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizationPolicyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_policy_relaxation_api_v1_admin_authorization_policy_change_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyChangeRequestCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_action_requests_api_v1_admin_authorization_actions_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "approved" | "rejected" | "expired" | "executed" | "cancelled") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRequestRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_action_request_api_v1_admin_authorization_actions__request_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActionDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRequestRead"];
                 };
             };
             /** @description Validation Error */

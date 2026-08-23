@@ -10,29 +10,33 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../shared/hooks/useAuth";
 import { useFeatures } from "../shared/hooks/useFeatures";
 import { isSafeHttpUrl } from "../shared/lib/safeUrl";
+import { hasAnyPermission, Permission } from "../shared/lib/permissions";
 
 interface AdminLink {
   to: string;
   label: string;
   /** When set, the link is hidden unless this feature flag is enabled. */
   feature?: string;
+  permissions?: readonly string[];
 }
 
 const ADMIN_LINKS: AdminLink[] = [
-  { to: "/admin/system", label: "Platform" },
-  { to: "/admin/features", label: "Features" },
-  { to: "/admin/users", label: "Users", feature: "multi_user" },
-  { to: "/admin/user-groups", label: "Groups", feature: "user_groups" },
-  { to: "/admin/tenants", label: "Tenants", feature: "multi_tenant" },
-  { to: "/admin/agents", label: "Agents", feature: "admin_authoring" },
-  { to: "/admin/frameworks", label: "Frameworks", feature: "admin_authoring" },
-  { to: "/admin/prompts", label: "Prompts", feature: "admin_authoring" },
-  { to: "/admin/smtp", label: "SMTP", feature: "email" },
-  { to: "/admin/sso/providers", label: "SSO", feature: "sso" },
-  { to: "/admin/scim/tokens", label: "SCIM tokens", feature: "scim" },
-  { to: "/admin/sso/audit", label: "Auth audit", feature: "sso" },
-  { to: "/account/settings/llm", label: "LLM configs" },
-  { to: "/admin/appearance", label: "Appearance" },
+  { to: "/admin/authorization", label: "Authorization" },
+  { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/users", label: "Users", feature: "multi_user", permissions: [Permission.identityRead] },
+  { to: "/admin/user-groups", label: "Groups", feature: "user_groups", permissions: [Permission.groupManage] },
+  { to: "/admin/tenants", label: "Tenants", feature: "multi_tenant", permissions: [Permission.platformTenantManage] },
+  { to: "/admin/agents", label: "Agents", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/frameworks", label: "Frameworks", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/prompts", label: "Prompts", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/smtp", label: "SMTP", feature: "email", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/sso/providers", label: "SSO", feature: "sso", permissions: [Permission.tenantPolicyManage] },
+  { to: "/admin/scim/tokens", label: "SCIM tokens", feature: "scim", permissions: [Permission.servicePrincipalManage] },
+  { to: "/admin/sso/audit", label: "Auth audit", feature: "sso", permissions: [Permission.auditRead] },
+  { to: "/admin/findings", label: "Findings", permissions: [Permission.auditRead] },
+  { to: "/account/settings/llm", label: "LLM configs", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/appearance", label: "Appearance", permissions: [Permission.platformConfigManage] },
 ];
 
 const LANGFUSE_HOST = (import.meta.env.VITE_LANGFUSE_HOST as string | undefined) ?? "";
@@ -44,7 +48,9 @@ export const AdminSubNav: React.FC = () => {
   const isSuperuser = !!user?.is_superuser;
   // Hide admin links whose backing feature is disabled (modular setup).
   const adminLinks = ADMIN_LINKS.filter(
-    (l) => !l.feature || isFeatureEnabled(l.feature),
+    (l) =>
+      (!l.feature || isFeatureEnabled(l.feature)) &&
+      (!l.permissions || hasAnyPermission(user?.permissions, l.permissions)),
   );
   // External link to the self-hosted Langfuse UI. Superuser-only because
   // Langfuse traces span all tenants (no per-project isolation in the

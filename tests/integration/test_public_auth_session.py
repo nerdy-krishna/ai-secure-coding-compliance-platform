@@ -23,6 +23,7 @@ from app.infrastructure.database.models import (
     User,
 )
 from app.shared.lib.permissions import TENANT_ADMIN
+from app.shared.lib.permissions import IDENTITY_MANAGE, PLATFORM_OWNER
 from tests.integration.support import integration_test
 
 
@@ -170,6 +171,8 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         cookie_me = await self.client.get("/api/v1/auth/session/me")
         self.assertEqual(cookie_me.status_code, 200, cookie_me.text)
         self.assertEqual(cookie_me.json()["email"], self.email)
+        self.assertIn(PLATFORM_OWNER, cookie_me.json()["role_keys"])
+        self.assertIn(IDENTITY_MANAGE, cookie_me.json()["permissions"])
 
         preferences = await self.client.get("/api/v1/account/preferences")
         self.assertEqual(preferences.status_code, 200, preferences.text)

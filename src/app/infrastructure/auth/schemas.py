@@ -51,6 +51,8 @@ class UserRead(schemas.BaseUser[int]):
     model_config = ConfigDict(extra="ignore")
 
     is_verified: bool = Field(default=False, exclude=True)
+    role_keys: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
 
 
 class UserCreate(schemas.BaseUserCreate):
