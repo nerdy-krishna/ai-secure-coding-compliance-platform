@@ -1,45 +1,42 @@
-"""Admin endpoint for assigning a user to a tenant (F14 follow-up).
+"""Explicit platform-owner operation for moving a human between tenants.
 
-Surface (superuser-only):
+Surface (platform tenant management + explicit source tenant):
 
-  PATCH  /api/v1/admin/users/{user_id}/tenant   {"tenant_id": "<uuid>" | null}
-
-Today the multi-tenant foundation (Chunks 7 + 8 + 9) is in place but
-operators had no way to move a user between tenants without an SQL
-shell. This endpoint plugs that gap. Body shape:
-
-  {"tenant_id": "11111111-..."}   → assign user to that tenant
-  {"tenant_id": null}              → unassign (collapses to default
-                                     tenant view via the dep's NULL →
-                                     DEFAULT fallback)
+  PATCH  /api/v1/admin/users/{user_id}/tenant   {"tenant_id": "<uuid>"}
 
 Defenses
-- Superuser-only (mirrors ``admin_tenants.py``'s ``_require_superuser``).
-- Target tenant existence is verified before the UPDATE; 404 on missing.
-- An admin cannot reassign their own row (defense in depth — superusers
-  bypass tenant scope, so this is mostly a footgun guard, but encoded).
-- Every successful UPDATE writes an ``auth_audit_events`` row in the
-  same transaction with old + new tenant ids and the actor's id.
+- The source is the active tenant, selected through a step-up grant for foreign tenants.
+- The destination is mandatory; users can no longer become tenant-less.
+- Critical-mode tenants fail closed until the two-person action workflow approves the move.
+- Existing tenant roles are dropped and the destination starts with analyst only.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid as _uuid
-from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
 from app.infrastructure.auth.core import current_active_user
-from app.infrastructure.auth.sso import audit
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+    target_fingerprint,
+)
+from app.infrastructure.database.tenant_context import (
+    apply_session_context,
+    principal_scope,
+)
+from app.shared.lib.permissions import ANALYST, PLATFORM_TENANT_MANAGE
 
 
 logger = logging.getLogger(__name__)
@@ -50,47 +47,30 @@ router = APIRouter(prefix="/admin/users", tags=["Admin: Users"])
 
 class UserTenantUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    # Optional[UUID]: null means "unassign" (the dep then coerces the
-    # absent tenant to DEFAULT_TENANT_ID for non-admin reads).
-    tenant_id: Optional[_uuid.UUID] = None
+    tenant_id: _uuid.UUID
 
 
 class UserTenantRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     email: str
-    tenant_id: Optional[_uuid.UUID]
+    tenant_id: _uuid.UUID
 
 
-async def _require_superuser(
-    current_user: db_models.User = Depends(current_active_user),
-) -> db_models.User:
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough privileges"
-        )
-    return current_user
-
-
-@router.patch("/{user_id}/tenant", response_model=UserTenantRead)
+@router.patch(
+    "/{user_id}/tenant",
+    response_model=UserTenantRead,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
 async def update_user_tenant(
-    request: Request,
     user_id: int = Path(..., ge=1),
     payload: UserTenantUpdate = Body(...),
+    source_tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    actor: db_models.User = Depends(_require_superuser),
+    actor: db_models.User = Depends(current_active_user),
 ) -> UserTenantRead:
-    """Assign or clear a user's tenant.
-
-    Superuser-only. Validates the target tenant exists when non-null,
-    refuses self-target, and writes an audit event in the same
-    transaction as the UPDATE.
-    """
+    """Move a non-acting user from the selected source to one destination."""
     if user_id == actor.id:
-        # Defense in depth: a superuser bypasses tenant scope on reads
-        # anyway, so this is mostly a footgun guard, but locking it
-        # closed prevents an admin from accidentally orphaning their
-        # own row mid-operation.
         raise HTTPException(
             status_code=400,
             detail=(
@@ -100,50 +80,79 @@ async def update_user_tenant(
         )
 
     target = (
-        await db.execute(select(db_models.User).where(db_models.User.id == user_id))
+        await db.execute(
+            select(db_models.User).where(
+                db_models.User.id == user_id,
+                db_models.User.tenant_id == source_tenant_id,
+            )
+        )
     ).scalar_one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="user not found")
 
     new_tenant_id = payload.tenant_id
-    if new_tenant_id is not None:
-        tenant_exists = (
-            await db.execute(
-                select(db_models.Tenant.id).where(db_models.Tenant.id == new_tenant_id)
-            )
-        ).scalar_one_or_none()
-        if tenant_exists is None:
-            raise HTTPException(status_code=404, detail="tenant not found")
+    tenant_exists = await db.scalar(
+        select(db_models.Tenant.id).where(db_models.Tenant.id == new_tenant_id)
+    )
+    if tenant_exists is None:
+        raise HTTPException(status_code=404, detail="tenant not found")
 
-    old_tenant_id = target.tenant_id
-    if old_tenant_id == new_tenant_id:
+    if source_tenant_id == new_tenant_id:
         # No-op write — return the current shape without an audit event
         # so the audit log reflects only real privilege changes.
         return UserTenantRead(
             id=target.id, email=target.email, tenant_id=target.tenant_id
         )
 
-    target.tenant_id = new_tenant_id
+    authz = AuthorizationRepository(db)
+    source_mode = await authz.separation_of_duties_mode(tenant_id=source_tenant_id)
+    destination_mode = await authz.separation_of_duties_mode(tenant_id=new_tenant_id)
+    if "critical" in {source_mode, destination_mode}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tenant reassignment requires an approved action request.",
+        )
 
-    revoked = await AuthSessionRepository(db).revoke_all_for_user(
-        target.id,
-        reason="tenant_changed",
-    )
-
-    await audit.record(
-        db,
-        event="auth.privilege.user_tenant_changed",
-        user_id=actor.id,
-        request=request,
-        details={
-            "target_user_id": target.id,
-            "target_email": target.email,
-            "old_tenant_id": (str(old_tenant_id) if old_tenant_id else None),
-            "new_tenant_id": (str(new_tenant_id) if new_tenant_id else None),
-            "revoked_session_count": revoked,
-        },
-    )
-    await db.commit()
+    with principal_scope(
+        tenant_id=None,
+        principal_kind="system",
+        principal_id="platform-user-tenant-move",
+        system_scope=True,
+    ):
+        await apply_session_context(db)
+        target.tenant_id = new_tenant_id
+        await db.flush()
+        await db.execute(
+            delete(db_models.RoleAssignment).where(
+                db_models.RoleAssignment.user_id == target.id
+            )
+        )
+        db.add(
+            db_models.RoleAssignment(
+                user_id=target.id,
+                tenant_id=new_tenant_id,
+                role_key=ANALYST,
+                created_by_user_id=actor.id,
+            )
+        )
+        await AuthSessionRepository(db).revoke_all_for_user(
+            target.id,
+            reason="tenant_changed",
+        )
+        authz.record_audit(
+            tenant_id=new_tenant_id,
+            principal_kind="human",
+            principal_id=str(actor.id),
+            permission=PLATFORM_TENANT_MANAGE,
+            resource_type="user_tenant_assignment",
+            target_fingerprint_value=target_fingerprint(
+                resource_type="user_tenant_assignment",
+                target_id=str(target.id),
+            ),
+            outcome="executed",
+            reason_code="tenant_changed_roles_reset",
+        )
+        await db.commit()
     return UserTenantRead(id=target.id, email=target.email, tenant_id=target.tenant_id)
 
 

@@ -1,8 +1,9 @@
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from typing import List, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.auth.core import current_active_user, current_active_user_sse
 from app.infrastructure.database import models as db_models
@@ -25,7 +26,18 @@ from app.infrastructure.database.repositories.user_group_repo import (
 from app.infrastructure.database.repositories.authorization_repo import (
     AuthorizationRepository,
 )
-from app.infrastructure.database.tenant_context import effective_tenant_id
+from app.infrastructure.auth.tenant_entry import (
+    BadSignature as TenantEntryBadSignature,
+    HEADER_NAME as TENANT_ENTRY_HEADER,
+    SignatureExpired as TenantEntryExpired,
+    consume_tenant_entry_grant,
+)
+from app.infrastructure.database.tenant_context import (
+    apply_session_context,
+    bind_principal,
+    effective_tenant_id,
+    reset_principal,
+)
 from app.core.services.admin_service import AdminService
 from app.core.services.scan import (
     ScanLifecycleService,
@@ -36,7 +48,7 @@ from app.core.services.chat_service import ChatService
 from app.core.services.rag_preprocessor_service import RAGPreprocessorService
 from app.core.services.security_standards_service import SecurityStandardsService
 from app.shared.lib import scan_scope
-from app.shared.lib.permissions import SCAN_READ_TENANT
+from app.shared.lib.permissions import PLATFORM_OWNER, SCAN_READ_TENANT
 
 
 def get_llm_config_repository(
@@ -224,11 +236,56 @@ async def get_visible_user_ids(
 
 
 async def get_current_user_tenant_id(
+    request: Request,
     user: db_models.User = Depends(current_active_user),
-) -> uuid.UUID:
-    """Return the caller's explicit active tenant; never an unscoped sentinel."""
+    repo: AuthorizationRepository = Depends(get_authorization_repository),
+) -> AsyncGenerator[uuid.UUID, None]:
+    """Yield one explicit tenant, optionally from a fresh platform-entry grant."""
 
-    return effective_tenant_id(user.tenant_id)
+    home_tenant_id = effective_tenant_id(user.tenant_id)
+    token = request.headers.get(TENANT_ENTRY_HEADER)
+    if not token:
+        yield home_tenant_id
+        return
+    if len(token) > 4096:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant entry denied.",
+        )
+    try:
+        target_tenant_id = consume_tenant_entry_grant(
+            request,
+            token,
+            user_id=user.id,
+        )
+    except (TenantEntryBadSignature, TenantEntryExpired, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant entry denied.",
+        )
+
+    role_keys = await repo.role_keys_for_user(user=user, tenant_id=home_tenant_id)
+    if PLATFORM_OWNER not in role_keys:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant entry denied.",
+        )
+    target_exists = await repo.db.scalar(
+        select(db_models.Tenant.id).where(db_models.Tenant.id == target_tenant_id)
+    )
+    if target_exists is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    binding = bind_principal(
+        tenant_id=target_tenant_id,
+        principal_kind="human",
+        principal_id=str(user.id),
+    )
+    try:
+        await apply_session_context(repo.db)
+        yield target_tenant_id
+    finally:
+        reset_principal(binding)
 
 
 async def get_current_user_tenant_id_sse(

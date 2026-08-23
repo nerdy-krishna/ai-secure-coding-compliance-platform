@@ -29,12 +29,17 @@ from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, status
+from fastapi_users.password import PasswordHelper
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
 from app.infrastructure.auth.core import current_active_user
+from app.infrastructure.auth.tenant_entry import (
+    MAX_AGE_SECONDS as TENANT_ENTRY_MAX_AGE_SECONDS,
+    issue_tenant_entry_grant,
+)
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.auth.sso.domains import (
     DomainVerificationError,
@@ -45,6 +50,10 @@ from app.infrastructure.auth.sso.domains import (
 )
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+    target_fingerprint,
+)
 from app.shared.lib.permissions import PLATFORM_TENANT_MANAGE, TENANT_POLICY_MANAGE
 
 
@@ -112,6 +121,18 @@ class DomainRead(BaseModel):
 class DomainChallengeRead(DomainRead):
     txt_name: str
     txt_value: str
+
+
+class TenantEntryCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tenant_id: _uuid.UUID
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class TenantEntryRead(BaseModel):
+    tenant_id: _uuid.UUID
+    entry_token: str
+    expires_in: int
 
 
 def _to_read(row: db_models.Tenant) -> TenantRead:
@@ -373,6 +394,76 @@ async def create_tenant(
     )
     await db.commit()
     return _to_read(row)
+
+
+@router.post(
+    "/entry",
+    response_model=TenantEntryRead,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
+async def create_tenant_entry(
+    request: Request,
+    payload: TenantEntryCreate = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: db_models.User = Depends(current_active_user),
+) -> TenantEntryRead:
+    """Reauthenticate a platform owner and bind a short-lived selected tenant."""
+
+    tenant = await db.scalar(
+        select(db_models.Tenant).where(db_models.Tenant.id == payload.tenant_id)
+    )
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="tenant not found")
+
+    verified, updated_hash = PasswordHelper().verify_and_update(
+        payload.password,
+        user.hashed_password,
+    )
+    authz = AuthorizationRepository(db)
+    fingerprint = target_fingerprint(
+        resource_type="tenant_entry",
+        target_id=str(payload.tenant_id),
+    )
+    if not verified:
+        authz.record_audit(
+            tenant_id=payload.tenant_id,
+            principal_kind="human",
+            principal_id=str(user.id),
+            permission=PLATFORM_TENANT_MANAGE,
+            resource_type="tenant_entry",
+            target_fingerprint_value=fingerprint,
+            outcome="denied",
+            reason_code="step_up_failed",
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant entry denied.",
+        )
+    if updated_hash is not None:
+        user.hashed_password = updated_hash
+
+    token = issue_tenant_entry_grant(
+        request,
+        user_id=user.id,
+        tenant_id=payload.tenant_id,
+    )
+    authz.record_audit(
+        tenant_id=payload.tenant_id,
+        principal_kind="human",
+        principal_id=str(user.id),
+        permission=PLATFORM_TENANT_MANAGE,
+        resource_type="tenant_entry",
+        target_fingerprint_value=fingerprint,
+        outcome="allowed",
+        reason_code="step_up_verified",
+    )
+    await db.commit()
+    return TenantEntryRead(
+        tenant_id=payload.tenant_id,
+        entry_token=token,
+        expires_in=TENANT_ENTRY_MAX_AGE_SECONDS,
+    )
 
 
 @router.get(
