@@ -1,19 +1,5 @@
 # src/app/api/v1/routers/admin_findings.py
-"""Admin-only cross-tenant findings list with source filter.
-
-Path prefix `/admin/findings`. Doubly scoped per N7
-(sast-prescan-followups threat model):
-1. ``current_superuser`` dependency — only superusers reach the
-   route at all (HTTP 403 otherwise).
-2. ``visible_user_ids = Depends(get_visible_user_ids)`` — admins
-   receive ``None`` (no filter); the helper is forwarded through
-   the service layer to the repo, which applies the SQL-layer
-   ``Scan.user_id IN (...)`` filter when non-None. Defense-in-depth.
-
-The frontend's `AdminSubNav` shows a "Findings" entry only when
-``user.is_superuser`` is true; this router rejects the same call
-server-side regardless.
-"""
+"""Tenant-scoped findings audit list with source filtering."""
 
 from __future__ import annotations
 
@@ -26,10 +12,16 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_visible_user_ids
-from app.infrastructure.auth.core import current_superuser
+from app.api.v1.dependencies import (
+    get_current_user_tenant_id,
+    get_visible_user_ids,
+    require_permission,
+)
+from app.infrastructure.auth.core import current_active_user
+from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.shared.lib.permissions import AUDIT_READ
 
 
 logger = logging.getLogger(__name__)
@@ -67,7 +59,11 @@ class AdminFindingsResponse(BaseModel):
     requested_at: datetime
 
 
-@router.get("", response_model=AdminFindingsResponse)
+@router.get(
+    "",
+    response_model=AdminFindingsResponse,
+    dependencies=[Depends(require_permission(AUDIT_READ))],
+)
 async def list_admin_findings(
     source: Optional[SourceFilter] = Query(
         default=None,
@@ -79,12 +75,8 @@ async def list_admin_findings(
         description="Last finding id from the previous page; results returned have id < cursor.",
     ),
     db: AsyncSession = Depends(get_db),
-    # TODO(V08.4.2): Supplement with a step-up / risk-evaluation dependency
-    # e.g. `_step_up=Depends(require_recent_reauth(window_minutes=15))` once
-    # that helper exists. Until then the JWT must carry a `last_authenticated_at`
-    # claim and /admin/* routes should reject tokens older than 15 minutes.
-    # Tracking: admin interfaces must not rely on the role bit alone (ASVS V08.4.2).
-    _user=Depends(current_superuser),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
+    user: db_models.User = Depends(current_active_user),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
 ) -> AdminFindingsResponse:
     repo = ScanRepository(db)
@@ -93,6 +85,7 @@ async def list_admin_findings(
         source_filter=source,
         limit=limit,
         cursor=cursor,
+        tenant_id=tenant_id,
     )
     items = [
         AdminFindingItem(
@@ -114,7 +107,8 @@ async def list_admin_findings(
     logger.info(
         "admin.findings.read",
         extra={
-            "actor_id": _user.id,
+            "actor_id": user.id,
+            "tenant_id": str(tenant_id),
             "source_filter": source,
             "limit": limit,
             "cursor": cursor,

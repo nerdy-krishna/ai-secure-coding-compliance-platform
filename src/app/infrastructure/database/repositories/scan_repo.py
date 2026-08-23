@@ -1297,7 +1297,7 @@ class ScanRepository:
         cursor: Optional[int] = None,
         tenant_id: Optional[uuid.UUID] = None,
     ) -> List[db_models.Finding]:
-        """List findings across scans with admin-scope filtering.
+        """List findings inside one explicit tenant with visibility filtering.
 
         N7 (sast-prescan-followups): the visibility-scope filter is
         applied at the SQL layer (`Scan.user_id IN (visible_user_ids)`)
@@ -1329,10 +1329,10 @@ class ScanRepository:
         )
         if visible_user_ids is not None:
             stmt = stmt.where(db_models.Scan.user_id.in_(visible_user_ids))
-        # F13 — defense-in-depth tenant scope. Today the only call site
-        # is the superuser /admin/findings endpoint (tenant_id=None →
-        # passthrough); the kwarg is kept here so a future non-admin
-        # caller cannot accidentally read across tenants.
+        if tenant_id is None:
+            raise ValueError("query_findings requires an explicit tenant_id")
+        # Defense in depth: even tenant-wide auditors remain pinned to the
+        # selected tenant. PostgreSQL RLS applies the same boundary.
         stmt = stmt.where(self._scope_tenant(db_models.Finding.tenant_id, tenant_id))
         if source_filter is not None:
             stmt = stmt.where(db_models.Finding.source == source_filter)
