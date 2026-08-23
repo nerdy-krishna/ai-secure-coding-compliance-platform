@@ -34,10 +34,14 @@ class SsoProviderRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def list_all(self) -> List[db_models.SsoProvider]:
-        """All providers (enabled + disabled). Admin-only callers."""
+    async def list_all(
+        self, *, tenant_id: uuid.UUID
+    ) -> List[db_models.SsoProvider]:
+        """All providers in one explicit tenant (enabled + disabled)."""
         result = await self.session.execute(
-            select(db_models.SsoProvider).order_by(db_models.SsoProvider.created_at)
+            select(db_models.SsoProvider)
+            .where(db_models.SsoProvider.tenant_id == tenant_id)
+            .order_by(db_models.SsoProvider.created_at)
         )
         return list(result.scalars().all())
 
@@ -52,23 +56,38 @@ class SsoProviderRepository:
         return list(result.scalars().all())
 
     async def get_by_id(
-        self, provider_id: uuid.UUID
+        self,
+        provider_id: uuid.UUID,
+        *,
+        tenant_id: uuid.UUID | None = None,
     ) -> Optional[db_models.SsoProvider]:
-        result = await self.session.execute(
-            select(db_models.SsoProvider).where(db_models.SsoProvider.id == provider_id)
+        stmt = select(db_models.SsoProvider).where(
+            db_models.SsoProvider.id == provider_id
         )
+        if tenant_id is not None:
+            stmt = stmt.where(db_models.SsoProvider.tenant_id == tenant_id)
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_name(self, name: str) -> Optional[db_models.SsoProvider]:
-        result = await self.session.execute(
-            select(db_models.SsoProvider).where(db_models.SsoProvider.name == name)
-        )
+    async def get_by_name(
+        self,
+        name: str,
+        *,
+        tenant_id: uuid.UUID | None = None,
+    ) -> Optional[db_models.SsoProvider]:
+        stmt = select(db_models.SsoProvider).where(db_models.SsoProvider.name == name)
+        if tenant_id is not None:
+            stmt = stmt.where(db_models.SsoProvider.tenant_id == tenant_id)
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_with_config(
-        self, provider_id: uuid.UUID
+        self,
+        provider_id: uuid.UUID,
+        *,
+        tenant_id: uuid.UUID | None = None,
     ) -> Optional[SsoProviderWithConfig]:
-        row = await self.get_by_id(provider_id)
+        row = await self.get_by_id(provider_id, tenant_id=tenant_id)
         if row is None:
             return None
         plaintext = decrypt_provider_config(row.config_encrypted)
@@ -109,6 +128,7 @@ class SsoProviderRepository:
         self,
         provider_id: uuid.UUID,
         *,
+        tenant_id: uuid.UUID,
         display_name: Optional[str] = None,
         enabled: Optional[bool] = None,
         config_plain: Optional[Dict[str, Any]] = None,
@@ -117,7 +137,7 @@ class SsoProviderRepository:
         force_for_domains: Optional[List[str]] = None,
         jit_policy: Optional[str] = None,
     ) -> Optional[db_models.SsoProvider]:
-        row = await self.get_by_id(provider_id)
+        row = await self.get_by_id(provider_id, tenant_id=tenant_id)
         if row is None:
             return None
         if display_name is not None:
@@ -137,8 +157,8 @@ class SsoProviderRepository:
         await self.session.flush()
         return row
 
-    async def delete(self, provider_id: uuid.UUID) -> bool:
-        row = await self.get_by_id(provider_id)
+    async def delete(self, provider_id: uuid.UUID, *, tenant_id: uuid.UUID) -> bool:
+        row = await self.get_by_id(provider_id, tenant_id=tenant_id)
         if row is None:
             return False
         await self.session.delete(row)

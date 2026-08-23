@@ -1,4 +1,4 @@
-"""Admin endpoints for the multi-tenant foundation.
+"""Permission-scoped endpoints for tenant metadata and verified domains.
 
 Surface (all superuser-only):
 
@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.auth.sso.domains import (
@@ -44,6 +45,7 @@ from app.infrastructure.auth.sso.domains import (
 )
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
+from app.shared.lib.permissions import PLATFORM_TENANT_MANAGE, TENANT_POLICY_MANAGE
 
 
 logger = logging.getLogger(__name__)
@@ -112,16 +114,6 @@ class DomainChallengeRead(DomainRead):
     txt_value: str
 
 
-async def _require_superuser(
-    current_user: db_models.User = Depends(current_active_user),
-) -> db_models.User:
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough privileges"
-        )
-    return current_user
-
-
 def _to_read(row: db_models.Tenant) -> TenantRead:
     return TenantRead(
         id=row.id,
@@ -144,12 +136,22 @@ async def _get_tenant_or_404(
     return row
 
 
-@router.get("/{tenant_id}/domains", response_model=List[DomainRead])
+def _require_path_tenant(tenant_id: _uuid.UUID, active_tenant_id: _uuid.UUID) -> None:
+    if tenant_id != active_tenant_id:
+        raise HTTPException(status_code=404, detail="tenant not found")
+
+
+@router.get(
+    "/{tenant_id}/domains",
+    response_model=List[DomainRead],
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
 async def list_verified_domains(
     tenant_id: _uuid.UUID = Path(...),
+    active_tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ) -> List[DomainRead]:
+    _require_path_tenant(tenant_id, active_tenant_id)
     await _get_tenant_or_404(db, tenant_id)
     rows = (
         await db.scalars(
@@ -165,14 +167,17 @@ async def list_verified_domains(
     "/{tenant_id}/domains",
     response_model=DomainChallengeRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
 )
 async def create_domain_challenge(
     request: Request,
     payload: DomainCreate,
     tenant_id: _uuid.UUID = Path(...),
+    active_tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ) -> DomainChallengeRead:
+    _require_path_tenant(tenant_id, active_tenant_id)
     await _get_tenant_or_404(db, tenant_id)
     try:
         normalized = normalize_domain(payload.domain)
@@ -210,14 +215,20 @@ async def create_domain_challenge(
     )
 
 
-@router.post("/{tenant_id}/domains/{domain_id}/verify", response_model=DomainRead)
+@router.post(
+    "/{tenant_id}/domains/{domain_id}/verify",
+    response_model=DomainRead,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
 async def verify_tenant_domain(
     request: Request,
     tenant_id: _uuid.UUID = Path(...),
     domain_id: _uuid.UUID = Path(...),
+    active_tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ) -> DomainRead:
+    _require_path_tenant(tenant_id, active_tenant_id)
     row = await db.scalar(
         select(db_models.TenantVerifiedDomain).where(
             db_models.TenantVerifiedDomain.id == domain_id,
@@ -255,15 +266,19 @@ async def verify_tenant_domain(
 
 
 @router.delete(
-    "/{tenant_id}/domains/{domain_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{tenant_id}/domains/{domain_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
 )
 async def delete_tenant_domain(
     request: Request,
     tenant_id: _uuid.UUID = Path(...),
     domain_id: _uuid.UUID = Path(...),
+    active_tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ) -> None:
+    _require_path_tenant(tenant_id, active_tenant_id)
     row = await db.scalar(
         select(db_models.TenantVerifiedDomain).where(
             db_models.TenantVerifiedDomain.id == domain_id,
@@ -286,10 +301,13 @@ async def delete_tenant_domain(
     await db.commit()
 
 
-@router.get("", response_model=List[TenantRead])
+@router.get(
+    "",
+    response_model=List[TenantRead],
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
 async def list_tenants(
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ) -> List[TenantRead]:
     rows = (
         (
@@ -307,12 +325,13 @@ async def list_tenants(
     "",
     response_model=TenantRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
 )
 async def create_tenant(
     request: Request,
     payload: TenantCreate = Body(...),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ) -> TenantRead:
     slug = payload.slug.strip().lower()
     if not _SLUG_RE.match(slug):
@@ -356,11 +375,14 @@ async def create_tenant(
     return _to_read(row)
 
 
-@router.get("/{tenant_id}", response_model=TenantRead)
+@router.get(
+    "/{tenant_id}",
+    response_model=TenantRead,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
 async def get_tenant(
     tenant_id: _uuid.UUID = Path(...),
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ) -> TenantRead:
     row = (
         await db.execute(
@@ -372,13 +394,17 @@ async def get_tenant(
     return _to_read(row)
 
 
-@router.patch("/{tenant_id}", response_model=TenantRead)
+@router.patch(
+    "/{tenant_id}",
+    response_model=TenantRead,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
 async def update_tenant(
     request: Request,
     tenant_id: _uuid.UUID = Path(...),
     payload: TenantUpdate = Body(...),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ) -> TenantRead:
     """Rename a tenant. Slug is immutable so external references and audit
     history stay stable; if a slug change is genuinely needed, create a
@@ -419,12 +445,16 @@ async def update_tenant(
     return _to_read(row)
 
 
-@router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{tenant_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
 async def delete_tenant(
     request: Request,
     tenant_id: _uuid.UUID = Path(...),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ) -> None:
     """Delete a tenant. The default tenant is protected — every backfilled
     row points to it and dropping it would orphan that data via the SET

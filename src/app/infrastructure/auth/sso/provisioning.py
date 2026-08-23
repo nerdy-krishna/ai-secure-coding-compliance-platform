@@ -35,6 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
+from app.shared.lib.permissions import ANALYST
 
 from . import audit
 from .domains import domain_is_verified_for_provider
@@ -152,6 +153,14 @@ async def _create_jit_user(
             "tenant_id": tenant_id,
         }
         user = await user_db.create(user_dict)
+        session.add(
+            db_models.RoleAssignment(
+                user_id=user.id,
+                tenant_id=tenant_id,
+                role_key=ANALYST,
+            )
+        )
+        await session.flush()
     finally:
         try:
             await user_db_gen.aclose()

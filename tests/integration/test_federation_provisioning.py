@@ -17,6 +17,7 @@ from app.infrastructure.auth.sso.repository import SsoProviderRepository
 from app.infrastructure.auth.sso.replay import claim_message_once
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import (
+    RoleAssignment,
     SsoProvider,
     Tenant,
     TenantVerifiedDomain,
@@ -24,6 +25,7 @@ from app.infrastructure.database.models import (
     UserGroup,
     UserGroupMembership,
 )
+from app.shared.lib.permissions import ANALYST
 from tests.integration.support import integration_test
 
 
@@ -112,6 +114,13 @@ class FederationProvisioningIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(identity.is_new_user)
             self.assertEqual(identity.user.tenant_id, self.tenant_id)
             self.assertFalse(identity.user.is_superuser)
+            role = await db.scalar(
+                select(RoleAssignment.role_key).where(
+                    RoleAssignment.user_id == identity.user.id,
+                    RoleAssignment.tenant_id == self.tenant_id,
+                )
+            )
+            self.assertEqual(role, ANALYST)
             membership = await db.scalar(
                 select(UserGroupMembership).where(
                     UserGroupMembership.group_id == self.group_id,

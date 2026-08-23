@@ -1,4 +1,4 @@
-"""Admin SSO router — `/api/v1/admin/sso/*`. Superuser-only.
+"""Tenant-scoped SSO administration under `/api/v1/admin/sso/*`.
 
 Surface:
 
@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.sso import audit, oidc, saml
 from app.infrastructure.auth.sso.domains import (
@@ -48,6 +49,7 @@ from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
+from app.shared.lib.permissions import AUDIT_READ, TENANT_POLICY_MANAGE
 
 logger = logging.getLogger(__name__)
 
@@ -59,17 +61,6 @@ router = APIRouter(prefix="/admin/sso", tags=["Admin: SSO"])
 # client_secret again.
 _UNCHANGED = "<<unchanged>>"
 _REDACTED = "***"
-
-
-async def _require_superuser(
-    current_user: db_models.User = Depends(current_active_user),
-) -> db_models.User:
-    if not current_user.is_superuser:
-        logger.warning("admin.sso.access_denied", extra={"user_id": current_user.id})
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough privileges"
-        )
-    return current_user
 
 
 # ---------- request / response schemas ---------------------------------------
@@ -152,7 +143,7 @@ def _redact_config(protocol: str, plaintext: Dict[str, Any]) -> Dict[str, Any]:
 async def _to_read(
     repo: SsoProviderRepository, row: db_models.SsoProvider
 ) -> ProviderRead:
-    bundle = await repo.get_with_config(row.id)
+    bundle = await repo.get_with_config(row.id, tenant_id=row.tenant_id)
     if bundle is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -205,28 +196,36 @@ def _merge_secrets(
 # ---------- endpoints --------------------------------------------------------
 
 
-@router.get("/providers", response_model=List[ProviderRead])
+@router.get(
+    "/providers",
+    response_model=List[ProviderRead],
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
 async def list_providers(
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ):
     repo = SsoProviderRepository(db)
-    rows = await repo.list_all()
+    rows = await repo.list_all(tenant_id=tenant_id)
     return [await _to_read(repo, row) for row in rows]
 
 
 @router.post(
-    "/providers", response_model=ProviderRead, status_code=status.HTTP_201_CREATED
+    "/providers",
+    response_model=ProviderRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
 )
 async def create_provider(
     payload: ProviderCreate,
     request: Request,
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ):
     repo = SsoProviderRepository(db)
     # Reject duplicate slug.
-    if await repo.get_by_name(payload.name) is not None:
+    if await repo.get_by_name(payload.name, tenant_id=tenant_id) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"provider name {payload.name!r} already exists",
@@ -239,7 +238,7 @@ async def create_provider(
     try:
         allowed_domains, forced_domains = await ensure_verified_provider_domains(
             db,
-            tenant_id=user.tenant_id,
+            tenant_id=tenant_id,
             allowed_domains=payload.allowed_email_domains,
             forced_domains=payload.force_for_domains,
             jit_policy=payload.jit_policy,
@@ -255,7 +254,7 @@ async def create_provider(
         allowed_email_domains=allowed_domains,
         force_for_domains=forced_domains,
         jit_policy=payload.jit_policy,
-        tenant_id=user.tenant_id,
+        tenant_id=tenant_id,
     )
     await audit.record(
         db,
@@ -271,36 +270,45 @@ async def create_provider(
     return await _to_read(repo, row)
 
 
-@router.get("/providers/{provider_id}", response_model=ProviderRead)
+@router.get(
+    "/providers/{provider_id}",
+    response_model=ProviderRead,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
 async def get_provider(
     provider_id: uuid.UUID = Path(...),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ):
     repo = SsoProviderRepository(db)
-    row = await repo.get_by_id(provider_id)
+    row = await repo.get_by_id(provider_id, tenant_id=tenant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
     return await _to_read(repo, row)
 
 
-@router.patch("/providers/{provider_id}", response_model=ProviderRead)
+@router.patch(
+    "/providers/{provider_id}",
+    response_model=ProviderRead,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
 async def update_provider(
     payload: ProviderUpdate,
     request: Request,
     provider_id: uuid.UUID = Path(...),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ):
     repo = SsoProviderRepository(db)
-    row = await repo.get_by_id(provider_id)
+    row = await repo.get_by_id(provider_id, tenant_id=tenant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
 
     config_plain: Optional[Dict[str, Any]] = None
     if payload.config is not None:
         # Pull the current decrypted config so we can re-merge secrets.
-        bundle = await repo.get_with_config(provider_id)
+        bundle = await repo.get_with_config(provider_id, tenant_id=tenant_id)
         if bundle is None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -341,6 +349,7 @@ async def update_provider(
 
     updated = await repo.update_fields(
         provider_id,
+        tenant_id=tenant_id,
         display_name=payload.display_name,
         enabled=payload.enabled,
         config_plain=config_plain,
@@ -381,15 +390,20 @@ async def update_provider(
     return await _to_read(repo, updated)
 
 
-@router.delete("/providers/{provider_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/providers/{provider_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
 async def delete_provider(
     request: Request,
     provider_id: uuid.UUID = Path(...),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ):
     repo = SsoProviderRepository(db)
-    row = await repo.get_by_id(provider_id)
+    row = await repo.get_by_id(provider_id, tenant_id=tenant_id)
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
     name = row.name
@@ -415,21 +429,24 @@ async def delete_provider(
         request=request,
         details={"name": name},
     )
-    deleted = await repo.delete(provider_id)
+    deleted = await repo.delete(provider_id, tenant_id=tenant_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="not found")
     await db.commit()
 
 
-@router.post("/providers/{provider_id}/test")
+@router.post(
+    "/providers/{provider_id}/test",
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
 async def test_provider(
     provider_id: uuid.UUID = Path(...),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ):
     """Preflight — OIDC discovery fetch / SAML metadata build."""
     repo = SsoProviderRepository(db)
-    bundle = await repo.get_with_config(provider_id)
+    bundle = await repo.get_with_config(provider_id, tenant_id=tenant_id)
     if bundle is None:
         raise HTTPException(status_code=404, detail="not found")
     cfg = bundle.config
@@ -440,17 +457,25 @@ async def test_provider(
     raise HTTPException(status_code=500, detail="unknown protocol")
 
 
-@router.get("/audit", response_model=List[AuditRead])
+@router.get(
+    "/audit",
+    response_model=List[AuditRead],
+    dependencies=[Depends(require_permission(AUDIT_READ))],
+)
 async def list_audit_events(
     limit: int = Query(default=100, ge=1, le=500),
     cursor: Optional[datetime] = Query(default=None),
     event: Optional[str] = Query(default=None, max_length=64),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ):
     """Paginated audit list, most-recent-first. ``cursor`` is the ``ts``
     of the last row from the previous page (exclusive)."""
-    stmt = select(db_models.AuthAuditEvent).order_by(db_models.AuthAuditEvent.ts.desc())
+    stmt = (
+        select(db_models.AuthAuditEvent)
+        .where(db_models.AuthAuditEvent.tenant_id == tenant_id)
+        .order_by(db_models.AuthAuditEvent.ts.desc())
+    )
     if cursor is not None:
         stmt = stmt.where(db_models.AuthAuditEvent.ts < cursor)
     if event:
