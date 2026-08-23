@@ -1,6 +1,8 @@
 # 08 — Auth, SSO, SCIM, RBAC, Multi-tenancy
 
-Every identity surface SCCAP exposes: password login, OIDC, SAML 2.0, WebAuthn passkeys, SCIM 2.0 provisioning, JWT token lifecycle, multi-tenant scoping, and group-based visibility.
+Every identity surface SCCAP exposes: password login, OIDC, SAML 2.0,
+WebAuthn passkeys, SCIM 2.0 provisioning, browser/bearer lifecycle,
+tenant-scoped RBAC, forced RLS, and group-based visibility.
 
 ---
 
@@ -104,7 +106,7 @@ flowchart LR
       BS["Opaque browser credential<br/>HttpOnly · Secure · SameSite=Strict<br/>server row: 60 min idle / 24 h absolute<br/>generation rotation + reuse revocation"]:::secret
       CSRF["Memory-only CSRF proof<br/>session-bound MAC + exact Origin"]:::secret
       AT["Bearer JWT for API/MCP/CI clients<br/>never persisted by the SPA"]:::secret
-      SSE["SSE stream token<br/>aud=sse:scan-stream · 60 s TTL<br/>bound to scan_id"]:::secret
+      SSE["SSE stream token<br/>aud=sse:scan-stream · 60 s TTL<br/>bound to tenant_id + scan_id"]:::secret
     end
 
     subgraph Use
@@ -134,25 +136,31 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    Tenants[("tenants(id, name, created_at)")]:::data
-    User[("user(id, email, tenant_id, is_superuser, …)")]:::data
+    Tenants[("tenants(id, separation_of_duties_mode, …)")]:::data
+    User[("user(id, email, tenant_id, …)")]:::data
+    Roles[("role_assignments<br/>global platform_owner<br/>tenant roles")]:::data
     Groups[("user_groups · user_group_memberships")]:::data
     Project[("projects(tenant_id, user_id, name UNIQUE per user)")]:::data
     Scan[("scans(tenant_id, project_id, user_id, …)")]:::data
     Finding[("findings(tenant_id, scan_id, …)")]:::data
     Chat[("chat_sessions(tenant_id, user_id, …)")]:::data
-    Dep["FastAPI dependencies:<br/>get_current_user_tenant_id()<br/>get_visible_user_ids()<br/>(user + group peers)"]:::app
+    Dep["FastAPI dependencies:<br/>get_current_permissions()<br/>get_current_user_tenant_id()<br/>get_visible_user_ids()"]:::app
     Routers["Every list/read endpoint<br/>(scans, projects, findings, chat, llm_logs, …)"]:::app
+    RLS["PostgreSQL FORCE RLS<br/>app.tenant_id + principal context"]:::app
+    Entry["platform_owner tenant entry<br/>password step-up + reason<br/>10-minute credential-bound grant"]:::app
 
     Tenants --> User
+    User --> Roles
     User --> Groups
     User --> Project --> Scan --> Finding
     User --> Chat
     Routers --> Dep
+    Entry --> Dep
     Dep -- "tenant_id = current_user.tenant_id<br/>user_id IN visible_user_ids" --> Project
     Dep -- same filter --> Scan
     Dep -- same filter --> Finding
     Dep -- same filter --> Chat
+    Project & Scan & Finding & Chat --> RLS
 
     classDef app  fill:#e0e7ff,stroke:#4338ca,color:#1e1b4b;
     classDef data fill:#dcfce7,stroke:#15803d,color:#052e16;
@@ -171,11 +179,11 @@ sequenceDiagram
 
     IDM->>API: GET /Users?filter=userName eq "alice@x"<br/>Authorization: Bearer <scim_token>
     API->>DB: validate scim_tokens row (active, not revoked)
-    API->>DB: SELECT user WHERE email = 'alice@x'
+    API->>DB: SELECT user WHERE tenant_id = token.tenant_id<br/>AND email = 'alice@x'
     API-->>IDM: 200 { Resources: [{id, userName, emails, active, …}] }
 
     IDM->>API: POST /Users { ... }
-    API->>DB: INSERT user (cannot set superuser)
+    API->>DB: INSERT tenant user (cannot set platform role)
     API-->>IDM: 201 { id, userName, ... }
 
     IDM->>API: PATCH /Users/{id} { Operations: [...] }
@@ -201,12 +209,12 @@ The identity surfaces above are **not all present in every install** — they ar
 
 | Feature        | Gates                                                                                       | When OFF                                                                              |
 |----------------|----------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| (none — `scan` floor) | Password login, WebAuthn passkeys, JWT mint/refresh/logout, the bootstrap superuser   | Always present — a single-superuser install still authenticates                        |
-| `multi_user`   | Self-service registration, `admin_users` router, the admin Users page                        | Install is single-account; the §1 surfaces collapse to password + passkey for that user |
+| (none — `scan` floor) | Password login, WebAuthn passkeys, JWT mint/refresh/logout, the bootstrap platform owner | Always present — a single-account install still authenticates                       |
+| `multi_user`   | `admin_users` router and the admin Users page                                                | Install is single-account; the §1 surfaces collapse to password + passkey for that user |
 | `user_groups`  | `admin_groups` router, group CRUD, peer visibility (`get_visible_user_ids` resolves to self) | `get_visible_user_ids()` returns `{current_user.id}` only — no peer scope               |
 | `sso`          | `sso` + `admin_sso` routers, the §2 OIDC/SAML flow, JIT provisioning, SSO audit log           | SSO buttons absent on `LoginPage`; only password / passkey remain                       |
 | `scim`         | `scim` + `admin_scim` routers, the §5 provisioning flow, `scim_tokens`                        | External IAM cannot provision; `/scim/v2/*` is unmounted (404)                          |
-| `multi_tenant` | `admin_tenants` router, tenant management UI                                                  | All rows resolve to `DEFAULT_TENANT`; §4 tenant filter still runs but is single-valued  |
+| `multi_tenant` | tenant metadata, explicit platform-owner entry, and tenant management UI                       | All tenant roles resolve to `DEFAULT_TENANT`; §4 tenant and RLS filters remain active   |
 
 Gating is enforced **server-side**: `bootstrap_enabled_features_sync()` decides which routers `main.py` mounts at import time, so a disabled surface returns 404 — the hidden nav link (diagram 03) is defence-in-depth, not the boundary. The `vibe_coder` variant ships none of these five (single-user); `developer` adds `multi_user` + `user_groups`; `enterprise` enables all five.
 
@@ -221,7 +229,8 @@ Gating is enforced **server-side**: `bootstrap_enabled_features_sync()` decides 
 | SCIM 2.0             | (hand-rolled)        | `/scim/v2/{Users,Groups,Schemas,…}`                                                                   | `scim_tokens(active, last_used)`      |
 
 Public self-registration is not mounted. Initial setup creates the first user;
-superusers create later local users through `/admin/users`.
+that user receives `platform_owner`. A tenant identity manager creates later
+local users through `/admin/users`; each starts with the `analyst` role.
 
 ### Token shapes
 
@@ -231,9 +240,10 @@ superusers create later local users through `/admin/users`.
 | CSRF proof       | JavaScript memory + `X-CSRF-Token`       | bound to current browser-session UUID                              | session MAC           |
 | Access JWT       | Explicit `Authorization: Bearer` for API/MCP/CI; never SPA storage | `ACCESS_TOKEN_LIFETIME_SECONDS` | `fastapi-users:auth` |
 | Legacy refresh JWT | HttpOnly compatibility cookie          | capped by browser-session absolute deadline                        | `fastapi-users:auth` |
-| SSE stream token | URL query param `?access_token=…`      | 60 seconds                                                           | `sse:scan-stream`   |
+| SSE stream token | URL query param `?access_token=…`      | 60 seconds; bound to selected tenant and one scan                    | `sse:scan-stream`   |
 | SCIM bearer      | `Authorization: Bearer <token>`        | No expiry (rotatable; revocable via admin UI)                        | `scim`              |
 | Passkey assertion challenge | Server-issued per attempt    | 60 s                                                                 | n/a                 |
+| Tenant-entry grant | JavaScript memory + `X-SCCAP-Tenant-Entry` | 10 minutes; bound to principal and browser/bearer credential | one explicit tenant |
 
 ### Browser session logic (`apiClient.ts` + `AuthProvider.tsx`)
 
@@ -245,13 +255,13 @@ superusers create later local users through `/admin/users`.
 
 ### Multi-tenancy scoping
 
-Every privileged list/read endpoint depends on:
+Every tenant surface resolves current permissions and an explicit tenant:
 
 | Dependency                  | What it does                                                                          |
 |-----------------------------|---------------------------------------------------------------------------------------|
-| `get_current_user()`        | Resolves the JWT to a `User` row                                                      |
-| `get_current_user_tenant_id()` | Returns `current_user.tenant_id` (or `DEFAULT_TENANT` for legacy rows)             |
-| `get_visible_user_ids()`    | `{current_user.id} ∪ {user_ids in any user_group the user belongs to}`               |
+| `get_current_permissions()` | Resolves current database role assignments into stable capability keys              |
+| `get_current_user_tenant_id()` | Returns the human's exact tenant; a platform owner must present a valid tenant-entry grant |
+| `get_visible_user_ids()`    | Applies ownership/group scope inside that tenant; tenant-wide read permission widens only the user filter |
 
 Filters applied at the repository layer:
 
@@ -260,28 +270,44 @@ WHERE tenant_id = :tenant_id
   AND user_id   IN :visible_user_ids
 ```
 
-Admins (`is_superuser=true`) bypass these filters; the auth audit middleware records the bypass for every privileged operation.
+No human role bypasses the tenant predicate or forced RLS. Platform owners must
+select one tenant, pass password step-up, provide a reason, and present the
+short-lived signed grant on tenant requests. Foreign and absent object IDs both
+return `404`.
 
 ### Multi-tenancy tables
 
 | Table                     | Tenant column        | Notes                                                                 |
 |---------------------------|----------------------|-----------------------------------------------------------------------|
-| `user`                    | `tenant_id` (nullable, backfilled `default`) | Tenant scope established at sign-up / JIT provisioning  |
+| `user`                    | `tenant_id` (non-null for tenant humans; legacy bootstrap is normalized) | Tenant scope established at creation/JIT |
 | `projects`                | `tenant_id`          | Inherited from creator user                                           |
 | `scans`                   | `tenant_id` (indexed) | Inherited from project                                                |
 | `findings`                | `tenant_id`          | Inherited from scan (faster filtering than joining)                   |
 | `chat_sessions`           | `tenant_id`          | Inherited from creator                                                |
 | `llm_interactions`        | `tenant_id`          | Inherited from scan / chat session                                    |
+| `role_assignments`        | nullable only for global `platform_owner` | Tenant roles require an exact tenant                         |
+| `scim_tokens`             | `tenant_id`          | Service principal is bound to one tenant                              |
+| `authorization_action_requests` | `tenant_id`   | Durable high-risk request and distinct-actor decision                 |
+
+Core tenant tables and their protected children use `ENABLE ROW LEVEL
+SECURITY` plus `FORCE ROW LEVEL SECURITY`. API and worker transactions set
+`app.tenant_id`, `app.principal_kind`, `app.principal_id`, and the narrowly
+controlled system-scope flag. Production rejects unsafe database-role posture
+at startup.
 
 ### Master admin protection (M6)
 
-A configurable `security.master_admin_user_id` system config key designates the bootstrap admin. The user-management endpoints refuse to:
+A configurable `security.master_admin_user_id` system config key designates the
+bootstrap recovery account. Tenant administration cannot grant or remove its
+global `platform_owner` assignment. The user-management endpoints also refuse
+to:
 
-- Demote the master admin (`is_superuser = false`)
 - Deactivate the master admin (`is_active = false`)
 - Delete the master admin
 
-…even when called by another superuser. This prevents an admin lock-out.
+Platform-owner tenant access is never implicit: recovery entry still requires
+password step-up, a reason, a ten-minute expiry, and high-severity audit
+evidence. It cannot satisfy its own critical-mode second approval.
 
 ### SSO provider table (`sso_providers`)
 
@@ -295,10 +321,29 @@ A configurable `security.master_admin_user_id` system config key designates the 
 | `jit_policy`             | `auto` · `approve` · `deny`                                        |
 
 PATCH accepts the sentinel `"<<unchanged>>"` for any secret field so admins can update non-secret fields without re-entering keys.
+In tenant `critical` mode, deleting a provider requires a durable request and a
+distinct current actor with `tenant.policy.manage`; session revocation,
+provider deletion, action execution, and audit evidence commit together.
 
-### Audit (`auth_audit_events`)
+### Roles, permissions, and separation of duties
 
-Single append-only table. Sample event types:
+Routes check permission keys rather than role names. Built-in tenant roles are
+`tenant_admin`, `security_approver`, `analyst`, `developer`, and `auditor`;
+humans may hold several and receive the union of their permissions. Service
+principals receive only direct allowlisted scopes and cannot open browser
+sessions or approve human actions.
+
+The tenant `separation_of_duties_mode` is `off` by default. In `critical` mode,
+scan-owner gate decisions, finding waivers, permission increases, SSO-provider
+deletion, SCIM credential revocation, and rule promotion/rollback require a
+distinct current actor. The generic action request binds the tenant,
+requester/approver permissions, HMAC target fingerprint, canonical payload
+digest, idempotency key, and expiry. Execution rejects stale permissions,
+expiry, changed payloads, and tenant or target mismatch.
+
+### Audit
+
+`auth_audit_events` is append-only. Sample event types:
 
 - `login_success`, `login_failure`
 - `sso_login_success`, `sso_login_failure`, `sso_jit_pending`
@@ -313,7 +358,10 @@ keyed network hash (after trusted-proxy resolution), coarse browser/OS label,
 `email_hash`, and allowlisted details. Cookies, bearer tokens, authorization
 codes, assertions, raw claims, secrets, and plaintext email are never stored.
 
-Exposed for export via `GET /api/v1/admin/sso/audit?cursor=…&limit=…` (cursor-paginated).
+Exposed to callers with `audit.read` via
+`GET /api/v1/admin/sso/audit?cursor=…&limit=…` (cursor-paginated).
+Authorization decisions are separately recorded in append-only
+`authorization_audit_events` with privacy-safe target fingerprints.
 
 ### CORS & origin handling
 
@@ -326,10 +374,14 @@ Exposed for export via `GET /api/v1/admin/sso/audit?cursor=…&limit=…` (curso
 
 ## Source files
 
-- `src/app/api/v1/routers/{auth_login_guard,sso,webauthn,scim,admin_sso,admin_scim,admin_tenants,admin_users,admin_groups}.py`
-- `src/app/infrastructure/auth/{audit,oidc,saml,provisioning,scim/filter}.py`
-- `src/app/infrastructure/database/models.py` (`User`, `OAuthAccount`, `SamlSubject`, `WebAuthnCredential`, `SsoProvider`, `ScimToken`, `AuthAuditEvent`, `Tenant`, `UserGroup`, `UserGroupMembership`)
-- `src/app/api/dependencies.py` (`get_current_user`, `get_current_user_tenant_id`, `get_visible_user_ids`)
+- `src/app/api/v1/routers/{auth_login_guard,sso,webauthn,scim,admin_sso,admin_scim,admin_tenants,admin_users,admin_groups,authorization}.py`
+- `src/app/infrastructure/auth/sso/{audit,oidc,saml,provisioning}.py`
+- `src/app/infrastructure/auth/{tenant_entry,sse_token}.py`
+- `src/app/infrastructure/auth/scim/{auth,filter}.py`
+- `src/app/infrastructure/database/models.py` (`User`, `RoleAssignment`, `AuthorizationActionRequest`, `AuthorizationAuditEvent`, `OAuthAccount`, `SamlSubject`, `WebAuthnCredential`, `SsoProvider`, `ScimToken`, `AuthAuditEvent`, `Tenant`, `UserGroup`, `UserGroupMembership`)
+- `src/app/api/v1/dependencies.py` (`get_current_permissions`, `get_current_user_tenant_id`, `get_visible_user_ids`)
+- `src/app/infrastructure/database/{tenant_context,role_posture}.py`
+- `src/app/infrastructure/database/repositories/authorization_repo.py`
 - `secure-code-ui/src/app/providers/{AuthContext,AuthProvider}.tsx`
 - `secure-code-ui/src/shared/api/{authService,ssoService,scimService,webauthnService,userGroupService,tenantService}.ts`
 - `secure-code-ui/src/pages/admin/{SsoProvidersPage,SsoAuditPage,ScimTokensPage,UserManagement,UserGroupsPage,TenantsPage}.tsx`

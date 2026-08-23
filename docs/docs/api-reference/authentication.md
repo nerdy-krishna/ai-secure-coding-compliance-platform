@@ -8,8 +8,9 @@ title: Authentication
 SCCAP separates browser and automation authentication. Browsers use an opaque,
 server-side session in an HttpOnly cookie; API, MCP, and CI clients may use a
 short-lived JWT Bearer access token. Public self-registration is not mounted: the
-first-run `/setup` flow creates the initial superuser, and superusers create
-later local accounts from **Admin → Users**.
+first-run `/setup` flow creates the initial `platform_owner`; tenant identity
+managers create later local accounts from **Admin → Users** after entering an
+explicit tenant.
 
 ## Login
 
@@ -78,10 +79,51 @@ SMTP must be configured:
 2. The backend emails a short-lived reset token.
 3. `POST /api/v1/auth/reset-password` with `{ token, password }`.
 
-## Admin-created users
+## Roles, permissions, and tenant entry
 
-Superusers create accounts through `POST /api/v1/admin/users`. When SMTP is
-configured, the new user receives a password-setup/reset link.
+SCCAP authorizes routes with stable permission keys resolved from database role
+assignments. Built-in roles are `platform_owner`, `tenant_admin`,
+`security_approver`, `analyst`, `developer`, and `auditor`. Role names are an
+assignment convenience; route checks use capabilities such as `identity.manage`,
+`scan.approve`, and `audit.read` plus tenant and resource scope.
+
+Tenant users operate only in their assigned tenant. A platform owner cannot use
+global capabilities as a tenant-data bypass. They must select one tenant from
+**Admin → Tenants**, re-enter their password, and provide a reason. The resulting
+`X-SCCAP-Tenant-Entry` grant stays in SPA memory, is bound to the current
+principal/credential and selected tenant, and expires after ten minutes. Scan
+stream tokens preserve that selected tenant in their signed claims.
+
+Tenant identity managers create accounts through `POST /api/v1/admin/users`.
+When SMTP is configured, the new user receives a password-setup/reset link.
+`GET /api/v1/auth/session/me` returns the caller's current `role_keys` and
+`permissions`; consumers should use the permissions for UI capability checks.
+
+## Critical separation of duties
+
+Each tenant's policy is available at
+`GET /api/v1/admin/authorization/policy`. Tightening the policy to `critical`
+is direct; relaxing it requires an approved, distinct-actor request. The shared
+inbox is:
+
+- `GET /api/v1/admin/authorization/actions`
+- `POST /api/v1/admin/authorization/actions/{request_id}/decision`
+- `POST /api/v1/admin/authorization/policy-change-requests`
+- `PATCH /api/v1/admin/authorization/policy`
+
+In critical mode, finding waivers, tenant permission increases, SSO-provider
+deletion, and SCIM-token revocation require an exact, unexpired action request
+approved by a different currently-authorized person. The corresponding request
+endpoints are:
+
+- `POST /api/v1/admin/users/{user_id}/role-change-requests`
+- `POST /api/v1/admin/sso/providers/{provider_id}/deletion-requests`
+- `POST /api/v1/admin/scim/tokens/{token_id}/revocation-requests`
+
+Execution revalidates requester and approver permissions, tenant, target, and
+canonical payload. Request IDs cannot be replayed across actions. Scan approval
+also requires a distinct approver when the tenant is in critical mode and the
+caller submitted the scan.
 
 ## SSO, passkeys, and SCIM
 
@@ -91,7 +133,7 @@ configured, the new user receives a password-setup/reset link.
   and signed GET/POST `/{name}/slo`.
 - Passkeys: `/api/v1/auth/webauthn/{register,login}/{begin,finish}` plus the
   authenticated credentials endpoints.
-- SCIM 2.0: `/scim/v2`; administrator token management is under
+- SCIM 2.0: `/scim/v2`; capability-scoped token management is under
   `/api/v1/admin/scim/tokens`.
 
 OIDC discovery is pinned to the configured HTTPS issuer and public endpoints;
@@ -103,7 +145,7 @@ logout message IDs are claimed once in PostgreSQL to prevent replay.
 Before an administrator can add a domain to an SSO provider or enable JIT, the
 tenant must prove DNS ownership through the TXT challenge endpoints under
 `/api/v1/admin/tenants/{tenant_id}/domains`. JIT users and group mappings remain
-tenant-bound and cannot grant superuser status. SCIM `active=false`, identity
+tenant-bound and cannot grant platform roles. SCIM `active=false`, identity
 replacement, and deletion revoke active browser sessions in the same database
 transaction.
 
