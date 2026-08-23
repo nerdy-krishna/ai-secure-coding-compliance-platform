@@ -156,10 +156,14 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(foreign.status_code, 404, foreign.text)
 
-        superuser = await self.client.get(
+        platform_without_entry = await self.client.get(
             endpoint, headers=await self._authorization(self.superuser_email)
         )
-        self.assertEqual(superuser.status_code, 404, superuser.text)
+        self.assertEqual(
+            platform_without_entry.status_code,
+            403,
+            platform_without_entry.text,
+        )
 
         async with AsyncSessionLocal() as db:
             await db.execute(
