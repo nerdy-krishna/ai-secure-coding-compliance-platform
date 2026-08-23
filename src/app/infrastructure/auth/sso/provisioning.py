@@ -7,7 +7,7 @@ Mitigations:
   * SAML: a signed ``Email`` (or mapped) attribute. The signed-assertion
     requirement is enforced upstream by ``saml.process_acs``; here we just
     need the attribute to be present.
-  Linking to a *pre-existing superuser account* is REFUSED entirely — the
+  Linking to a pre-existing ``platform_owner`` account is REFUSED entirely — the
   admin must use the Users page to manually link an SSO subject to an
   existing admin (or never link at all).
 * **M5** — JIT-created users get ``is_superuser=False`` HARD-CODED. We
@@ -35,7 +35,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
-from app.shared.lib.permissions import ANALYST
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+)
+from app.shared.lib.permissions import ANALYST, PLATFORM_OWNER
 
 from . import audit
 from .domains import domain_is_verified_for_provider
@@ -416,8 +419,12 @@ async def provision_or_link_oidc(
                 details={"reason": "cross_tenant_link"},
             )
             raise SsoProvisioningDenied("cross-tenant SSO account linking is refused")
-        # Refuse to silently link to a pre-existing admin (M4).
-        if user.is_superuser:
+        # Refuse to silently link a global recovery/platform identity (M4).
+        role_keys = await AuthorizationRepository(session).role_keys_for_user(
+            user=user,
+            tenant_id=provider.tenant_id,
+        )
+        if PLATFORM_OWNER in role_keys:
             await audit.record(
                 session,
                 event=audit.EVENT_SSO_LINK_REFUSED,
@@ -427,10 +434,10 @@ async def provision_or_link_oidc(
                 outcome="denied",
                 email=norm_email,
                 request=request,
-                details={"reason": "preexisting_superuser_account"},
+                details={"reason": "preexisting_platform_owner_account"},
             )
             raise SsoProvisioningSuperuserLink(
-                "linking SSO subjects to pre-existing superuser accounts is refused; "
+                "linking SSO subjects to pre-existing platform-owner accounts is refused; "
                 "manual link required"
             )
         await repo.create_oauth_link(
@@ -611,7 +618,11 @@ async def provision_or_link_saml(
                 details={"reason": "cross_tenant_link"},
             )
             raise SsoProvisioningDenied("cross-tenant SSO account linking is refused")
-        if user.is_superuser:
+        role_keys = await AuthorizationRepository(session).role_keys_for_user(
+            user=user,
+            tenant_id=provider.tenant_id,
+        )
+        if PLATFORM_OWNER in role_keys:
             await audit.record(
                 session,
                 event=audit.EVENT_SSO_LINK_REFUSED,
@@ -621,10 +632,10 @@ async def provision_or_link_saml(
                 outcome="denied",
                 email=norm_email,
                 request=request,
-                details={"reason": "preexisting_superuser_account"},
+                details={"reason": "preexisting_platform_owner_account"},
             )
             raise SsoProvisioningSuperuserLink(
-                "linking SSO subjects to pre-existing superuser accounts is refused"
+                "linking SSO subjects to pre-existing platform-owner accounts is refused"
             )
         await repo.create_saml_link(
             user_id=user.id,

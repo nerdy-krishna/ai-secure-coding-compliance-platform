@@ -24,12 +24,14 @@ from pydantic import AnyHttpUrl, BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1 import models as api_models
+from app.api.v1.dependencies import get_current_permissions
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.system_config_repo import (
     SystemConfigRepository,
 )
+from app.shared.lib.permissions import PLATFORM_CONFIG_MANAGE
 
 
 def get_system_config_repo(
@@ -70,8 +72,11 @@ class _SessionLifetimeValue(BaseModel):
     hours: int = Field(..., ge=1, le=168)
 
 
-async def get_admin_user(current_user: db_models.User = Depends(current_active_user)):
-    if not current_user.is_superuser:
+async def get_admin_user(
+    current_user: db_models.User = Depends(current_active_user),
+    permissions: frozenset[str] = Depends(get_current_permissions),
+):
+    if PLATFORM_CONFIG_MANAGE not in permissions:
         logger.warning(
             "admin.system_config.access_denied",
             extra={"user_id": current_user.id},

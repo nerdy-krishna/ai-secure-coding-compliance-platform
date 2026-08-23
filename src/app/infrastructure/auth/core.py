@@ -22,12 +22,16 @@ from app.infrastructure.auth.session import (
 from app.infrastructure.auth.sse_token import verify_scan_stream_token
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.models import User
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+)
 from app.infrastructure.database.tenant_context import (
     apply_session_context,
     bind_principal,
     effective_tenant_id,
     reset_principal,
 )
+from app.shared.lib.permissions import PLATFORM_CONFIG_MANAGE
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +122,20 @@ async def current_active_user(
 
 async def current_superuser(
     user: User = Depends(current_active_user),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
-    if not user.is_superuser:
+    """Compatibility name for the stable platform-configuration capability.
+
+    Older global administration routers still import this dependency. It no
+    longer authorizes from ``User.is_superuser``; removing the current database
+    role assignment takes effect on the next request.
+    """
+
+    permissions = await AuthorizationRepository(db).permissions_for_user(
+        user=user,
+        tenant_id=effective_tenant_id(user.tenant_id),
+    )
+    if PLATFORM_CONFIG_MANAGE not in permissions:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
     return user
 

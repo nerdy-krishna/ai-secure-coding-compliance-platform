@@ -47,7 +47,7 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     email=f"{label}-{suffix}@example.com",
                     hashed_password=PasswordHelper().hash(self.password),
                     is_active=True,
-                    is_superuser=False,
+                    is_superuser=(label == "owner"),
                     is_verified=True,
                     tenant_id=tenant_id,
                 )
@@ -136,6 +136,10 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(non_platform.status_code, 403, non_platform.text)
 
         owner_headers = await self._headers("owner")
+        global_config = await self.client.get(
+            "/api/v1/admin/logs/level", headers=owner_headers
+        )
+        self.assertEqual(global_config.status_code, 200, global_config.text)
         no_entry = await self.client.get(
             "/api/v1/admin/users", headers=owner_headers
         )
@@ -252,6 +256,10 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "/api/v1/admin/users", headers=entered_headers
         )
         self.assertEqual(stale_grant.status_code, 403, stale_grant.text)
+        stale_global_role = await self.client.get(
+            "/api/v1/admin/logs/level", headers=owner_headers
+        )
+        self.assertEqual(stale_global_role.status_code, 403, stale_global_role.text)
 
 
 if __name__ == "__main__":

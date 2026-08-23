@@ -22,8 +22,7 @@ from app.infrastructure.database.models import (
     Tenant,
     User,
 )
-from app.shared.lib.permissions import TENANT_ADMIN
-from app.shared.lib.permissions import IDENTITY_MANAGE, PLATFORM_OWNER
+from app.shared.lib.permissions import IDENTITY_MANAGE, TENANT_ADMIN
 from tests.integration.support import integration_test
 
 
@@ -51,7 +50,7 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 email=self.email,
                 hashed_password=password_hash,
                 is_active=True,
-                is_superuser=True,
+                is_superuser=False,
                 is_verified=True,
             )
             same_tenant_user = User(
@@ -171,7 +170,7 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         cookie_me = await self.client.get("/api/v1/auth/session/me")
         self.assertEqual(cookie_me.status_code, 200, cookie_me.text)
         self.assertEqual(cookie_me.json()["email"], self.email)
-        self.assertIn(PLATFORM_OWNER, cookie_me.json()["role_keys"])
+        self.assertIn(TENANT_ADMIN, cookie_me.json()["role_keys"])
         self.assertIn(IDENTITY_MANAGE, cookie_me.json()["permissions"])
 
         preferences = await self.client.get("/api/v1/account/preferences")
@@ -233,8 +232,7 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(cross_user.status_code, 404, cross_user.text)
 
-        # Current superusers are tenant-confined until issue 17 adds a distinct
-        # cross-tenant system-admin permission.
+        # Tenant identity managers are confined to their active tenant.
         same_tenant_inventory = await self.client.get(
             f"/api/v1/admin/users/{self.same_tenant_user_id}/sessions"
         )

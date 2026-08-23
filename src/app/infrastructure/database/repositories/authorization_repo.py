@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config.config import settings
 from app.config.logging_config import correlation_id_var
 from app.infrastructure.database import models as db_models
-from app.shared.lib.permissions import PLATFORM_OWNER, permissions_for_roles
+from app.shared.lib.permissions import permissions_for_roles
 
 
 class AuthorizationConflictError(RuntimeError):
@@ -77,13 +77,7 @@ class AuthorizationRepository:
                 ),
             )
         )
-        role_keys = set(rows.all())
-        # Bounded rollout compatibility: migrations create this assignment,
-        # but an old/bootstrap row encountered before backfill must fail safe
-        # for availability without reintroducing global query bypass logic.
-        if user.is_superuser:
-            role_keys.add(PLATFORM_OWNER)
-        return frozenset(role_keys)
+        return frozenset(rows.all())
 
     async def permissions_for_user(
         self, *, user: db_models.User, tenant_id: uuid.UUID
