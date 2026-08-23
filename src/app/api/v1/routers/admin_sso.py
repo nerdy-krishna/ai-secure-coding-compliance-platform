@@ -22,15 +22,29 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
+from app.api.v1.dependencies import (
+    get_current_permissions,
+    get_current_user_tenant_id,
+    require_permission,
+)
+from app.api.v1.routers.authorization import ActionRequestRead, action_request_to_read
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.sso import audit, oidc, saml
 from app.infrastructure.auth.sso.domains import (
@@ -49,6 +63,13 @@ from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationConflictError,
+    AuthorizationDeniedError,
+    AuthorizationRepository,
+    payload_digest,
+    target_fingerprint,
+)
 from app.shared.lib.permissions import AUDIT_READ, TENANT_POLICY_MANAGE
 
 logger = logging.getLogger(__name__)
@@ -61,6 +82,7 @@ router = APIRouter(prefix="/admin/sso", tags=["Admin: SSO"])
 # client_secret again.
 _UNCHANGED = "<<unchanged>>"
 _REDACTED = "***"
+_DELETE_PROVIDER_PAYLOAD = {"operation": "delete_sso_provider"}
 
 
 # ---------- request / response schemas ---------------------------------------
@@ -191,6 +213,13 @@ def _merge_secrets(
                 )
             out[field] = existing
     return out
+
+
+def _provider_fingerprint(*, tenant_id: uuid.UUID, provider_id: uuid.UUID) -> str:
+    return target_fingerprint(
+        resource_type="sso_provider",
+        target_id=f"{tenant_id}:{provider_id}",
+    )
 
 
 # ---------- endpoints --------------------------------------------------------
@@ -390,6 +419,65 @@ async def update_provider(
     return await _to_read(repo, updated)
 
 
+@router.post(
+    "/providers/{provider_id}/deletion-requests",
+    response_model=ActionRequestRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(TENANT_POLICY_MANAGE))],
+)
+async def request_provider_deletion(
+    provider_id: uuid.UUID = Path(...),
+    idempotency_key: str = Header(..., alias="X-Idempotency-Key", max_length=128),
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
+    permissions: frozenset[str] = Depends(get_current_permissions),
+    db: AsyncSession = Depends(get_db),
+    user: db_models.User = Depends(current_active_user),
+) -> ActionRequestRead:
+    provider = await SsoProviderRepository(db).get_by_id(
+        provider_id, tenant_id=tenant_id
+    )
+    if provider is None:
+        raise HTTPException(status_code=404, detail="not found")
+    authz = AuthorizationRepository(db)
+    if await authz.separation_of_duties_mode(tenant_id=tenant_id) != "critical":
+        raise HTTPException(
+            status_code=409,
+            detail="A distinct-actor request is only used in critical mode.",
+        )
+    fingerprint = _provider_fingerprint(
+        tenant_id=tenant_id, provider_id=provider_id
+    )
+    try:
+        action = await authz.create_action_request(
+            tenant_id=tenant_id,
+            requester_user_id=user.id,
+            requester_permission=TENANT_POLICY_MANAGE,
+            approver_permission=TENANT_POLICY_MANAGE,
+            target_type="sso_provider_delete",
+            target_fingerprint_value=fingerprint,
+            payload_digest_value=payload_digest(_DELETE_PROVIDER_PAYLOAD),
+            idempotency_key=idempotency_key,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+    except AuthorizationConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    authz.record_audit(
+        tenant_id=tenant_id,
+        principal_kind="human",
+        principal_id=str(user.id),
+        permission=TENANT_POLICY_MANAGE,
+        resource_type="sso_provider",
+        target_fingerprint_value=fingerprint,
+        outcome="requested",
+        reason_code="provider_deletion_requested",
+        action_request_id=action.id,
+    )
+    await db.commit()
+    return action_request_to_read(
+        action, actor_user_id=user.id, permissions=permissions
+    )
+
+
 @router.delete(
     "/providers/{provider_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -398,15 +486,68 @@ async def update_provider(
 async def delete_provider(
     request: Request,
     provider_id: uuid.UUID = Path(...),
+    action_request_id: uuid.UUID | None = Query(default=None),
     tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
+    permissions: frozenset[str] = Depends(get_current_permissions),
     db: AsyncSession = Depends(get_db),
     user: db_models.User = Depends(current_active_user),
 ):
     repo = SsoProviderRepository(db)
-    row = await repo.get_by_id(provider_id, tenant_id=tenant_id)
+    row = await db.scalar(
+        select(db_models.SsoProvider)
+        .where(
+            db_models.SsoProvider.id == provider_id,
+            db_models.SsoProvider.tenant_id == tenant_id,
+        )
+        .with_for_update()
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
-    name = row.name
+    authz = AuthorizationRepository(db)
+    fingerprint = _provider_fingerprint(
+        tenant_id=tenant_id, provider_id=provider_id
+    )
+    requires_approval = (
+        await authz.separation_of_duties_mode(tenant_id=tenant_id) == "critical"
+    )
+    approver_id: int | None = None
+    if requires_approval:
+        if action_request_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail="An approved distinct-actor action request is required.",
+            )
+        action = await authz.get_action_request(
+            request_id=action_request_id, tenant_id=tenant_id
+        )
+        if (
+            action is None
+            or action.requester_user_id != user.id
+            or action.target_type != "sso_provider_delete"
+            or action.target_fingerprint != fingerprint
+        ):
+            raise HTTPException(status_code=404, detail="Action request not found.")
+        approver_permissions = await authz.permissions_for_user_id(
+            user_id=action.approver_user_id or -1,
+            tenant_id=tenant_id,
+        )
+        try:
+            await authz.mark_executed(
+                request_id=action.id,
+                tenant_id=tenant_id,
+                payload_digest_value=payload_digest(_DELETE_PROVIDER_PAYLOAD),
+                requester_permissions=permissions,
+                approver_permissions=approver_permissions,
+            )
+        except (AuthorizationConflictError, AuthorizationDeniedError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        approver_id = action.approver_user_id
+    elif action_request_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="An action request is not applicable to this provider deletion.",
+        )
+
     revoked = await AuthSessionRepository(db).revoke_all_for_provider(
         provider_id,
         reason="provider_deleted",
@@ -424,14 +565,32 @@ async def delete_provider(
     await audit.record(
         db,
         event=audit.EVENT_PROVIDER_DELETED,
-        user_id=user.id,
+        actor_user_id=user.id,
         provider_id=provider_id,
+        tenant_id=tenant_id,
+        outcome="success",
         request=request,
-        details={"name": name},
+        details={"approval_required": requires_approval},
     )
     deleted = await repo.delete(provider_id, tenant_id=tenant_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="not found")
+    authz.record_audit(
+        tenant_id=tenant_id,
+        principal_kind="human",
+        principal_id=str(user.id),
+        permission=TENANT_POLICY_MANAGE,
+        resource_type="sso_provider",
+        target_fingerprint_value=fingerprint,
+        outcome="executed" if requires_approval else "allowed",
+        reason_code=(
+            "approved_provider_deletion_executed"
+            if requires_approval
+            else "provider_deleted"
+        ),
+        action_request_id=action_request_id,
+        approver_principal_id=str(approver_id) if approver_id is not None else None,
+    )
     await db.commit()
 
 

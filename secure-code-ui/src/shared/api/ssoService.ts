@@ -10,6 +10,7 @@
 // secret without re-entry.
 
 import apiClient from "./apiClient";
+import type { ActionRequest } from "./authorizationService";
 
 export type SsoProtocol = "oidc" | "saml";
 
@@ -134,8 +135,19 @@ export const ssoService = {
     return res.data;
   },
 
-  async adminDeleteProvider(id: string): Promise<void> {
-    await apiClient.delete(`/admin/sso/providers/${id}`);
+  async adminDeleteProvider(id: string, actionRequestId?: string): Promise<void> {
+    await apiClient.delete(`/admin/sso/providers/${id}`, {
+      params: actionRequestId ? { action_request_id: actionRequestId } : undefined,
+    });
+  },
+
+  async adminRequestProviderDeletion(id: string): Promise<ActionRequest> {
+    const response = await apiClient.post<ActionRequest>(
+      `/admin/sso/providers/${id}/deletion-requests`,
+      undefined,
+      { headers: { "X-Idempotency-Key": crypto.randomUUID() } },
+    );
+    return response.data;
   },
 
   async adminTestProvider(id: string): Promise<Record<string, unknown>> {

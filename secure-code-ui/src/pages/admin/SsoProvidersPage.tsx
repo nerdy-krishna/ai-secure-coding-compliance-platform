@@ -199,6 +199,7 @@ const SsoProvidersPage: React.FC = () => {
   const [oidc, setOidc] = useState<OidcForm>(EMPTY_OIDC);
   const [saml, setSaml] = useState<SamlForm>(EMPTY_SAML);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteActionRequestId, setDeleteActionRequestId] = useState("");
   const [testResult, setTestResult] = useState<Record<string, unknown> | null>(
     null,
   );
@@ -236,14 +237,30 @@ const SsoProvidersPage: React.FC = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => ssoService.adminDeleteProvider(id),
+    mutationFn: (args: { id: string; actionRequestId?: string }) =>
+      ssoService.adminDeleteProvider(args.id, args.actionRequestId),
     onSuccess: () => {
       toast.success("Provider deleted.");
       setConfirmDeleteId(null);
+      setDeleteActionRequestId("");
       invalidate();
     },
-    onError: (err) =>
-      toast.error(`Delete failed: ${apiDetail(err)}`),
+    onError: async (err, args) => {
+      if (err instanceof AxiosError && err.response?.status === 409 && !args.actionRequestId) {
+        try {
+          const request = await ssoService.adminRequestProviderDeletion(args.id);
+          setDeleteActionRequestId(request.id);
+          toast.warn(
+            `Approval request ${request.id} created. A distinct tenant admin must approve it; then delete again.`,
+          );
+          return;
+        } catch (requestError) {
+          toast.error(`Request failed: ${apiDetail(requestError)}`);
+          return;
+        }
+      }
+      toast.error(`Delete failed: ${apiDetail(err)}`);
+    },
   });
 
   const testMutation = useMutation({
@@ -526,7 +543,10 @@ const SsoProvidersPage: React.FC = () => {
                   </button>
                   <button
                     className="sccap-btn sccap-btn-icon sccap-btn-ghost"
-                    onClick={() => setConfirmDeleteId(p.id)}
+                    onClick={() => {
+                      setDeleteActionRequestId("");
+                      setConfirmDeleteId(p.id);
+                    }}
                     aria-label="Delete"
                     style={{ color: "var(--critical)" }}
                   >
@@ -945,14 +965,20 @@ const SsoProvidersPage: React.FC = () => {
       {/* Delete confirm */}
       <Modal
         open={confirmDeleteId !== null}
-        onClose={() => setConfirmDeleteId(null)}
+        onClose={() => {
+          setConfirmDeleteId(null);
+          setDeleteActionRequestId("");
+        }}
         title="Delete SSO provider?"
         width={420}
         footer={
           <>
             <button
               className="sccap-btn sccap-btn-sm"
-              onClick={() => setConfirmDeleteId(null)}
+              onClick={() => {
+                setConfirmDeleteId(null);
+                setDeleteActionRequestId("");
+              }}
               disabled={deleteMutation.isPending}
             >
               Cancel
@@ -961,7 +987,11 @@ const SsoProvidersPage: React.FC = () => {
               className="sccap-btn sccap-btn-sm"
               style={{ background: "var(--critical)", color: "#fff", border: "none" }}
               onClick={() =>
-                confirmDeleteId && deleteMutation.mutate(confirmDeleteId)
+                confirmDeleteId &&
+                deleteMutation.mutate({
+                  id: confirmDeleteId,
+                  actionRequestId: deleteActionRequestId.trim() || undefined,
+                })
               }
               disabled={deleteMutation.isPending}
             >
@@ -970,10 +1000,21 @@ const SsoProvidersPage: React.FC = () => {
           </>
         }
       >
-        <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-          Linked OAuth/SAML accounts for this provider will be removed. Users
-          will need to re-link via a different provider, or use the password
-          reset flow.
+        <div style={{ display: "grid", gap: 12, fontSize: 13, color: "var(--fg-muted)" }}>
+          <div>
+            Linked OAuth/SAML accounts for this provider will be removed. Users
+            will need to re-link via a different provider, or use the password
+            reset flow.
+          </div>
+          <label style={{ display: "grid", gap: 5 }}>
+            <span>Approved action request ID (required in critical mode)</span>
+            <input
+              className="sccap-input"
+              value={deleteActionRequestId}
+              placeholder="Created automatically, or paste an approved request ID"
+              onChange={(event) => setDeleteActionRequestId(event.target.value)}
+            />
+          </label>
         </div>
       </Modal>
     </div>

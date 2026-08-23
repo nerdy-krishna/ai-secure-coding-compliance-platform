@@ -2151,6 +2151,23 @@ export interface paths {
         patch: operations["update_provider_api_v1_admin_sso_providers__provider_id__patch"];
         trace?: never;
     };
+    "/api/v1/admin/sso/providers/{provider_id}/deletion-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Provider Deletion */
+        post: operations["request_provider_deletion_api_v1_admin_sso_providers__provider_id__deletion_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/sso/providers/{provider_id}/test": {
         parameters: {
             query?: never;
@@ -2503,6 +2520,23 @@ export interface paths {
         put?: never;
         /** Create Token */
         post: operations["create_token_api_v1_admin_scim_tokens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/scim/tokens/{token_id}/revocation-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Token Revocation */
+        post: operations["request_token_revocation_api_v1_admin_scim_tokens__token_id__revocation_requests_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10219,7 +10253,9 @@ export interface operations {
     };
     delete_provider_api_v1_admin_sso_providers__provider_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                action_request_id?: string | null;
+            };
             header?: never;
             path: {
                 provider_id: string;
@@ -10268,6 +10304,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_provider_deletion_api_v1_admin_sso_providers__provider_id__deletion_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Idempotency-Key": string;
+            };
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRequestRead"];
                 };
             };
             /** @description Validation Error */
@@ -11110,9 +11179,44 @@ export interface operations {
             };
         };
     };
-    revoke_token_api_v1_admin_scim_tokens__token_id__delete: {
+    request_token_revocation_api_v1_admin_scim_tokens__token_id__revocation_requests_post: {
         parameters: {
             query?: never;
+            header: {
+                "X-Idempotency-Key": string;
+            };
+            path: {
+                token_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionRequestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_token_api_v1_admin_scim_tokens__token_id__delete: {
+        parameters: {
+            query?: {
+                action_request_id?: string | null;
+            };
             header?: never;
             path: {
                 token_id: string;

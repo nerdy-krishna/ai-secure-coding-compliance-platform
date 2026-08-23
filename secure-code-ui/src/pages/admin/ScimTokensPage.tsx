@@ -55,6 +55,9 @@ const ScimTokensPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revocationRequests, setRevocationRequests] = useState<Map<string, string>>(
+    () => new Map(),
+  );
 
   // Form state.
   const [name, setName] = useState("");
@@ -137,14 +140,43 @@ const ScimTokensPage: React.FC = () => {
     );
     if (!ok) return;
     setRevokingId(row.id);
+    const actionRequestId = revocationRequests.get(row.id)?.trim() || undefined;
     try {
-      await scimService.revokeToken(row.id);
+      await scimService.revokeToken(row.id, actionRequestId);
       toast.success("Token revoked.");
       // Defensive: clear the issue banner if the operator revokes the
       // token they just created without copying it.
       if (issued?.id === row.id) setIssued(null);
+      setRevocationRequests((previous) => {
+        const next = new Map(previous);
+        next.delete(row.id);
+        return next;
+      });
       await refresh();
     } catch (err) {
+      const statusCode = (err as { response?: { status?: number } })?.response?.status;
+      if (statusCode === 409 && !actionRequestId) {
+        try {
+          const request = await scimService.requestTokenRevocation(row.id);
+          setRevocationRequests((previous) => {
+            const next = new Map(previous);
+            next.set(row.id, request.id);
+            return next;
+          });
+          toast.warn(
+            `Approval request ${request.id} created. A distinct tenant admin must approve it; then revoke again.`,
+          );
+          return;
+        } catch (requestError) {
+          const requestMessage =
+            (requestError as { response?: { data?: { detail?: string } }; message?: string })
+              ?.response?.data?.detail ||
+            (requestError as { message?: string })?.message ||
+            "Failed to request token revocation";
+          toast.error(requestMessage);
+          return;
+        }
+      }
       const msg =
         (err as { response?: { data?: { detail?: string } }; message?: string })
           ?.response?.data?.detail ||
@@ -369,6 +401,7 @@ const ScimTokensPage: React.FC = () => {
               const expired =
                 row.expires_at != null &&
                 new Date(row.expires_at).getTime() < Date.now();
+              const revocationRequestId = revocationRequests.get(row.id) ?? "";
               return (
                 <div
                   key={row.id}
@@ -440,6 +473,23 @@ const ScimTokensPage: React.FC = () => {
                       </span>
                       <span>Last used {fmt(row.last_used_at)}</span>
                     </div>
+                    <label style={{ display: "grid", gap: 5, marginTop: 10 }}>
+                      <span style={{ fontSize: 11.5, color: "var(--fg-muted)" }}>
+                        Approved revocation request ID (critical mode only)
+                      </span>
+                      <input
+                        className="sccap-input"
+                        value={revocationRequestId}
+                        placeholder="Created automatically, or paste an approved request ID"
+                        onChange={(event) =>
+                          setRevocationRequests((previous) => {
+                            const next = new Map(previous);
+                            next.set(row.id, event.target.value);
+                            return next;
+                          })
+                        }
+                      />
+                    </label>
                   </div>
                   <div>
                     <button

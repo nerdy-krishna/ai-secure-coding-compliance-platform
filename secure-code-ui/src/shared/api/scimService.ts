@@ -5,6 +5,7 @@
 // must surface it so the operator can copy it before navigating away.
 
 import apiClient from "./apiClient";
+import type { ActionRequest } from "./authorizationService";
 
 export type ScimScope = "users:read" | "users:write" | "groups:read" | "groups:write";
 
@@ -46,8 +47,18 @@ export const scimService = {
     );
     return r.data;
   },
-  async revokeToken(id: string): Promise<void> {
-    await apiClient.delete(`/admin/scim/tokens/${id}`);
+  async revokeToken(id: string, actionRequestId?: string): Promise<void> {
+    await apiClient.delete(`/admin/scim/tokens/${id}`, {
+      params: actionRequestId ? { action_request_id: actionRequestId } : undefined,
+    });
+  },
+  async requestTokenRevocation(id: string): Promise<ActionRequest> {
+    const response = await apiClient.post<ActionRequest>(
+      `/admin/scim/tokens/${id}/revocation-requests`,
+      undefined,
+      { headers: { "X-Idempotency-Key": crypto.randomUUID() } },
+    );
+    return response.data;
   },
 };
 
