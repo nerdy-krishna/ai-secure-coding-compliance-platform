@@ -1362,6 +1362,335 @@ class LLMPriceOverride(Base):
     )
 
 
+class UsageBudgetPolicy(Base):
+    """One immutable version of a tenant-owned usage budget policy."""
+
+    __tablename__ = "usage_budget_policies"
+    __table_args__ = (
+        UniqueConstraint(
+            "logical_policy_id", "version", name="uq_usage_budget_policy_version"
+        ),
+        sa.CheckConstraint(
+            "scope_kind IN ('tenant', 'group', 'user')",
+            name="ck_usage_budget_policies_scope_kind",
+        ),
+        sa.CheckConstraint(
+            "window_kind IN ('request', 'scan', 'day', 'month')",
+            name="ck_usage_budget_policies_window_kind",
+        ),
+        sa.CheckConstraint(
+            "(scope_kind = 'tenant' AND target_group_id IS NULL AND "
+            "target_user_id IS NULL) OR "
+            "(scope_kind = 'group' AND target_group_id IS NOT NULL AND "
+            "target_user_id IS NULL) OR "
+            "(scope_kind = 'user' AND target_group_id IS NULL AND "
+            "target_user_id IS NOT NULL)",
+            name="ck_usage_budget_policies_scope_target",
+        ),
+        sa.CheckConstraint(
+            "cap_input_tokens IS NOT NULL OR cap_output_tokens IS NOT NULL OR "
+            "cap_total_tokens IS NOT NULL OR cap_uncached_input_tokens IS NOT NULL "
+            "OR cap_billable_tokens IS NOT NULL OR cap_usd IS NOT NULL OR "
+            "cap_provider_requests IS NOT NULL",
+            name="ck_usage_budget_policies_has_cap",
+        ),
+        sa.CheckConstraint(
+            "soft_threshold_low > 0 AND soft_threshold_low < "
+            "soft_threshold_high AND soft_threshold_high < 100",
+            name="ck_usage_budget_policies_thresholds",
+        ),
+        sa.CheckConstraint(
+            "unknown_price_action IN ('deny', 'token_only')",
+            name="ck_usage_budget_policies_unknown_price_action",
+        ),
+        sa.CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="ck_usage_budget_policies_interval",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    logical_policy_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    scope_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_group_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("user_groups.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    target_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    window_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="RESTRICT"), nullable=True
+    )
+    stage: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cap_input_tokens: Mapped[Optional[int]] = mapped_column(BIGINT)
+    cap_output_tokens: Mapped[Optional[int]] = mapped_column(BIGINT)
+    cap_total_tokens: Mapped[Optional[int]] = mapped_column(BIGINT)
+    cap_uncached_input_tokens: Mapped[Optional[int]] = mapped_column(BIGINT)
+    cap_billable_tokens: Mapped[Optional[int]] = mapped_column(BIGINT)
+    cap_usd: Mapped[Optional[Decimal]] = mapped_column(sa.Numeric(30, 12))
+    cap_provider_requests: Mapped[Optional[int]] = mapped_column(BIGINT)
+    soft_threshold_low: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="80"
+    )
+    soft_threshold_high: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="95"
+    )
+    unknown_price_action: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="deny"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.true()
+    )
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    effective_to: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class UsageBudgetCounter(Base):
+    """Serialized held/spent totals for one immutable policy window."""
+
+    __tablename__ = "usage_budget_counters"
+    __table_args__ = (
+        UniqueConstraint(
+            "policy_id", "window_key", name="uq_usage_budget_counter_window"
+        ),
+        sa.CheckConstraint(
+            "window_end > window_start", name="ck_usage_budget_counters_interval"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_policies.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    window_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    spent_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    held_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    spent_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    held_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    spent_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    held_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    spent_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    held_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    spent_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    held_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    spent_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False, server_default="0")
+    held_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False, server_default="0")
+    spent_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    held_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UsageBudgetReservation(Base):
+    """Idempotent durable hold made before billable work starts."""
+
+    __tablename__ = "usage_budget_reservations"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "state IN ('held', 'settled', 'released', 'expired', "
+            "'accounting_unknown')",
+            name="ck_usage_budget_reservations_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    operation_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
+    group_ids: Mapped[list[uuid.UUID]] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False, server_default="{}")
+    request_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    scan_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True)
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True)
+    stage: Mapped[str] = mapped_column(String(100), nullable=False)
+    parent_reservation_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"), nullable=True, index=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="held")
+    estimated_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    estimated_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    estimated_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    estimated_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    estimated_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    estimated_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
+    estimated_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finalized_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[Optional[str]] = mapped_column(String(100))
+
+
+class UsageBudgetAllocation(Base):
+    """A reservation's hold against one policy counter."""
+
+    __tablename__ = "usage_budget_allocations"
+    __table_args__ = (
+        UniqueConstraint("reservation_id", "counter_id", name="uq_usage_budget_allocation"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
+    reservation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"), nullable=False, index=True)
+    counter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_counters.id", ondelete="RESTRICT"), nullable=False, index=True)
+    held_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    held_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    held_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    held_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    held_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    held_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
+    held_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UsageBudgetSettlement(Base):
+    """Immutable actual usage applied once for one canonical usage event."""
+
+    __tablename__ = "usage_budget_settlements"
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
+    reservation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    usage_event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("llm_usage_events.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    actual_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    actual_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    actual_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    actual_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    actual_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    actual_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
+    actual_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    overrun: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UsageBudgetOverride(Base):
+    """Time-bounded additive allowance for one immutable policy window."""
+
+    __tablename__ = "usage_budget_overrides"
+    __table_args__ = (
+        sa.CheckConstraint("expires_at > effective_from", name="ck_usage_budget_overrides_interval"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
+    policy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_policies.id", ondelete="RESTRICT"), nullable=False, index=True)
+    window_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    allowance_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    allowance_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    allowance_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    allowance_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    allowance_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    allowance_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False, server_default="0")
+    allowance_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UsageBudgetThresholdEvent(Base):
+    """Deduplicated evidence that a policy-window threshold was crossed."""
+
+    __tablename__ = "usage_budget_threshold_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "counter_id",
+            "dimension",
+            "threshold_percent",
+            name="uq_usage_budget_threshold_event",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_policies.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    counter_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_counters.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    dimension: Mapped[str] = mapped_column(String(40), nullable=False)
+    threshold_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    observed: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
+    effective_cap: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class UsageBudgetNotificationOutbox(Base):
+    """Exactly-once notification target created with a threshold event."""
+
+    __tablename__ = "usage_budget_notification_outbox"
+    __table_args__ = (
+        UniqueConstraint(
+            "threshold_event_id",
+            "recipient_user_id",
+            name="uq_usage_budget_notification_recipient",
+        ),
+        sa.CheckConstraint(
+            "state IN ('pending', 'published', 'failed')",
+            name="ck_usage_budget_notification_outbox_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    threshold_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_threshold_events.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    recipient_user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending"
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     id: Mapped[uuid.UUID] = mapped_column(
