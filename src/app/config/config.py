@@ -116,6 +116,16 @@ class Settings(BaseSettings):
         ge=300,
         le=60 * 60 * 24 * 7,
     )
+    # Stateful browser-session inactivity deadline. Ordinary authenticated
+    # activity may extend this deadline, but never the absolute lifetime.
+    SESSION_IDLE_LIFETIME_SECONDS: int = Field(
+        default=60 * 60,
+        ge=60,
+        le=60 * 60 * 24,
+    )
+    # Avoid a database write for every authenticated asset/API request while
+    # still bounding how stale last-seen/inactivity state can become.
+    SESSION_TOUCH_INTERVAL_SECONDS: int = Field(default=5 * 60, ge=30, le=15 * 60)
 
     # --- Web Push (#90) ---
     # VAPID keypair for scan-completion Web Push. Optional: when either

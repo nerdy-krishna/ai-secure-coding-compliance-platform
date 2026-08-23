@@ -62,6 +62,9 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     webauthn_credentials: Mapped[List["WebAuthnCredential"]] = relationship(
         "WebAuthnCredential", back_populates="user", cascade="all, delete-orphan"
     )
+    auth_sessions: Mapped[List["AuthSession"]] = relationship(
+        "AuthSession", back_populates="user", cascade="all, delete-orphan"
+    )
 
     # Cross-browser user preferences (theme, variant, accent).  Nullable
     # JSONB — absent means "use defaults".  Written by
@@ -2053,6 +2056,89 @@ class ScimToken(Base):
     __table_args__ = (UniqueConstraint("token_hash", name="uq_scim_tokens_token_hash"),)
 
 
+class AuthSession(Base):
+    """Server-side browser session and credential-family state.
+
+    The browser credential carries this row's opaque UUID, generation, and a
+    random secret under an application MAC. Only a keyed digest of that random
+    secret is persisted. A lower, validly MACed generation is therefore a
+    detectable replay; a guessed UUID with an invalid MAC cannot revoke a
+    victim's session.
+    """
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    provider_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("sso_providers.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    auth_method: Mapped[str] = mapped_column(String(32), nullable=False)
+    # HMAC-SHA256 of an IdP `sid` / SAML SessionIndex where one exists. The
+    # remote session identifier itself is never stored on this row.
+    provider_session_hash: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    assurance_level: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="aal1"
+    )
+    credential_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    credential_secret_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True
+    )
+    authenticated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    idle_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    absolute_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    revocation_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Privacy-reduced inventory hints. IPs are keyed hashes; user agents are
+    # normalized to a coarse browser/OS label before persistence.
+    ip_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    device_label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="auth_sessions")
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "credential_generation >= 0",
+            name="ck_auth_sessions_generation_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "idle_expires_at <= absolute_expires_at",
+            name="ck_auth_sessions_idle_before_absolute",
+        ),
+    )
+
+
 class AuthAuditEvent(Base):
     """Append-only audit log for authentication events (M7, M8).
 
@@ -2078,6 +2164,18 @@ class AuthAuditEvent(Base):
     # FK with ON DELETE SET NULL so audit history survives user/provider deletes.
     user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("auth_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    outcome: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="unknown"
     )
     provider_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("sso_providers.id", ondelete="SET NULL"),
