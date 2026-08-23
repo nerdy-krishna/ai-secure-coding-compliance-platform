@@ -11,18 +11,41 @@ const apiClient = axios.create({
 
 let csrfToken: string | null = null;
 let browserSessionEstablished = false;
+let tenantEntryGrant: string | null = null;
+let tenantEntryExpiryTimer: ReturnType<typeof setTimeout> | null = null;
 
 const SAFE_METHODS = new Set(["get", "head", "options"]);
 
 export function setBrowserSessionEstablished(established: boolean): void {
   browserSessionEstablished = established;
-  if (!established) csrfToken = null;
+  if (!established) {
+    csrfToken = null;
+    clearTenantEntryGrant();
+  }
+}
+
+export function setTenantEntryGrant(token: string, expiresInSeconds: number): void {
+  tenantEntryGrant = token;
+  if (tenantEntryExpiryTimer) clearTimeout(tenantEntryExpiryTimer);
+  tenantEntryExpiryTimer = setTimeout(
+    () => clearTenantEntryGrant(),
+    Math.max(0, expiresInSeconds * 1000),
+  );
+}
+
+export function clearTenantEntryGrant(): void {
+  tenantEntryGrant = null;
+  if (tenantEntryExpiryTimer) clearTimeout(tenantEntryExpiryTimer);
+  tenantEntryExpiryTimer = null;
 }
 
 apiClient.interceptors.request.use((config) => {
   const method = (config.method || "get").toLowerCase();
   if (!SAFE_METHODS.has(method) && csrfToken && config.headers) {
     config.headers["X-CSRF-Token"] = csrfToken;
+  }
+  if (tenantEntryGrant && config.headers) {
+    config.headers["X-SCCAP-Tenant-Entry"] = tenantEntryGrant;
   }
   return config;
 });
@@ -39,6 +62,7 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && browserSessionEstablished) {
       browserSessionEstablished = false;
       csrfToken = null;
+      clearTenantEntryGrant();
       window.dispatchEvent(new CustomEvent("sccap:session-expired"));
     }
     return Promise.reject(error);

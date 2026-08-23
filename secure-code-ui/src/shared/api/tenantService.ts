@@ -1,10 +1,8 @@
 // secure-code-ui/src/shared/api/tenantService.ts
 //
-// Admin-only client for /api/v1/admin/tenants. Tenant scoping is
-// foundation-only today (Chunk 7); this surface exists so operators can
-// create new tenants ahead of per-tenant enforcement work landing.
+// Platform tenant metadata and explicit short-lived tenant-entry grants.
 
-import apiClient from "./apiClient";
+import apiClient, { clearTenantEntryGrant, setTenantEntryGrant } from "./apiClient";
 
 export interface Tenant {
   id: string;
@@ -24,6 +22,12 @@ export interface TenantUpdatePayload {
   display_name: string;
 }
 
+interface TenantEntryResponse {
+  tenant_id: string;
+  entry_token: string;
+  expires_in: number;
+}
+
 export const tenantService = {
   async list(): Promise<Tenant[]> {
     const r = await apiClient.get<Tenant[]>("/admin/tenants");
@@ -39,6 +43,17 @@ export const tenantService = {
   },
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/admin/tenants/${id}`);
+  },
+  async enter(id: string, password: string, reason: string): Promise<void> {
+    const response = await apiClient.post<TenantEntryResponse>("/admin/tenants/entry", {
+      tenant_id: id,
+      password,
+      reason,
+    });
+    setTenantEntryGrant(response.data.entry_token, response.data.expires_in);
+  },
+  leave(): void {
+    clearTenantEntryGrant();
   },
 };
 

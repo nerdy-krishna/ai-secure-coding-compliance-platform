@@ -112,11 +112,26 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_step_up_grant_selects_one_tenant_and_stales_immediately(self) -> None:
         entry_endpoint = "/api/v1/admin/tenants/entry"
+        entry_reason = "Investigating a tenant security incident"
         admin_headers = await self._headers("admin")
+        empty_reason = await self.client.post(
+            entry_endpoint,
+            headers=await self._headers("owner"),
+            json={
+                "tenant_id": str(self.target_tenant_id),
+                "password": self.password,
+                "reason": "          ",
+            },
+        )
+        self.assertEqual(empty_reason.status_code, 422, empty_reason.text)
         non_platform = await self.client.post(
             entry_endpoint,
             headers=admin_headers,
-            json={"tenant_id": str(self.target_tenant_id), "password": self.password},
+            json={
+                "tenant_id": str(self.target_tenant_id),
+                "password": self.password,
+                "reason": entry_reason,
+            },
         )
         self.assertEqual(non_platform.status_code, 403, non_platform.text)
 
@@ -124,13 +139,21 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         wrong_password = await self.client.post(
             entry_endpoint,
             headers=owner_headers,
-            json={"tenant_id": str(self.target_tenant_id), "password": "wrong"},
+            json={
+                "tenant_id": str(self.target_tenant_id),
+                "password": "wrong",
+                "reason": entry_reason,
+            },
         )
         self.assertEqual(wrong_password.status_code, 403, wrong_password.text)
         issued = await self.client.post(
             entry_endpoint,
             headers=owner_headers,
-            json={"tenant_id": str(self.target_tenant_id), "password": self.password},
+            json={
+                "tenant_id": str(self.target_tenant_id),
+                "password": self.password,
+                "reason": entry_reason,
+            },
         )
         self.assertEqual(issued.status_code, 200, issued.text)
         token = issued.json()["entry_token"]
@@ -207,6 +230,16 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(audit_row)
             self.assertEqual(audit_row.tenant_id, self.target_tenant_id)
             self.assertNotIn(str(self.target_tenant_id), audit_row.target_fingerprint)
+            reason_row = await db.scalar(
+                select(AuthorizationAuditEvent).where(
+                    AuthorizationAuditEvent.principal_id
+                    == str(self.users["owner"][0]),
+                    AuthorizationAuditEvent.resource_type == "tenant_entry_reason",
+                    AuthorizationAuditEvent.outcome == "allowed",
+                )
+            )
+            self.assertIsNotNone(reason_row)
+            self.assertNotIn(entry_reason, reason_row.target_fingerprint)
             await db.execute(
                 delete(RoleAssignment).where(
                     RoleAssignment.user_id == self.users["owner"][0],

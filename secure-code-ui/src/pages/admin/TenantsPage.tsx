@@ -1,10 +1,6 @@
 // secure-code-ui/src/pages/admin/TenantsPage.tsx
 //
-// Admin CRUD for the multi-tenant foundation (Chunk 7). The tenancy
-// schema is in place but enforcement (per-tenant visibility on scans /
-// findings) lands in a later chunk; this page lets operators create
-// tenants ahead of that switch so the data model is populated when it
-// flips on.
+// Platform tenant metadata and explicit, short-lived tenant entry.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "../../shared/ui/Icon";
@@ -33,6 +29,7 @@ const TenantsPage: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [enteredTenantId, setEnteredTenantId] = useState<string | null>(null);
 
   const [slug, setSlug] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -126,7 +123,7 @@ const TenantsPage: React.FC = () => {
       return;
     }
     const ok = window.confirm(
-      `Delete tenant "${row.slug}"? Rows currently assigned to it will be detached (tenant_id set to NULL). Reassign first if that's not what you want.`,
+      `Delete tenant "${row.slug}"? Tenant-owned rows must be reassigned or removed first.`,
     );
     if (!ok) return;
     setRemovingId(row.id);
@@ -144,6 +141,36 @@ const TenantsPage: React.FC = () => {
     } finally {
       setRemovingId(null);
     }
+  };
+
+  const onEnter = async (row: Tenant) => {
+    const password = window.prompt(`Re-enter your password to enter "${row.slug}".`);
+    if (!password) return;
+    const reason = window.prompt(
+      "Reason for break-glass tenant entry (recorded as a privacy-safe fingerprint):",
+    );
+    if (!reason || reason.trim().length < 10) {
+      toast.error("A reason of at least 10 characters is required.");
+      return;
+    }
+    try {
+      await tenantService.enter(row.id, password, reason.trim());
+      setEnteredTenantId(row.id);
+      toast.success(`Entered "${row.slug}" for up to 10 minutes.`);
+    } catch (err) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } }; message?: string })
+          ?.response?.data?.detail ||
+        (err as { message?: string })?.message ||
+        "Tenant entry denied";
+      toast.error(msg);
+    }
+  };
+
+  const onLeave = () => {
+    tenantService.leave();
+    setEnteredTenantId(null);
+    toast.success("Exited the selected tenant.");
   };
 
   const sortedTenants = useMemo(
@@ -167,10 +194,9 @@ const TenantsPage: React.FC = () => {
           }
         />
         <div style={{ color: "var(--fg-muted)", fontSize: 13, marginTop: 4 }}>
-          Tenants partition the platform into isolated workspaces. The schema
-          is in place; per-tenant visibility on scans, projects, and findings
-          is rolling out in a follow-up. Creating tenants now lets you assign
-          users + groups ahead of that switch.
+          Tenants partition the platform into isolated workspaces. Platform
+          owners must re-enter their password, provide a reason, and select one
+          tenant before tenant data is available. Entry expires after 10 minutes.
         </div>
       </div>
 
@@ -322,6 +348,23 @@ const TenantsPage: React.FC = () => {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  {enteredTenantId === row.id ? (
+                    <button
+                      className="sccap-btn sccap-btn-sm sccap-btn-primary"
+                      onClick={onLeave}
+                      title="Exit the selected tenant now"
+                    >
+                      Exit tenant
+                    </button>
+                  ) : (
+                    <button
+                      className="sccap-btn sccap-btn-sm sccap-btn-ghost"
+                      onClick={() => void onEnter(row)}
+                      title="Step up and enter this tenant for up to 10 minutes"
+                    >
+                      Enter tenant
+                    </button>
+                  )}
                   <button
                     className="sccap-btn sccap-btn-sm sccap-btn-ghost"
                     onClick={() => void onRename(row)}

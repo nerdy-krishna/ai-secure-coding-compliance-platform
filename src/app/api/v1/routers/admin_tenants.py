@@ -1,6 +1,6 @@
 """Permission-scoped endpoints for tenant metadata and verified domains.
 
-Surface (all superuser-only):
+Surface (all require stable authorization capabilities):
 
   GET    /api/v1/admin/tenants            — list all tenants
   POST   /api/v1/admin/tenants            — create a tenant
@@ -8,11 +8,8 @@ Surface (all superuser-only):
   PATCH  /api/v1/admin/tenants/{id}       — rename display_name only
   DELETE /api/v1/admin/tenants/{id}       — delete (default tenant is protected)
 
-Tenant scoping today is *foundation only* (Chunk 7) — every existing
-aggregate row is backfilled to the seeded ``default`` tenant
-(``00000000-0000-0000-0000-000000000001``). The schema, repo, and admin
-surface are in place so future enforcement work (scoped queries,
-per-tenant SSO/SCIM) only needs to plug in the visibility layer.
+Platform owners explicitly enter one tenant with a short-lived,
+credential-bound step-up grant before accessing tenant data.
 
 Slug constraints
 - ASCII alphanumerics + dash + underscore, 1–64 chars, lowercased.
@@ -30,7 +27,7 @@ from typing import List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, status
 from fastapi_users.password import PasswordHelper
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,6 +124,15 @@ class TenantEntryCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tenant_id: _uuid.UUID
     password: str = Field(..., min_length=1, max_length=256)
+    reason: str = Field(..., min_length=10, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 10:
+            raise ValueError("reason must contain at least 10 non-whitespace characters")
+        return normalized
 
 
 class TenantEntryRead(BaseModel):
@@ -424,6 +430,10 @@ async def create_tenant_entry(
         resource_type="tenant_entry",
         target_id=str(payload.tenant_id),
     )
+    reason_fingerprint = target_fingerprint(
+        resource_type="tenant_entry_reason",
+        target_id=payload.reason.strip(),
+    )
     if not verified:
         authz.record_audit(
             tenant_id=payload.tenant_id,
@@ -456,7 +466,25 @@ async def create_tenant_entry(
         resource_type="tenant_entry",
         target_fingerprint_value=fingerprint,
         outcome="allowed",
-        reason_code="step_up_verified",
+        reason_code="break_glass_step_up_verified",
+    )
+    authz.record_audit(
+        tenant_id=payload.tenant_id,
+        principal_kind="human",
+        principal_id=str(user.id),
+        permission=PLATFORM_TENANT_MANAGE,
+        resource_type="tenant_entry_reason",
+        target_fingerprint_value=reason_fingerprint,
+        outcome="allowed",
+        reason_code="break_glass_reason_recorded",
+    )
+    logger.warning(
+        "authorization.break_glass_tenant_entry",
+        extra={
+            "actor_id": user.id,
+            "tenant_id": str(payload.tenant_id),
+            "expires_in": TENANT_ENTRY_MAX_AGE_SECONDS,
+        },
     )
     await db.commit()
     return TenantEntryRead(
