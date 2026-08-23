@@ -52,6 +52,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.auth.scim.auth import require_scope
@@ -81,6 +82,7 @@ from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
+from app.shared.lib.permissions import ANALYST
 
 
 logger = logging.getLogger(__name__)
@@ -330,14 +332,15 @@ async def list_users(
     startIndex: int = Query(default=1, ge=1, le=10_000_000),
     count: int = Query(default=100, ge=0, le=200),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:read")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:read")),
 ):
     try:
         clause = parse_filter(filter)
     except UnsupportedScimFilter as exc:
         return _scim_error(400, str(exc))
 
-    base_q = select(db_models.User)
+    tenant_id = token[0].tenant_id
+    base_q = select(db_models.User).where(db_models.User.tenant_id == tenant_id)
     try:
         base_q = _apply_clause_to_query(base_q, clause)
     except UnsupportedScimFilter as exc:
@@ -366,13 +369,18 @@ async def list_users(
 async def get_user(
     user_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:read")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:read")),
 ):
     try:
         uid = int(user_id)
     except ValueError:
         return _scim_error(400, "invalid user id")
-    result = await db.execute(select(db_models.User).where(db_models.User.id == uid))
+    result = await db.execute(
+        select(db_models.User).where(
+            db_models.User.id == uid,
+            db_models.User.tenant_id == token[0].tenant_id,
+        )
+    )
     user = result.scalar_one_or_none()
     if user is None:
         return _scim_error(404, "user not found")
@@ -387,18 +395,22 @@ async def create_user(
     request: Request,
     payload: ScimUser = Body(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
 ):
     """Create a SCIM-managed user. Maps userName → email. JIT-creates with
     a random sentinel password; the user must use the password-reset flow
     or SSO to log in (SCIM doesn't carry credentials)."""
     norm_email = payload.userName.strip().lower()
+    tenant_id = token[0].tenant_id
     if "@" not in norm_email:
         return _scim_error(400, "userName must look like an email address")
 
     existing = (
         await db.execute(
-            select(db_models.User).where(db_models.User.email == norm_email)
+            select(db_models.User).where(
+                db_models.User.email == norm_email,
+                db_models.User.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if existing is not None:
@@ -423,8 +435,20 @@ async def create_user(
                 # separate flow.
                 "is_superuser": False,
                 "is_verified": True,
+                "tenant_id": tenant_id,
             }
         )
+        db.add(
+            db_models.RoleAssignment(
+                user_id=user.id,
+                tenant_id=tenant_id,
+                role_key=ANALYST,
+            )
+        )
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        return _scim_error(409, "user already exists")
     finally:
         try:
             await user_db_gen.aclose()
@@ -435,7 +459,7 @@ async def create_user(
         db,
         event=EVENT_SCIM_USER_CREATED,
         user_id=user.id,
-        tenant_id=user.tenant_id,
+        tenant_id=tenant_id,
         outcome="success",
         email=norm_email,
         request=request,
@@ -458,13 +482,19 @@ async def replace_user(
     user_id: str = Path(...),
     payload: ScimUser = Body(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
 ):
     try:
         uid = int(user_id)
     except ValueError:
         return _scim_error(400, "invalid user id")
-    result = await db.execute(select(db_models.User).where(db_models.User.id == uid))
+    tenant_id = token[0].tenant_id
+    result = await db.execute(
+        select(db_models.User).where(
+            db_models.User.id == uid,
+            db_models.User.tenant_id == tenant_id,
+        )
+    )
     user = result.scalar_one_or_none()
     if user is None:
         return _scim_error(404, "user not found")
@@ -477,7 +507,10 @@ async def replace_user(
     if identity_changed:
         clash = (
             await db.execute(
-                select(db_models.User).where(db_models.User.email == new_email)
+                select(db_models.User).where(
+                    db_models.User.email == new_email,
+                    db_models.User.tenant_id == tenant_id,
+                )
             )
         ).scalar_one_or_none()
         if clash is not None:
@@ -525,7 +558,7 @@ async def patch_user(
     user_id: str = Path(...),
     payload: ScimPatchRequest = Body(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
 ):
     """Minimal PATCH support — only ``replace`` on ``active``. Everything
     else returns 400; the IdP can fall back to PUT for full replacement."""
@@ -533,7 +566,12 @@ async def patch_user(
         uid = int(user_id)
     except ValueError:
         return _scim_error(400, "invalid user id")
-    result = await db.execute(select(db_models.User).where(db_models.User.id == uid))
+    result = await db.execute(
+        select(db_models.User).where(
+            db_models.User.id == uid,
+            db_models.User.tenant_id == token[0].tenant_id,
+        )
+    )
     user = result.scalar_one_or_none()
     if user is None:
         return _scim_error(404, "user not found")
@@ -597,7 +635,7 @@ async def delete_user(
     request: Request,
     user_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("users:write")),
 ):
     """SOFT delete: set is_active=False. SCIM expects 204 on success.
 
@@ -608,7 +646,12 @@ async def delete_user(
         uid = int(user_id)
     except ValueError:
         return _scim_error(400, "invalid user id")
-    result = await db.execute(select(db_models.User).where(db_models.User.id == uid))
+    result = await db.execute(
+        select(db_models.User).where(
+            db_models.User.id == uid,
+            db_models.User.tenant_id == token[0].tenant_id,
+        )
+    )
     user = result.scalar_one_or_none()
     if user is None:
         return _scim_error(404, "user not found")
@@ -691,11 +734,27 @@ def _parse_group_id(raw: str) -> Optional[_uuid.UUID]:
         return None
 
 
-async def _load_member_ids(db: AsyncSession, group_id: _uuid.UUID) -> list[int]:
+async def _load_member_ids(
+    db: AsyncSession,
+    group_id: _uuid.UUID,
+    *,
+    tenant_id: _uuid.UUID,
+) -> list[int]:
     rows = (
         await db.execute(
-            select(db_models.UserGroupMembership.user_id).where(
-                db_models.UserGroupMembership.group_id == group_id
+            select(db_models.UserGroupMembership.user_id)
+            .join(
+                db_models.User,
+                db_models.User.id == db_models.UserGroupMembership.user_id,
+            )
+            .join(
+                db_models.UserGroup,
+                db_models.UserGroup.id == db_models.UserGroupMembership.group_id,
+            )
+            .where(
+                db_models.UserGroupMembership.group_id == group_id,
+                db_models.User.tenant_id == tenant_id,
+                db_models.UserGroup.tenant_id == tenant_id,
             )
         )
     ).all()
@@ -723,6 +782,8 @@ async def _link_members(
     db: AsyncSession,
     group_id: _uuid.UUID,
     members: list[ScimGroupMember],
+    *,
+    tenant_id: _uuid.UUID,
 ) -> list[int]:
     """Insert UserGroupMembership rows for the supplied members.
 
@@ -736,7 +797,12 @@ async def _link_members(
         except (ValueError, TypeError):
             continue
         u = (
-            await db.execute(select(db_models.User.id).where(db_models.User.id == uid))
+            await db.execute(
+                select(db_models.User.id).where(
+                    db_models.User.id == uid,
+                    db_models.User.tenant_id == tenant_id,
+                )
+            )
         ).scalar_one_or_none()
         if u is None:
             continue
@@ -754,23 +820,26 @@ async def _link_members(
     return sorted(set(linked))
 
 
-async def _resolve_creator_id(db: AsyncSession) -> Optional[int]:
-    """user_groups.created_by is NOT NULL; SCIM tokens carry no specific
-    user, so attribute the row to the configured master admin (or the
-    lowest-id active superuser as a fallback)."""
-    from app.core.config_cache import SystemConfigCache
+async def _resolve_creator_id(
+    db: AsyncSession,
+    token: db_models.ScimToken,
+) -> Optional[int]:
+    """Resolve the tenant-matched human sponsor of a SCIM principal.
 
-    creator_id = SystemConfigCache.get_master_admin_user_id()
-    if creator_id is not None:
-        return int(creator_id)
-    return (
-        await db.execute(
-            select(db_models.User.id)
-            .where(db_models.User.is_superuser.is_(True))
-            .order_by(db_models.User.id)
-            .limit(1)
+    The token remains the authorization/audit actor. The issuing human is
+    retained only for the legacy non-null group provenance field. If that
+    sponsor was removed or changed tenants, the token must be rotated before
+    it can create more groups.
+    """
+
+    if token.created_by_user_id is None:
+        return None
+    return await db.scalar(
+        select(db_models.User.id).where(
+            db_models.User.id == token.created_by_user_id,
+            db_models.User.tenant_id == token.tenant_id,
         )
-    ).scalar_one_or_none()
+    )
 
 
 @router.get("/Groups")
@@ -780,14 +849,17 @@ async def list_groups(
     startIndex: int = Query(default=1, ge=1, le=10_000_000),
     count: int = Query(default=100, ge=0, le=200),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:read")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:read")),
 ):
     try:
         node = parse_filter(filter)
     except UnsupportedScimFilter as exc:
         return _scim_error(400, str(exc))
 
-    base_q = select(db_models.UserGroup)
+    tenant_id = token[0].tenant_id
+    base_q = select(db_models.UserGroup).where(
+        db_models.UserGroup.tenant_id == tenant_id
+    )
     try:
         base_q = _apply_group_clause_to_query(base_q, node)
     except UnsupportedScimFilter as exc:
@@ -802,7 +874,7 @@ async def list_groups(
     groups = list((await db.execute(page_q)).scalars().all())
     resources = []
     for g in groups:
-        member_ids = await _load_member_ids(db, g.id)
+        member_ids = await _load_member_ids(db, g.id, tenant_id=tenant_id)
         resources.append(_group_to_dict(g, member_ids))
     return JSONResponse(
         content={
@@ -820,19 +892,26 @@ async def list_groups(
 async def get_group(
     group_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:read")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:read")),
 ):
     gid = _parse_group_id(group_id)
     if gid is None:
         return _scim_error(400, "invalid group id")
     g = (
         await db.execute(
-            select(db_models.UserGroup).where(db_models.UserGroup.id == gid)
+            select(db_models.UserGroup).where(
+                db_models.UserGroup.id == gid,
+                db_models.UserGroup.tenant_id == token[0].tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if g is None:
         return _scim_error(404, "group not found")
-    member_ids = await _load_member_ids(db, g.id)
+    member_ids = await _load_member_ids(
+        db,
+        g.id,
+        tenant_id=token[0].tenant_id,
+    )
     return JSONResponse(
         content=_group_to_dict(g, member_ids),
         media_type="application/scim+json",
@@ -844,39 +923,52 @@ async def create_group(
     request: Request,
     payload: ScimGroup = Body(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
 ):
+    tenant_id = token[0].tenant_id
     name = payload.displayName.strip()
     if not name:
         return _scim_error(400, "displayName is required")
     clash = (
         await db.execute(
-            select(db_models.UserGroup).where(db_models.UserGroup.name == name)
+            select(db_models.UserGroup).where(
+                db_models.UserGroup.name == name,
+                db_models.UserGroup.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if clash is not None:
         return _scim_error(409, "group with that displayName already exists")
 
-    creator_id = await _resolve_creator_id(db)
+    creator_id = await _resolve_creator_id(db, token[0])
     if creator_id is None:
         return _scim_error(
-            500,
-            "cannot create group via SCIM: no superuser exists to attribute "
-            "the row to (complete first-run setup first)",
+            409,
+            "SCIM token sponsor is no longer active in this tenant; rotate the token",
         )
-
-    g = db_models.UserGroup(name=name, created_by=int(creator_id))
+    g = db_models.UserGroup(
+        name=name,
+        created_by=creator_id,
+        tenant_id=tenant_id,
+    )
     db.add(g)
     await db.flush()
 
     member_ids: list[int] = []
     if payload.members:
-        member_ids = await _link_members(db, g.id, payload.members)
+        member_ids = await _link_members(
+            db,
+            g.id,
+            payload.members,
+            tenant_id=tenant_id,
+        )
 
     await audit.record(
         db,
         event=EVENT_SCIM_GROUP_CREATED,
         user_id=None,
+        tenant_id=tenant_id,
+        outcome="success",
         request=request,
         details={
             "group_id": str(g.id),
@@ -900,7 +992,7 @@ async def replace_group(
     group_id: str = Path(...),
     payload: ScimGroup = Body(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
 ):
     """Full replacement: displayName updated, member set wiped + reseeded."""
     from sqlalchemy import delete as sa_delete
@@ -908,9 +1000,13 @@ async def replace_group(
     gid = _parse_group_id(group_id)
     if gid is None:
         return _scim_error(400, "invalid group id")
+    tenant_id = token[0].tenant_id
     g = (
         await db.execute(
-            select(db_models.UserGroup).where(db_models.UserGroup.id == gid)
+            select(db_models.UserGroup).where(
+                db_models.UserGroup.id == gid,
+                db_models.UserGroup.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if g is None:
@@ -925,6 +1021,7 @@ async def replace_group(
                 select(db_models.UserGroup).where(
                     db_models.UserGroup.name == new_name,
                     db_models.UserGroup.id != gid,
+                    db_models.UserGroup.tenant_id == tenant_id,
                 )
             )
         ).scalar_one_or_none()
@@ -939,12 +1036,19 @@ async def replace_group(
     )
     member_ids: list[int] = []
     if payload.members:
-        member_ids = await _link_members(db, gid, payload.members)
+        member_ids = await _link_members(
+            db,
+            gid,
+            payload.members,
+            tenant_id=tenant_id,
+        )
 
     await audit.record(
         db,
         event=EVENT_SCIM_GROUP_UPDATED,
         user_id=None,
+        tenant_id=tenant_id,
+        outcome="success",
         request=request,
         details={
             "group_id": str(g.id),
@@ -965,7 +1069,7 @@ async def patch_group(
     group_id: str = Path(...),
     payload: ScimPatchRequest = Body(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
 ):
     """Group PATCH — supports the operations IdPs actually emit:
 
@@ -979,9 +1083,13 @@ async def patch_group(
     gid = _parse_group_id(group_id)
     if gid is None:
         return _scim_error(400, "invalid group id")
+    tenant_id = token[0].tenant_id
     g = (
         await db.execute(
-            select(db_models.UserGroup).where(db_models.UserGroup.id == gid)
+            select(db_models.UserGroup).where(
+                db_models.UserGroup.id == gid,
+                db_models.UserGroup.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if g is None:
@@ -1005,6 +1113,7 @@ async def patch_group(
                     select(db_models.UserGroup).where(
                         db_models.UserGroup.name == new_name,
                         db_models.UserGroup.id != gid,
+                        db_models.UserGroup.tenant_id == tenant_id,
                     )
                 )
             ).scalar_one_or_none()
@@ -1024,7 +1133,12 @@ async def patch_group(
                             type=str(raw.get("type", "User")),
                         )
                     )
-            new_ids = await _link_members(db, gid, members_in)
+            new_ids = await _link_members(
+                db,
+                gid,
+                members_in,
+                tenant_id=tenant_id,
+            )
             added.extend(new_ids)
             continue
 
@@ -1067,6 +1181,8 @@ async def patch_group(
         db,
         event=EVENT_SCIM_GROUP_UPDATED,
         user_id=None,
+        tenant_id=tenant_id,
+        outcome="success",
         request=request,
         details={
             "group_id": str(g.id),
@@ -1077,7 +1193,7 @@ async def patch_group(
         },
     )
     await db.commit()
-    member_ids = await _load_member_ids(db, g.id)
+    member_ids = await _load_member_ids(db, g.id, tenant_id=tenant_id)
     return JSONResponse(
         content=_group_to_dict(g, member_ids),
         media_type="application/scim+json",
@@ -1089,7 +1205,7 @@ async def delete_group(
     request: Request,
     group_id: str = Path(...),
     db: AsyncSession = Depends(get_db),
-    _token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
+    token: Tuple[db_models.ScimToken, list] = Depends(require_scope("groups:write")),
 ):
     """Hard-delete the group; memberships cascade. Unlike Users, dropping
     a Group only loses shared visibility (re-creatable), so we don't
@@ -1097,9 +1213,13 @@ async def delete_group(
     gid = _parse_group_id(group_id)
     if gid is None:
         return _scim_error(400, "invalid group id")
+    tenant_id = token[0].tenant_id
     g = (
         await db.execute(
-            select(db_models.UserGroup).where(db_models.UserGroup.id == gid)
+            select(db_models.UserGroup).where(
+                db_models.UserGroup.id == gid,
+                db_models.UserGroup.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if g is None:
@@ -1111,6 +1231,8 @@ async def delete_group(
         db,
         event=EVENT_SCIM_GROUP_DELETED,
         user_id=None,
+        tenant_id=tenant_id,
+        outcome="success",
         request=request,
         details={"group_id": str(gid), "displayName": name},
     )

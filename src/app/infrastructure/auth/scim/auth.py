@@ -11,6 +11,7 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timezone
+from collections.abc import AsyncIterator
 from typing import List, Optional, Tuple
 
 from fastapi import Depends, Header, HTTPException, status
@@ -19,6 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
+from app.infrastructure.database.tenant_context import (
+    apply_session_context,
+    principal_scope,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -42,7 +47,7 @@ def issue_plaintext_token() -> str:
 async def scim_token_auth(
     db: AsyncSession = Depends(get_db),
     authorization: Optional[str] = Header(default=None),
-) -> Tuple[db_models.ScimToken, List[str]]:
+) -> AsyncIterator[Tuple[db_models.ScimToken, List[str]]]:
     """FastAPI dependency: validate the Authorization: Bearer header.
 
     Returns ``(token_row, scopes)``. Raises 401 on missing/invalid;
@@ -69,10 +74,23 @@ async def scim_token_auth(
             detail="invalid SCIM token",
         )
     token_hash = hash_token(bearer)
-    result = await db.execute(
-        select(db_models.ScimToken).where(db_models.ScimToken.token_hash == token_hash)
-    )
-    row = result.scalar_one_or_none()
+    # The tenant is not known until the opaque token is resolved. Permit only
+    # this exact secret-derived lookup under narrow system scope, then replace
+    # it with the token's tenant-bound service-principal context before any
+    # SCIM resource query executes.
+    with principal_scope(
+        tenant_id=None,
+        principal_kind="system",
+        principal_id="scim-token-bootstrap",
+        system_scope=True,
+    ):
+        await apply_session_context(db)
+        result = await db.execute(
+            select(db_models.ScimToken).where(
+                db_models.ScimToken.token_hash == token_hash
+            )
+        )
+        row = result.scalar_one_or_none()
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -83,17 +101,27 @@ async def scim_token_auth(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="SCIM token expired",
         )
-    # Bump last_used_at; best-effort.
-    try:
-        await db.execute(
-            update(db_models.ScimToken)
-            .where(db_models.ScimToken.id == row.id)
-            .values(last_used_at=datetime.now(timezone.utc))
-        )
-        # Don't commit here — caller's transaction owns the boundary.
-    except Exception:
-        logger.warning("scim.token.last_used_update_failed", exc_info=True)
-    return row, list(row.scopes or [])
+    with principal_scope(
+        tenant_id=row.tenant_id,
+        principal_kind="service_principal",
+        principal_id=str(row.id),
+    ):
+        await apply_session_context(db)
+        # Bump last_used_at; best-effort. The endpoint owns the transaction.
+        try:
+            await db.execute(
+                update(db_models.ScimToken)
+                .where(
+                    db_models.ScimToken.id == row.id,
+                    db_models.ScimToken.tenant_id == row.tenant_id,
+                )
+                .values(last_used_at=datetime.now(timezone.utc))
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.warning("scim.token.last_used_update_failed", exc_info=True)
+        yield row, list(row.scopes or [])
 
 
 def require_scope(required: str):

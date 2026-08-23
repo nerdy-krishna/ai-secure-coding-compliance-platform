@@ -2330,6 +2330,13 @@ class ScimToken(Base):
     created_by_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
+    )
 
     __table_args__ = (UniqueConstraint("token_hash", name="uq_scim_tokens_token_hash"),)
 

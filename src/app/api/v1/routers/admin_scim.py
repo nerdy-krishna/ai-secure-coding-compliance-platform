@@ -1,6 +1,6 @@
-"""Admin endpoints for SCIM token issuance + revocation.
+"""Tenant-scoped endpoints for SCIM service-principal lifecycle.
 
-Surface (all superuser-only):
+Surface (all require ``service_principal.manage``):
 
   GET    /api/v1/admin/scim/tokens        — list (token plaintext NEVER returned)
   POST   /api/v1/admin/scim/tokens        — issue (plaintext returned ONCE)
@@ -24,10 +24,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.auth.core import current_active_user
+from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
 from app.infrastructure.auth.scim.auth import hash_token, issue_plaintext_token
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
+from app.shared.lib.permissions import SERVICE_PRINCIPAL_MANAGE
 
 
 logger = logging.getLogger(__name__)
@@ -68,25 +70,21 @@ class ScimTokenIssued(ScimTokenRead):
     plaintext_token: str
 
 
-async def _require_superuser(
-    current_user: db_models.User = Depends(current_active_user),
-) -> db_models.User:
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Not enough privileges"
-        )
-    return current_user
-
-
-@router.get("/tokens", response_model=List[ScimTokenRead])
+@router.get(
+    "/tokens",
+    response_model=List[ScimTokenRead],
+    dependencies=[Depends(require_permission(SERVICE_PRINCIPAL_MANAGE))],
+)
 async def list_tokens(
+    tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    _user: db_models.User = Depends(_require_superuser),
 ):
     rows = (
         (
             await db.execute(
-                select(db_models.ScimToken).order_by(db_models.ScimToken.created_at)
+                select(db_models.ScimToken)
+                .where(db_models.ScimToken.tenant_id == tenant_id)
+                .order_by(db_models.ScimToken.created_at)
             )
         )
         .scalars()
@@ -99,12 +97,14 @@ async def list_tokens(
     "/tokens",
     response_model=ScimTokenIssued,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(SERVICE_PRINCIPAL_MANAGE))],
 )
 async def create_token(
     request: Request,
     payload: ScimTokenCreate = Body(...),
+    tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ):
     bad = [s for s in payload.scopes if s not in _VALID_SCOPES]
     if bad:
@@ -119,13 +119,16 @@ async def create_token(
         scopes=list(payload.scopes),
         expires_at=payload.expires_at,
         created_by_user_id=user.id,
+        tenant_id=tenant_id,
     )
     db.add(row)
     await db.flush()
     await audit.record(
         db,
         event="scim.token.created",
-        user_id=user.id,
+        actor_user_id=user.id,
+        tenant_id=tenant_id,
+        outcome="success",
         request=request,
         details={"name": payload.name, "scopes": list(payload.scopes)},
     )
@@ -141,16 +144,24 @@ async def create_token(
     )
 
 
-@router.delete("/tokens/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/tokens/{token_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(SERVICE_PRINCIPAL_MANAGE))],
+)
 async def revoke_token(
     request: Request,
     token_id: _uuid.UUID = Path(...),
+    tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
     db: AsyncSession = Depends(get_db),
-    user: db_models.User = Depends(_require_superuser),
+    user: db_models.User = Depends(current_active_user),
 ):
     row = (
         await db.execute(
-            select(db_models.ScimToken).where(db_models.ScimToken.id == token_id)
+            select(db_models.ScimToken).where(
+                db_models.ScimToken.id == token_id,
+                db_models.ScimToken.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if row is None:
@@ -160,7 +171,9 @@ async def revoke_token(
     await audit.record(
         db,
         event="scim.token.revoked",
-        user_id=user.id,
+        actor_user_id=user.id,
+        tenant_id=tenant_id,
+        outcome="success",
         request=request,
         details={"name": name, "token_uuid": str(token_id)},
     )
