@@ -1826,6 +1826,9 @@ class Tenant(Base):
     session_concurrency_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="deny_new"
     )
+    separation_of_duties_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="off"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -1843,10 +1846,169 @@ class Tenant(Base):
             "session_concurrency_mode IN ('deny_new', 'revoke_oldest')",
             name="ck_tenants_session_concurrency_mode",
         ),
+        sa.CheckConstraint(
+            "separation_of_duties_mode IN ('off', 'critical')",
+            name="ck_tenants_separation_of_duties_mode",
+        ),
     )
 
     verified_domains: Mapped[List["TenantVerifiedDomain"]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"
+    )
+
+
+class RoleAssignment(Base):
+    """Built-in global or tenant role assigned to a human user."""
+
+    __tablename__ = "role_assignments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    role_key: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "role_key IN ('platform_owner', 'tenant_admin', "
+            "'security_approver', 'analyst', 'developer', 'auditor')",
+            name="ck_role_assignments_builtin_role",
+        ),
+        sa.CheckConstraint(
+            "(role_key = 'platform_owner' AND tenant_id IS NULL) OR "
+            "(role_key <> 'platform_owner' AND tenant_id IS NOT NULL)",
+            name="ck_role_assignments_scope",
+        ),
+        sa.Index(
+            "uq_role_assignments_global_user_role",
+            "user_id",
+            "role_key",
+            unique=True,
+            postgresql_where=sa.text("tenant_id IS NULL"),
+        ),
+        sa.Index(
+            "uq_role_assignments_tenant_user_role",
+            "tenant_id",
+            "user_id",
+            "role_key",
+            unique=True,
+            postgresql_where=sa.text("tenant_id IS NOT NULL"),
+        ),
+    )
+
+
+class AuthorizationActionRequest(Base):
+    """Immutable-target, durable request for a high-risk action."""
+
+    __tablename__ = "authorization_action_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requester_user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    requester_permission: Mapped[str] = mapped_column(String(96), nullable=False)
+    approver_permission: Mapped[str] = mapped_column(String(96), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending", index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    approver_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decision_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "idempotency_key",
+            name="uq_authorization_action_requests_tenant_idempotency",
+        ),
+        sa.CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'expired', "
+            "'executed', 'cancelled')",
+            name="ck_authorization_action_requests_status",
+        ),
+        sa.CheckConstraint(
+            "approver_user_id IS NULL OR approver_user_id <> requester_user_id",
+            name="ck_authorization_action_requests_distinct_actor",
+        ),
+    )
+
+
+class AuthorizationAuditEvent(Base):
+    """Append-only privacy-safe evidence for authorization decisions."""
+
+    __tablename__ = "authorization_audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    principal_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    principal_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    permission: Mapped[str] = mapped_column(String(96), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_fingerprint: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    action_request_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    approver_principal_id: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "principal_kind IN ('human', 'service_principal', 'system')",
+            name="ck_authorization_audit_events_principal_kind",
+        ),
+        sa.CheckConstraint(
+            "outcome IN ('allowed', 'denied', 'requested', 'approved', "
+            "'rejected', 'executed', 'failed')",
+            name="ck_authorization_audit_events_outcome",
+        ),
     )
 
 
