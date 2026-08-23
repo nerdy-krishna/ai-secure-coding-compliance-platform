@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi_users.password import PasswordHelper
-from sqlalchemy import delete, update
+from sqlalchemy import delete, text, update
 from sqlalchemy.exc import DBAPIError
 
 from app.infrastructure.database.database import AsyncSessionLocal, engine
@@ -26,6 +26,7 @@ from app.infrastructure.database.repositories.authorization_repo import (
     payload_digest,
     target_fingerprint,
 )
+from app.infrastructure.database.tenant_context import bind_principal, reset_principal
 from app.shared.lib.permissions import (
     ANALYST,
     PLATFORM_OWNER,
@@ -142,6 +143,46 @@ class AuthorizationFoundationIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(WAIVER_REQUEST, requester_permissions)
         self.assertNotIn(WAIVER_APPROVE, requester_permissions)
         self.assertIn(WAIVER_APPROVE, platform_permissions)
+
+    async def test_tenant_context_is_reapplied_after_commit(self) -> None:
+        binding = bind_principal(
+            tenant_id=self.tenant_id,
+            principal_kind="human",
+            principal_id=str(self.requester_id),
+        )
+        try:
+            async with AsyncSessionLocal() as db:
+                first = (
+                    await db.execute(
+                        text(
+                            "SELECT current_setting('app.tenant_id'), "
+                            "current_setting('app.principal_kind'), "
+                            "current_setting('app.principal_id'), "
+                            "current_setting('app.system_scope')"
+                        )
+                    )
+                ).one()
+                await db.commit()
+                second = (
+                    await db.execute(
+                        text(
+                            "SELECT current_setting('app.tenant_id'), "
+                            "current_setting('app.principal_kind'), "
+                            "current_setting('app.principal_id'), "
+                            "current_setting('app.system_scope')"
+                        )
+                    )
+                ).one()
+            expected = (
+                str(self.tenant_id),
+                "human",
+                str(self.requester_id),
+                "off",
+            )
+            self.assertEqual(tuple(first), expected)
+            self.assertEqual(tuple(second), expected)
+        finally:
+            reset_principal(binding)
 
     async def test_idempotency_is_bound_to_immutable_payload(self) -> None:
         key = f"waiver:{uuid4()}"

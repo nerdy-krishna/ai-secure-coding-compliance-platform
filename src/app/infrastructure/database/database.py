@@ -56,6 +56,14 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
 )
 
+# Register once at database-module import so every API, worker, sweeper, and
+# test transaction receives an explicit PostgreSQL principal context.
+from app.infrastructure.database.tenant_context import (  # noqa: E402
+    install_tenant_context_hooks,
+)
+
+install_tenant_context_hooks()
+
 # Define the declarative base for our ORM models.
 # All models in src/app/db/models.py will inherit from this Base.
 Base = declarative_base()

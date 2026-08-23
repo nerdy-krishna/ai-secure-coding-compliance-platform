@@ -1,7 +1,7 @@
 # src/app/infrastructure/auth/core.py
 import logging
 import uuid
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi_users import FastAPIUsers
@@ -22,6 +22,12 @@ from app.infrastructure.auth.session import (
 from app.infrastructure.auth.sse_token import verify_scan_stream_token
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.models import User
+from app.infrastructure.database.tenant_context import (
+    apply_session_context,
+    bind_principal,
+    effective_tenant_id,
+    reset_principal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +52,7 @@ async def current_active_user(
     bearer_user: User | None = Depends(_optional_active_bearer_user),
     db: AsyncSession = Depends(get_db),
     strategy=Depends(get_custom_cookie_jwt_strategy),
-) -> User:
+) -> AsyncGenerator[User, None]:
     """Authenticate an active user via bearer token or browser session cookie.
 
     Bearer requests preserve the programmatic API contract. Cookie-authenticated
@@ -54,51 +60,60 @@ async def current_active_user(
     header bound to the server-side session family.
     """
     if bearer_user is not None:
-        return bearer_user
+        user = bearer_user
+    else:
+        credential = request.cookies.get(strategy.browser_session_cookie_name)
+        if not credential:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
-    credential = request.cookies.get(strategy.browser_session_cookie_name)
-    if not credential:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        try:
+            claims = decode_session_credential(credential)
+            enforce_cookie_csrf(request, claims.session_id)
+            session_row = await BrowserSessionService(db).authenticate(credential)
+        except InvalidCsrfRequest as exc:
+            logger.warning(
+                "auth.browser_session.csrf_rejected",
+                extra={"path": request.url.path, "reason": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CSRF validation failed.",
+            ) from exc
+        except SessionError as exc:
+            # Persist expiry-triggered revocation while malformed credentials remain
+            # side-effect free.
+            await db.commit()
+            logger.warning(
+                "auth.browser_session.rejected",
+                extra={"path": request.url.path, "reason": type(exc).__name__},
+            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED) from exc
 
+        user = await db.get(User, session_row.user_id)
+        tenant_matches = user is not None and user.tenant_id == session_row.tenant_id
+        if user is None or not user.is_active or not tenant_matches:
+            await BrowserSessionService(db).repo.revoke(
+                session_row,
+                reason=(
+                    "user_inactive"
+                    if user is None or not user.is_active
+                    else "tenant_changed"
+                ),
+            )
+            await db.commit()
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        await db.commit()
+
+    binding = bind_principal(
+        tenant_id=effective_tenant_id(user.tenant_id),
+        principal_kind="human",
+        principal_id=str(user.id),
+    )
     try:
-        claims = decode_session_credential(credential)
-        enforce_cookie_csrf(request, claims.session_id)
-        session_row = await BrowserSessionService(db).authenticate(credential)
-    except InvalidCsrfRequest as exc:
-        logger.warning(
-            "auth.browser_session.csrf_rejected",
-            extra={"path": request.url.path, "reason": str(exc)},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="CSRF validation failed.",
-        ) from exc
-    except SessionError as exc:
-        # Persist expiry-triggered revocation while malformed credentials remain
-        # side-effect free.
-        await db.commit()
-        logger.warning(
-            "auth.browser_session.rejected",
-            extra={"path": request.url.path, "reason": type(exc).__name__},
-        )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED) from exc
-
-    user = await db.get(User, session_row.user_id)
-    tenant_matches = user is not None and user.tenant_id == session_row.tenant_id
-    if user is None or not user.is_active or not tenant_matches:
-        await BrowserSessionService(db).repo.revoke(
-            session_row,
-            reason=(
-                "user_inactive"
-                if user is None or not user.is_active
-                else "tenant_changed"
-            ),
-        )
-        await db.commit()
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-
-    await db.commit()
-    return user
+        await apply_session_context(db)
+        yield user
+    finally:
+        reset_principal(binding)
 
 
 async def current_superuser(
@@ -121,7 +136,7 @@ async def current_active_user_sse(
     ),
     strategy=Depends(get_custom_cookie_jwt_strategy),
     user_manager: UserManager = Depends(get_user_manager),
-) -> User:
+) -> AsyncGenerator[User, None]:
     """SSE-friendly auth dependency.
 
     Tries the Authorization header first (same as `current_active_user`);
@@ -206,4 +221,13 @@ async def current_active_user_sse(
         "sse.auth.success",
         extra={"user_id": user.id, "method": method, "client_ip": client_ip},
     )
-    return user
+    binding = bind_principal(
+        tenant_id=effective_tenant_id(user.tenant_id),
+        principal_kind="human",
+        principal_id=str(user.id),
+    )
+    try:
+        await apply_session_context(user_manager.user_db.session)
+        yield user
+    finally:
+        reset_principal(binding)
