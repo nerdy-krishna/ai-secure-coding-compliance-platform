@@ -37,15 +37,25 @@ class ScanOutboxRepository:
         ``commit=False`` lets an application service include dispatch intent in
         the same transaction as its aggregate state change.
         """
-        attempt_id = await self.db.scalar(
-            select(db_models.Scan.current_attempt_id).where(
-                db_models.Scan.id == scan_id
+        scan_identity = (
+            await self.db.execute(
+                select(
+                    db_models.Scan.current_attempt_id,
+                    db_models.Scan.tenant_id,
+                ).where(db_models.Scan.id == scan_id)
             )
-        )
+        ).one_or_none()
+        if scan_identity is None:
+            raise ValueError("cannot enqueue dispatch for an unknown scan")
+        attempt_id, tenant_id = scan_identity
+        outbox_id = uuid.uuid4()
         payload = dict(payload)
+        payload["outbox_id"] = str(outbox_id)
+        payload["tenant_id"] = str(tenant_id)
         if attempt_id is not None:
             payload.setdefault("attempt_id", str(attempt_id))
         row = db_models.ScanOutbox(
+            id=outbox_id,
             scan_id=scan_id,
             attempt_id=attempt_id,
             queue_name=queue_name,

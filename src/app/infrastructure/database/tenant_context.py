@@ -9,6 +9,7 @@ silently discard the tenant boundary for the next statement.
 from __future__ import annotations
 
 import uuid
+from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 
@@ -77,6 +78,28 @@ def reset_principal(binding: PrincipalBinding) -> None:
     principal_id_var.reset(binding.principal_id_token)
     principal_kind_var.reset(binding.principal_kind_token)
     tenant_id_var.reset(binding.tenant_id_token)
+
+
+@contextmanager
+def principal_scope(
+    *,
+    tenant_id: uuid.UUID | None,
+    principal_kind: str,
+    principal_id: str,
+    system_scope: bool = False,
+):
+    """Bind a principal for one synchronous or asynchronous lexical scope."""
+
+    binding = bind_principal(
+        tenant_id=tenant_id,
+        principal_kind=principal_kind,
+        principal_id=principal_id,
+        system_scope=system_scope,
+    )
+    try:
+        yield
+    finally:
+        reset_principal(binding)
 
 
 def _context_values() -> dict[str, str]:

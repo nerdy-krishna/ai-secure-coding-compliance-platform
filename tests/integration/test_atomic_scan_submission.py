@@ -110,6 +110,8 @@ class AtomicScanSubmissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(outbox_rows), 1)
             self.assertIsNone(outbox_rows[0].published_at)
             self.assertEqual(outbox_rows[0].payload["scan_id"], str(scan.id))
+            self.assertEqual(outbox_rows[0].payload["outbox_id"], str(outbox_rows[0].id))
+            self.assertEqual(outbox_rows[0].payload["tenant_id"], str(scan.tenant_id))
             self.assertTrue(
                 outbox_rows[0].payload["correlation_id"].startswith("test-")
             )

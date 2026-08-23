@@ -37,6 +37,11 @@ from langgraph.types import Command
 from app.config.config import settings
 from app.config.logging_config import LOGGING_CONFIG, correlation_id_var
 from app.infrastructure.llm_client_rate_limiter import initialize_rate_limiters
+from app.infrastructure.database.tenant_context import principal_scope
+from app.infrastructure.messaging.worker_identity import (
+    TrustedScanDelivery,
+    resolve_trusted_scan_delivery,
+)
 from app.infrastructure.observability import flush_langfuse, get_langchain_handler
 from app.infrastructure.workflows.cancellation import (
     ScanCancellationRequested,
@@ -788,8 +793,21 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
     except (json.JSONDecodeError, UnicodeDecodeError):
         body_parse_failed = True
 
+    queue_name = message.routing_key or ""
+    trusted_delivery = await resolve_trusted_scan_delivery(
+        scan_id=initial_state["scan_id"],
+        queue_name=queue_name,
+        body=body,
+    )
+    if trusted_delivery is None:
+        logger.error(
+            "MSG: Delivery has no matching durable outbox identity; rejecting."
+        )
+        await message.reject(requeue=False)
+        return
+
     is_manual_restart = (
-        (message.routing_key or "") == settings.RABBITMQ_SUBMISSION_QUEUE
+        queue_name == settings.RABBITMQ_SUBMISSION_QUEUE
         and body.get("action") == "manual_restart"
         and body.get("mode") == "restart"
     )
@@ -807,7 +825,7 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
             await message.reject(requeue=True)
             return
 
-    if (message.routing_key or "") == settings.RABBITMQ_APPROVAL_QUEUE:
+    if queue_name == settings.RABBITMQ_APPROVAL_QUEUE:
         if body_parse_failed:
             logger.error("MSG: Approval body parse failed")
             await message.reject(requeue=False)
@@ -838,17 +856,29 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         }
         # Spawn background task — don't block the consumer while
         # the full analysis runs (can take 5–30 min of LLM calls).
-        asyncio.create_task(_run_workflow_task(initial_state, resume_payload, message))
+        asyncio.create_task(
+            _run_workflow_task(
+                initial_state,
+                resume_payload,
+                message,
+                trusted_delivery,
+            )
+        )
         return
 
     # Submission queue: process inline with the context manager for
     # proper ACK/NACK semantics.
-    async with message.process(requeue=False, ignore_processed=True):
-        success = await _run_workflow_for_scan(
-            initial_state, resume_payload=resume_payload
-        )
-        if not success:
-            await message.reject(requeue=True)
+    with principal_scope(
+        tenant_id=trusted_delivery.tenant_id,
+        principal_kind="service_principal",
+        principal_id=f"scan-worker:{trusted_delivery.outbox_id}",
+    ):
+        async with message.process(requeue=False, ignore_processed=True):
+            success = await _run_workflow_for_scan(
+                initial_state, resume_payload=resume_payload
+            )
+            if not success:
+                await message.reject(requeue=True)
 
 
 # Track in-flight analysis workflows so we don't overwhelm the LLM
@@ -862,16 +892,22 @@ async def _run_workflow_task(
     initial_state: WorkerState,
     resume_payload: Optional[dict],
     message: AbstractIncomingMessage,
+    trusted_delivery: TrustedScanDelivery,
 ) -> None:
     """Background task wrapper that ACKs/NACKs the message after completion."""
-    async with _analysis_semaphore:
-        success = await _run_workflow_for_scan(
-            initial_state, resume_payload=resume_payload
-        )
-        if not success:
-            await message.reject(requeue=True)
-        else:
-            await message.ack()
+    with principal_scope(
+        tenant_id=trusted_delivery.tenant_id,
+        principal_kind="service_principal",
+        principal_id=f"scan-worker:{trusted_delivery.outbox_id}",
+    ):
+        async with _analysis_semaphore:
+            success = await _run_workflow_for_scan(
+                initial_state, resume_payload=resume_payload
+            )
+            if not success:
+                await message.reject(requeue=True)
+            else:
+                await message.ack()
 
 
 class WorkerRunner:
@@ -965,11 +1001,23 @@ async def _async_main() -> None:
     # findings. (2026-05-04)
     initialize_rate_limiters()
 
+    # The worker must enforce the same RLS role posture as the API before it
+    # accepts a queue delivery. A superuser, table owner, or BYPASSRLS login
+    # would otherwise make the tenant binding below advisory only.
+    from app.infrastructure.database import AsyncSessionLocal
+    from app.infrastructure.database.role_posture import verify_database_role_posture
+
+    async with AsyncSessionLocal() as db:
+        await verify_database_role_posture(
+            db,
+            enforce=str(getattr(settings, "ENVIRONMENT", "")).lower()
+            == "production",
+        )
+
     # Hydrate the feature-flag cache (modular setup — #104) so any
     # feature-gated workflow node sees the same enabled set as the API. The
     # worker has no FastAPI lifespan, so it loads the flags itself here.
     try:
-        from app.infrastructure.database import AsyncSessionLocal
         from app.infrastructure.database.repositories.system_config_repo import (
             SystemConfigRepository,
         )

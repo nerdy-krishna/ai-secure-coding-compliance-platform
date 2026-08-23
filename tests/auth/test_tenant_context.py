@@ -6,6 +6,7 @@ from app.infrastructure.database.tenant_context import (
     effective_tenant_id,
     principal_id_var,
     principal_kind_var,
+    principal_scope,
     reset_principal,
     system_scope_var,
     tenant_id_var,
@@ -83,3 +84,16 @@ class TenantContextTests(unittest.TestCase):
         )
         self.assertTrue(system_scope_var.get())
         reset_principal(binding)
+
+    def test_principal_scope_restores_context_after_exception(self) -> None:
+        tenant_id = uuid4()
+        with self.assertRaisesRegex(RuntimeError, "stop"):
+            with principal_scope(
+                tenant_id=tenant_id,
+                principal_kind="service_principal",
+                principal_id="scan-worker",
+            ):
+                self.assertEqual(tenant_id_var.get(), tenant_id)
+                raise RuntimeError("stop")
+        self.assertIsNone(tenant_id_var.get())
+        self.assertEqual(principal_kind_var.get(), "anonymous")

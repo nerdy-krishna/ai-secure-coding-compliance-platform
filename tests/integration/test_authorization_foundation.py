@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import DBAPIError
 
+from app.config.config import settings
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import (
     AuthorizationActionRequest,
@@ -21,6 +22,7 @@ from app.infrastructure.database.models import (
     RoleAssignment,
     Scan,
     ScanEvent,
+    ScanOutbox,
     Tenant,
     User,
 )
@@ -31,8 +33,12 @@ from app.infrastructure.database.repositories.authorization_repo import (
     payload_digest,
     target_fingerprint,
 )
+from app.infrastructure.database.repositories.scan_outbox_repo import (
+    ScanOutboxRepository,
+)
 from app.infrastructure.database.role_posture import inspect_database_role_posture
 from app.infrastructure.database.tenant_context import bind_principal, reset_principal
+from app.infrastructure.messaging.worker_identity import resolve_trusted_scan_delivery
 from app.shared.lib.permissions import (
     ANALYST,
     PLATFORM_OWNER,
@@ -393,6 +399,15 @@ class TenantRlsIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 ]
             )
+            outbox = await ScanOutboxRepository(db).enqueue(
+                scan_id=scan_a.id,
+                queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+                payload={
+                    "scan_id": str(scan_a.id),
+                    "correlation_id": f"rls-test-{suffix}",
+                },
+                commit=False,
+            )
             await db.commit()
             self.tenant_a_id = tenant_a.id
             self.tenant_b_id = tenant_b.id
@@ -402,6 +417,9 @@ class TenantRlsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.project_b_id = project_b.id
             self.scan_a_id = scan_a.id
             self.scan_b_id = scan_b.id
+            self.outbox_id = outbox.id
+            self.delivery_body = dict(outbox.payload)
+            self.delivery_body.pop("correlation_id", None)
 
     async def asyncTearDown(self) -> None:
         async with AsyncSessionLocal() as db:
@@ -519,6 +537,63 @@ class TenantRlsIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             ).one()
         self.assertEqual(tuple(row), (False, False, False))
+
+    async def test_worker_delivery_resolves_only_exact_durable_outbox_payload(
+        self,
+    ) -> None:
+        trusted = await resolve_trusted_scan_delivery(
+            scan_id=self.scan_a_id,
+            queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+            body=self.delivery_body,
+        )
+        self.assertIsNotNone(trusted)
+        self.assertEqual(trusted.tenant_id, self.tenant_a_id)
+        self.assertEqual(trusted.outbox_id, self.outbox_id)
+        self.assertFalse(trusted.legacy_payload)
+
+        forged_tenant = dict(self.delivery_body)
+        forged_tenant["tenant_id"] = str(self.tenant_b_id)
+        self.assertIsNone(
+            await resolve_trusted_scan_delivery(
+                scan_id=self.scan_a_id,
+                queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+                body=forged_tenant,
+            )
+        )
+        self.assertIsNone(
+            await resolve_trusted_scan_delivery(
+                scan_id=self.scan_b_id,
+                queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+                body=self.delivery_body,
+            )
+        )
+
+    async def test_worker_delivery_supports_exact_legacy_payload_during_rollout(
+        self,
+    ) -> None:
+        legacy_payload = {
+            "scan_id": str(self.scan_a_id),
+            "action": "legacy-rollout-test",
+        }
+        async with AsyncSessionLocal() as db:
+            row = ScanOutbox(
+                scan_id=self.scan_a_id,
+                queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+                payload=legacy_payload,
+            )
+            db.add(row)
+            await db.commit()
+            legacy_outbox_id = row.id
+
+        trusted = await resolve_trusted_scan_delivery(
+            scan_id=self.scan_a_id,
+            queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+            body=legacy_payload,
+        )
+        self.assertIsNotNone(trusted)
+        self.assertEqual(trusted.tenant_id, self.tenant_a_id)
+        self.assertEqual(trusted.outbox_id, legacy_outbox_id)
+        self.assertTrue(trusted.legacy_payload)
 
     async def test_role_posture_inspection_distinguishes_active_and_login_roles(
         self,
