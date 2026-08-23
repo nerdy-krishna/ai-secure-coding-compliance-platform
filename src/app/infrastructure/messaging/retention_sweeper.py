@@ -32,6 +32,7 @@ import os
 from sqlalchemy import text
 
 from app.infrastructure.database.database import AsyncSessionLocal
+from app.infrastructure.database.tenant_context import system_principal_task
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ async def _delete_expired_in(table: str) -> int:
         await asyncio.sleep(0)
 
 
+@system_principal_task("retention-sweeper")
 async def _sweep_once() -> None:
     """Run one full pass across all retention tables."""
     for table in _TABLE_ORDER:

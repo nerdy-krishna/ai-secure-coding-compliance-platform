@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from app.infrastructure.database.tenant_context import (
     principal_scope,
     reset_principal,
     system_scope_var,
+    system_principal_task,
     tenant_id_var,
 )
 from app.infrastructure.database.role_posture import DatabaseRolePosture
@@ -97,3 +99,20 @@ class TenantContextTests(unittest.TestCase):
                 raise RuntimeError("stop")
         self.assertIsNone(tenant_id_var.get())
         self.assertEqual(principal_kind_var.get(), "anonymous")
+
+    def test_system_task_decorator_binds_across_await_and_restores(self) -> None:
+        @system_principal_task("retention-test")
+        async def run() -> tuple[str, str, bool]:
+            await asyncio.sleep(0)
+            return (
+                principal_kind_var.get(),
+                principal_id_var.get(),
+                system_scope_var.get(),
+            )
+
+        self.assertEqual(
+            asyncio.run(run()),
+            ("system", "retention-test", True),
+        )
+        self.assertEqual(principal_kind_var.get(), "anonymous")
+        self.assertFalse(system_scope_var.get())

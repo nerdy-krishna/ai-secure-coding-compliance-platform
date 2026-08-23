@@ -9,9 +9,12 @@ silently discard the tenant boundary for the next statement.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
+from functools import wraps
+from typing import ParamSpec, TypeVar
 
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +35,8 @@ system_scope_var: ContextVar[bool] = ContextVar("database_system_scope", default
 # Seeded by the tenant-foundation migration. New rows use this value when a
 # caller omits an explicit tenant; it is a real tenant, never an unscoped mode.
 DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def effective_tenant_id(tenant_id: uuid.UUID | None) -> uuid.UUID:
@@ -100,6 +105,32 @@ def principal_scope(
         yield
     finally:
         reset_principal(binding)
+
+
+def system_principal_task(
+    principal_id: str,
+) -> Callable[
+    [Callable[_P, Awaitable[_R]]],
+    Callable[_P, Awaitable[_R]],
+]:
+    """Decorate one async maintenance task with explicit system scope."""
+
+    def decorate(
+        func: Callable[_P, Awaitable[_R]],
+    ) -> Callable[_P, Awaitable[_R]]:
+        @wraps(func)
+        async def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with principal_scope(
+                tenant_id=None,
+                principal_kind="system",
+                principal_id=principal_id,
+                system_scope=True,
+            ):
+                return await func(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
 
 
 def _context_values() -> dict[str, str]:

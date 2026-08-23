@@ -20,6 +20,7 @@ import logging
 from sqlalchemy import text
 
 from app.infrastructure.database import AsyncSessionLocal
+from app.infrastructure.database.tenant_context import system_principal_task
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ SWEEPER_INTERVAL_SECONDS = 3600
 BATCH_SIZE = 5000
 
 
+@system_principal_task("findings-source-sweeper")
 async def _sweep_once() -> int:
     """Single sweep pass. Returns the number of rows backfilled."""
     async with AsyncSessionLocal() as db:

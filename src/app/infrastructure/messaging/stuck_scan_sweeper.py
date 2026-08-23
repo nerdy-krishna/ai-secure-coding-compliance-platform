@@ -19,6 +19,7 @@ from sqlalchemy import func, select, update
 
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database import models as db_models
+from app.infrastructure.database.tenant_context import system_principal_task
 from app.shared.lib.scan_status import (
     STATUS_FAILED,
     STATUS_QUEUED,
@@ -37,6 +38,7 @@ STUCK_SCAN_TIMEOUT_SECONDS = 600  # 10 min
 _STUCK_STATUSES = {STATUS_QUEUED_FOR_SCAN, STATUS_QUEUED}
 
 
+@system_principal_task("stuck-scan-sweeper")
 async def _sweep_once() -> int:
     """Find and fail stuck scans.  Returns count of scans marked FAILED."""
     async with AsyncSessionLocal() as db:

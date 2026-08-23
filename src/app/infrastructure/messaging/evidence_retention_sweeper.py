@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.config.config import settings
 from app.infrastructure.database import AsyncSessionLocal, models as db_models
 from app.infrastructure.database.repositories.evidence_repo import EvidenceRepository
+from app.infrastructure.database.tenant_context import system_principal_task
 from app.infrastructure.evidence.object_store import EvidenceObjectStore
 
 logger = logging.getLogger(__name__)
@@ -143,6 +144,7 @@ async def _delete_orphan_uploads() -> int:
     return deleted
 
 
+@system_principal_task("evidence-retention-sweeper")
 async def _sweep_once() -> tuple[int, int, int]:
     if not settings.EVIDENCE_STORE_ENABLED:
         return (0, 0, 0)

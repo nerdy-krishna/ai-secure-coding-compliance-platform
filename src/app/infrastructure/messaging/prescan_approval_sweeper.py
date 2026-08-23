@@ -26,6 +26,7 @@ from app.infrastructure.database.repositories.approval_gate_repo import (
     ApprovalGateRepository,
 )
 from app.infrastructure.database import models as db_models
+from app.infrastructure.database.tenant_context import system_principal_task
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_USER_DECLINE,
     STATUS_PENDING_PRESCAN_APPROVAL,
@@ -71,6 +72,7 @@ async def _delete_checkpointer_thread(scan_id: str) -> None:
         )
 
 
+@system_principal_task("prescan-approval-sweeper")
 async def _sweep_once() -> int:
     """Single sweep pass. Returns the number of scans transitioned.
 

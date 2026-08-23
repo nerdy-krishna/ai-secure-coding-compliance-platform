@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.infrastructure.database.database import AsyncSessionLocal
+from app.infrastructure.database.tenant_context import system_principal_task
 from app.infrastructure.database.repositories.semgrep_rule_repo import (
     SemgrepRuleRepository,
 )
@@ -38,6 +39,7 @@ def _is_cron_due(cron_expr: str | None, last_synced_at: datetime | None) -> bool
         return False
 
 
+@system_principal_task("semgrep-sync-sweeper")
 async def _tick() -> None:
     """Check for due auto-sync sources and enqueue them."""
     from app.core.services.semgrep_ingestion.sync_service import run_sync

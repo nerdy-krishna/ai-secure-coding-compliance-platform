@@ -37,7 +37,11 @@ from app.infrastructure.database.repositories.scan_outbox_repo import (
     ScanOutboxRepository,
 )
 from app.infrastructure.database.role_posture import inspect_database_role_posture
-from app.infrastructure.database.tenant_context import bind_principal, reset_principal
+from app.infrastructure.database.tenant_context import (
+    bind_principal,
+    reset_principal,
+    system_principal_task,
+)
 from app.infrastructure.messaging.worker_identity import resolve_trusted_scan_delivery
 from app.shared.lib.permissions import (
     ANALYST,
@@ -522,6 +526,16 @@ class TenantRlsIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue({self.scan_a_id, self.scan_b_id}.issubset(scan_ids))
         finally:
             reset_principal(binding)
+
+    async def test_decorated_system_task_crosses_forced_rls_explicitly(self) -> None:
+        @system_principal_task("integration-sweeper")
+        async def visible_scan_ids() -> set:
+            async with AsyncSessionLocal() as db:
+                await db.execute(text("SET LOCAL ROLE sccap_runtime"))
+                return set((await db.scalars(select(Scan.id))).all())
+
+        scan_ids = await visible_scan_ids()
+        self.assertTrue({self.scan_a_id, self.scan_b_id}.issubset(scan_ids))
 
     async def test_runtime_role_is_nobypassrls_and_not_table_owner(self) -> None:
         async with AsyncSessionLocal() as db:
