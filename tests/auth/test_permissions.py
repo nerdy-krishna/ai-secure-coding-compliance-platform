@@ -11,6 +11,8 @@ from app.shared.lib.permissions import (
     SCAN_APPROVE_SELF,
     SECURITY_APPROVER,
     TENANT_ADMIN,
+    TENANT_POLICY_MANAGE,
+    AUDIT_READ,
     permissions_for_roles,
 )
 
@@ -39,3 +41,18 @@ class PermissionMatrixTests(unittest.TestCase):
             permissions_for_roles([ANALYST]) | permissions_for_roles([AUDITOR]),
         )
         self.assertEqual(permissions_for_roles(["future_unknown_role"]), frozenset())
+
+    def test_usage_budget_administration_uses_existing_policy_authority(self) -> None:
+        tenant_admin = permissions_for_roles([TENANT_ADMIN])
+        security_approver = permissions_for_roles([SECURITY_APPROVER])
+        auditor = permissions_for_roles([AUDITOR])
+        developer = permissions_for_roles([DEVELOPER])
+
+        self.assertIn(TENANT_POLICY_MANAGE, tenant_admin)
+        self.assertIn(AUDIT_READ, tenant_admin)
+        self.assertIn(AUDIT_READ, security_approver)
+        self.assertNotIn(TENANT_POLICY_MANAGE, security_approver)
+        self.assertIn(AUDIT_READ, auditor)
+        self.assertNotIn(TENANT_POLICY_MANAGE, auditor)
+        self.assertNotIn(AUDIT_READ, developer)
+        self.assertNotIn(TENANT_POLICY_MANAGE, developer)

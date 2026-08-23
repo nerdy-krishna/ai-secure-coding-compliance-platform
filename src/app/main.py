@@ -30,6 +30,7 @@ from app.api.v1.routers.admin_config import router as admin_config_router
 from app.api.v1.routers.admin_smtp import router as admin_smtp_router
 from app.api.v1.routers.admin_findings import router as admin_findings_router
 from app.api.v1.routers.admin_groups import router as admin_groups_router
+from app.api.v1.routers.admin_usage_budgets import router as admin_usage_budgets_router
 from app.api.v1.routers.admin_seed import router as admin_seed_router
 from app.api.v1.routers.dashboard import router as dashboard_router
 from app.api.v1.routers.push import router as push_router
@@ -43,6 +44,7 @@ from typing import Optional
 from app.config.config import settings
 from app.infrastructure.llm_client_rate_limiter import initialize_rate_limiters
 from app.config.logging_config import LOGGING_CONFIG, correlation_id_var
+from app.core.services.usage_budget_service import BudgetExceededError
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 # Apply the logging configuration right at the start
@@ -984,6 +986,21 @@ async def _last_resort_handler(request: Request, exc: Exception):
     )
 
 
+@app.exception_handler(BudgetExceededError)
+async def _budget_exceeded_handler(request: Request, exc: BudgetExceededError):
+    """Expose budget denials without leaking policy names or tenant metadata."""
+    del request
+    headers: dict[str, str] = {}
+    retry_after = exc.retry_after
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": exc.as_detail()},
+        headers=headers,
+    )
+
+
 # --- Include API Routers ---
 
 # Main application router for submissions and results
@@ -1057,6 +1074,8 @@ _include_if_enabled(
 _include_if_enabled(
     "user_groups", admin_groups_router, prefix="/api/v1", tags=["Admin: User Groups"]
 )
+# Tenant budget policy administration and ledger-backed usage inspection.
+app.include_router(admin_usage_budgets_router, prefix="/api/v1")
 # Cross-tenant findings list with source filter (sast-prescan-followups Group D1).
 app.include_router(admin_findings_router, prefix="/api/v1", tags=["Admin: Findings"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])
