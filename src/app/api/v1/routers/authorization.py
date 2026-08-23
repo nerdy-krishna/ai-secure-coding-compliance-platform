@@ -73,7 +73,7 @@ class ActionRequestRead(BaseModel):
     can_decide: bool
 
 
-def _to_action_read(
+def action_request_to_read(
     row: db_models.AuthorizationActionRequest,
     *,
     actor_user_id: int,
@@ -164,7 +164,7 @@ async def request_policy_relaxation(
         action_request_id=row.id,
     )
     await db.commit()
-    return _to_action_read(row, actor_user_id=user.id, permissions=permissions)
+    return action_request_to_read(row, actor_user_id=user.id, permissions=permissions)
 
 
 @router.patch(
@@ -275,7 +275,7 @@ async def list_action_requests(
         ).all()
     )
     return [
-        _to_action_read(row, actor_user_id=user.id, permissions=permissions)
+        action_request_to_read(row, actor_user_id=user.id, permissions=permissions)
         for row in rows
     ]
 
@@ -327,7 +327,9 @@ async def decide_action_request(
         approver_principal_id=str(user.id),
     )
     await db.commit()
-    return _to_action_read(decided, actor_user_id=user.id, permissions=permissions)
+    return action_request_to_read(
+        decided, actor_user_id=user.id, permissions=permissions
+    )
 
 
-__all__ = ["router"]
+__all__ = ["ActionRequestRead", "action_request_to_read", "router"]

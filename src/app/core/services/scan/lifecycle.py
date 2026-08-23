@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
@@ -33,9 +34,18 @@ from app.infrastructure.database.repositories.scan_attempt_repo import (
     ScanAttemptRepository,
 )
 from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationConflictError,
+    AuthorizationDeniedError,
     AuthorizationRepository,
+    payload_digest,
+    target_fingerprint,
 )
-from app.shared.lib.permissions import SCAN_APPROVE, SCAN_APPROVE_SELF
+from app.shared.lib.permissions import (
+    SCAN_APPROVE,
+    SCAN_APPROVE_SELF,
+    WAIVER_APPROVE,
+    WAIVER_REQUEST,
+)
 from app.shared.lib.scan_visibility import can_view_scan
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
@@ -798,6 +808,8 @@ class ScanLifecycleService:
         *,
         visible_user_ids: Optional[list[int]],
         tenant_id: uuid.UUID,
+        approved_waiver: bool = False,
+        commit: bool = True,
     ) -> "api_models.FindingDispositionResponse":
         """Set a finding's triage disposition (PRD #96 / #97).
 
@@ -831,12 +843,23 @@ class ScanLifecycleService:
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             )
 
+        if request.disposition in {"false_positive", "risk_accepted"}:
+            sod_mode = await AuthorizationRepository(
+                self.repo.db
+            ).separation_of_duties_mode(tenant_id=tenant_id)
+            if sod_mode == "critical" and not approved_waiver:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A distinct approved waiver request is required.",
+                )
+
         note = request.note.strip() if request.note else None
         updated, new_score = await self.repo.apply_finding_disposition(
             finding,
             new_disposition=request.disposition,
             actor_user_id=user.id,
             note=note,
+            commit=commit,
         )
         logger.info(
             "scan: finding disposition set",
@@ -856,6 +879,153 @@ class ScanLifecycleService:
             disposition_note=updated.disposition_note,
             scan_risk_score=new_score,
         )
+
+    @staticmethod
+    def _waiver_payload(
+        scan_id: uuid.UUID,
+        finding_id: int,
+        request: "api_models.FindingDispositionUpdateRequest",
+    ) -> dict[str, object]:
+        return {
+            "scan_id": str(scan_id),
+            "finding_id": finding_id,
+            "disposition": request.disposition,
+            "note": request.note.strip() if request.note else None,
+        }
+
+    async def request_finding_waiver(
+        self,
+        scan_id: uuid.UUID,
+        finding_id: int,
+        user: db_models.User,
+        request: "api_models.FindingDispositionUpdateRequest",
+        *,
+        idempotency_key: str,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
+    ) -> db_models.AuthorizationActionRequest:
+        from app.shared.lib import finding_disposition as fd
+
+        if request.disposition not in {"false_positive", "risk_accepted"}:
+            raise HTTPException(status_code=400, detail="Not a waiver disposition.")
+        await self._get_triageable_scan_or_404(
+            scan_id, user, visible_user_ids, tenant_id=tenant_id
+        )
+        finding = await self.repo.get_finding(finding_id)
+        if finding is None or finding.scan_id != scan_id:
+            raise HTTPException(status_code=404, detail="Finding not found for this scan.")
+        try:
+            fd.validate_transition(
+                finding.disposition or fd.DEFAULT_DISPOSITION,
+                request.disposition,
+                request.note,
+            )
+        except fd.DispositionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        canonical = self._waiver_payload(scan_id, finding_id, request)
+        fingerprint = target_fingerprint(
+            resource_type="finding_waiver",
+            target_id=f"{scan_id}:{finding_id}",
+        )
+        authz = AuthorizationRepository(self.repo.db)
+        try:
+            row = await authz.create_action_request(
+                tenant_id=tenant_id,
+                requester_user_id=user.id,
+                requester_permission=WAIVER_REQUEST,
+                approver_permission=WAIVER_APPROVE,
+                target_type="finding_waiver",
+                target_fingerprint_value=fingerprint,
+                payload_digest_value=payload_digest(canonical),
+                idempotency_key=idempotency_key,
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            )
+        except AuthorizationConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        authz.record_audit(
+            tenant_id=tenant_id,
+            principal_kind="human",
+            principal_id=str(user.id),
+            permission=WAIVER_REQUEST,
+            resource_type="finding_waiver",
+            target_fingerprint_value=fingerprint,
+            outcome="requested",
+            reason_code="waiver_requested",
+            action_request_id=row.id,
+        )
+        await self.repo.db.commit()
+        return row
+
+    async def execute_finding_waiver(
+        self,
+        scan_id: uuid.UUID,
+        finding_id: int,
+        action_request_id: uuid.UUID,
+        user: db_models.User,
+        request: "api_models.FindingDispositionUpdateRequest",
+        *,
+        permissions: frozenset[str],
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
+    ) -> "api_models.FindingDispositionResponse":
+        authz = AuthorizationRepository(self.repo.db)
+        action = await authz.get_action_request(
+            request_id=action_request_id, tenant_id=tenant_id
+        )
+        fingerprint = target_fingerprint(
+            resource_type="finding_waiver",
+            target_id=f"{scan_id}:{finding_id}",
+        )
+        if (
+            action is None
+            or action.requester_user_id != user.id
+            or action.target_type != "finding_waiver"
+            or action.target_fingerprint != fingerprint
+        ):
+            raise HTTPException(status_code=404, detail="Action request not found.")
+        approver_permissions = await authz.permissions_for_user_id(
+            user_id=action.approver_user_id or -1,
+            tenant_id=tenant_id,
+        )
+        canonical = self._waiver_payload(scan_id, finding_id, request)
+        try:
+            await authz.mark_executed(
+                request_id=action.id,
+                tenant_id=tenant_id,
+                payload_digest_value=payload_digest(canonical),
+                requester_permissions=permissions,
+                approver_permissions=approver_permissions,
+            )
+            response = await self.set_finding_disposition(
+                scan_id,
+                finding_id,
+                user,
+                request,
+                visible_user_ids=visible_user_ids,
+                tenant_id=tenant_id,
+                approved_waiver=True,
+                commit=False,
+            )
+            authz.record_audit(
+                tenant_id=tenant_id,
+                principal_kind="human",
+                principal_id=str(user.id),
+                permission=WAIVER_REQUEST,
+                resource_type="finding_waiver",
+                target_fingerprint_value=fingerprint,
+                outcome="executed",
+                reason_code="approved_waiver_executed",
+                action_request_id=action.id,
+                approver_principal_id=str(action.approver_user_id),
+            )
+            await self.repo.db.commit()
+            return response
+        except (AuthorizationConflictError, AuthorizationDeniedError) as exc:
+            await self.repo.db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc))
+        except Exception:
+            await self.repo.db.rollback()
+            raise
 
     async def _get_triageable_scan_or_404(
         self,
@@ -937,6 +1107,15 @@ class ScanLifecycleService:
                     f"{request.disposition!r}."
                 ),
             )
+        if request.disposition in {"false_positive", "risk_accepted"}:
+            sod_mode = await AuthorizationRepository(
+                self.repo.db
+            ).separation_of_duties_mode(tenant_id=tenant_id)
+            if sod_mode == "critical":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Bulk waivers require approved individual action requests.",
+                )
 
         requested_ids = list(dict.fromkeys(request.finding_ids))
         findings = await self.repo.get_findings_by_ids(scan_id, requested_ids)

@@ -70,6 +70,10 @@ from app.api.v1.dependencies import (
     require_permission_sse,
 )
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
+from app.api.v1.routers.authorization import (
+    ActionRequestRead,
+    action_request_to_read,
+)
 from app.shared.lib.git import list_repo_files
 from app.shared.lib.archive import is_archive_filename, list_archive_files
 from app.shared.lib.permissions import (
@@ -79,6 +83,7 @@ from app.shared.lib.permissions import (
     SCAN_CONTROL,
     SCAN_READ,
     SCAN_SUBMIT,
+    WAIVER_REQUEST,
 )
 
 router = APIRouter()
@@ -1169,6 +1174,65 @@ async def set_finding_disposition(
         finding_id,
         user,
         request,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+
+
+@router.post(
+    "/scans/{scan_id}/findings/{finding_id}/waiver-requests",
+    response_model=ActionRequestRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(WAIVER_REQUEST))],
+)
+async def request_finding_waiver(
+    scan_id: uuid.UUID,
+    finding_id: int,
+    request: api_models.FindingDispositionUpdateRequest,
+    idempotency_key: str = Header(..., alias="X-Idempotency-Key", max_length=128),
+    user: db_models.User = Depends(current_active_user),
+    permissions: frozenset[str] = Depends(get_current_permissions),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    row = await service.request_finding_waiver(
+        scan_id,
+        finding_id,
+        user,
+        request,
+        idempotency_key=idempotency_key,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+    return action_request_to_read(
+        row, actor_user_id=user.id, permissions=permissions
+    )
+
+
+@router.post(
+    "/scans/{scan_id}/findings/{finding_id}/waiver-requests/{action_request_id}/execute",
+    response_model=api_models.FindingDispositionResponse,
+    dependencies=[Depends(require_permission(WAIVER_REQUEST))],
+)
+async def execute_finding_waiver(
+    scan_id: uuid.UUID,
+    finding_id: int,
+    action_request_id: uuid.UUID,
+    request: api_models.FindingDispositionUpdateRequest,
+    user: db_models.User = Depends(current_active_user),
+    permissions: frozenset[str] = Depends(get_current_permissions),
+    service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    return await service.execute_finding_waiver(
+        scan_id,
+        finding_id,
+        action_request_id,
+        user,
+        request,
+        permissions=permissions,
         visible_user_ids=visible_user_ids,
         tenant_id=tenant_id,
     )

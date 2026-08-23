@@ -1168,6 +1168,7 @@ class ScanRepository:
         new_disposition: str,
         actor_user_id: int,
         note: Optional[str],
+        commit: bool = True,
     ) -> tuple[db_models.Finding, int]:
         """Set a finding's disposition, append an audit event, and
         recompute `Scan.risk_score` — all in one transaction (PRD #96 /
@@ -1180,16 +1181,19 @@ class ScanRepository:
             note=note,
         )
         new_score = await self._recompute_risk_score(finding.scan_id)
-        try:
-            await self.db.commit()
-        except SQLAlchemyError:
-            await self.db.rollback()
-            logger.error(
-                "scan_repo.apply_finding_disposition.commit_failed",
-                extra={"finding_id": finding.id},
-            )
-            raise
-        await self.db.refresh(finding)
+        if commit:
+            try:
+                await self.db.commit()
+            except SQLAlchemyError:
+                await self.db.rollback()
+                logger.error(
+                    "scan_repo.apply_finding_disposition.commit_failed",
+                    extra={"finding_id": finding.id},
+                )
+                raise
+            await self.db.refresh(finding)
+        else:
+            await self.db.flush()
         return finding, new_score
 
     async def apply_finding_dispositions(
