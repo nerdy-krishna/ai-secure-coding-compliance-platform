@@ -629,7 +629,7 @@ async def issue_scan_stream_token(
     EventSource cannot send Authorization headers, so the frontend
     POSTs here (with the regular Bearer header), gets back a token,
     and appends it to the stream URL as `?access_token=…`. The token
-    is audience-tagged "sse:scan-stream", scan-id-bound, and 60s-TTL —
+    is audience-tagged "sse:scan-stream", tenant/scan-bound, and 60s-TTL —
     it cannot be substituted for a regular access token at any other
     endpoint, and cannot be replayed against a different scan.
 
@@ -646,7 +646,7 @@ async def issue_scan_stream_token(
         tenant_id=tenant_id,
     )
 
-    token, expires_in = mint_scan_stream_token(user.id, scan_id)
+    token, expires_in = mint_scan_stream_token(user.id, scan_id, tenant_id)
     return {"access_token": token, "expires_in": expires_in}
 
 

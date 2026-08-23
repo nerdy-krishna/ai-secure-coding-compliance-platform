@@ -183,8 +183,9 @@ async def current_active_user_sse(
     if token and scan_id_str:
         try:
             scan_id_uuid = uuid.UUID(scan_id_str)
-            user_id = verify_scan_stream_token(token, scan_id_uuid)
+            user_id, stream_tenant_id = verify_scan_stream_token(token, scan_id_uuid)
             user = await user_manager.get(user_id)
+            request.state.sse_tenant_id = stream_tenant_id
             method = "sse_token"
         except (HTTPException, ValueError):
             user = None
@@ -222,7 +223,11 @@ async def current_active_user_sse(
         extra={"user_id": user.id, "method": method, "client_ip": client_ip},
     )
     binding = bind_principal(
-        tenant_id=effective_tenant_id(user.tenant_id),
+        tenant_id=getattr(
+            request.state,
+            "sse_tenant_id",
+            effective_tenant_id(user.tenant_id),
+        ),
         principal_kind="human",
         principal_id=str(user.id),
     )

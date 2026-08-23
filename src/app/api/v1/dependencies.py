@@ -47,6 +47,7 @@ from app.core.services.scan import (
 from app.core.services.chat_service import ChatService
 from app.core.services.rag_preprocessor_service import RAGPreprocessorService
 from app.core.services.security_standards_service import SecurityStandardsService
+from app.core.config_cache import SystemConfigCache
 from app.shared.lib import scan_scope
 from app.shared.lib.permissions import PLATFORM_OWNER, SCAN_READ_TENANT
 
@@ -245,6 +246,16 @@ async def get_current_user_tenant_id(
     home_tenant_id = effective_tenant_id(user.tenant_id)
     token = request.headers.get(TENANT_ENTRY_HEADER)
     if not token:
+        if SystemConfigCache.is_feature_enabled("multi_tenant"):
+            role_keys = await repo.role_keys_for_user(
+                user=user,
+                tenant_id=home_tenant_id,
+            )
+            if PLATFORM_OWNER in role_keys:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Tenant entry required.",
+                )
         yield home_tenant_id
         return
     if len(token) > 4096:
@@ -289,12 +300,30 @@ async def get_current_user_tenant_id(
 
 
 async def get_current_user_tenant_id_sse(
+    request: Request,
     user: db_models.User = Depends(current_active_user_sse),
+    repo: AuthorizationRepository = Depends(get_authorization_repository),
 ) -> uuid.UUID:
-    """SSE variant — same logic as :func:`get_current_user_tenant_id`
-    against the SSE-aware auth dep so both share FastAPI's per-request
-    cache."""
-    return effective_tenant_id(user.tenant_id)
+    """Resolve the tenant preserved by a signed scan-stream token."""
+
+    home_tenant_id = effective_tenant_id(user.tenant_id)
+    stream_tenant_id = getattr(request.state, "sse_tenant_id", None)
+    role_keys = await repo.role_keys_for_user(user=user, tenant_id=home_tenant_id)
+    if PLATFORM_OWNER in role_keys and SystemConfigCache.is_feature_enabled(
+        "multi_tenant"
+    ):
+        if stream_tenant_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tenant entry required.",
+            )
+        return stream_tenant_id
+    if stream_tenant_id is not None and stream_tenant_id != home_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant entry denied.",
+        )
+    return home_tenant_id
 
 
 async def get_visible_user_ids_sse(

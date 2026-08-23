@@ -9,7 +9,8 @@ mitigates that with three constraints baked into the token:
   fastapi-users access tokens used here, and rejects these tokens
   at any non-SSE endpoint that calls `read_token()`. The two token
   classes can't be substituted for one another.
-- **`scan_id` claim binds the token to a single scan.** The verifier
+- **`scan_id` and `tenant_id` claims bind the token to one tenant scan.**
+  The selected tenant comes from the authorized stream-token request. The verifier
   rejects a token presented at a different scan's stream URL — so a
   leaked token can't be replayed to read another scan.
 - **60s TTL** — short enough that a token captured from an access log
@@ -48,9 +49,10 @@ def _secret() -> str:
 def mint_scan_stream_token(
     user_id: int,
     scan_id: uuid.UUID,
+    tenant_id: uuid.UUID,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
 ) -> tuple[str, int]:
-    """Mint a JWT bound to `(user_id, scan_id)` with a short TTL.
+    """Mint a JWT bound to `(user_id, tenant_id, scan_id)` with a short TTL.
 
     Returns the encoded token plus the TTL in seconds (so the caller
     can echo it to the client without re-deriving).
@@ -59,6 +61,7 @@ def mint_scan_stream_token(
     payload = {
         "sub": str(user_id),
         "scan_id": str(scan_id),
+        "tenant_id": str(tenant_id),
         "aud": AUDIENCE,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(seconds=ttl_seconds)).timestamp()),
@@ -68,11 +71,14 @@ def mint_scan_stream_token(
     return token, ttl_seconds
 
 
-def verify_scan_stream_token(token: str, expected_scan_id: uuid.UUID) -> int:
-    """Verify a token and return the user_id it asserts.
+def verify_scan_stream_token(
+    token: str,
+    expected_scan_id: uuid.UUID,
+) -> tuple[int, uuid.UUID]:
+    """Verify a token and return its user and selected tenant.
 
     Raises HTTPException(401) on signature failure, audience mismatch,
-    expiry, missing/wrong scan_id claim, or non-integer sub. The
+    expiry, missing/wrong scan or tenant claims, or non-integer sub. The
     response body is intentionally generic so a caller can't probe
     which check failed.
     """
@@ -101,9 +107,10 @@ def verify_scan_stream_token(token: str, expected_scan_id: uuid.UUID) -> int:
         )
 
     sub = decoded.get("sub")
+    tenant_id = decoded.get("tenant_id")
     try:
-        return int(sub)
-    except (TypeError, ValueError):
+        return int(sub), uuid.UUID(str(tenant_id))
+    except (TypeError, ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid stream token.",

@@ -136,6 +136,14 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(non_platform.status_code, 403, non_platform.text)
 
         owner_headers = await self._headers("owner")
+        no_entry = await self.client.get(
+            "/api/v1/admin/users", headers=owner_headers
+        )
+        self.assertEqual(no_entry.status_code, 403, no_entry.text)
+        tenant_admin_users = await self.client.get(
+            "/api/v1/admin/users", headers=admin_headers
+        )
+        self.assertEqual(tenant_admin_users.status_code, 200, tenant_admin_users.text)
         wrong_password = await self.client.post(
             entry_endpoint,
             headers=owner_headers,
@@ -159,14 +167,6 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         token = issued.json()["entry_token"]
         self.assertEqual(issued.json()["tenant_id"], str(self.target_tenant_id))
         self.assertEqual(issued.json()["expires_in"], 600)
-
-        home_users = await self.client.get(
-            "/api/v1/admin/users", headers=owner_headers
-        )
-        self.assertEqual(home_users.status_code, 200, home_users.text)
-        home_ids = {row["id"] for row in home_users.json()}
-        self.assertIn(self.users["home-member"][0], home_ids)
-        self.assertNotIn(self.users["target-member"][0], home_ids)
 
         entered_headers = {**owner_headers, "X-SCCAP-Tenant-Entry": token}
         target_users = await self.client.get(
