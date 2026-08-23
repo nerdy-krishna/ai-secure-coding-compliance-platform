@@ -1818,11 +1818,31 @@ class Tenant(Base):
     )
     slug: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Null means unlimited. Enforcement is per user and serialized on the
+    # user row so concurrent logins cannot both pass the count check.
+    session_concurrency_limit: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    session_concurrency_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="deny_new"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "session_concurrency_limit IS NULL OR "
+            "(session_concurrency_limit >= 1 AND session_concurrency_limit <= 100)",
+            name="ck_tenants_session_concurrency_limit",
+        ),
+        sa.CheckConstraint(
+            "session_concurrency_mode IN ('deny_new', 'revoke_oldest')",
+            name="ck_tenants_session_concurrency_mode",
+        ),
     )
 
     verified_domains: Mapped[List["TenantVerifiedDomain"]] = relationship(

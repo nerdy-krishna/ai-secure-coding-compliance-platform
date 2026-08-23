@@ -37,6 +37,7 @@ from app.api.v1.routers.search import router as search_router
 from app.infrastructure.auth.backend import auth_backend
 from app.infrastructure.auth.core import fastapi_users
 from app.infrastructure.auth.schemas import UserRead, UserUpdate
+from app.infrastructure.auth.session import SessionLimitExceeded
 from typing import Optional
 
 from app.config.config import settings
@@ -941,6 +942,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={"detail": "Request validation failed."},
+    )
+
+
+@app.exception_handler(SessionLimitExceeded)
+async def session_limit_exception_handler(
+    request: Request, exc: SessionLimitExceeded
+):
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={
+            "detail": "Concurrent browser-session limit reached.",
+            "limit": exc.limit,
+        },
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
 
 

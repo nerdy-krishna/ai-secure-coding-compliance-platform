@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from fastapi import Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.config import settings
@@ -57,6 +58,12 @@ class SessionReuseDetected(SessionError):
 
 class InvalidCsrfRequest(SessionError):
     pass
+
+
+class SessionLimitExceeded(SessionError):
+    def __init__(self, limit: int):
+        self.limit = limit
+        super().__init__(f"Concurrent browser-session limit ({limit}) reached.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +292,66 @@ class BrowserSessionService:
         self.repo = AuthSessionRepository(db)
         self.policy = policy or SessionPolicy.from_settings()
 
+    async def _enforce_concurrency_limit(
+        self,
+        user: db_models.User,
+        *,
+        request: Request | None,
+        now: datetime,
+    ) -> None:
+        if user.tenant_id is None:
+            return
+        tenant = await self.db.get(db_models.Tenant, user.tenant_id)
+        if tenant is None or tenant.session_concurrency_limit is None:
+            return
+        limit = tenant.session_concurrency_limit
+        # Serialize the count-and-create decision per user. A tenant-wide lock
+        # would turn unrelated users logging in at once into a bottleneck.
+        await self.db.execute(
+            select(db_models.User.id)
+            .where(db_models.User.id == user.id)
+            .with_for_update()
+        )
+        active = await self.repo.list_for_user(user.id)
+        if len(active) < limit:
+            return
+        if tenant.session_concurrency_mode == "deny_new":
+            from app.infrastructure.auth.sso.audit import record_in_new_session
+
+            await record_in_new_session(
+                event="session.concurrent_limit_denied",
+                user_id=user.id,
+                actor_user_id=user.id,
+                tenant_id=user.tenant_id,
+                outcome="denied",
+                request=request,
+                details={"limit": limit, "mode": "deny_new"},
+            )
+            raise SessionLimitExceeded(limit)
+
+        revoke_count = len(active) - limit + 1
+        oldest = sorted(active, key=lambda row: (row.created_at, str(row.id)))[
+            :revoke_count
+        ]
+        for row in oldest:
+            await self.repo.revoke(row, reason="concurrency_revoke_oldest", now=now)
+        from app.infrastructure.auth.sso.audit import record
+
+        await record(
+            self.db,
+            event="session.concurrent_limit_enforced",
+            user_id=user.id,
+            actor_user_id=user.id,
+            tenant_id=user.tenant_id,
+            outcome="success",
+            request=request,
+            details={
+                "limit": limit,
+                "mode": "revoke_oldest",
+                "revoked_count": len(oldest),
+            },
+        )
+
     async def create(
         self,
         user: db_models.User,
@@ -297,6 +364,11 @@ class BrowserSessionService:
         now: datetime | None = None,
     ) -> IssuedSession:
         issued_at = _utc(now)
+        await self._enforce_concurrency_limit(
+            user,
+            request=request,
+            now=issued_at,
+        )
         absolute_expires_at = issued_at + timedelta(
             seconds=self.policy.absolute_seconds
         )

@@ -66,6 +66,8 @@ class TenantRead(BaseModel):
     id: _uuid.UUID
     slug: str
     display_name: str
+    session_concurrency_limit: int | None
+    session_concurrency_mode: str
     created_at: datetime
     updated_at: datetime
     is_default: bool = False
@@ -75,11 +77,19 @@ class TenantCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     slug: str = Field(..., min_length=1, max_length=64)
     display_name: str = Field(..., min_length=1, max_length=128)
+    session_concurrency_limit: int | None = Field(default=None, ge=1, le=100)
+    session_concurrency_mode: str = Field(
+        default="deny_new", pattern=r"^(deny_new|revoke_oldest)$"
+    )
 
 
 class TenantUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    display_name: str = Field(..., min_length=1, max_length=128)
+    display_name: str | None = Field(default=None, min_length=1, max_length=128)
+    session_concurrency_limit: int | None = Field(default=None, ge=1, le=100)
+    session_concurrency_mode: str | None = Field(
+        default=None, pattern=r"^(deny_new|revoke_oldest)$"
+    )
 
 
 class DomainCreate(BaseModel):
@@ -117,6 +127,8 @@ def _to_read(row: db_models.Tenant) -> TenantRead:
         id=row.id,
         slug=row.slug,
         display_name=row.display_name,
+        session_concurrency_limit=row.session_concurrency_limit,
+        session_concurrency_mode=row.session_concurrency_mode,
         created_at=row.created_at,
         updated_at=row.updated_at,
         is_default=(row.id == DEFAULT_TENANT_ID),
@@ -321,7 +333,12 @@ async def create_tenant(
     if existing is not None:
         raise HTTPException(status_code=409, detail="slug already in use")
 
-    row = db_models.Tenant(slug=slug, display_name=payload.display_name.strip())
+    row = db_models.Tenant(
+        slug=slug,
+        display_name=payload.display_name.strip(),
+        session_concurrency_limit=payload.session_concurrency_limit,
+        session_concurrency_mode=payload.session_concurrency_mode,
+    )
     db.add(row)
     await db.flush()
     await audit.record(
@@ -373,11 +390,17 @@ async def update_tenant(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="tenant not found")
-    new_name = payload.display_name.strip()
-    if not new_name:
-        raise HTTPException(status_code=400, detail="display_name cannot be empty")
     old_name = row.display_name
-    row.display_name = new_name
+    new_name = old_name
+    if payload.display_name is not None:
+        new_name = payload.display_name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="display_name cannot be empty")
+        row.display_name = new_name
+    if "session_concurrency_limit" in payload.model_fields_set:
+        row.session_concurrency_limit = payload.session_concurrency_limit
+    if payload.session_concurrency_mode is not None:
+        row.session_concurrency_mode = payload.session_concurrency_mode
     await audit.record(
         db,
         event="tenant.updated",
@@ -388,6 +411,8 @@ async def update_tenant(
             "slug": row.slug,
             "old_display_name": old_name,
             "new_display_name": new_name,
+            "session_concurrency_limit": row.session_concurrency_limit,
+            "session_concurrency_mode": row.session_concurrency_mode,
         },
     )
     await db.commit()
