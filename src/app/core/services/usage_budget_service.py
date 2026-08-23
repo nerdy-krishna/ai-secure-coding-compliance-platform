@@ -305,6 +305,13 @@ class UsageBudgetService:
         attribution = await self.repo.resolve_attribution(identity_context)
         if attribution.scan_attempt_id is None:
             raise ValueError("scan budget gate requires an active scan attempt")
+        if attribution.actor_user_id is None:
+            raise ValueError("scan budget gate requires an attributable actor")
+        await self.repo.ensure_default_scan_policy(
+            tenant_id=attribution.tenant_id,
+            created_by_user_id=attribution.actor_user_id,
+            commit=False,
+        )
         context = LLMUsageContext(
             operation_kind="scan",
             operation_id=str(scan_id),

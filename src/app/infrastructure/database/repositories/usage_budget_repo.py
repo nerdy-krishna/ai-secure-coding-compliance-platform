@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from dataclasses import dataclass, fields
 from datetime import datetime, timedelta, timezone
@@ -219,7 +220,24 @@ class UsageBudgetRepository:
             db_models.UsageBudgetPolicy.tenant_id == tenant_id
         )
         if not include_disabled:
-            query = query.where(db_models.UsageBudgetPolicy.enabled.is_(True))
+            effective_at = datetime.now(timezone.utc)
+            newer = aliased(db_models.UsageBudgetPolicy)
+            query = query.where(
+                db_models.UsageBudgetPolicy.enabled.is_(True),
+                db_models.UsageBudgetPolicy.effective_from <= effective_at,
+                (
+                    db_models.UsageBudgetPolicy.effective_to.is_(None)
+                    | (db_models.UsageBudgetPolicy.effective_to > effective_at)
+                ),
+                ~sa.exists(
+                    select(newer.id).where(
+                        newer.logical_policy_id
+                        == db_models.UsageBudgetPolicy.logical_policy_id,
+                        newer.version > db_models.UsageBudgetPolicy.version,
+                        newer.effective_from <= effective_at,
+                    )
+                ),
+            )
         return list(
             (
                 await self.db.scalars(
@@ -349,6 +367,56 @@ class UsageBudgetRepository:
             await self.db.commit()
             await self.db.refresh(row)
         return row
+
+    async def ensure_default_scan_policy(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        created_by_user_id: int,
+        commit: bool = True,
+    ) -> db_models.UsageBudgetPolicy:
+        """Lazily establish the legacy-compatible $100 scan ceiling.
+
+        The migration seeds tenants that already exist. New tenants receive the
+        same deterministic policy when their first scan reaches a priced gate,
+        avoiding unrelated tenant/user provisioning side effects.
+        """
+        logical_policy_id = uuid.UUID(
+            hashlib.md5(  # noqa: S324 - deterministic identifier, not security
+                f"{tenant_id}:default-scan-usd".encode()
+            ).hexdigest()
+        )
+        await self.db.execute(
+            pg_insert(db_models.UsageBudgetPolicy)
+            .values(
+                id=logical_policy_id,
+                logical_policy_id=logical_policy_id,
+                version=1,
+                tenant_id=tenant_id,
+                scope_kind="tenant",
+                window_kind="scan",
+                cap_usd=Decimal("100"),
+                enabled=True,
+                effective_from=datetime.now(timezone.utc),
+                reason="System default preserving the legacy per-scan estimate ceiling",
+                created_by_user_id=created_by_user_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["logical_policy_id", "version"]
+            )
+        )
+        policy = await self.db.scalar(
+            select(db_models.UsageBudgetPolicy).where(
+                db_models.UsageBudgetPolicy.logical_policy_id == logical_policy_id,
+                db_models.UsageBudgetPolicy.version == 1,
+            )
+        )
+        if policy is None:
+            raise RuntimeError("default scan budget policy could not be established")
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(policy)
+        return policy
 
     async def replace_policy(
         self,

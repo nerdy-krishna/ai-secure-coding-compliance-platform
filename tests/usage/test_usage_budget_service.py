@@ -44,6 +44,7 @@ class UsageBudgetServiceTests(unittest.IsolatedAsyncioTestCase):
             settle=AsyncMock(),
             release=AsyncMock(return_value=True),
             mark_accounting_unknown=AsyncMock(return_value=True),
+            ensure_default_scan_policy=AsyncMock(),
         )
         self.service = UsageBudgetService(self.repo)
 
@@ -170,6 +171,11 @@ class UsageBudgetServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result, reservation_id)
+        self.repo.ensure_default_scan_policy.assert_awaited_once_with(
+            tenant_id=tenant_id,
+            created_by_user_id=42,
+            commit=False,
+        )
         request = self.repo.reserve.await_args.args[0]
         self.assertIn(str(attempt_id), request.idempotency_key)
         self.assertEqual(request.stage, "analysis")

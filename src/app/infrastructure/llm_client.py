@@ -14,9 +14,11 @@
 # - return an AgentLLMResult NamedTuple so existing call sites don't
 #   change.
 
+import asyncio
 import logging
 import time
 import uuid
+from decimal import Decimal
 from typing import Any, NamedTuple, Optional, Type, TypeVar
 
 from pydantic import BaseModel
@@ -29,10 +31,17 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from app.core.services.usage_budget_service import UsageBudgetService
 from app.infrastructure.database import AsyncSessionLocal as async_session_factory
 from app.infrastructure.database.models import LLMConfiguration as DB_LLMConfiguration
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
-from app.infrastructure.database.repositories.llm_usage_repo import LLMUsageContext
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMUsageContext,
+    LLMUsageRepository,
+)
+from app.infrastructure.database.repositories.usage_budget_repo import (
+    UsageBudgetRepository,
+)
 from app.infrastructure.llm_client_rate_limiter import get_rate_limiter_for_config
 from app.infrastructure.llm_usage_capture import (
     build_request_writes,
@@ -42,6 +51,7 @@ from app.infrastructure.llm_usage_capture import (
 from app.infrastructure.observability import get_langfuse, mask
 from app.shared.lib import cost_estimation
 from app.shared.lib.circuit_breaker import call as circuit_breaker_call
+from app.shared.lib.llm_estimation import calibrate_estimate
 from app.shared.lib.retry_jitter import _default_is_retryable, retry_with_backoff
 
 logger = logging.getLogger(__name__)
@@ -79,6 +89,64 @@ _OUTPUT_RETRIES = 2
 # Once a model lands here, later calls skip straight to prompt-based
 # structured output instead of paying a failed tool call first.
 _PROMPTED_OUTPUT_MODELS: set[str] = set()
+
+
+async def _reserve_usage_budget(
+    *,
+    context: LLMUsageContext,
+    config: DB_LLMConfiguration,
+    prompt_tokens: int,
+    price_snapshot: Any,
+) -> uuid.UUID | None:
+    """Persist the conservative hold immediately before provider admission."""
+    async with async_session_factory() as db:
+        usage_repo = LLMUsageRepository(db)
+        observations = await usage_repo.recent_estimation_observations(
+            llm_config_id=config.id,
+            stage=context.stage,
+        )
+        calibration = calibrate_estimate(context.stage, observations)
+        estimate = cost_estimation.estimate_cost_for_prompt(
+            config,
+            prompt_tokens,
+            calibration=calibration,
+            stage=context.stage,
+            price_snapshot=price_snapshot,
+            planned_request_count=1,
+        )
+        legacy_input_rate = Decimal(str(config.input_cost_per_million or 0))
+        legacy_output_rate = Decimal(str(config.output_cost_per_million or 0))
+        price_is_known = (
+            price_snapshot is not None
+            or (legacy_input_rate > 0 and legacy_output_rate > 0)
+            or Decimal(str(estimate.get("upper_bound_estimated_cost") or 0)) > 0
+        )
+        return await UsageBudgetService(
+            UsageBudgetRepository(db)
+        ).reserve_logical_call(
+            context,
+            config.id,
+            estimate,
+            price_snapshot,
+            prepriced_estimate=price_is_known,
+        )
+
+
+async def _finalize_usage_budget(
+    *,
+    reservation_id: uuid.UUID | None,
+    usage_event_id: uuid.UUID | None,
+    provider_called: bool,
+) -> None:
+    """Settle actual usage, release an unused hold, or conserve an unknown call."""
+    if reservation_id is None:
+        return
+    async with async_session_factory() as db:
+        await UsageBudgetService(UsageBudgetRepository(db)).settle_logical_call(
+            reservation_id,
+            usage_event_id,
+            provider_called=provider_called,
+        )
 
 
 def _is_tool_choice_unsupported(err: Exception) -> bool:
@@ -269,32 +337,31 @@ class LLMClient:
             f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
         )
 
-        # Pre-count tokens for the rate limiter's token budget. Cheap,
-        # local call via LiteLLM (no network round-trip under
-        # LITELLM_LOCAL_MODEL_COST_MAP=True).
+        # Pre-count every rendered prompt for both the durable budget and the
+        # provider rate limiter. This is a cheap local LiteLLM call (no network
+        # round-trip under LITELLM_LOCAL_MODEL_COST_MAP=True).
+        prompt_tokens_for_budget = await cost_estimation.count_tokens(
+            full_prompt_for_counting, self.db_llm_config
+        )
+        max_prompt_tokens = getattr(self.db_llm_config, "max_prompt_tokens", None)
+        if max_prompt_tokens and prompt_tokens_for_budget > int(max_prompt_tokens):
+            return AgentLLMResult(
+                parsed_output=None,
+                raw_output="",
+                error=(
+                    f"Prompt token estimate {prompt_tokens_for_budget} exceeds "
+                    f"configured max_prompt_tokens {max_prompt_tokens}."
+                ),
+                cost=0.0,
+                prompt_tokens=prompt_tokens_for_budget,
+                completion_tokens=0,
+                total_tokens=prompt_tokens_for_budget,
+                latency_ms=0,
+            )
+
         rate_limiter = get_rate_limiter_for_config(
             self.db_llm_config, self.provider_name
         )
-        prompt_tokens_for_budget: Optional[int] = None
-        if rate_limiter:
-            prompt_tokens_for_budget = await cost_estimation.count_tokens(
-                full_prompt_for_counting, self.db_llm_config
-            )
-            max_prompt_tokens = getattr(self.db_llm_config, "max_prompt_tokens", None)
-            if max_prompt_tokens and prompt_tokens_for_budget > int(max_prompt_tokens):
-                return AgentLLMResult(
-                    parsed_output=None,
-                    raw_output="",
-                    error=(
-                        f"Prompt token estimate {prompt_tokens_for_budget} exceeds "
-                        f"configured max_prompt_tokens {max_prompt_tokens}."
-                    ),
-                    cost=0.0,
-                    prompt_tokens=prompt_tokens_for_budget,
-                    completion_tokens=0,
-                    total_tokens=prompt_tokens_for_budget,
-                    latency_ms=0,
-                )
 
         # Freeze the effective admin price version before the provider request.
         # An operator edit during a long-running call applies only to later calls.
@@ -349,29 +416,8 @@ class LLMClient:
         cache_write_tokens: int = 0
         cache_read_tokens: int = 0
         captured_run_result: Any = None
-
-        # Langfuse cost reporting is owned by THIS span (recorded onto
-        # `cost_details` after the call). Cost source of truth remains
-        # `cost_estimation.calculate_actual_cost`. Do NOT enable
-        # `litellm.success_callback=["langfuse"]` — that would emit a
-        # second cost record per call and diverge from Scan.actual_cost.
-        # Threat-model gate G6.
-        langfuse_client = get_langfuse()
-        span_ctx = (
-            langfuse_client.start_as_current_span(
-                name=f"llm.{self.provider_name}.{self.db_llm_config.model_name}",
-                input=mask(full_prompt_for_counting),
-            )
-            if langfuse_client is not None
-            else None
-        )
-        span = None
-        if span_ctx is not None:
-            try:
-                span = span_ctx.__enter__()
-            except Exception as e:
-                logger.warning("Langfuse span open failed: %s", e)
-                span_ctx = None
+        provider_call_started = False
+        budget_reservation_id: uuid.UUID | None = None
 
         def _capture(rr: Any) -> None:
             """Pull the parsed output + usage off a Pydantic AI run."""
@@ -392,6 +438,37 @@ class LLMClient:
         # envelope so rate-limiter waits don't count as errors.
         if rate_limiter:
             await rate_limiter.acquire(tokens=prompt_tokens_for_budget or 1)
+
+        # This database transaction is the cross-process admission authority.
+        # It intentionally occurs after any rate-limit wait and immediately
+        # before the first potentially billable upstream request.
+        budget_reservation_id = await _reserve_usage_budget(
+            context=usage_context,
+            config=self.db_llm_config,
+            prompt_tokens=prompt_tokens_for_budget,
+            price_snapshot=effective_price_override,
+        )
+
+        # Open observability only after admission. A denied request is not an
+        # LLM call and must not leak an unfinished provider span. This span
+        # remains the sole Langfuse cost reporter; the canonical ledger remains
+        # the billing source of truth (threat-model gate G6).
+        langfuse_client = get_langfuse()
+        span_ctx = (
+            langfuse_client.start_as_current_span(
+                name=f"llm.{self.provider_name}.{self.db_llm_config.model_name}",
+                input=mask(full_prompt_for_counting),
+            )
+            if langfuse_client is not None
+            else None
+        )
+        span = None
+        if span_ctx is not None:
+            try:
+                span = span_ctx.__enter__()
+            except Exception as e:
+                logger.warning("Langfuse span open failed: %s", e)
+                span_ctx = None
 
         await _emit_llm_activity(
             "LLM_CALL",
@@ -429,8 +506,9 @@ class LLMClient:
             the agent and retry exactly once.  Transient errors (429, 5xx)
             are NOT caught here — they propagate to the retry wrapper.
             """
-            nonlocal use_prompted
+            nonlocal provider_call_started, use_prompted
             try:
+                provider_call_started = True
                 _capture(await run_agent.run(prompt))
             except Exception as e:
                 tool_issue = not use_prompted and _is_tool_choice_unsupported(e)
@@ -470,6 +548,25 @@ class LLMClient:
                 ),
                 is_retryable=_default_is_retryable,
             )
+        except asyncio.CancelledError:
+            try:
+                await _finalize_usage_budget(
+                    reservation_id=budget_reservation_id,
+                    usage_event_id=None,
+                    provider_called=provider_call_started,
+                )
+            except Exception:
+                logger.error(
+                    "LLM budget finalization failed during cancellation",
+                    extra={"operation_kind": usage_context.operation_kind},
+                    exc_info=True,
+                )
+            if span_ctx is not None:
+                try:
+                    span_ctx.__exit__(None, None, None)
+                except Exception:
+                    logger.warning("Langfuse span exit failed during cancellation")
+            raise
         except Exception as e:
             logger.error(
                 "LLM call failed (provider=%s, model=%s): %s",
@@ -547,6 +644,30 @@ class LLMClient:
             # price. Estimated local token counts are never presented as an
             # actual charge.
             cost = None
+
+        try:
+            await _finalize_usage_budget(
+                reservation_id=budget_reservation_id,
+                usage_event_id=usage_event_id,
+                provider_called=provider_call_started,
+            )
+        except Exception:
+            # The canonical event (when present) makes settlement replayable.
+            # Never replay the provider request because budget accounting had
+            # an operational failure; leave the conservative hold in place.
+            logger.error(
+                "LLM budget settlement failed",
+                extra={
+                    "provider": self.provider_name,
+                    "model": self.db_llm_config.model_name,
+                    "operation_kind": usage_context.operation_kind,
+                    "stage": usage_context.stage,
+                    "usage_event_id": (
+                        str(usage_event_id) if usage_event_id is not None else None
+                    ),
+                },
+                exc_info=True,
+            )
 
         # Stamp output / usage / cost onto the Langfuse span and close
         # it. All Langfuse interactions wrapped in try/except so a flush

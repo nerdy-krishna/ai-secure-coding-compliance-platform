@@ -1455,9 +1455,10 @@ class UsageBudgetPolicy(Base):
     )
     effective_to: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by_user_id: Mapped[int] = mapped_column(
-        ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
-    )
+    # Keep the historical actor identifier even if the user is later removed.
+    # Tenant-reference triggers validate it at insert time; an FK would prevent
+    # normal user lifecycle cleanup from preserving immutable policy history.
+    created_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -1530,7 +1531,7 @@ class UsageBudgetReservation(Base):
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True)
     stage: Mapped[str] = mapped_column(String(100), nullable=False)
     parent_reservation_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"), nullable=True, index=True)
-    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="held")
+    state: Mapped[str] = mapped_column(String(20), nullable=False, server_default="held")
     estimated_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     estimated_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     estimated_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
@@ -1606,7 +1607,8 @@ class UsageBudgetOverride(Base):
     allowance_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False, server_default="0")
     allowance_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="RESTRICT"), nullable=False)
+    # Validated by the tenant-reference trigger when the immutable row is added.
+    created_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

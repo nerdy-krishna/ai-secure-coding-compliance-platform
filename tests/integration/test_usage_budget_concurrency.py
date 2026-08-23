@@ -345,6 +345,82 @@ class UsageBudgetConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         finally:
             reset_principal(binding)
 
+    async def test_child_draws_parent_envelope_without_double_holding(self) -> None:
+        binding = bind_principal(
+            tenant_id=self.tenant_id,
+            principal_kind="human",
+            principal_id=str(self.user_id),
+        )
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = UsageBudgetRepository(db)
+                parent = await repo.reserve(
+                    BudgetReservationRequest(
+                        tenant_id=self.tenant_id,
+                        idempotency_key=f"parent:{uuid4()}",
+                        operation_kind="scan",
+                        request_key=f"scan-gate:{self.scan_id}:analysis",
+                        stage=self.stage,
+                        estimate=BudgetAmounts(total_tokens=100),
+                        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                        actor_user_id=self.user_id,
+                        group_ids=self.group_ids,
+                        scan_attempt_id=self.attempt_id,
+                        window_kinds=("day",),
+                    )
+                )
+                self.assertTrue(parent.allowed)
+                child = await repo.reserve(
+                    BudgetReservationRequest(
+                        tenant_id=self.tenant_id,
+                        idempotency_key=f"child:{uuid4()}",
+                        operation_kind="scan",
+                        request_key=f"analysis:{uuid4()}",
+                        stage=self.stage,
+                        estimate=BudgetAmounts(total_tokens=60),
+                        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                        actor_user_id=self.user_id,
+                        group_ids=self.group_ids,
+                        scan_attempt_id=self.attempt_id,
+                        parent_reservation_id=parent.reservation.id,
+                        window_kinds=("day",),
+                    )
+                )
+                self.assertTrue(child.allowed)
+
+                counters = list(
+                    (
+                        await db.scalars(
+                            select(db_models.UsageBudgetCounter).where(
+                                db_models.UsageBudgetCounter.policy_id.in_(
+                                    self.policy_ids
+                                )
+                            )
+                        )
+                    ).all()
+                )
+                self.assertEqual(
+                    [counter.held_total_tokens for counter in counters],
+                    [100, 100, 100],
+                )
+
+                self.assertTrue(
+                    await repo.release(child.reservation.id, "child_cancelled")
+                )
+                self.assertEqual(
+                    [counter.held_total_tokens for counter in counters],
+                    [100, 100, 100],
+                )
+                self.assertTrue(
+                    await repo.release(parent.reservation.id, "scan_terminal")
+                )
+                self.assertEqual(
+                    [counter.held_total_tokens for counter in counters],
+                    [0, 0, 0],
+                )
+        finally:
+            reset_principal(binding)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -323,6 +323,15 @@ class ScanLifecycleService:
                 "cost_approval",
             }:
                 try:
+                    # Legacy scans created before durable execution attempts may
+                    # still be waiting at an approval gate. Establish the attempt
+                    # in this transaction so budget attribution cannot be skipped
+                    # and a later lifecycle failure rolls it back with the gate.
+                    await ScanAttemptRepository(self.repo.db).create_initial(
+                        scan,
+                        actor_user_id=user.id,
+                        commit=False,
+                    )
                     await reserve_scan_gate_budget(
                         self.repo.db,
                         scan_id,
