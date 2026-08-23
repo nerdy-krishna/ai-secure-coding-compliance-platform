@@ -136,3 +136,51 @@ class AuthSessionRepository:
         )
         await self.db.flush()
         return int(result.rowcount or 0)
+
+    async def revoke_for_provider_session(
+        self,
+        provider_id: uuid.UUID,
+        provider_session_hash: str,
+        *,
+        reason: str,
+        now: datetime | None = None,
+    ) -> int:
+        """Revoke only browser sessions bound to one IdP session."""
+        result = await self.db.execute(
+            update(db_models.AuthSession)
+            .where(
+                db_models.AuthSession.provider_id == provider_id,
+                db_models.AuthSession.provider_session_hash == provider_session_hash,
+                db_models.AuthSession.revoked_at.is_(None),
+            )
+            .values(
+                revoked_at=now or datetime.now(timezone.utc),
+                revocation_reason=reason[:64],
+            )
+        )
+        await self.db.flush()
+        return int(result.rowcount or 0)
+
+    async def revoke_for_provider_user(
+        self,
+        provider_id: uuid.UUID,
+        user_id: int,
+        *,
+        reason: str,
+        now: datetime | None = None,
+    ) -> int:
+        """Revoke one subject's sessions for a provider, leaving other IdPs alone."""
+        result = await self.db.execute(
+            update(db_models.AuthSession)
+            .where(
+                db_models.AuthSession.provider_id == provider_id,
+                db_models.AuthSession.user_id == user_id,
+                db_models.AuthSession.revoked_at.is_(None),
+            )
+            .values(
+                revoked_at=now or datetime.now(timezone.utc),
+                revocation_reason=reason[:64],
+            )
+        )
+        await self.db.flush()
+        return int(result.rowcount or 0)

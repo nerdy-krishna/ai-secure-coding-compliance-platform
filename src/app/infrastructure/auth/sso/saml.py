@@ -44,6 +44,13 @@ class SamlIdentity:
     attributes: Dict[str, List[str]]
 
 
+@dataclass(slots=True)
+class SamlLogout:
+    redirect_url: Optional[str]
+    name_id: Optional[str]
+    session_indexes: List[str]
+
+
 def _build_settings_dict(
     config: SamlConfig,
 ) -> Dict[str, Any]:
@@ -203,12 +210,11 @@ def build_logout_redirect(
 
 def process_slo(
     config: SamlConfig, request: Any, *, post_form: Dict[str, str]
-) -> Dict[str, Any]:
+) -> SamlLogout:
     """Handle an inbound SAML LogoutRequest or LogoutResponse (POST-binding).
 
-    Returns a small dict the router uses to decide whether to redirect the
-    user (``url`` if a LogoutResponse needs to be sent back) or to
-    terminate the session locally.
+    Identity correlators are extracted only from request XML retained by
+    python3-saml after signature and destination validation succeeds.
     """
     OneLogin_Saml2_Auth, _ = _lazy_imports()
     settings_dict = _build_settings_dict(config)
@@ -219,7 +225,29 @@ def process_slo(
     errors = auth.get_errors()
     if errors:
         raise ValueError(f"SAML SLO invalid: {','.join(errors)}")
-    return {"redirect_url": url}
+    name_id: Optional[str] = None
+    session_indexes: List[str] = []
+    request_xml = auth.get_last_request_xml()
+    if request_xml:
+        from onelogin.saml2.logout_request import OneLogin_Saml2_Logout_Request
+
+        try:
+            parsed_name_id = OneLogin_Saml2_Logout_Request.get_nameid(request_xml)
+            name_id = str(parsed_name_id) if parsed_name_id else None
+            session_indexes = [
+                str(value)
+                for value in OneLogin_Saml2_Logout_Request.get_session_indexes(
+                    request_xml
+                )
+                if value
+            ]
+        except Exception as exc:
+            raise ValueError("SAML SLO identity correlator is invalid") from exc
+    return SamlLogout(
+        redirect_url=str(url) if url else None,
+        name_id=name_id,
+        session_indexes=session_indexes,
+    )
 
 
 def metadata_xml(config: SamlConfig) -> bytes:

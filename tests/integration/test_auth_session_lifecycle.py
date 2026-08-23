@@ -16,11 +16,13 @@ from app.infrastructure.auth.session import (
     SessionExpired,
     SessionPolicy,
     SessionReuseDetected,
+    provider_session_digest,
 )
+from app.infrastructure.auth.sso.repository import SsoProviderRepository
 from app.infrastructure.auth.db import get_user_db
 from app.infrastructure.auth.manager import UserManager
 from app.infrastructure.database.database import AsyncSessionLocal, engine
-from app.infrastructure.database.models import AuthSession, User
+from app.infrastructure.database.models import AuthSession, SsoProvider, User
 from app.infrastructure.database.repositories.auth_session_repo import (
     AuthSessionRepository,
 )
@@ -215,6 +217,61 @@ class AuthSessionLifecycleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             second = await db.get(AuthSession, second_id)
             self.assertEqual(first.revocation_reason, "password_reset")
             self.assertEqual(second.revocation_reason, "password_reset")
+
+    async def test_provider_logout_revokes_only_the_matching_remote_session(
+        self,
+    ) -> None:
+        async with AsyncSessionLocal() as db:
+            provider = await SsoProviderRepository(db).create(
+                name=f"integration-oidc-{uuid4().hex[:12]}",
+                display_name="Integration OIDC",
+                protocol="oidc",
+                config_plain={
+                    "issuer_url": "https://idp.example.test",
+                    "client_id": "integration-client",
+                    "client_secret": "integration-secret",
+                },
+            )
+            user = await db.get(User, self.user_id)
+            matching = await BrowserSessionService(db).create(
+                user,
+                auth_method="oidc",
+                provider_id=provider.id,
+                provider_session_id="remote-session-a",
+            )
+            unrelated = await BrowserSessionService(db).create(
+                user,
+                auth_method="oidc",
+                provider_id=provider.id,
+                provider_session_id="remote-session-b",
+            )
+            provider_id = provider.id
+            await db.commit()
+
+        try:
+            async with AsyncSessionLocal() as db:
+                revoked = await AuthSessionRepository(db).revoke_for_provider_session(
+                    provider_id,
+                    provider_session_digest("remote-session-a") or "",
+                    reason="oidc_backchannel_logout",
+                )
+                await db.commit()
+            self.assertEqual(revoked, 1)
+
+            async with AsyncSessionLocal() as db:
+                matching_row = await db.get(AuthSession, matching.row.id)
+                unrelated_row = await db.get(AuthSession, unrelated.row.id)
+                self.assertEqual(
+                    matching_row.revocation_reason,
+                    "oidc_backchannel_logout",
+                )
+                self.assertIsNone(unrelated_row.revoked_at)
+        finally:
+            async with AsyncSessionLocal() as db:
+                provider = await db.get(SsoProvider, provider_id)
+                if provider is not None:
+                    await db.delete(provider)
+                await db.commit()
 
 
 if __name__ == "__main__":

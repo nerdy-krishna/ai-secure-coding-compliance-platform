@@ -20,6 +20,7 @@ import base64
 import hashlib
 import logging
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -27,15 +28,21 @@ from typing import Any, Dict, Optional
 import httpx
 import jwt
 from httpx_oauth.clients.openid import OpenID
-from jwt import PyJWKClient
 
-from .models import OidcConfig
+from .models import OidcConfig, _reject_internal_or_loopback
 
 logger = logging.getLogger(__name__)
 
 
 # Threat-model M14 timeouts. Applied to every httpx call this module makes.
 _HTTPX_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
+_OIDC_ALLOWED_ALGORITHMS = frozenset(
+    {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}
+)
+_JWKS_CACHE_SECONDS = 600
+_MAX_FEDERATION_DOCUMENT_BYTES = 1024 * 1024
+_BACKCHANNEL_LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout"
+_jwks_cache: dict[str, tuple[float, Dict[str, Any]]] = {}
 
 
 @dataclass(slots=True)
@@ -141,40 +148,14 @@ async def exchange_code(
 
     # M1: validate the id_token explicitly. httpx-oauth doesn't.
     discovery = await _fetch_discovery(str(config.issuer_url))
-    jwks_uri = discovery.get("jwks_uri")
-    issuer = discovery.get("issuer") or str(config.issuer_url).rstrip("/")
-    if not jwks_uri:
-        raise ValueError("OIDC discovery missing 'jwks_uri'")
-
-    jwks_client = PyJWKClient(jwks_uri, cache_keys=True, lifespan=600)
-    try:
-        signing_key = jwks_client.get_signing_key_from_jwt(id_token)
-    except Exception as exc:
-        raise ValueError(f"id_token JWKS lookup failed: {exc}") from exc
-
-    try:
-        claims = jwt.decode(
-            id_token,
-            signing_key.key,
-            algorithms=(
-                [signing_key.algorithm_name]
-                if signing_key.algorithm_name
-                else ["RS256"]
-            ),
-            audience=config.client_id,
-            issuer=issuer,
-            options={
-                "require": ["iss", "aud", "exp", "iat", "sub"],
-                "verify_signature": True,
-                "verify_aud": True,
-                "verify_iss": True,
-                "verify_exp": True,
-                "verify_iat": True,
-            },
-            leeway=30,  # 30 seconds clock skew tolerance
-        )
-    except jwt.PyJWTError as exc:
-        raise ValueError(f"id_token validation failed: {exc}") from exc
+    discovery = _validate_discovery(config, discovery)
+    claims = await _decode_provider_jwt(
+        config,
+        id_token,
+        discovery=discovery,
+        required_claims=["iss", "aud", "exp", "iat", "sub"],
+        error_label="id_token",
+    )
 
     # nonce is mandatory and must equal the value we stashed in the state cookie.
     token_nonce = claims.get("nonce")
@@ -254,8 +235,150 @@ async def _fetch_discovery(issuer_url: str) -> Dict[str, Any]:
     url = issuer_url.rstrip("/") + "/.well-known/openid-configuration"
     async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT, follow_redirects=False) as c:
         resp = await c.get(url)
-        resp.raise_for_status()
-        return resp.json()
+        return _bounded_json_response(resp, label="OIDC discovery")
+
+
+def _bounded_json_response(resp: httpx.Response, *, label: str) -> Dict[str, Any]:
+    resp.raise_for_status()
+    if len(resp.content) > _MAX_FEDERATION_DOCUMENT_BYTES:
+        raise ValueError(f"{label} document exceeds size limit")
+    payload = resp.json()
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} document must be a JSON object")
+    return payload
+
+
+def _validate_discovery(
+    config: OidcConfig, discovery: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Pin discovery to the configured issuer and public HTTPS endpoints."""
+    configured_issuer = str(config.issuer_url).rstrip("/")
+    discovered_issuer = str(discovery.get("issuer") or "").rstrip("/")
+    if discovered_issuer != configured_issuer:
+        raise ValueError("OIDC discovery issuer does not match configured issuer")
+    for field in (
+        "authorization_endpoint",
+        "token_endpoint",
+        "jwks_uri",
+        "userinfo_endpoint",
+        "end_session_endpoint",
+    ):
+        value = discovery.get(field)
+        if value is None and field in {"authorization_endpoint", "token_endpoint", "jwks_uri"}:
+            raise ValueError(f"OIDC discovery missing {field!r}")
+        if value is not None:
+            try:
+                _reject_internal_or_loopback(str(value), field_name=field)
+            except ValueError as exc:
+                raise ValueError(f"OIDC discovery has unsafe {field}") from exc
+    return discovery
+
+
+async def _fetch_jwks(jwks_uri: str) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT, follow_redirects=False) as c:
+        resp = await c.get(jwks_uri)
+        return _bounded_json_response(resp, label="OIDC JWKS")
+
+
+async def _load_jwks(jwks_uri: str, *, force_refresh: bool = False) -> Dict[str, Any]:
+    now = time.monotonic()
+    cached = _jwks_cache.get(jwks_uri)
+    if not force_refresh and cached is not None and cached[0] > now:
+        return cached[1]
+    payload = await _fetch_jwks(jwks_uri)
+    keys = payload.get("keys")
+    if not isinstance(keys, list) or not keys or len(keys) > 100:
+        raise ValueError("OIDC JWKS must contain between 1 and 100 keys")
+    _jwks_cache[jwks_uri] = (now + _JWKS_CACHE_SECONDS, payload)
+    return payload
+
+
+def _select_jwk(jwks: Dict[str, Any], kid: str) -> Dict[str, Any] | None:
+    for key in jwks.get("keys", []):
+        if isinstance(key, dict) and key.get("kid") == kid:
+            return key
+    return None
+
+
+async def _decode_provider_jwt(
+    config: OidcConfig,
+    token: str,
+    *,
+    discovery: Dict[str, Any],
+    required_claims: list[str],
+    error_label: str,
+) -> Dict[str, Any]:
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError as exc:
+        raise ValueError(f"{error_label} header invalid") from exc
+    algorithm = header.get("alg")
+    kid = header.get("kid")
+    if algorithm not in _OIDC_ALLOWED_ALGORITHMS or not isinstance(kid, str) or not kid:
+        raise ValueError(f"{error_label} uses an unsupported algorithm or missing key id")
+
+    jwks_uri = str(discovery["jwks_uri"])
+    jwks = await _load_jwks(jwks_uri)
+    jwk_dict = _select_jwk(jwks, kid)
+    if jwk_dict is None:
+        # A miss is the key-rotation signal. Refresh once before rejecting.
+        jwks = await _load_jwks(jwks_uri, force_refresh=True)
+        jwk_dict = _select_jwk(jwks, kid)
+    if jwk_dict is None:
+        raise ValueError(f"{error_label} signing key not found after JWKS refresh")
+    if jwk_dict.get("alg") not in (None, algorithm):
+        raise ValueError(f"{error_label} algorithm does not match signing key")
+    try:
+        signing_key = jwt.PyJWK.from_dict(jwk_dict, algorithm=algorithm).key
+        return jwt.decode(
+            token,
+            signing_key,
+            algorithms=[algorithm],
+            audience=config.client_id,
+            issuer=str(config.issuer_url).rstrip("/"),
+            options={"require": required_claims},
+            leeway=30,
+        )
+    except (jwt.PyJWTError, ValueError) as exc:
+        raise ValueError(f"{error_label} validation failed") from exc
+
+
+async def validate_logout_token(
+    config: OidcConfig,
+    logout_token: str,
+    *,
+    now: datetime | None = None,
+) -> Dict[str, Any]:
+    """Validate an OIDC Back-Channel Logout token before session revocation."""
+    try:
+        header = jwt.get_unverified_header(logout_token)
+    except jwt.PyJWTError as exc:
+        raise ValueError("logout_token header invalid") from exc
+    if header.get("typ") != "logout+jwt":
+        raise ValueError("logout_token typ must be logout+jwt")
+
+    discovery = _validate_discovery(config, await _fetch_discovery(str(config.issuer_url)))
+    claims = await _decode_provider_jwt(
+        config,
+        logout_token,
+        discovery=discovery,
+        required_claims=["iss", "aud", "iat", "events", "jti"],
+        error_label="logout_token",
+    )
+    events = claims.get("events")
+    if not isinstance(events, dict) or _BACKCHANNEL_LOGOUT_EVENT not in events:
+        raise ValueError("logout_token missing back-channel logout event")
+    if "nonce" in claims:
+        raise ValueError("logout_token must not contain nonce")
+    sid = claims.get("sid")
+    sub = claims.get("sub")
+    if not (isinstance(sid, str) and sid) and not (isinstance(sub, str) and sub):
+        raise ValueError("logout_token must contain sid or sub")
+    current = now or datetime.now(timezone.utc)
+    issued = datetime.fromtimestamp(int(claims["iat"]), tz=timezone.utc)
+    if abs((current - issued).total_seconds()) > 120:
+        raise ValueError("logout_token is outside the accepted two-minute window")
+    return claims
 
 
 async def _fetch_userinfo(
@@ -267,8 +390,7 @@ async def _fetch_userinfo(
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(timeout=_HTTPX_TIMEOUT, follow_redirects=False) as c:
         resp = await c.get(userinfo_endpoint, headers=headers)
-        resp.raise_for_status()
-        return resp.json()
+        return _bounded_json_response(resp, label="OIDC userinfo")
 
 
 async def preflight_test(config: OidcConfig) -> Dict[str, Any]:
@@ -281,16 +403,17 @@ async def preflight_test(config: OidcConfig) -> Dict[str, Any]:
         discovery = await _fetch_discovery(str(config.issuer_url))
     except Exception as exc:
         return {"ok": False, "error": f"discovery fetch failed: {exc}"}
-    jwks_uri = discovery.get("jwks_uri")
-    if not jwks_uri:
-        return {"ok": False, "error": "discovery missing jwks_uri"}
+    try:
+        discovery = _validate_discovery(config, discovery)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    jwks_uri = str(discovery["jwks_uri"])
     try:
         async with httpx.AsyncClient(
             timeout=_HTTPX_TIMEOUT, follow_redirects=False
         ) as c:
             resp = await c.get(jwks_uri)
-            resp.raise_for_status()
-            jwks = resp.json()
+            jwks = _bounded_json_response(resp, label="OIDC JWKS")
     except Exception as exc:
         return {"ok": False, "error": f"jwks fetch failed: {exc}"}
     return {

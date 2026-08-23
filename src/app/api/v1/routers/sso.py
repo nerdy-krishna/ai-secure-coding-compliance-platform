@@ -24,7 +24,7 @@ Threat-model mitigations:
 from __future__ import annotations
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.config import settings
 from app.infrastructure.auth.backend import get_custom_cookie_jwt_strategy
+from app.infrastructure.auth.session import provider_session_digest
 from app.infrastructure.auth.sso import audit, oidc, saml
 from app.infrastructure.auth.sso.provisioning import (
     SsoProvisioningDenied,
@@ -62,6 +63,9 @@ from app.infrastructure.auth.sso.state_cookie import (
     set_state_cookie,
 )
 from app.infrastructure.database.database import get_db
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -529,6 +533,188 @@ async def saml_acs(
     redirect = _redirect_to_frontend(response_extras=extras)
     clear_state_cookie(redirect)
     return redirect
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/sso/{name}/backchannel-logout — OIDC provider logout
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{name}/backchannel-logout", status_code=status.HTTP_204_NO_CONTENT)
+async def oidc_backchannel_logout(
+    request: Request,
+    name: str = Path(..., min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$"),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    body = await request.body()
+    if len(body) > 32 * 1024:
+        raise HTTPException(status_code=413, detail="logout token too large")
+    form = await request.form()
+    logout_token = form.get("logout_token")
+    if not isinstance(logout_token, str) or not logout_token:
+        raise HTTPException(status_code=400, detail="logout_token is required")
+
+    repo = SsoProviderRepository(db)
+    provider = await repo.get_by_name(name)
+    if provider is None or not provider.enabled or provider.protocol != "oidc":
+        raise HTTPException(status_code=404, detail="not found")
+    bundle = await repo.get_with_config(provider.id)
+    if bundle is None:
+        raise HTTPException(status_code=500, detail="config unavailable")
+    try:
+        claims = await oidc.validate_logout_token(bundle.config, logout_token)
+    except ValueError:
+        await audit.record(
+            db,
+            event=audit.EVENT_SSO_LOGOUT,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
+            request=request,
+            details={"protocol": "oidc", "reason": "invalid_logout_token"},
+        )
+        await db.commit()
+        raise HTTPException(status_code=400, detail="invalid logout_token")
+
+    sessions = AuthSessionRepository(db)
+    sid = claims.get("sid")
+    subject = claims.get("sub")
+    subject_user_id: int | None = None
+    if isinstance(sid, str) and sid:
+        revoked = await sessions.revoke_for_provider_session(
+            provider.id,
+            provider_session_digest(sid) or "",
+            reason="oidc_backchannel_logout",
+        )
+        scope = "provider_session"
+    else:
+        link = await repo.find_oauth_account(provider.id, str(subject))
+        subject_user_id = link.user_id if link is not None else None
+        revoked = (
+            await sessions.revoke_for_provider_user(
+                provider.id,
+                subject_user_id,
+                reason="oidc_backchannel_logout",
+            )
+            if subject_user_id is not None
+            else 0
+        )
+        scope = "provider_subject"
+    await audit.record(
+        db,
+        event=audit.EVENT_SSO_LOGOUT,
+        user_id=subject_user_id,
+        provider_id=provider.id,
+        tenant_id=provider.tenant_id,
+        outcome="success",
+        request=request,
+        details={"protocol": "oidc", "scope": scope, "revoked_sessions": revoked},
+    )
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# GET|POST /auth/sso/{name}/slo — signed SAML provider logout
+# ---------------------------------------------------------------------------
+
+
+async def _handle_saml_slo(
+    *,
+    request: Request,
+    name: str,
+    post_form: dict[str, str],
+    db: AsyncSession,
+):
+    repo = SsoProviderRepository(db)
+    provider = await repo.get_by_name(name)
+    if provider is None or not provider.enabled or provider.protocol != "saml":
+        raise HTTPException(status_code=404, detail="not found")
+    bundle = await repo.get_with_config(provider.id)
+    if bundle is None:
+        raise HTTPException(status_code=500, detail="config unavailable")
+    try:
+        result = saml.process_slo(bundle.config, request, post_form=post_form)
+    except ValueError:
+        await audit.record(
+            db,
+            event=audit.EVENT_SSO_LOGOUT,
+            provider_id=provider.id,
+            tenant_id=provider.tenant_id,
+            outcome="denied",
+            request=request,
+            details={"protocol": "saml", "reason": "invalid_logout_message"},
+        )
+        await db.commit()
+        raise HTTPException(status_code=400, detail="invalid SAML logout message")
+
+    sessions = AuthSessionRepository(db)
+    revoked = 0
+    subject_user_id: int | None = None
+    if result.session_indexes:
+        for session_index in set(result.session_indexes):
+            revoked += await sessions.revoke_for_provider_session(
+                provider.id,
+                provider_session_digest(session_index) or "",
+                reason="saml_idp_logout",
+            )
+        scope = "provider_session"
+    elif result.name_id:
+        link = await repo.find_saml_subject(provider.id, result.name_id)
+        subject_user_id = link.user_id if link is not None else None
+        revoked = (
+            await sessions.revoke_for_provider_user(
+                provider.id,
+                subject_user_id,
+                reason="saml_idp_logout",
+            )
+            if subject_user_id is not None
+            else 0
+        )
+        scope = "provider_subject"
+    else:
+        scope = "response_only"
+    await audit.record(
+        db,
+        event=audit.EVENT_SSO_LOGOUT,
+        user_id=subject_user_id,
+        provider_id=provider.id,
+        tenant_id=provider.tenant_id,
+        outcome="success",
+        request=request,
+        details={"protocol": "saml", "scope": scope, "revoked_sessions": revoked},
+    )
+    await db.commit()
+    if result.redirect_url:
+        return RedirectResponse(result.redirect_url, status_code=303)
+    return Response(status_code=204)
+
+
+@router.get("/{name}/slo")
+async def saml_slo_redirect(
+    request: Request,
+    name: str = Path(..., min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$"),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _handle_saml_slo(request=request, name=name, post_form={}, db=db)
+
+
+@router.post("/{name}/slo")
+async def saml_slo_post(
+    request: Request,
+    name: str = Path(..., min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$"),
+    db: AsyncSession = Depends(get_db),
+):
+    body = await request.body()
+    if len(body) > _SAML_MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="SAML message too large")
+    form = await request.form()
+    post_form = {k: v for k, v in form.items() if isinstance(v, str)}
+    return await _handle_saml_slo(
+        request=request,
+        name=name,
+        post_form=post_form,
+        db=db,
+    )
 
 
 # ---------------------------------------------------------------------------

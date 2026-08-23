@@ -95,7 +95,7 @@ _BLOCKED_HOSTS = {
 }
 
 
-def _reject_internal_or_loopback(url: str) -> None:
+def _reject_internal_or_loopback(url: str, *, field_name: str = "issuer_url") -> None:
     """Raise ``ValueError`` if ``url`` resolves to a private / loopback /
     link-local / metadata target. Used by both ``OidcConfig.issuer_url``
     and the admin "test" preflight."""
@@ -105,14 +105,14 @@ def _reject_internal_or_loopback(url: str) -> None:
         # interception (and protects developers from accidentally pointing
         # at an internal http://idp.local).
         raise ValueError(
-            "issuer_url must use https:// (http is rejected to prevent token interception)"
+            f"{field_name} must use https:// (http is rejected to prevent token interception)"
         )
     host = (parsed.hostname or "").lower()
     if not host:
-        raise ValueError("issuer_url must include a host")
+        raise ValueError(f"{field_name} must include a host")
     if host in _BLOCKED_HOSTS:
         raise ValueError(
-            f"issuer_url host {host!r} is blocked (loopback / metadata service)"
+            f"{field_name} host {host!r} is blocked (loopback / metadata service)"
         )
     # Try to parse as an IP address; if it parses, apply CIDR-based blocks.
     try:
@@ -129,7 +129,7 @@ def _reject_internal_or_loopback(url: str) -> None:
         or ip.is_unspecified
     ):
         raise ValueError(
-            f"issuer_url IP {host} is loopback / private / link-local — blocked"
+            f"{field_name} IP {host} is loopback / private / link-local — blocked"
         )
 
 
