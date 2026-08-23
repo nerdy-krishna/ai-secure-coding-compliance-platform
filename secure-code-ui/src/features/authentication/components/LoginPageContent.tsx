@@ -52,17 +52,24 @@ const LoginPageContent: React.FC = () => {
     }
   }, [authError, clearError, toast]);
 
-  // Load enabled SSO providers on mount — only when the `sso` feature is on
-  // (modular setup). When disabled the SSO routers are not even mounted, so
-  // skipping the request avoids a guaranteed 404.
+  // Provider discovery is email-first. The server resolves one exact verified
+  // domain and never exposes a cross-tenant provider catalogue.
   useEffect(() => {
     if (!isFeatureEnabled("sso")) {
       setProvidersLoaded(true);
       return;
     }
+    const trimmed = form.username.trim();
+    if (!trimmed.includes("@") || trimmed.length < 5) {
+      setProviders([]);
+      setProvidersLoaded(true);
+      return;
+    }
     let cancelled = false;
+    setProvidersLoaded(false);
+    const timer = setTimeout(() => {
     ssoService
-      .listEnabledProviders()
+      .listEnabledProviders(trimmed)
       .then((res) => {
         if (!cancelled) setProviders(res.providers);
       })
@@ -72,10 +79,12 @@ const LoginPageContent: React.FC = () => {
       .finally(() => {
         if (!cancelled) setProvidersLoaded(true);
       });
+    }, 400);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [isFeatureEnabled]);
+  }, [form.username, isFeatureEnabled]);
 
   // Force-SSO preflight: when the user types an email and tabs out, ask
   // the backend whether their domain requires SSO. If yes, hide the

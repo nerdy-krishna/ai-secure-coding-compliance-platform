@@ -330,9 +330,14 @@ async def provision_or_link_oidc(
     user's `user_groups` membership is additively synced from IdP claims
     after the user is established. ``is_superuser`` is NEVER affected.
     """
+    if provider.tenant_id is None:
+        raise SsoProvisioningDenied("provider is not assigned to a tenant")
+    tenant_id = provider.tenant_id
     norm_email = _normalize_email(email)
     repo = SsoProviderRepository(session)
-    existing_link = await repo.find_oauth_account(provider.id, sub)
+    existing_link = await repo.find_oauth_account(
+        provider.id, sub, tenant_id=tenant_id
+    )
     if existing_link is not None:
         # Returning user — no further checks (the link was vetted on creation).
         result = await session.execute(
@@ -346,7 +351,11 @@ async def provision_or_link_oidc(
         # SCCAP refresh-path session-bind check (Chunk 4) tracks the
         # IdP's session lifetime in lock-step.
         if idp_token_expires_at is not None:
-            await repo.update_oauth_token_expiry(existing_link.id, idp_token_expires_at)
+            await repo.update_oauth_token_expiry(
+                existing_link.id,
+                idp_token_expires_at,
+                tenant_id=tenant_id,
+            )
         # Re-sync group memberships on every login so directory drift
         # (new groups added at the IdP) propagates without a re-link.
         await _sync_groups_from_idp(
@@ -366,7 +375,7 @@ async def provision_or_link_oidc(
             session,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
-            tenant_id=provider.tenant_id,
+            tenant_id=tenant_id,
             outcome="denied",
             email=norm_email,
             request=request,
@@ -467,21 +476,19 @@ async def provision_or_link_oidc(
         )
         raise SsoProvisioningDenied("provider jit_policy=deny; no auto-provisioning")
 
-    if provider.tenant_id is None:
-        raise SsoProvisioningDenied("provider is not assigned to a tenant")
     is_active = provider.jit_policy != "approve"
     user = await _create_jit_user(
         session,
         norm_email,
         is_active=is_active,
-        tenant_id=provider.tenant_id,
+        tenant_id=tenant_id,
     )
     await repo.create_oauth_link(
         user_id=user.id,
         provider_id=provider.id,
         account_id=sub,
         account_email=norm_email,
-        tenant_id=provider.tenant_id,
+        tenant_id=tenant_id,
     )
     await audit.record(
         session,
@@ -536,6 +543,9 @@ async def provision_or_link_saml(
     values after the user is established. ``is_superuser`` is NEVER
     affected by group sync.
     """
+    if provider.tenant_id is None:
+        raise SsoProvisioningDenied("provider is not assigned to a tenant")
+    tenant_id = provider.tenant_id
     norm_email = _normalize_email(email)
     # Resolve IdP-asserted groups once for use in every branch below.
     idp_groups: List[str] = []
@@ -544,11 +554,15 @@ async def provision_or_link_saml(
         idp_groups = [g for g in raw if isinstance(g, str)]
 
     repo = SsoProviderRepository(session)
-    existing = await repo.find_saml_subject(provider.id, name_id)
+    existing = await repo.find_saml_subject(
+        provider.id, name_id, tenant_id=tenant_id
+    )
     if existing is not None:
         # Update session_index for SLO.
         if session_index != existing.session_index:
-            await repo.update_saml_session_index(existing.id, session_index)
+            await repo.update_saml_session_index(
+                existing.id, session_index, tenant_id=tenant_id
+            )
         result = await session.execute(
             select(db_models.User).where(db_models.User.id == existing.user_id)
         )
@@ -572,7 +586,7 @@ async def provision_or_link_saml(
             session,
             event=audit.EVENT_SSO_LOGIN_FAILURE,
             provider_id=provider.id,
-            tenant_id=provider.tenant_id,
+            tenant_id=tenant_id,
             outcome="denied",
             email=norm_email,
             request=request,
@@ -654,14 +668,12 @@ async def provision_or_link_saml(
         )
         raise SsoProvisioningDenied("provider jit_policy=deny; no auto-provisioning")
 
-    if provider.tenant_id is None:
-        raise SsoProvisioningDenied("provider is not assigned to a tenant")
     is_active = provider.jit_policy != "approve"
     user = await _create_jit_user(
         session,
         norm_email,
         is_active=is_active,
-        tenant_id=provider.tenant_id,
+        tenant_id=tenant_id,
     )
     await repo.create_saml_link(
         user_id=user.id,
@@ -669,7 +681,7 @@ async def provision_or_link_saml(
         name_id=name_id,
         name_id_format=name_id_format,
         session_index=session_index,
-        tenant_id=provider.tenant_id,
+        tenant_id=tenant_id,
     )
     await audit.record(
         session,

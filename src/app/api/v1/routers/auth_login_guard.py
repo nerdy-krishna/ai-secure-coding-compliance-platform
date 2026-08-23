@@ -33,7 +33,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.config.config import settings
 from app.core.config_cache import SystemConfigCache
 from app.infrastructure.auth.sso import audit
-from app.infrastructure.auth.sso.domains import domain_is_verified_for_provider
+from app.infrastructure.auth.sso.domains import resolve_verified_domain_tenant_id
 from app.infrastructure.auth.sso.repository import SsoProviderRepository
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import AsyncSessionLocal, get_db
@@ -68,16 +68,17 @@ async def _resolve_forced_provider(
 ) -> Optional[db_models.SsoProvider]:
     """If any enabled provider's ``force_for_domains`` matches the email's
     domain, return the first one. Otherwise None."""
-    repo = SsoProviderRepository(session)
-    rows = await repo.list_enabled()
     domain = _domain_of(email)
     if not domain:
         return None
+    tenant_id = await resolve_verified_domain_tenant_id(session, domain)
+    if tenant_id is None:
+        return None
+    repo = SsoProviderRepository(session)
+    rows = await repo.list_enabled(tenant_id=tenant_id)
     for row in rows:
         ff = row.force_for_domains or []
-        if domain in {d.lower() for d in ff} and await domain_is_verified_for_provider(
-            session, row, domain
-        ):
+        if domain in {d.lower() for d in ff}:
             return row
     return None
 

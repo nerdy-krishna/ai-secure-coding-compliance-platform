@@ -152,6 +152,19 @@ async def domain_is_verified_for_provider(
     return match is not None
 
 
+async def resolve_verified_domain_tenant_id(
+    db: AsyncSession, domain: str
+) -> uuid.UUID | None:
+    """Resolve one exact verified login domain without exposing tenant lists."""
+    normalized = normalize_domain(domain)
+    return await db.scalar(
+        select(db_models.TenantVerifiedDomain.tenant_id).where(
+            db_models.TenantVerifiedDomain.domain == normalized,
+            db_models.TenantVerifiedDomain.status == "verified",
+        )
+    )
+
+
 def mark_verified(row: db_models.TenantVerifiedDomain) -> None:
     row.status = "verified"
     row.verified_at = datetime.now(timezone.utc)

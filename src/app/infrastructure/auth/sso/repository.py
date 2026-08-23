@@ -45,12 +45,16 @@ class SsoProviderRepository:
         )
         return list(result.scalars().all())
 
-    async def list_enabled(self) -> List[db_models.SsoProvider]:
-        """Only enabled providers — used by the public /auth/sso/providers
-        endpoint (login page) and the runtime login path."""
+    async def list_enabled(
+        self, *, tenant_id: uuid.UUID
+    ) -> List[db_models.SsoProvider]:
+        """Enabled providers in one explicit tenant."""
         result = await self.session.execute(
             select(db_models.SsoProvider)
-            .where(db_models.SsoProvider.enabled.is_(True))
+            .where(
+                db_models.SsoProvider.enabled.is_(True),
+                db_models.SsoProvider.tenant_id == tenant_id,
+            )
             .order_by(db_models.SsoProvider.created_at)
         )
         return list(result.scalars().all())
@@ -168,23 +172,25 @@ class SsoProviderRepository:
     # --- linking lookups ----------------------------------------------------
 
     async def find_oauth_account(
-        self, provider_id: uuid.UUID, account_id: str
+        self, provider_id: uuid.UUID, account_id: str, *, tenant_id: uuid.UUID
     ) -> Optional[db_models.OAuthAccount]:
         result = await self.session.execute(
             select(db_models.OAuthAccount).where(
                 db_models.OAuthAccount.provider_id == provider_id,
                 db_models.OAuthAccount.account_id == account_id,
+                db_models.OAuthAccount.tenant_id == tenant_id,
             )
         )
         return result.scalar_one_or_none()
 
     async def find_saml_subject(
-        self, provider_id: uuid.UUID, name_id: str
+        self, provider_id: uuid.UUID, name_id: str, *, tenant_id: uuid.UUID
     ) -> Optional[db_models.SamlSubject]:
         result = await self.session.execute(
             select(db_models.SamlSubject).where(
                 db_models.SamlSubject.provider_id == provider_id,
                 db_models.SamlSubject.name_id == name_id,
+                db_models.SamlSubject.tenant_id == tenant_id,
             )
         )
         return result.scalar_one_or_none()
@@ -197,7 +203,7 @@ class SsoProviderRepository:
         account_id: str,
         account_email: str,
         idp_token_expires_at: Optional[datetime] = None,
-        tenant_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID,
     ) -> db_models.OAuthAccount:
         row = db_models.OAuthAccount(
             user_id=user_id,
@@ -215,6 +221,8 @@ class SsoProviderRepository:
         self,
         oauth_account_id: uuid.UUID,
         idp_token_expires_at: Optional[datetime],
+        *,
+        tenant_id: uuid.UUID,
     ) -> None:
         """Refresh `oauth_accounts.idp_token_expires_at` on a returning login.
 
@@ -224,7 +232,10 @@ class SsoProviderRepository:
         """
         await self.session.execute(
             update(db_models.OAuthAccount)
-            .where(db_models.OAuthAccount.id == oauth_account_id)
+            .where(
+                db_models.OAuthAccount.id == oauth_account_id,
+                db_models.OAuthAccount.tenant_id == tenant_id,
+            )
             .values(idp_token_expires_at=idp_token_expires_at)
         )
         await self.session.flush()
@@ -237,7 +248,7 @@ class SsoProviderRepository:
         name_id: str,
         name_id_format: str,
         session_index: Optional[str] = None,
-        tenant_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID,
     ) -> db_models.SamlSubject:
         row = db_models.SamlSubject(
             user_id=user_id,
@@ -252,11 +263,18 @@ class SsoProviderRepository:
         return row
 
     async def update_saml_session_index(
-        self, subject_id: uuid.UUID, session_index: Optional[str]
+        self,
+        subject_id: uuid.UUID,
+        session_index: Optional[str],
+        *,
+        tenant_id: uuid.UUID,
     ) -> None:
         await self.session.execute(
             update(db_models.SamlSubject)
-            .where(db_models.SamlSubject.id == subject_id)
+            .where(
+                db_models.SamlSubject.id == subject_id,
+                db_models.SamlSubject.tenant_id == tenant_id,
+            )
             .values(session_index=session_index)
         )
         await self.session.flush()

@@ -44,7 +44,10 @@ from app.config.config import settings
 from app.infrastructure.auth.backend import get_custom_cookie_jwt_strategy
 from app.infrastructure.auth.session import provider_session_digest
 from app.infrastructure.auth.sso import audit, oidc, saml
-from app.infrastructure.auth.sso.domains import domain_is_verified_for_provider
+from app.infrastructure.auth.sso.domains import (
+    normalize_domain,
+    resolve_verified_domain_tenant_id,
+)
 from app.infrastructure.auth.sso.provisioning import (
     SsoProvisioningDenied,
     SsoProvisioningEmailUnverified,
@@ -175,8 +178,17 @@ async def list_enabled_providers(
     ``force_for_domains`` matches the email's domain so the frontend can hide
     the password field for that user (force-SSO UX).
     """
-    repo = SsoProviderRepository(db)
-    rows = await repo.list_enabled()
+    rows = []
+    domain = ""
+    if email and "@" in email:
+        try:
+            domain = normalize_domain(email.strip().lower().split("@", 1)[1])
+        except ValueError:
+            domain = ""
+    if domain:
+        tenant_id = await resolve_verified_domain_tenant_id(db, domain)
+        if tenant_id is not None:
+            rows = await SsoProviderRepository(db).list_enabled(tenant_id=tenant_id)
     items: list[dict] = [
         {
             "id": str(row.id),
@@ -188,13 +200,10 @@ async def list_enabled_providers(
     ]
     forced: Optional[dict] = None
     if email:
-        domain = email.strip().lower().split("@", 1)[-1] if "@" in email else ""
         if domain:
             for row in rows:
                 ff = row.force_for_domains or []
-                if domain in {
-                    d.lower() for d in ff
-                } and await domain_is_verified_for_provider(db, row, domain):
+                if domain in {d.lower() for d in ff}:
                     forced = {
                         "id": str(row.id),
                         "name": row.name,
@@ -225,7 +234,7 @@ async def initiate_login(
             status_code=status.HTTP_404_NOT_FOUND, detail="provider not found"
         )
 
-    bundle = await repo.get_with_config(provider.id)
+    bundle = await repo.get_with_config(provider.id, tenant_id=provider.tenant_id)
     if bundle is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -323,7 +332,7 @@ async def oidc_callback(
     if str(provider.id) != claims["provider_id"]:
         return _redirect_to_frontend_with_error("provider_mismatch")
 
-    bundle = await repo.get_with_config(provider.id)
+    bundle = await repo.get_with_config(provider.id, tenant_id=provider.tenant_id)
     if bundle is None:
         return _redirect_to_frontend_with_error("provider_config_unavailable")
     cfg = bundle.config  # type: OidcConfig
@@ -474,7 +483,7 @@ async def saml_acs(
         return _redirect_to_frontend_with_error("provider_not_found")
     if str(provider.id) != claims["provider_id"]:
         return _redirect_to_frontend_with_error("provider_mismatch")
-    bundle = await repo.get_with_config(provider.id)
+    bundle = await repo.get_with_config(provider.id, tenant_id=provider.tenant_id)
     if bundle is None:
         return _redirect_to_frontend_with_error("provider_config_unavailable")
     cfg = bundle.config  # type: SamlConfig
@@ -624,7 +633,7 @@ async def oidc_backchannel_logout(
     provider = await repo.get_by_name(name)
     if provider is None or not provider.enabled or provider.protocol != "oidc":
         raise HTTPException(status_code=404, detail="not found")
-    bundle = await repo.get_with_config(provider.id)
+    bundle = await repo.get_with_config(provider.id, tenant_id=provider.tenant_id)
     if bundle is None:
         raise HTTPException(status_code=500, detail="config unavailable")
     try:
@@ -674,7 +683,9 @@ async def oidc_backchannel_logout(
         )
         scope = "provider_session"
     else:
-        link = await repo.find_oauth_account(provider.id, str(subject))
+        link = await repo.find_oauth_account(
+            provider.id, str(subject), tenant_id=provider.tenant_id
+        )
         subject_user_id = link.user_id if link is not None else None
         revoked = (
             await sessions.revoke_for_provider_user(
@@ -715,7 +726,7 @@ async def _handle_saml_slo(
     provider = await repo.get_by_name(name)
     if provider is None or not provider.enabled or provider.protocol != "saml":
         raise HTTPException(status_code=404, detail="not found")
-    bundle = await repo.get_with_config(provider.id)
+    bundle = await repo.get_with_config(provider.id, tenant_id=provider.tenant_id)
     if bundle is None:
         raise HTTPException(status_code=500, detail="config unavailable")
     try:
@@ -763,7 +774,9 @@ async def _handle_saml_slo(
             )
         scope = "provider_session"
     elif result.name_id:
-        link = await repo.find_saml_subject(provider.id, result.name_id)
+        link = await repo.find_saml_subject(
+            provider.id, result.name_id, tenant_id=provider.tenant_id
+        )
         subject_user_id = link.user_id if link is not None else None
         revoked = (
             await sessions.revoke_for_provider_user(
@@ -835,7 +848,7 @@ async def saml_metadata(
     provider = await repo.get_by_name(name)
     if provider is None or not provider.enabled or provider.protocol != "saml":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
-    bundle = await repo.get_with_config(provider.id)
+    bundle = await repo.get_with_config(provider.id, tenant_id=provider.tenant_id)
     if bundle is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
