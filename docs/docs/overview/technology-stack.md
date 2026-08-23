@@ -63,20 +63,18 @@ LangGraph workflow with an `AsyncPostgresSaver` checkpointer. Queues:
   (feature-scoped components), `widgets/` (layouts), `shared/api/`
   (one service module per backend domain — all traffic goes through
   `apiClient.ts`).
-- **Ant Design** primitives in places where the custom `sccap-*`
-  design system doesn't cover.
+- **Custom SCCAP UI primitives and CSS**; Ant Design is not installed.
 - **TanStack Query** for server-state caching.
-- **React Router v7** with four route guards in `App.tsx`
+- **React Router v7** with centralized authentication/role and feature guards in `App.tsx`
   (`auth`, `unauth`, `superuser`, `root-redirect`). Every guard
   redirects to `/setup` when `isSetupCompleted === false`.
 
-## Testing + tooling
+## Verification + tooling
 
-- **pytest + pytest-asyncio** with function-scoped async engine
-  fixtures (H.0.3); each test runs in a SAVEPOINT rollback via the
-  `db_session` fixture for isolation.
+- The inherited executable test suites were removed on 2026-08-22.
+  Replacement tests are added at reproduced production seams; see the
+  [Verification Strategy](../development/testing-strategy.md).
 - **ruff + black + mypy** for Python lint/format/type-check.
 - **ESLint + tsc** for the frontend.
 - **GitHub Actions CI** runs backend lint, frontend lint + Vite build,
-  `poetry.lock` drift, Docker build, and pytest against a Postgres 16
-  service container on every push.
+  `poetry.lock` drift, security checks, documentation, and Docker builds.

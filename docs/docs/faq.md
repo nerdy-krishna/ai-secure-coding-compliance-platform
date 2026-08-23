@@ -153,5 +153,6 @@ Pass `?token=<jwt>` when opening the EventSource.
 
 Check the outbox sweeper logs:
 `docker compose logs app | grep -i outbox`. If the sweeper is
-idle, the `scan_outbox` rows may be stuck in a retry backoff —
-check the `attempts` column on the row.
+idle, inspect unpublished `scan_outbox` rows and the `attempts` column. The
+sweeper retries on a fixed interval; a growing attempt count indicates broker,
+credential, queue-policy, or network failure.

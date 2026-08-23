@@ -2,8 +2,7 @@
 
 Started from the FastAPI lifespan. Runs forever on a fixed interval until the
 app shuts down. Each tick:
-  1. Selects up to `BATCH_SIZE` unpublished rows older than `MIN_AGE_SECONDS`
-     (giving the primary publisher a head start on fresh rows).
+  1. Selects up to `BATCH_SIZE` committed unpublished rows.
   2. For each, calls publish_message; on success marks published_at, on
      failure increments attempts and leaves the row for the next tick.
 """
@@ -19,8 +18,8 @@ from app.infrastructure.messaging.publisher import publish_message
 
 logger = logging.getLogger(__name__)
 
-SWEEP_INTERVAL_SECONDS = 10
-MIN_AGE_SECONDS = 30
+SWEEP_INTERVAL_SECONDS = 1
+MIN_AGE_SECONDS = 0
 BATCH_SIZE = 50
 
 
@@ -35,9 +34,12 @@ async def _tick() -> None:
         logger.info("outbox_sweep.batch", extra={"count": len(rows)})
         for row in rows:
             try:
+                payload = dict(row.payload)
+                correlation_id = payload.pop("correlation_id", None)
                 published = await publish_message(
                     queue_name=row.queue_name,
-                    message_body=dict(row.payload),
+                    message_body=payload,
+                    correlation_id=correlation_id,
                 )
                 if published:
                     await repo.mark_published(row.id)

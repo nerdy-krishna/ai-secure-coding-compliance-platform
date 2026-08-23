@@ -41,8 +41,19 @@ validate_email() {
 # V01.3.7: validate rendered config with nginx -t before proceeding.
 render_https_conf() {
     sed "s|__SSL_DOMAIN__|${DOMAIN}|g" /etc/nginx/nginx-https.conf > /etc/nginx/conf.d/default.conf
-    if ! nginx -t -c /etc/nginx/conf.d/default.conf 2>/dev/null; then
+    if ! nginx -t 2>/dev/null; then
         echo "ERROR: rendered nginx config failed validation (nginx -t). Aborting."
+        exit 1
+    fi
+}
+
+# HTTP and HTTPS server blocks reference rate-limit zones declared once in
+# nginx.conf's http{} context. Validate the complete assembled configuration,
+# not an individual server-block fragment.
+render_http_conf() {
+    cp /etc/nginx/nginx-http.conf /etc/nginx/conf.d/default.conf
+    if ! nginx -t 2>/dev/null; then
+        echo "ERROR: rendered HTTP nginx config failed validation (nginx -t). Aborting."
         exit 1
     fi
 }
@@ -57,7 +68,7 @@ if [ "$ENABLED" != "true" ]; then
         exit 1
     fi
     echo "WARN security_event=tls_disabled mode=http_only SSL_DEV_INSECURE=true is set. Running Nginx on Port 80 only."
-    cp /etc/nginx/nginx-http.conf /etc/nginx/conf.d/default.conf
+    render_http_conf
     exit 0
 fi
 
@@ -86,7 +97,7 @@ mkdir -p /var/log/letsencrypt /var/lib/letsencrypt 2>/dev/null || true
 flock -e 200
 if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
     echo "No SSL certificate found. Bootstrapping HTTP-only configuration to answer ACME challenges..."
-    cp /etc/nginx/nginx-http.conf /etc/nginx/conf.d/default.conf
+    render_http_conf
 
     # Start Nginx in background to respond to ACME challenges
     echo "Starting temporary Nginx layer..."
@@ -152,4 +163,3 @@ trap "kill $RENEWAL_PID 2>/dev/null" TERM INT EXIT
 
 # The main Nginx process will start after this entrypoint script finishes.
 exit 0
-

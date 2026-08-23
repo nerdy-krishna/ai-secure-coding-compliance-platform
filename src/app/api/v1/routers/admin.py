@@ -60,6 +60,48 @@ async def update_llm_configuration(
     return updated_config
 
 
+@llm_router.get(
+    "/{config_id}/price-overrides",
+    response_model=List[api_models.LLMPriceOverrideRead],
+)
+async def list_llm_price_overrides(
+    config_id: uuid.UUID,
+    admin_service: AdminService = Depends(get_admin_service),
+    user: db_models.User = Depends(current_superuser),
+):
+    """List immutable price versions for one model configuration."""
+    _ = user
+    return await admin_service.list_price_overrides(config_id)
+
+
+@llm_router.post(
+    "/{config_id}/price-overrides",
+    response_model=api_models.LLMPriceOverrideRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def append_llm_price_override(
+    config_id: uuid.UUID,
+    value: api_models.LLMPriceOverrideCreate,
+    admin_service: AdminService = Depends(get_admin_service),
+    user: db_models.User = Depends(current_superuser),
+):
+    """Close the active price version and append a complete replacement."""
+    row = await admin_service.append_price_override(
+        config_id,
+        value,
+        actor_user_id=user.id,
+    )
+    logger.info(
+        "admin.llm_price_override.appended",
+        extra={
+            "actor_id": str(user.id),
+            "config_id": str(config_id),
+            "price_override_id": str(row.id),
+        },
+    )
+    return row
+
+
 @llm_router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_llm_configuration(
     config_id: uuid.UUID,

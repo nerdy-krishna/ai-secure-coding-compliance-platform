@@ -40,15 +40,15 @@ export function redactSensitive(value: unknown, parentKey?: string): unknown {
   }
 
   if (typeof value === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (isSensitiveKey(k)) {
-        result[k] = "[REDACTED]";
-      } else {
-        result[k] = redactSensitive(v, k);
-      }
-    }
-    return result;
+    // Object.fromEntries creates own data properties even for a hostile
+    // `__proto__` key; assigning untrusted keys into `{}` would invoke its
+    // legacy prototype setter.
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        isSensitiveKey(key) ? "[REDACTED]" : redactSensitive(item, key),
+      ]),
+    );
   }
 
   if (typeof value === "string") {

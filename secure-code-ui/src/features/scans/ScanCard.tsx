@@ -87,7 +87,6 @@ export const ScanCard: React.FC<ScanCardProps> = ({
 
   return (
     <div
-      onClick={onOpen}
       style={{
         display: "grid",
         gridTemplateColumns: "1fr auto",
@@ -105,7 +104,19 @@ export const ScanCard: React.FC<ScanCardProps> = ({
         (e.currentTarget.style.background = "transparent")
       }
     >
-      <div style={{ minWidth: 0 }}>
+      <div
+        role="link"
+        tabIndex={0}
+        aria-label={`Open ${scan.project_name} scan ${scan.id.slice(0, 8)}`}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
+        style={{ minWidth: 0, cursor: "pointer", outlineOffset: 4 }}
+      >
         {showProject && (
           <div
             style={{ fontWeight: 500, color: "var(--fg)", marginBottom: 2 }}
@@ -337,10 +348,7 @@ export const ScanCard: React.FC<ScanCardProps> = ({
         )}
       </div>
 
-      <div
-        style={{ display: "flex", alignItems: "center", gap: 10 }}
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         {progress.isTerminal &&
           (() => {
             // Green fill/text for a successful scan, red for a failure,
@@ -359,9 +367,15 @@ export const ScanCard: React.FC<ScanCardProps> = ({
             );
           })()}
         {controls}
-        <span onClick={onOpen} style={{ cursor: "pointer", display: "flex" }}>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={`Open scan ${scan.id.slice(0, 8)}`}
+          onClick={onOpen}
+          style={{ cursor: "pointer", display: "flex" }}
+        >
           <Icon.ChevronR size={14} />
-        </span>
+        </button>
       </div>
     </div>
   );

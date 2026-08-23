@@ -26,8 +26,8 @@ retrieve_and_prepare_data
   → analyze_files_parallel
   → consolidate_findings        (FindingConsolidator, reasoning slot)
   → validate_cross_file         (opt-in — no-op unless cross_file_validation)
-  → consolidate_and_patch       (no-op for AUDIT / SUGGEST)
-  → verify_patches              (REMEDIATE-only Semgrep re-pass)
+  → consolidate_and_patch       (SUGGEST/REMEDIATE planner + isolated compiler/tests)
+  → verify_patches              (pre-promotion Semgrep/Bandit/Gitleaks gate)
   → save_results
   → save_final_report → END
 ```
@@ -83,10 +83,11 @@ When the user approves the analysis-cost gate, the worker resumes the
   map: `build_dep_summary(file_path)` reads symbol signatures from
   successors in the dependency graph and prefixes each chunk with a
   `# --- [DEPENDENCY CONTEXT] ---` block.
-- **Concurrency** is a single `asyncio.Semaphore(CONCURRENT_LLM_LIMIT)`
-  (default 5) over the union of file × chunk × agent calls.
-- **No mid-graph DB writes.** Findings + `proposed_fixes` flow through
-  state to `consolidate_findings` and beyond.
+- **Concurrency** uses one fixed `asyncio.Semaphore(CONCURRENT_LLM_LIMIT)`
+  per distinct LLM configuration. Rate-limit token buckets and circuit
+  breakers add independent backpressure; concurrency is not adaptive.
+- **Durable mid-graph persistence** writes scanner findings, raw LLM
+  findings, file profiles, events, and ScanTask results before finalization.
 
 ### Consolidation + remediation
 
@@ -97,17 +98,29 @@ cause into one root finding (with every `affected_location`, unioned
 positives, duplicates, and noise — a qualitative quality gate with no
 severity floor. It replaces the old exact-key `correlate_findings`.
 
-`consolidate_and_patch` is REMEDIATE-only: groups `proposed_fixes`
-by file, resolves line-range conflicts via `_run_merge_agent`,
-tree-sitter syntax-verifies the patched content, and builds
-`final_file_map` for the `POST_REMEDIATION` snapshot. AUDIT is a
-no-op; SUGGEST keeps the embedded `fixes` field on each finding but
-doesn't build a snapshot.
+Every raw finding has a producer-stable UUID and every proposed patch is
+a `fix_candidate` tied to the exact original source hash. Consolidation
+records raw → canonical UUID decisions and governs candidates as selected,
+duplicate, conflict, or rejected. Dropped false-positive candidates cannot
+enter patching. SUGGEST and REMEDIATE both validate selected anchors and
+syntax; only REMEDIATE promotes patches.
 
-`save_results` deletes the raw prescan rows and writes the
-consolidated finding set fresh; `save_final_report` writes the
-CVSS-weighted 0–10 `risk_score` and the `summary` JSON, and sets the
-final status (`COMPLETED` or `REMEDIATION_COMPLETED`).
+`consolidate_and_patch` runs the deterministic patch planner for both
+SUGGEST and REMEDIATE. It resolves exact byte ranges against the recorded
+source hash, rejects ambiguous anchors, collapses exact duplicates, and
+marks every transitive overlap component for manual review. Accepted edits
+apply atomically in descending byte-offset order. Per-file limits (64 hunks,
+256 KiB positive expansion, 512 KiB serialized diff) and scan-wide limits
+(256 hunks, 1 MiB expansion, 2 MiB diff) fail closed before checkpoint or
+artifact growth, and accepted files must pass a whole-file tree-sitter parse
+check. Both modes persist a versioned unified-diff patch
+plan with candidate-to-hunk lineage; only REMEDIATE promotes accepted files
+into `final_file_map` and a `POST_REMEDIATION` snapshot.
+
+`save_results` replaces the consolidated bucket while preserving the
+`sast` and `raw_llm` diagnostic buckets. `save_final_report` writes the
+CVSS-weighted 0–10 risk score, summary/final status, and finding-lineage
+artifact, including exact candidate dispositions and apply state.
 
 ### Cross-file validation (opt-in)
 
@@ -159,8 +172,8 @@ Specialized agents live under `src/app/infrastructure/agents/`:
 - **`chat_agent`** — one-shot LLM call used by the Advisor. Runs RAG
   retrieval scoped to the session's `frameworks`, injects the docs
   into the prompt, and returns a response + usage metadata.
-- **`symbol_map_agent`** — builds the repo-map symbol index used by
-  `ContextBundlingEngine`.
+- **`RepositoryMappingEngine`** — deterministic analysis utility (not an LLM
+  agent) that builds the repository map consumed by `ContextBundlingEngine`.
 
 Impact-summary generation was removed in the 2026-04-26 cleanup. The
 on-demand HTML / CSV / PDF / SARIF findings report

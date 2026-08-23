@@ -3,131 +3,111 @@ title: Architecture Overview
 sidebar_position: 1
 ---
 
-# Architecture Overview
+# Architecture overview
 
-SCCAP runs as a small compose stack: an API service, a worker, the
-data stores the two share, and an observability pipeline.
+SCCAP combines deterministic security scanners and LLM-based analysis behind a resumable,
+operator-approved scan lifecycle.
 
-```
-┌──────────┐       ┌─────────┐       ┌─────────┐
-│   UI     │  ◄─►  │   API   │  ◄─►  │ Postgres│
-│ (Vite)   │       │(FastAPI)│       └─────────┘
-└──────────┘       └────┬────┘       ┌─────────┐
-                        │       ◄─►  │ Qdrant  │
-                        ▼            └─────────┘
-                   ┌─────────┐
-                   │RabbitMQ │
-                   └────┬────┘
-                        │
-                        ▼
-                   ┌─────────┐       ┌────────────────────┐
-                   │ Worker  │  ───► │ Fluentd → Loki →   │
-                   │(LangGr.)│       │ Grafana            │
-                   └─────────┘       └────────────────────┘
+```mermaid
+flowchart LR
+    UI[React/Vite UI] --> API[FastAPI]
+    MCP[MCP clients] --> API
+    API --> PG[(PostgreSQL)]
+    API --> MQ[(RabbitMQ)]
+    MQ --> WORKER[Async worker + LangGraph]
+    WORKER --> PG
+    WORKER --> SCANNERS[Bandit · Semgrep · Gitleaks · OSV]
+    WORKER --> LLMS[LiteLLM / Pydantic AI]
+    WORKER --> QDRANT[(Qdrant RAG)]
+    PG --> SSE[Scan-event SSE]
+    SSE --> UI
 ```
 
-## Responsibilities
+## Runtime modules
 
-- **API (`app`)** — FastAPI routers under `src/app/api/v1/routers/`.
-  Handles auth, admin CRUD, scan submissions, scan result lookups,
-  chat sessions, and the MCP tool surface. Writes scan rows +
-  outbox rows in a single transaction; never publishes to RabbitMQ
-  inline.
-- **Worker (`worker`)** — consumes `code_submission_queue` and
-  `analysis_approved_queue` via `aio-pika`. Every message invokes the compiled
-  LangGraph (`infrastructure/workflows/worker_graph.py`) keyed on
-  `scan_id` via an `AsyncPostgresSaver` checkpointer.
-- **Outbox sweeper** — a background task inside the API (see
-  `src/app/infrastructure/messaging/outbox_sweeper.py`) periodically
-  reads `scan_outbox` for unpublished rows and actually publishes them
-  to RabbitMQ. This closes the race between "scan row committed" and
-  "RabbitMQ publish failed."
-- **Postgres** — authoritative store for everything SCCAP writes,
-  including the LangGraph checkpoint tables (`checkpoints`,
-  `checkpoint_writes`, `checkpoint_blobs`, `checkpoint_migrations`)
-  managed by the Postgres checkpointer.
-- **Qdrant** — vector store for RAG (replaced ChromaDB per ADR-008).
-  Uses `fastembed` with `sentence-transformers/all-MiniLM-L6-v2`
-  (lazy-downloaded on first use); framework-scoped via metadata filters.
-- **Fluentd → Loki → Grafana** — structured log aggregation.
+- **FastAPI module** — authentication, setup, submissions, approvals, cancellation, result/query
+  interfaces, administration, SSO/SCIM/WebAuthn, chat, compliance, MCP, and event streaming.
+- **Worker module** — consumes submission/approval notifications and runs resumable LangGraph
+  threads. Up to three analysis workflows may run concurrently in one worker process.
+- **PostgreSQL adapter** — authoritative application records, outbox, durable tasks, findings,
+  artifacts, snapshots, audits, and LangGraph checkpoints.
+- **RabbitMQ adapter** — delivery notification for new and resumed scan work; database state remains
+  authoritative.
+- **Qdrant adapter** — dense+sparse framework retrieval using the pre-bundled FastEmbed model.
+- **Scanner adapters** — isolated subprocess wrappers that stage selected source and parse bounded,
+  allowlisted output.
+- **React module** — handcrafted CSS/UI primitives, TanStack Query, React Router, Axios, React Flow,
+  and feature-gated pages. Ant Design is not installed.
 
-## Code layout (backend)
+## Data ownership
 
-- `src/app/api/v1/routers/` — FastAPI routers; wired in `main.py`.
-  Admin endpoints are split by concern (`admin_agents`,
-  `admin_frameworks`, `admin_prompts`, `admin_rag`, `admin_config`,
-  `admin_users`, `admin_groups`, `admin_seed`, `llm_config`).
-- `src/app/core/services/` — orchestration layer. Routers delegate
-  here rather than touching repositories directly.
-- `src/app/infrastructure/database/repositories/` — one repository
-  per aggregate: `scan_repo`, `chat_repo`, `user_repo`,
-  `framework_repo`, `agent_repo`, `prompt_template_repo`,
-  `llm_config_repo`, `rag_job_repo`, `system_config_repo`,
-  `user_group_repo`.
-- `src/app/infrastructure/agents/` — LangGraph sub-graphs
-  (`generic_specialized_agent`, `chat_agent`, `symbol_map_agent`).
-- `src/app/infrastructure/workflows/worker_graph.py` — the top-level
-  LangGraph `StateGraph`. Any edit to nodes / edges must be reflected
-  in `.agent/scanning_flow.md`.
-- `src/app/shared/analysis_tools/` — `chunker.py` (semantic
-  splitter), `context_bundler.py` (dependency graph), `repository_map.py`
-  (tree-sitter symbol index).
+| Data | Owner |
+| --- | --- |
+| Users, identity links, tenants, groups | PostgreSQL auth/identity tables |
+| Projects and scan configuration | PostgreSQL Project/Scan records |
+| Original and remediated source | SourceCodeFile + CodeSnapshot records |
+| Workflow progress | Scan status, ScanEvent, ScanTask, LangGraph checkpoints |
+| Findings and provenance | Finding buckets + ScanArtifact lineage |
+| LLM prompts, outputs, usage, cost | LLMInteraction |
+| Framework knowledge | PostgreSQL metadata + Qdrant vectors |
+| Scanner rule catalog | PostgreSQL Semgrep source/rule/sync records |
 
-## Cross-cutting services
+## Reliability model
 
-- **`SystemConfigCache`** (`src/app/core/config_cache.py`) — a
-  process-local singleton populated at startup from `system_config`
-  rows. Drives the dynamic CORS middleware, log level, and SMTP
-  settings. When editing `system_config` at runtime, the cache is
-  also updated or the change won't take effect until restart.
-- **`correlation_id_middleware`** — attaches an `X-Correlation-ID`
-  to every inbound request and stores it in a `ContextVar` so all
-  log entries automatically carry it.
-- **`DynamicCORSMiddleware`** — allows all origins until setup
-  completes, then tightens to
-  `system_config['security.allowed_origins']` + env `ALLOWED_ORIGINS`.
-- **`correlation_id_var`** — propagated into the worker via the
-  message envelope; worker logs stitch across the boundary.
+Submission, approval/decline, and manual run-control atomically write their scan changes, audit
+events, cleanup where applicable, and ScanOutbox intent, then return without contacting RabbitMQ.
+Cancellation atomically writes its terminal status and event. A background sweeper is the sole
+publisher and retries unpublished rows. Compare-and-set claims reject racing or duplicate lifecycle
+decisions before they can create duplicate dispatch work.
 
-## Scan lifecycle (short form)
+LangGraph checkpoints and ScanTasks make deep analysis resumable. ScanEvents provide replayable
+activity to the SSE interface. Cancellation is cooperative: API state becomes authoritative and
+worker stages must observe it before performing further work.
 
-Full flow: see
-[Architecture → Data Flow](./data-flow.md) or
-[`.agent/scanning_flow.md`](https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform/blob/main/.agent/scanning_flow.md)
-for the canonical version.
+All scan-status writers use the transition policy in `shared/lib/scan_status.py`; terminal states
+have no normal exits. Each successful graph node persists its registered node identifier in
+`WorkerState.completed_stages` with the same checkpoint as its outputs. Resume retains that durable
+thread, while restart deletes it before starting over.
 
-1. UI `POST /api/v1/scans` → `projects.py` router →
-   `scan_service.create_scan_from_*` dedupes files, creates `Scan` +
-   `ORIGINAL_SUBMISSION` snapshot, writes an outbox row to
-   `code_submission_queue`.
-2. Worker picks up the message, builds a `WorkerState`, and calls the
-   compiled LangGraph with the Postgres checkpointer.
-3. Audit pass: `retrieve_and_prepare_data` → `RepositoryMappingEngine`
-   + `ContextBundlingEngine` → `deterministic_prescan` (Bandit /
-   Semgrep / Gitleaks / OSV). If findings are non-empty, the scan
-   pauses at `PENDING_PRESCAN_APPROVAL` (ADR-009) for operator review;
-   Critical Gitleaks findings need an explicit override to continue.
-4. After prescan approval, `estimate_cost` runs a token-counting dry
-   run, persists `cost_details`, atomically flips status to
-   `PENDING_COST_APPROVAL` (firing a `pg_notify` so SSE wakes
-   immediately), then native `interrupt()` pauses the graph and
-   checkpoints state.
-5. User approves: API publishes to `analysis_approved_queue`; worker
-   resumes the same thread with `Command(resume=payload)`.
-6. Single-pass parallel analysis: `analyze_files_parallel` runs every
-   relevant agent against every file from the `ORIGINAL_SUBMISSION`
-   snapshot in parallel, bounded by a single
-   `asyncio.Semaphore(CONCURRENT_LLM_LIMIT=5)` over the union of
-   file × chunk × agent calls. Per-file agent triage is inline
-   (extension-based routing); per-file dependency context is still
-   injected from the repository map.
-7. `correlate_findings` (group by file/CWE/line, merge agent
-   corroborations) → `consolidate_and_patch` (REMEDIATE-only:
-   merges per-file fixes via the merge agent, tree-sitter
-   syntax-verifies, builds the `POST_REMEDIATION` snapshot) →
-   `save_results` (splits findings into fresh / existing — fresh
-   LLM-agent rows are inserted, existing prescan rows get correlation
-   updates; applies to all scan types including REMEDIATE) →
-   `save_final_report` (writes the CVSS-weighted 0–10 `risk_score` +
-   the `summary` JSON, sets `COMPLETED` / `REMEDIATION_COMPLETED`)
-   → END.
+## Security and tenancy
+
+- Bearer JWT access and refresh tokens back password authentication.
+- OIDC and SAML providers, SCIM provisioning, WebAuthn credentials, and forced-SSO domains are
+  implemented and feature/configuration gated where applicable.
+- Fernet encryption protects persisted LLM and SMTP secrets.
+- Tenant scope and group-derived visible-user scope must pass through every user-owned list query.
+- Correlation identifiers propagate from HTTP requests through messages and worker logs.
+- Audit records include ScanEvents, LLMInteractions, finding disposition events, and auth audit
+  events.
+
+## Scan workflow
+
+The implemented sequence is:
+
+```text
+retrieve → classify → deterministic prescan
+  → optional prescan approval
+  → profiling estimate → profiling approval → profile
+  → analysis estimate → cost approval
+  → durable parallel analysis → persist raw LLM findings
+  → durable per-file consolidation → deterministic global consolidation
+  → optional cross-file validation
+  → deterministic patch planning → optional remediation promotion
+  → patch verification
+  → consolidated results → report + lineage artifact
+```
+
+See [Data Flow](data-flow.md) for transaction, event, and limitation details.
+
+## Feature packaging
+
+Installation variants seed a runtime feature catalog rather than separate application builds. Scan
+is always enabled. Chat, compliance, users/groups, SSO, SCIM, multi-tenancy, email, observability,
+MCP, and admin authoring may be enabled according to dependency rules.
+
+## Current verification posture
+
+CI currently enforces backend formatting/lint, the focused replacement unit suite, frontend
+compilation, dependency lock consistency, security checks, and Docker image construction. A strict
+documentation build and generated OpenAPI drift check are not yet CI gates. Broader database,
+worker, browser, tenancy, and event-stream coverage is still being added at verified production seams.

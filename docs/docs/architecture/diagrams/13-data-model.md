@@ -34,6 +34,14 @@ erDiagram
     SCANS ||--o{ CODE_SNAPSHOTS : "before/after"
     SCANS ||--o{ FINDINGS : "yields"
     SCANS ||--o{ LLM_INTERACTIONS : "spend"
+    SCANS ||--o{ LLM_USAGE_EVENTS : "usage"
+    CHAT_SESSIONS ||--o{ LLM_USAGE_EVENTS : "usage"
+    RAG_PREPROCESSING_JOBS ||--o{ LLM_USAGE_EVENTS : "usage"
+    LLM_CONFIGURATIONS ||--o{ LLM_USAGE_EVENTS : "priced calls"
+    LLM_CONFIGURATIONS ||--o{ LLM_PRICE_OVERRIDES : "versioned rates"
+    LLM_USAGE_EVENTS ||--o{ LLM_USAGE_REQUESTS : "provider responses"
+    LLM_USAGE_REQUESTS ||--o{ LLM_USAGE_LINE_ITEMS : "billable categories"
+    LLM_USAGE_EVENTS ||--o| LLM_INTERACTIONS : "compatibility projection"
     FINDINGS ||--o{ FINDING_DISPOSITION_EVENTS : "triage history"
     USER ||--o{ FINDING_DISPOSITION_EVENTS : "triaged by"
     SOURCE_CODE_FILES ||--o{ CODE_SNAPSHOTS : "referenced"
@@ -258,7 +266,7 @@ erDiagram
     LLM_CONFIGURATIONS {
         uuid id PK
         text name UK
-        text provider "anthropic|openai|google"
+        text provider "anthropic|openai|google|deepseek|xai|custom_openai"
         text model_name
         text tokenizer
         bytea encrypted_api_key "FERNET"
@@ -271,6 +279,7 @@ erDiagram
         bigserial id PK
         uuid scan_id FK
         uuid chat_message_id FK
+        uuid usage_event_id FK "unique"
         text agent_name
         text file_path
         jsonb prompt_context "redacted"
@@ -282,6 +291,63 @@ erDiagram
         numeric cost
         timestamp timestamp
         timestamp expires_at
+    }
+    LLM_USAGE_EVENTS {
+        uuid id PK
+        text idempotency_key UK
+        text operation_kind "scan|chat|rag"
+        text operation_id
+        uuid scan_id FK
+        uuid chat_session_id FK
+        uuid rag_job_id FK
+        text stage
+        text agent_name
+        uuid llm_config_id FK
+        int user_id FK
+        uuid tenant_id FK
+        uuid[] group_ids
+        text provider
+        text requested_model
+        int request_count
+        int input_tokens
+        int output_tokens
+        text quality_state
+        text cost_status
+        numeric total_cost "NUMERIC(30,12)"
+    }
+    LLM_USAGE_REQUESTS {
+        uuid id PK
+        uuid usage_event_id FK
+        int request_index
+        text provider_response_id
+        text resolved_model
+        jsonb provider_usage "bounded"
+        jsonb price_snapshot "immutable"
+        text cost_status
+        numeric total_cost "NUMERIC(30,12)"
+    }
+    LLM_USAGE_LINE_ITEMS {
+        bigserial id PK
+        uuid usage_request_id FK
+        int line_index
+        text category
+        numeric quantity
+        text unit
+        numeric rate
+        numeric modifier
+        text currency
+        numeric amount
+    }
+    LLM_PRICE_OVERRIDES {
+        uuid id PK
+        uuid llm_config_id FK
+        text provider
+        text model_pattern
+        jsonb rates
+        text currency
+        text source
+        timestamp effective_from
+        timestamp effective_to
     }
     FRAMEWORKS {
         uuid id PK

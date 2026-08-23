@@ -8,9 +8,17 @@ Start by copying the example file to create your own local configuration:
 
 ```bash
 cp .env.example .env
+python3 scripts/bootstrap_env_secrets.py --env-file .env
 ```
 
 > ❗ **Never commit your actual `.env` file with sensitive credentials to version control.**
+
+The bootstrap command is also the safe upgrade path for an existing `.env`.
+It generates missing or explicit placeholder secrets, preserves valid values,
+writes the file atomically (mode `0600` on POSIX), and never prints secret
+material. On Windows, keep the checkout under a user-restricted NTFS directory.
+Run it after pulling a release and before `docker compose` so newly required
+interpolation values are present.
 
 ---
 
@@ -39,8 +47,9 @@ ENCRYPTION_KEY=your-super-secret-generated-key-goes-here
 | `APP_PORT` | Port for the backend FastAPI app | `8000` | Ensure this port is available |
 | `SECRET_KEY` | Used to sign JWT tokens | `your-random-secret` | Must be unique and strong |
 | `ALLOWED_ORIGINS` | Allowed origins for CORS | `http://localhost:5173` | No trailing slash |
-| `ACCESS_TOKEN_LIFETIME_SECONDS` | Access token expiry time | `1800` | 30 minutes |
+| `ACCESS_TOKEN_LIFETIME_SECONDS` | Access token expiry time | `3600` | 60 minutes; the browser refreshes before expiry |
 | `REFRESH_TOKEN_LIFETIME_SECONDS` | Refresh token lifetime | `604800` | 7 days |
+| `SSL_DEV_INSECURE` | Explicit HTTP-only local-development opt-in | `false` | Compose also uses it to allow the refresh cookie over HTTP; forbidden with `ENVIRONMENT=production` |
 
 ---
 
@@ -64,6 +73,7 @@ ENCRYPTION_KEY=your-super-secret-generated-key-goes-here
 | -------- | ----------- | ------- |
 | `RABBITMQ_DEFAULT_USER` | RabbitMQ username | `devuser_scp` |
 | `RABBITMQ_DEFAULT_PASS` | RabbitMQ password | `yoursecurepassword` |
+| `RABBITMQ_ERLANG_COOKIE` | Internal RabbitMQ node-authentication cookie; required by Compose and generated during setup/upgrade | generated value; do not share or log |
 | `RABBITMQ_HOST` | RabbitMQ host (internal) | `rabbitmq` |
 | `RABBITMQ_PORT` | AMQP port | `5672` |
 | `RABBITMQ_MANAGEMENT_PORT` | Port for RabbitMQ UI | `15672` |
@@ -76,6 +86,30 @@ defaults):
 | ----- | ------------ | ------- |
 | `RABBITMQ_SUBMISSION_QUEUE` | `code_submission_queue` | New scan submissions (worker runs the audit pass and pauses at cost approval) |
 | `RABBITMQ_APPROVAL_QUEUE` | `analysis_approved_queue` | User approved the cost estimate; worker resumes the paused LangGraph thread |
+
+## Immutable evidence storage
+
+Compose runs a dedicated local `evidence-minio` service. Production should point SCCAP at a private
+S3-compatible bucket and use workload identity where possible.
+
+| Variable | Purpose | Production requirement |
+| --- | --- | --- |
+| `EVIDENCE_STORE_ENABLED` | Enables encrypted object evidence | `true` |
+| `EVIDENCE_S3_ENDPOINT_URL` | S3-compatible endpoint; omit for AWS S3 | TLS endpoint or AWS default |
+| `EVIDENCE_S3_REGION` | Bucket/KMS region | Deployment region |
+| `EVIDENCE_S3_BUCKET` | Dedicated private evidence bucket | Do not share with Langfuse or uploads |
+| `EVIDENCE_S3_ACCESS_KEY_ID` / `EVIDENCE_S3_SECRET_ACCESS_KEY` | Static credentials for local/compatible stores | Prefer both omitted with workload identity |
+| `EVIDENCE_KEY_PROVIDER` | Envelope-key provider: `local` or `aws_kms` | Must be `aws_kms` |
+| `EVIDENCE_KMS_KEY_ID` | KMS key/alias used to generate and unwrap data keys | Required |
+| `EVIDENCE_LOCAL_KEK` | Local-only key-encryption secret | Forbidden as the production provider |
+| `EVIDENCE_RETENTION_DAYS` | Default retain-until interval | Set from policy |
+| `EVIDENCE_DUAL_WRITE_LEGACY` | Also retain PostgreSQL JSON during migration | Enable only for expand/verify rollout |
+
+Objects are encrypted before upload and downloads are application-mediated. Do not expose the
+bucket publicly or issue direct presigned links. To migrate existing artifacts, keep dual-write on,
+run `docker compose exec app python -m app.scripts.backfill_evidence_store`, verify coverage and
+digests, then disable legacy writes in a later deployment. Legal holds must be released through the
+governance repository/workflow; direct bucket deletion bypasses the audit trail.
 
 ---
 
@@ -99,14 +133,55 @@ Protocol (`infrastructure/rag/qdrant_store.py`).
 | -------- | ----------- | ------- | ----- |
 | `LITELLM_LOCAL_MODEL_COST_MAP` | Pin LiteLLM to its bundled model-price map instead of fetching it at runtime. | `True` | Recommended. Keeps scan-cost calculations offline. |
 
-Every LLM interaction is priced through `litellm.token_counter(...)` +
-`litellm.cost_per_token(...)`. The `llm_configurations` table lets
-admins provide an override (non-zero `input_cost_per_million` /
-`output_cost_per_million`) for bespoke endpoints (Azure, private
-deployments); otherwise LiteLLM's community-maintained price map is
-used. See
+LiteLLM performs local pre-call token counting and estimate pricing.
+Post-call actuals use provider-reported usage in the immutable usage
+ledger. For negotiated contracts, superusers append a complete,
+effective-dated price version under the LLM configuration API; the old
+two-rate fields remain a text-only compatibility fallback. See
 [Architecture → LLM Integration](../architecture/llm-integration.md)
 for the full data flow.
+
+---
+
+## Immutable OSV advisory snapshot (optional)
+
+OSV prescan can retain the legacy live service, but automatic promotion of an
+OSV-originated fix or dependency-lockfile change requires an immutable local
+advisory snapshot. SCCAP never downloads or refreshes that database during
+promotion.
+
+Prepare an OSV-Scanner v2 cache directory containing
+`osv-scanner/<ecosystem>/all.zip`. Add a read-only `snapshot.json` at its root:
+
+```json
+{
+  "schema_version": 1,
+  "snapshot_id": "osv-2026-08-23T000000Z",
+  "created_at": "2026-08-23T00:00:00Z",
+  "files": [
+    {
+      "path": "osv-scanner/PyPI/all.zip",
+      "size_bytes": 123456,
+      "sha256": "<64 lowercase hex characters>"
+    }
+  ]
+}
+```
+
+Every `all.zip` used by the snapshot must appear exactly once. Set
+`OSV_OFFLINE_SNAPSHOT_HOST_DIR` to that directory and start Compose with both
+files:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.osv-offline.yml up -d worker
+```
+
+The override mounts the directory read-only. The worker verifies bounded path,
+size, and SHA-256 evidence before and after each use, rejects symlinks and
+worker-writable files, strips proxy credentials, and passes OSV explicit
+offline/no-resolve flags. An invalid configured snapshot does not fall back to
+live OSV matching. Without the override, OSV prescan remains visibly degraded
+and affected patch promotion remains blocked.
 
 ---
 

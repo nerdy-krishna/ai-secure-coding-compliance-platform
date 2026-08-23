@@ -128,7 +128,7 @@ The `chat_agent` is instantiated through Pydantic AI with the session's `llm_con
 
 | Column                       | Used for                                                  |
 |------------------------------|-----------------------------------------------------------|
-| `provider`                   | Picks the Pydantic AI agent class (Anthropic / OpenAI / Google) |
+| `provider`                   | Selects the configured Pydantic AI/LiteLLM provider path, including custom OpenAI-compatible endpoints |
 | `model_name`                 | Wire model id (e.g., `claude-sonnet-4-6`)                 |
 | `tokenizer`                  | Token counting for cost math (LiteLLM cost map)           |
 | `encrypted_api_key` (Fernet) | Decrypted per call; never logged                          |

@@ -93,6 +93,7 @@ async def retry_with_backoff(
     base_delay_sec: float = DEFAULT_BASE_DELAY_SEC,
     max_delay_sec: float = DEFAULT_MAX_DELAY_SEC,
     is_retryable: Callable[[Exception], bool] = _default_is_retryable,
+    on_retry: Optional[Callable[[int, int, float, Exception], Awaitable[None]]] = None,
 ) -> T:
     """Call `fn`, retrying on transient errors with exponential backoff + jitter.
 
@@ -122,6 +123,8 @@ async def retry_with_backoff(
                 jittered,
                 exc.__class__.__name__,
             )
+            if on_retry is not None:
+                await on_retry(attempt + 1, max_retries, jittered, exc)
             await asyncio.sleep(jittered)
 
     # Should be unreachable, but satisfy the type checker

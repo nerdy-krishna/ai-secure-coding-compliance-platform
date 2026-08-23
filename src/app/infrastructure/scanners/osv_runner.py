@@ -26,17 +26,19 @@ import asyncio
 import html
 import json
 import logging
+import os
 import re
 import subprocess
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.scanners.bandit_runner import _resolve_binary
+from app.shared.lib.owned_subprocess import run_owned_subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +195,45 @@ def _row_to_finding(
     )
 
 
+def _original_source_path(source_path: str, original_paths: Mapping[Path, str]) -> str:
+    """Translate OSV's staged source path back to the uploaded path."""
+    try:
+        staged = Path(source_path).resolve()
+    except (OSError, ValueError):
+        return source_path
+    direct = original_paths.get(staged)
+    if direct is not None:
+        return direct
+    # Some OSV output identifies the containing directory rather than the
+    # lockfile. Prefer the sole staged file below that directory when the
+    # mapping is unambiguous; otherwise retain OSV's bounded source string.
+    descendants = {
+        original
+        for path, original in original_paths.items()
+        if path == staged or staged in path.parents
+    }
+    return next(iter(descendants)) if len(descendants) == 1 else source_path
+
+
+def parse_osv_findings_report(
+    raw: Any, original_paths: Mapping[Path, str]
+) -> List[VulnerabilityFinding]:
+    """Validate native OSV JSON and map it to bounded SCCAP findings.
+
+    Unlike the fail-soft prescan wrapper, invalid JSON raises so the strict
+    promotion adapter can distinguish broken evidence from a clean report.
+    """
+    parsed = _OSVScanOutput.model_validate(raw)
+    findings: List[VulnerabilityFinding] = []
+    for results in parsed.results:
+        source_path = str((results.source or {}).get("path", "lockfile"))[:1024]
+        source_path = _original_source_path(source_path, original_paths)
+        for pkg_entry in results.packages:
+            for vuln in pkg_entry.vulnerabilities:
+                findings.append(_row_to_finding(vuln, pkg_entry.package, source_path))
+    return findings
+
+
 def _truncate_bom(bom: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Apply the BOM size policy.
 
@@ -269,6 +310,7 @@ def _run_osv_subprocess(
     staged_dir: Path,
     bom_path: Path,
     json_path: Path,
+    offline_snapshot: Any = None,
 ) -> Tuple[int, str, str]:
     """Invoke OSV-Scanner twice (CycloneDX BOM + JSON findings).
 
@@ -285,12 +327,26 @@ def _run_osv_subprocess(
     CycloneDX run's content lives at ``bom_path``. Returned stderr is
     pre-redacted via `_redact_stderr`.
     """
-    bom_proc = subprocess.run(  # noqa: S603 (allowlisted binary, no shell)
+    offline_args = (
+        ["--offline", "--offline-vulnerabilities", "--no-resolve"]
+        if offline_snapshot is not None
+        else []
+    )
+    subprocess_env = None
+    if offline_snapshot is not None:
+        from app.infrastructure.scanners.osv_offline_replay import (
+            _subprocess_environment,
+        )
+
+        subprocess_env = _subprocess_environment(offline_snapshot)
+
+    bom_proc = run_owned_subprocess(
         [
             binary,
             "scan",
             "source",
             "--recursive",
+            *offline_args,
             "--format",
             "cyclonedx-1-5",
             "--output",
@@ -301,6 +357,7 @@ def _run_osv_subprocess(
         text=True,
         timeout=OSV_TIMEOUT_SECONDS,
         check=False,
+        env=subprocess_env,
     )
     if bom_proc.returncode not in (0, 1):  # 1 = vulns found, expected
         logger.warning(
@@ -309,12 +366,13 @@ def _run_osv_subprocess(
             _redact_stderr((bom_proc.stderr or "")[:500]),
         )
 
-    findings_proc = subprocess.run(  # noqa: S603
+    findings_proc = run_owned_subprocess(
         [
             binary,
             "scan",
             "source",
             "--recursive",
+            *offline_args,
             "--format",
             "json",
             "--output",
@@ -325,6 +383,7 @@ def _run_osv_subprocess(
         text=True,
         timeout=OSV_TIMEOUT_SECONDS,
         check=False,
+        env=subprocess_env,
     )
     return (
         findings_proc.returncode,
@@ -338,6 +397,7 @@ async def run_osv(
     original_paths: Dict[Path, str],
     *,
     scan_id: Optional[uuid.UUID] = None,
+    report_collector: Optional[Callable[[Any], None]] = None,
 ) -> Tuple[List[VulnerabilityFinding], Optional[Dict[str, Any]]]:
     """Run OSV-Scanner against the staged file tree.
 
@@ -362,13 +422,34 @@ async def run_osv(
     # not stamp it on findings (the worker graph attaches scan_id at
     # `save_findings` time).
     sid = scan_id or uuid.uuid4()
+    offline_snapshot = None
+    from app.infrastructure.scanners.osv_offline_replay import (
+        SNAPSHOT_ENV,
+        OfflineSnapshotError,
+        load_offline_snapshot,
+    )
+
+    if os.getenv(SNAPSHOT_ENV, "").strip():
+        try:
+            offline_snapshot = load_offline_snapshot()
+        except OfflineSnapshotError as exc:
+            logger.warning(
+                "scanner=osv configured offline snapshot rejected reason=%s",
+                exc.code,
+            )
+            return [], None
     with tempfile.TemporaryDirectory(prefix="osv-out-") as tmp:
         tmp_path = Path(tmp)
         bom_path = tmp_path / "bom.cyclonedx.json"
         json_path = tmp_path / "vulns.json"
         try:
             rc, _stdout, stderr = await asyncio.to_thread(
-                _run_osv_subprocess, osv_bin, staged_dir, bom_path, json_path
+                _run_osv_subprocess,
+                osv_bin,
+                staged_dir,
+                bom_path,
+                json_path,
+                offline_snapshot,
             )
         except subprocess.TimeoutExpired:
             logger.warning(
@@ -379,8 +460,23 @@ async def run_osv(
             logger.warning("scanner=osv subprocess error: %s", e)
             return [], None
 
+        if offline_snapshot is not None:
+            try:
+                verified_after = load_offline_snapshot(offline_snapshot.root)
+            except OfflineSnapshotError as exc:
+                logger.warning(
+                    "scanner=osv offline snapshot changed or failed after scan reason=%s",
+                    exc.code,
+                )
+                return [], None
+            if verified_after.database_sha256 != offline_snapshot.database_sha256:
+                logger.warning("scanner=osv offline snapshot changed during scan")
+                return [], None
+
         if rc not in (0, 1):
             logger.warning("scanner=osv exited rc=%d; stderr=%s", rc, stderr[:500])
+            if offline_snapshot is not None:
+                return [], None
             # Fall through and try to parse what we have anyway.
 
         bom: Optional[Dict[str, Any]] = None
@@ -393,17 +489,21 @@ async def run_osv(
                 bom = None
 
         findings: List[VulnerabilityFinding] = []
+        raw_report: Dict[str, Any] = {"results": []}
         if json_path.exists():
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
                     raw = json.load(f)
+                if isinstance(raw, dict):
+                    raw_report = raw
                 parsed = _OSVScanOutput.model_validate(raw)
             except (OSError, ValueError, ValidationError) as e:
                 logger.warning("scanner=osv could not parse findings JSON: %s", e)
                 parsed = _OSVScanOutput()
 
             for results in parsed.results:
-                source_path = (results.source or {}).get("path", "lockfile")
+                source_path = str((results.source or {}).get("path", "lockfile"))[:1024]
+                source_path = _original_source_path(source_path, original_paths)
                 # OSV nests vulns inside `packages[].vulnerabilities[]`.
                 for pkg_entry in results.packages:
                     for vuln in pkg_entry.vulnerabilities:
@@ -417,6 +517,9 @@ async def run_osv(
                             )
                             continue
 
+        if report_collector is not None:
+            report_collector(raw_report)
+
         bom = _truncate_bom(bom)
         logger.info(
             "scanner=osv scan_id=%s findings=%d bom_present=%s",
@@ -424,7 +527,4 @@ async def run_osv(
             len(findings),
             bom is not None,
         )
-        # original_paths kwarg unused for OSV (it's a whole-tree scanner,
-        # not file-routed); kept for parity with the registry signature.
-        del original_paths
         return findings, bom

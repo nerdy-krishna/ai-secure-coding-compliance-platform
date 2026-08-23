@@ -5,16 +5,14 @@ Hoisted out of `worker_graph.py` so the per-node modules under
 import cycle through `worker_graph.py` itself (G1 from the
 split-worker-graph threat model).
 
-Both `WorkerState` and `RelevantAgent` are re-exported from
-`worker_graph.py` for back-compat — historic callers (e.g.
-`workers/consumer.py`, the LangGraph checkpointer) keep importing
-from the original location.
+Callers import these state contracts directly rather than through the graph
+wiring module.
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, NotRequired, Optional, TypedDict
 
 from app.core.schemas import FixResult, VulnerabilityFinding
 
@@ -29,11 +27,12 @@ class WorkerState(TypedDict):
     """The two-tier (utility + reasoning) state for the worker workflow."""
 
     scan_id: uuid.UUID
+    attempt_id: Optional[uuid.UUID]
     scan_type: str
     current_scan_status: Optional[str]
     # The two LLM slots configured on the scan (#69). The reasoning slot
-    # drives analysis / consolidation / merge; the utility slot drives
-    # the profiler and fix-snippet verification. Slot resolution lives
+    # drives analysis / consolidation / patch-evidence judgement; the utility slot drives
+    # the profiler. Slot resolution lives
     # in `shared.lib.llm_slots`; utility falls back to reasoning when None.
     reasoning_llm_config_id: Optional[uuid.UUID]
     utility_llm_config_id: Optional[uuid.UUID]
@@ -43,8 +42,9 @@ class WorkerState(TypedDict):
     # single-LLM analysis. Set from `Scan.secondary_reasoning_llm_config_id`
     # by `retrieve`.
     secondary_reasoning_llm_config_id: Optional[uuid.UUID]
-    # Per-stage LLM temperature map ({profiler, analysis, consolidation,
-    # merge} → float) chosen at submit time (#78). `resolve_temperature`
+    # Per-stage LLM temperature map ({profiler, analysis, consolidation}
+    # → float) chosen at submit time (#78). Patch-evidence re-analysis inherits
+    # the consolidation value. `resolve_temperature`
     # falls back to 0.2 per stage when a stage or the map is missing.
     stage_temperatures: Optional[Dict[str, Any]]
     # Opt-in (#92 / PRD #91): when true, `resolve_temperature` returns
@@ -79,13 +79,21 @@ class WorkerState(TypedDict):
     # `approved: bool`. Populated only between the interrupt return and
     # the next route.
     profiling_approval: Optional[Dict[str, Any]]
+    # Decision payload returned by the full-analysis cost interrupt.
+    cost_approval: Optional[Dict[str, Any]]
     all_relevant_agents: Dict[str, RelevantAgent]
     live_codebase: Optional[Dict[str, str]]
     findings: List[VulnerabilityFinding]
-    # Raw per-agent fix proposals collected by analyze_files_parallel_node and
-    # consumed by consolidate_and_patch_node. Carries (finding, suggestion)
-    # pairs before correlation; the correlated findings live in `findings`.
-    proposed_fixes: Optional[List[FixResult]]
+    # Governed per-agent patch candidates. Consolidation stamps the surviving
+    # canonical finding, disposition, and decision reason before remediation
+    # is allowed to consume a candidate.
+    fix_candidates: Optional[List[FixResult]]
+    # Exact raw -> canonical consolidation decisions. Unlike the timeline
+    # event projection, this state contract is updated by global consolidation.
+    finding_lineage: Optional[List[Dict[str, Any]]]
+    # Versioned deterministic range/hunk plan for SUGGEST and REMEDIATE.
+    patch_plan: Optional[Dict[str, Any]]
+    patch_validation_summary: Optional[Dict[str, Any]]
     agent_results: Optional[List[Dict[str, Any]]]
     # CycloneDX SBOM produced by `osv_runner` during the deterministic
     # prescan. Persisted to `Scan.bom_cyclonedx` on completion. May be
@@ -95,6 +103,9 @@ class WorkerState(TypedDict):
     # carries `approved: bool` and `override_critical_secret: bool`.
     # Populated only between the interrupt return and the next route.
     prescan_approval: Optional[Dict[str, Any]]
+    # Current durable HITL gate identity. Replaced for each gate occurrence;
+    # queue payloads and interrupt returns must match its gate_id.
+    active_approval_gate: NotRequired[Optional[Dict[str, Any]]]
     # Number of resume attempts on the prescan-approval interrupt; capped at 3
     # by `_route_after_prescan_approval` to prevent loop-back denial of service.
     resume_attempts: Optional[int]
@@ -102,3 +113,7 @@ class WorkerState(TypedDict):
     # Analysis batch number — incremented on each restart/resume so
     # multiple generations of findings can coexist in the DB.
     _batch: int
+    # Exact graph-node completion order, persisted atomically in the LangGraph
+    # checkpoint by `cancellation_aware`. Manual resume uses the same thread;
+    # manual restart deletes the thread before starting a clean run.
+    completed_stages: NotRequired[List[str]]

@@ -37,6 +37,39 @@ export interface ScanFindingsDebug {
   full_sankey_links?: Array<{ source: string; target: string; value: number }> | null;
 }
 
+export interface FindingFixCandidate {
+  candidate_id: string;
+  raw_finding_id: string;
+  canonical_finding_id?: string | null;
+  source_snapshot_hash: string;
+  anchor_fingerprint: string;
+  patch_fingerprint: string;
+  resolved_range?: {
+    start_byte: number; end_byte: number;
+    start_line: number; start_column: number;
+    end_line: number; end_column: number;
+  } | null;
+  context_fingerprint?: string | null;
+  patch_hunk_id?: string | null;
+  applicability_status: string;
+  language?: string | null;
+  symbol?: string | null;
+  required_imports: string[];
+  required_dependencies: string[];
+  configuration_changes: string[];
+  migration_changes: string[];
+  manual_steps: string[];
+  file_path: string;
+  line_number: number;
+  suggestion: { description?: string; original_snippet?: string; code?: string };
+  disposition: "pending" | "selected" | "alternative" | "duplicate" | "conflict" | "rejected";
+  decision_reason?: string | null;
+  contributing_agents: string[];
+  contributing_models: string[];
+  validation_status: "not_run" | "passed" | "failed";
+  is_applied: boolean;
+}
+
 export const debugService = {
   getFindingsDebug: async (scanId: string): Promise<ScanFindingsDebug> => {
     const { data } = await apiClient.get<ScanFindingsDebug>(
@@ -61,6 +94,7 @@ export const debugService = {
     lineage_quality: string;
     warnings: string[];
     available_expansions: Record<string, number>;
+    fix_candidates: FindingFixCandidate[];
   }> => {
     const { data } = await apiClient.post(
       `/scans/${encodeURIComponent(scanId)}/finding-lineage`,

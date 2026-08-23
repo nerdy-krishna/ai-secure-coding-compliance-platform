@@ -20,7 +20,6 @@ from typing import Any, Dict, List, cast
 import networkx as nx
 
 from app.core.schemas import (
-    CodeChunk,
     FixResult,
     SpecializedAgentState,
     VulnerabilityFinding,
@@ -30,9 +29,13 @@ from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.agents.generic_specialized_agent import (
     build_generic_specialized_agent_graph,
 )
-from app.infrastructure.workflows.nodes.cost import CHUNK_ONLY_IF_LARGER_THAN
 from app.infrastructure.workflows.state import WorkerState
-from app.shared.analysis_tools.chunker import semantic_chunker
+from app.shared.lib.analysis_envelope import (
+    build_analysis_usage_unit_key,
+    build_code_chunks,
+    build_dependency_summary,
+    build_enriched_code,
+)
 from app.shared.lib.agent_routing import resolve_agents_for_file
 from app.shared.lib.file_classification import should_skip_llm_analysis
 from app.shared.lib.analysis_dispatch import (
@@ -81,21 +84,6 @@ def _deserialise_agent_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         "fixes": [FixResult.model_validate(item) for item in payload.get("fixes", [])],
         "__reused": True,
     }
-
-
-def _number_lines(code: str, start_line: int) -> str:
-    """Prefix each line with its 1-based *file* line number (`NNN| `).
-
-    The agent sees accurate file-relative line numbers — even for a
-    chunk drawn from the middle of a large file — so the `line_number`
-    it reports is a real anchor and the `vulnerable_snippet` it copies
-    can be located precisely. The prompt tells it to drop the prefix.
-    """
-    lines = code.split("\n")
-    width = len(str(start_line + len(lines) - 1))
-    return "\n".join(
-        f"{start_line + i:>{width}}| {line}" for i, line in enumerate(lines)
-    )
 
 
 async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
@@ -216,49 +204,6 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     except Exception as _e:  # noqa: BLE001
         logger.warning("analyze: lane config-name lookup failed: %s", _e)
 
-    def build_dep_summary(file_path: str) -> str:
-        """Per-file dependency context. Pure read from repository_map; safe to
-        compute concurrently across files."""
-        if file_path not in dependency_graph:
-            return ""
-        dep_parts: List[str] = []
-        for dep_path in dependency_graph.successors(file_path):
-            dep_file_summary = repository_map.files.get(dep_path)
-            if dep_file_summary and dep_file_summary.symbols:
-                symbol_sigs = [
-                    f"  - {s.type} {s.name} (line {s.line_number})"
-                    for s in dep_file_summary.symbols[:15]
-                ]
-                dep_parts.append(f"# File: {dep_path}\n" + "\n".join(symbol_sigs))
-        if not dep_parts:
-            return ""
-        return (
-            "# --- [DEPENDENCY CONTEXT: symbols from imported files] ---\n"
-            + "\n".join(dep_parts)
-            + "\n# --- [END DEPENDENCY CONTEXT] ---\n\n"
-        )
-
-    def chunk_file(file_path: str, file_content: str) -> List[CodeChunk]:
-        file_summary = repository_map.files.get(file_path)
-        if not file_summary:
-            return []
-        token_count = len(file_content) / 4
-        if token_count > CHUNK_ONLY_IF_LARGER_THAN:
-            logger.info(
-                "%s is a large file, applying chunking.",
-                file_path,
-                extra={"scan_id": str(scan_id)},
-            )
-            return semantic_chunker(file_content, file_summary)
-        return [
-            {
-                "symbol_name": file_path,
-                "code": file_content,
-                "start_line": 1,
-                "end_line": len(file_content.splitlines()),
-            }
-        ]
-
     async def run_agent_with_sem(pool_key, build_coro):
         async with semaphores[pool_key]:
             return await build_coro()
@@ -275,7 +220,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             )
             return {"findings": [], "fixes": [], "agent_calls": 0, "agent_failures": 0}
 
-        chunks = chunk_file(file_path, file_content)
+        chunks = build_code_chunks(file_path, file_content, repository_map)
         if not chunks:
             logger.warning(
                 "analyze: skipping file — no chunks produced",
@@ -394,7 +339,9 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             },
         )
 
-        dep_summary = build_dep_summary(file_path)
+        dep_summary = build_dependency_summary(
+            file_path, dependency_graph, repository_map
+        )
 
         file_findings: List[VulnerabilityFinding] = []
         file_fixes: List[FixResult] = []
@@ -425,17 +372,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             # dep_summary is kept as a separate, un-numbered context block
             # so the agent never confuses dependency context with the
             # file it must report line numbers and snippets against.
-            numbered_code = _number_lines(chunk["code"], chunk["start_line"])
-            code_under_review = (
-                "=== CODE UNDER REVIEW "
-                "(line-numbered; copy snippets WITHOUT the 'NNN| ' prefix) ===\n"
-                f"{numbered_code}"
-            )
-            enriched_code = (
-                f"{dep_summary}\n{code_under_review}"
-                if dep_summary
-                else code_under_review
-            )
+            enriched_code = build_enriched_code(chunk, dep_summary)
             # Dual-LLM dispatch (#93): expand the routed agents across
             # the reasoning lane(s). One lane → today's behaviour; two
             # lanes → every agent runs once per reasoning LLM, each on
@@ -443,11 +380,25 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             specs = plan_agent_invocations(relevant_agents, lanes)
             tasks = []
             for spec in specs:
+                agent_name_for_key = str(spec.agent.get("name", "agent"))
+                task_key = build_analysis_usage_unit_key(
+                    file_path=file_path,
+                    chunk_index=chunk_idx,
+                    start_line=chunk["start_line"],
+                    end_line=chunk["end_line"],
+                    agent_name=agent_name_for_key,
+                    lane=spec.lane.lane,
+                    llm_config_id=spec.lane.config_id,
+                )
                 initial_agent_state: SpecializedAgentState = {
                     "scan_id": scan_id,
                     "llm_config_id": spec.lane.config_id,
                     "temperature": spec.lane.temperature,
                     "filename": file_path,
+                    "usage_unit_key": task_key,
+                    "source_snapshot_hash": (state.get("initial_file_map") or {}).get(
+                        file_path, _stable_hash(file_content)
+                    ),
                     "code_snippet": enriched_code,
                     "file_content_for_verification": file_content,
                     "workflow_mode": (
@@ -460,12 +411,6 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                     "error": None,
                     "prescan_findings_for_file": per_file_scanner_findings,
                 }
-                agent_name_for_key = str(spec.agent.get("name", "agent"))
-                task_key = (
-                    f"{file_path}::chunk:{chunk_idx}:{chunk['start_line']}-{chunk['end_line']}"
-                    f"::agent:{agent_name_for_key}::lane:{spec.lane.lane}"
-                    f"::llm:{spec.lane.config_id}"
-                )
                 task_input_payload = {
                     "file_path": file_path,
                     "chunk_index": chunk_idx,
@@ -648,6 +593,9 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
                     )
                     for finding in agent_findings:
                         finding.detected_by_llms = [llm_name]
+                    for candidate in r.get("fixes", []) or []:
+                        candidate.contributing_models = [llm_name]
+                        candidate.finding.detected_by_llms = [llm_name]
                 file_findings.extend(agent_findings)
                 # The agent returns `fixes` as a separate list of FixResult
                 # objects; collect them directly for the terminal consolidation.
@@ -714,7 +662,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     file_results = await asyncio.gather(*file_tasks, return_exceptions=True)
 
     all_scan_findings: List[VulnerabilityFinding] = []
-    all_proposed_fixes: List[FixResult] = []
+    all_fix_candidates: List[FixResult] = []
     # Per-lane totals aggregated across files (#93).
     lane_calls: Dict[str, int] = {}
     lane_failures: Dict[str, int] = {}
@@ -734,7 +682,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
             )
             continue
         all_scan_findings.extend(r.get("findings", []))
-        all_proposed_fixes.extend(r.get("fixes", []))
+        all_fix_candidates.extend(r.get("fixes", []))
         for _lane, _n in (r.get("lane_calls") or {}).items():
             lane_calls[_lane] = lane_calls.get(_lane, 0) + int(_n)
         for _lane, _n in (r.get("lane_failures") or {}).items():
@@ -761,7 +709,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         scan_id,
         len(all_scan_findings),
         len(prior_findings),
-        len(all_proposed_fixes),
+        len(all_fix_candidates),
         total_agent_calls,
         total_agent_failures,
         failed_file_tasks,
@@ -784,7 +732,11 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         for lane_name, errs in sorted(all_lane_errors.items()):
             for err_msg in list(errs)[:1]:  # first error per lane
                 error_lines.append(f"[{lane_name}] {err_msg}")
-        detail = "\n".join(error_lines) if error_lines else "No error details captured from agents."
+        detail = (
+            "\n".join(error_lines)
+            if error_lines
+            else "No error details captured from agents."
+        )
         logger.error(
             "analyze: every agent invocation failed — marking scan FAILED",
             extra={
@@ -796,7 +748,7 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
         )
         return {
             "findings": prior_findings,
-            "proposed_fixes": [],
+            "fix_candidates": [],
             "error_message": (
                 f"Analyze stage failed: all {total_agent_calls} agent "
                 f"invocations errored across {len(file_results)} file(s).\n{detail}"
@@ -877,5 +829,5 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
 
     return {
         "findings": prior_findings + all_scan_findings,
-        "proposed_fixes": all_proposed_fixes,
+        "fix_candidates": all_fix_candidates,
     }

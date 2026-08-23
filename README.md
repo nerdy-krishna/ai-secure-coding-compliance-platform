@@ -46,10 +46,11 @@ separate, opt-in step.
 - **Downloadable findings report** — export any scan's findings as a
   self-contained HTML page, a CSV (one row per finding), a paginated PDF,
   or SARIF 2.1.0 for GitHub code scanning, straight from the Results page.
-- **Intelligent remediation** — pick findings, let the multi-agent
-  system generate code fixes, and download the patched codebase as a
-  zip. Remediation runs incrementally with a merge agent to resolve
-  file conflicts.
+- **Remediation scan mode** — choose `REMEDIATE` when submitting a
+  scan to have agents generate fixes during analysis, merge conflicting
+  edits, verify supported patches, and produce a downloadable patched
+  snapshot. Post-result selection and incremental apply are not yet
+  implemented.
 - **Projects page with per-project stats** — every card shows the
   latest terminal scan's risk score, severity bar, and fixes-ready
   count, no client-side heuristics.
@@ -65,7 +66,7 @@ separate, opt-in step.
   Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) plus any custom
   frameworks, with an AI-computed posture score.
 - **Multi-provider LLM support** — OpenAI, Anthropic, Google, DeepSeek,
-  and xAI. Each scan is configured with two slots: a *utility* (cheap)
+  xAI, and custom OpenAI-compatible endpoints. Each scan is configured with two slots: a *utility* (cheap)
   model for profiling and verification, and a *reasoning* (capable)
   model for analysis and consolidation, plus a per-stage temperature
   (profiler / analysis / consolidation / merge) tunable at submit
@@ -89,12 +90,11 @@ separate, opt-in step.
   agent routing by default while keeping cheap SAST checks active.
   An advanced **deep vendor scan** option gives full LLM inspection
   when needed, reflected in cost and time estimates.
-- **Adaptive concurrency & per-config rate limits** — scan LLM
-  concurrency adjusts dynamically based on rolling-window wait time
-  and error signals, respecting per-LLM-configuration RPM/TPM
-  budgets and prompt-size caps. Prompt-size guardrails split or
-  compact oversized prompts before the LLM call and skip impossible
-  ones with a coverage warning instead of failing the scan.
+- **Per-config resilience controls** — scan LLM calls use a fixed
+  concurrency pool per configuration, per-config RPM/TPM budgets,
+  retry with jitter, and circuit breakers. Configured prompt-size caps
+  reject oversized calls; automatic prompt splitting/compaction is
+  planned rather than implemented.
 
 ### For security admins
 - **User Groups + scoped visibility** — an admin creates groups and
@@ -171,9 +171,9 @@ separate, opt-in step.
 6. **Approve** (or cancel) each gate in the UI. A live SSE stream
    surfaces estimates and reconnects through token expiry; the worker
    resumes the same LangGraph thread from the checkpoint.
-7. **Analyze** — specialized agents run in parallel under adaptive
-   per-LLM-concurrency control, bound by per-config RPM/TPM rate
-   limits and prompt-size guardrails. Each analysis invocation is a
+7. **Analyze** — specialized agents run in parallel under a fixed
+   per-LLM-configuration concurrency pool, bound by per-config RPM/TPM
+   limits and circuit breakers. Each analysis invocation is a
    **durable task** persisted in a scan-scoped task ledger — if the
    worker is interrupted, completed analysis chunks are reused on
    resume rather than re-invoked. If a second reasoning LLM was
@@ -183,11 +183,10 @@ separate, opt-in step.
    issue and drops false positives and noise. Each finding records
    which reasoning LLM(s) detected it. Per-file consolidation is also
    a durable task, reusable on resume.
-9. **Global consolidation** — a deterministic pre-clustering pass
-   identifies cross-file same-root findings (e.g. a missing CSP header
-   across multiple templates) and merges them into one multi-file
-   finding with affected locations on every file, keeping the primary
-   file path for backward compatibility.
+9. **Global consolidation** — deterministic exact-field grouping
+   merges cross-file findings that share normalized source, CWE, title,
+   and remediation. Broader LLM-assisted root-cause clustering is not
+   yet implemented.
 10. **Cross-file validation (opt-in)** — if enabled at submit, each
     eligible finding is re-judged against its cross-file callers and
     inputs, attaching a non-destructive `confirmed` / `mitigated` /
@@ -195,8 +194,8 @@ separate, opt-in step.
 11. **Review** findings in the Results page — both deterministic and
     LLM-emitted, tagged by source — and download the report as HTML,
     CSV, PDF, or SARIF 2.1.0.
-12. **Remediate** — select findings, apply fixes incrementally with a
-    merge agent to resolve conflicts, then download the patched tree.
+12. **Remediate** — scans submitted in `REMEDIATE` mode merge generated
+    fixes, verify supported patches, and save a patched tree for download.
 13. **Resume or restart** — failed scans (and eligible cancelled scans
     with durable artifacts) can be manually resumed (reuses completed
     durable work) or restarted (discards partial artifacts, reruns
@@ -221,7 +220,20 @@ which **installation variant** to use, writes `.env` (including
 `SCCAP_VARIANT` and `COMPOSE_PROFILES`), builds + starts the compose
 stack, and runs Alembic migrations. The UI is built inside its Docker
 image — Node.js is not a host prerequisite. On Windows, run `setup.bat`
-from the project root.
+from the project root. Re-running either installer after an upgrade preserves
+every non-placeholder secret and safely adds newly required values.
+
+For a non-interactive upgrade, repair the existing file before the first
+Compose command:
+
+```bash
+python3 scripts/bootstrap_env_secrets.py --env-file .env
+docker compose config --quiet
+```
+
+The bootstrap writes `.env` atomically, applies mode `0600` where POSIX modes
+are available, and reports only how many values changed; it never prints
+generated values.
 
 ### Installation variants
 
@@ -276,7 +288,7 @@ Python 3.12 + FastAPI + Poetry · SQLAlchemy async + Alembic ·
 LangGraph 1.x + LangChain 1.x · LiteLLM · Pydantic AI · FastMCP ·
 WeasyPrint (PDF reports) · fastapi-users (JWT Bearer) · Postgres 16 ·
 RabbitMQ · Qdrant (fastembed `all-MiniLM-L6-v2`) · Fluentd → Loki →
-Grafana · React 18 + Vite + TypeScript · Ant Design · TanStack Query ·
+Grafana · React 18 + Vite + TypeScript · custom SCCAP UI primitives · TanStack Query ·
 React Router v7.
 
 Full breakdown in

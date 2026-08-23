@@ -4,7 +4,7 @@ import re
 import uuid
 import tiktoken
 from typing import List, Optional, Tuple
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,10 @@ from app.infrastructure.database.repositories.prompt_template_repo import (
     PromptTemplateRepository,
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMUsageContext,
+    build_usage_idempotency_key,
+)
 from app.infrastructure.database import AsyncSessionLocal as async_session_factory
 from app.infrastructure.llm_client import get_llm_client
 from app.infrastructure.observability.mask import mask as redact_secrets
@@ -96,8 +100,26 @@ class ChatAgent:
         )
         prompt = f"Concisely summarize the key points of the following conversation in a single paragraph:\n\n{conversation_text}"
 
+        first_message_id = history_to_summarize[0].id
+        last_message_id = history_to_summarize[-1].id
         llm_response = await llm_client.generate_structured_output(
-            prompt, SummaryResponse
+            prompt,
+            SummaryResponse,
+            usage_context=LLMUsageContext(
+                operation_kind="chat",
+                operation_id=str(session_id),
+                stage="history_summarization",
+                agent_name=SUMMARIZER_AGENT_NAME,
+                idempotency_key=build_usage_idempotency_key(
+                    operation_kind="chat",
+                    operation_id=session_id,
+                    stage="history_summarization",
+                    agent_name=SUMMARIZER_AGENT_NAME,
+                    unit_key=f"{first_message_id}:{last_message_id}",
+                    llm_config_id=llm_config_id,
+                ),
+                chat_session_id=session_id,
+            ),
         )
 
         if llm_response.error or not isinstance(
@@ -127,6 +149,7 @@ class ChatAgent:
         llm_config_id: Optional[uuid.UUID],
         user_id: int,
         frameworks: Optional[List[str]] = None,
+        usage_operation_id: Optional[uuid.UUID] = None,
     ) -> Tuple[str, Optional[int], Optional[float]]:
         """
         Generates a context-aware response, applying summarization if needed.
@@ -250,11 +273,17 @@ class ChatAgent:
             base_prompt = template_obj.template_text
 
         # 5. Build final prompt
-        history.append(
-            db_models.ChatMessage(
-                role="user", content=user_question, timestamp=datetime.now(timezone.utc)
+        # ChatService persists the user message before invoking the agent. Do
+        # not append the same question a second time. One-shot channels supply
+        # no history, so create an in-memory message only for prompt rendering.
+        if not history:
+            history.append(
+                db_models.ChatMessage(
+                    role="user",
+                    content=user_question,
+                    timestamp=datetime.now(timezone.utc),
+                )
             )
-        )
         history_str = redact_secrets(
             "\n".join([f"{msg.role}: {msg.content}" for msg in history])
         )
@@ -276,8 +305,28 @@ class ChatAgent:
         )
 
         # 6. Generate final response
+        operation_id = usage_operation_id or session_id
+        latest_message_id = getattr(history[-1], "id", None)
+        unit_key = str(latest_message_id or "one-shot")
         llm_response = await llm_client.generate_structured_output(
-            final_prompt, ChatResponse
+            final_prompt,
+            ChatResponse,
+            usage_context=LLMUsageContext(
+                operation_kind="chat",
+                operation_id=str(operation_id),
+                stage="advisor_response",
+                agent_name=AGENT_NAME,
+                idempotency_key=build_usage_idempotency_key(
+                    operation_kind="chat",
+                    operation_id=operation_id,
+                    stage="advisor_response",
+                    agent_name=AGENT_NAME,
+                    unit_key=unit_key,
+                    llm_config_id=effective_llm_config_id,
+                ),
+                chat_session_id=None if usage_operation_id else session_id,
+                actor_user_id=user_id if usage_operation_id else None,
+            ),
         )
 
         ai_response_content = (
@@ -307,6 +356,8 @@ class ChatAgent:
             )  # ScanRepo has the generic save_llm_interaction method
             interaction = LLMInteraction(
                 agent_name=AGENT_NAME,
+                usage_event_id=llm_response.usage_event_id,
+                llm_config_id=effective_llm_config_id,
                 prompt_template_name=CHAT_PROMPT_TEMPLATE_NAME,
                 prompt_context={
                     "question_length": len(user_question),
@@ -326,24 +377,9 @@ class ChatAgent:
                 output_tokens=llm_response.completion_tokens,
                 total_tokens=llm_response.total_tokens,
             )
-            # V14.2.7 — stamp retention expiry from the cached config.
-            from app.core.config_cache import (
-                RETENTION_KIND_LLM_INTERACTION,
-                SystemConfigCache,
+            db_interaction = await repo.save_llm_interaction(
+                interaction_data=interaction
             )
-
-            _retention_days = SystemConfigCache.get_retention_days(
-                RETENTION_KIND_LLM_INTERACTION
-            )
-            _payload = interaction.model_dump()
-            if _retention_days > 0:
-                _payload["expires_at"] = datetime.now(timezone.utc) + timedelta(
-                    days=_retention_days
-                )
-            db_interaction = db_models.LLMInteraction(**_payload)
-            db.add(db_interaction)
-            await db.commit()
-            await db.refresh(db_interaction)
             llm_interaction_id = db_interaction.id
 
         return ai_response_content, llm_interaction_id, llm_response.cost

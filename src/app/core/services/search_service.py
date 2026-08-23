@@ -104,8 +104,8 @@ class SearchService:
             scope_project_col = self._scope(db_models.Project.user_id, visible_user_ids)
 
             # Per-tenant scope predicates anchored on the table the search
-            # subquery pulls from. Tenant filter follows the same NULL-or-
-            # match convention as ``shared.lib.tenant_scope``.
+            # subquery pulls from. Tenant filter follows the repository-wide
+            # NULL-or-match convention used during tenant migration.
             tenant_scan_col = self._tenant_scope(db_models.Scan.tenant_id, tenant_id)
             tenant_project_col = self._tenant_scope(
                 db_models.Project.tenant_id, tenant_id

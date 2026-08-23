@@ -29,9 +29,11 @@ async def handle_error_node(state: WorkerState) -> Dict[str, Any]:
     try:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
-            await repo.update_status(scan_id, STATUS_FAILED)
-            # Persist the human-readable error so the API can surface it.
-            await repo.set_error_message(scan_id, error)
+            changed = await repo.update_status(scan_id, STATUS_FAILED, commit=False)
+            # A concurrent user cancellation remains authoritative and must
+            # not acquire a misleading workflow-failure message.
+            if changed:
+                await repo.set_error_message(scan_id, error)
             await db.commit()
     except Exception as e:
         logger.exception(

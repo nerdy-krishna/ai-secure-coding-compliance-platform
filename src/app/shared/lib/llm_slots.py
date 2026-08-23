@@ -6,9 +6,9 @@ graph belongs to exactly one slot; this module is the single source of
 truth for that mapping so no node hard-codes a config id.
 
 The reasoning slot drives the work where model quality matters —
-per-file analysis, finding consolidation, and the remediation merge
-agent. The utility slot drives the cheap, mechanical steps — the
-per-file profiler (#71) and fix-snippet verification.
+per-file analysis, finding consolidation, and evidence-scoped verification of
+LLM-originated fixes. The utility slot drives the per-file profiler (#71).
+Patch planning, syntax checks, and native scanner replay remain deterministic.
 
 `resolve_llm_config_id` falls back to the reasoning config when the
 utility slot is unset (legacy scans, or a submit that omitted it), so
@@ -34,9 +34,8 @@ class LLMStep(str, Enum):
 
     ANALYSIS = "analysis"
     CONSOLIDATION = "consolidation"
-    MERGE_AGENT = "merge_agent"
+    PATCH_EVIDENCE = "patch_evidence"
     PROFILER = "profiler"
-    FIX_VERIFICATION = "fix_verification"
 
 
 # Fixed step → slot mapping. Reasoning for quality-sensitive work,
@@ -44,9 +43,8 @@ class LLMStep(str, Enum):
 _STEP_TO_SLOT: dict[LLMStep, LLMSlot] = {
     LLMStep.ANALYSIS: LLMSlot.REASONING,
     LLMStep.CONSOLIDATION: LLMSlot.REASONING,
-    LLMStep.MERGE_AGENT: LLMSlot.REASONING,
+    LLMStep.PATCH_EVIDENCE: LLMSlot.REASONING,
     LLMStep.PROFILER: LLMSlot.UTILITY,
-    LLMStep.FIX_VERIFICATION: LLMSlot.UTILITY,
 }
 
 
@@ -59,13 +57,13 @@ def slot_for_step(step: LLMStep) -> LLMSlot:
 DEFAULT_TEMPERATURE: float = 0.2
 
 # Maps an LLM step to its key in the scan's `stage_temperatures` map.
-# FIX_VERIFICATION is a tree-sitter parse check, not an LLM call — it
-# has no temperature key and resolves to the default.
 _STEP_TO_TEMP_KEY: dict[LLMStep, str] = {
     LLMStep.PROFILER: "profiler",
     LLMStep.ANALYSIS: "analysis",
     LLMStep.CONSOLIDATION: "consolidation",
-    LLMStep.MERGE_AGENT: "merge",
+    # Patch evidence is another security judgement over existing findings and
+    # therefore deliberately inherits the consolidation temperature control.
+    LLMStep.PATCH_EVIDENCE: "consolidation",
 }
 
 
@@ -148,7 +146,7 @@ def resolve_secondary_reasoning_llm_config_id(
     Returns ``None`` when the scan didn't opt into a second reasoning
     LLM — analysis then runs single-pass on the primary reasoning
     config, exactly as before. The second LLM is confined to the
-    analysis step; consolidation / merge / profiler keep resolving
-    through `resolve_llm_config_id`.
+    analysis step; consolidation and profiling keep resolving through
+    `resolve_llm_config_id`.
     """
     return state.get("secondary_reasoning_llm_config_id")

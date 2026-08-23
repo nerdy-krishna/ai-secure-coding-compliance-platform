@@ -5,11 +5,9 @@ title: Managing Findings
 
 # Managing Findings
 
-Once a scan reaches `COMPLETED`, the Results page surfaces findings
-that are candidates for remediation. SCCAP supports selective,
-incremental fix application — you control which findings are
-applied, and a merge agent resolves conflicts between overlapping
-fixes.
+Once a scan reaches `COMPLETED`, the Results page surfaces the final
+consolidated findings. Operators can triage findings individually or in
+bulk; remediation itself is selected when the scan is submitted.
 
 ## Suggested fixes
 
@@ -19,13 +17,26 @@ the fix renders as an inline before/after diff; **Expand** opens it
 full-screen. A `SUGGEST` scan is **advisory** — it shows the fix so
 you can review and apply it yourself; it does not mutate your code.
 
+The header's **Patch plan** download contains the immutable JSON plan:
+source hashes, exact resolved ranges, unified diffs, stable hunk IDs,
+candidate-to-hunk lineage, requirements, and every rejected/manual-review
+decision. It is available for both SUGGEST and REMEDIATE.
+
 ## Getting fixes applied
 
-SCCAP applies fixes only on a **`REMEDIATE`** scan. There, the worker
-graph merges the per-finding fixes, syntax-verifies them with
-tree-sitter, and writes a patched `POST_REMEDIATION` code snapshot —
-the single verified remediation path. To have a codebase patched,
-submit it (or re-submit it) with `scan_type=REMEDIATE`.
+SCCAP applies fixes only on a **`REMEDIATE`** scan. The worker resolves each
+candidate against the exact original source hash and byte range. Ambiguous
+anchors and transitively overlapping edits are retained for manual review;
+disjoint edits apply atomically in descending byte order. A whole-file
+tree-sitter failure rolls back that file. Accepted files become a patched
+`POST_REMEDIATION` code snapshot. To have a codebase patched, submit it (or
+re-submit it) with `scan_type=REMEDIATE`.
+
+The patch plan distinguishes a failed parser from a missing tool, skipped or
+not-run validation, timeout, and infrastructure error. None of those states is
+displayed as a successful check. Semgrep verification follows the exact native
+rule at the resolved patch site rather than treating any same-CWE finding in
+the file as the original issue.
 
 ## Downloading the patched tree
 
@@ -35,18 +46,29 @@ When the remediation run completes, the header gains a
 Diff the zip contents against your working copy to review what
 changed.
 
-## Dismissing / suppressing findings
+## Triaging findings
 
-SCCAP treats every finding as "open" unless a remediation applied
-the associated fix. There is no dedicated "dismiss" state in this
-release — false positives stay in the result. Two workarounds:
+Every finding starts as **Open**. From the Results page, a user who can
+view the scan can move it to:
 
-- Re-run the scan against a narrower file set to exclude the
-  problematic area.
-- Rely on the finding's confidence score during triage.
+- **Confirmed** — a reviewed vulnerability that still contributes to risk.
+- **False positive** — excluded from risk; a justification is required.
+- **Remediated** — excluded from risk after the fix is dealt with.
+- **Risk accepted** — excluded from risk; a justification is required.
 
-Formal finding lifecycle (acknowledged / dismissed / suppressed) is
-on the [roadmap](../../roadmap.md).
+The same action can be applied to a selected group of findings. Every
+change records the actor, timestamp, previous state, new state, and note
+in an append-only disposition history. Re-triage is allowed, including
+moving a regressed fix back to Open.
+
+Superusers can delete a disposition, which resets the finding to Open
+and permanently removes that finding's disposition history. This is
+different from an ordinary re-triage transition and should be used
+sparingly.
+
+Risk totals and dashboards count Open and Confirmed findings. False
+Positive, Remediated, and Risk Accepted findings remain visible in the
+results and exported reports but do not contribute to risk calculations.
 
 ## Re-scanning after a fix
 
@@ -58,6 +80,5 @@ previous run; the trend delta is visible on the card.
 
 ## Admin visibility
 
-When scoped visibility is set up (H.2 user groups), any admin or
-group peer can see the findings and remediation results of a scan
-they can see.
+Visibility follows the scan's user/group scope. A user who can view the
+scan can triage it; only a superuser can delete disposition history.

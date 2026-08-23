@@ -32,7 +32,13 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from app.infrastructure.database import AsyncSessionLocal as async_session_factory
 from app.infrastructure.database.models import LLMConfiguration as DB_LLMConfiguration
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
+from app.infrastructure.database.repositories.llm_usage_repo import LLMUsageContext
 from app.infrastructure.llm_client_rate_limiter import get_rate_limiter_for_config
+from app.infrastructure.llm_usage_capture import (
+    build_request_writes,
+    load_active_price_override,
+    record_run_usage,
+)
 from app.infrastructure.observability import get_langfuse, mask
 from app.shared.lib import cost_estimation
 from app.shared.lib.circuit_breaker import call as circuit_breaker_call
@@ -54,6 +60,11 @@ class AgentLLMResult(NamedTuple):
     latency_ms: Optional[int]
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
+    usage_event_id: Optional[uuid.UUID] = None
+    # True only when this provider response created the canonical logical-call
+    # event.  Consumers that persist a structured audit projection use this to
+    # reject a concurrently generated response that lost the idempotency race.
+    usage_event_created: bool = False
 
 
 # How many auto-retries Pydantic AI gets to recover a Pydantic-validation
@@ -204,6 +215,8 @@ class LLMClient:
         prompt: str,
         response_model: Type[T],
         system_prompt: Optional[str] = None,
+        *,
+        usage_context: LLMUsageContext,
     ) -> AgentLLMResult:
         """Run `prompt` through the configured LLM and validate the
         response against `response_model`. Pydantic AI automatically
@@ -213,6 +226,35 @@ class LLMClient:
         Returns an `AgentLLMResult` even on failure — callers branch on
         `result.parsed_output` / `result.error`.
         """
+
+        async def _emit_llm_activity(
+            stage_name: str, event_status: str, details: dict[str, Any]
+        ) -> None:
+            if usage_context.scan_id is None:
+                return
+            try:
+                from app.infrastructure.database import AsyncSessionLocal
+                from app.infrastructure.database.repositories.scan_repo import (
+                    ScanRepository,
+                )
+
+                async with AsyncSessionLocal() as event_db:
+                    await ScanRepository(event_db).create_scan_event(
+                        usage_context.scan_id,
+                        stage_name,
+                        event_status,
+                        details=details,
+                        activity_kind=(
+                            "retry" if event_status == "RETRYING" else "llm_call"
+                        ),
+                    )
+            except Exception:
+                logger.warning(
+                    "llm activity event persistence failed",
+                    extra={"scan_id": str(usage_context.scan_id)},
+                    exc_info=True,
+                )
+
         logger.info(
             "Entering LLM structured output generation.",
             extra={
@@ -254,6 +296,11 @@ class LLMClient:
                     latency_ms=0,
                 )
 
+        # Freeze the effective admin price version before the provider request.
+        # An operator edit during a long-running call applies only to later calls.
+        effective_price_override = await load_active_price_override(
+            self.db_llm_config.id
+        )
         model = self._build_model()
         model_key = f"{self.provider_name}:{self.db_llm_config.model_name}"
         circuit_key = str(getattr(self.db_llm_config, "id", model_key))
@@ -301,6 +348,7 @@ class LLMClient:
         completion_tokens: int = 0
         cache_write_tokens: int = 0
         cache_read_tokens: int = 0
+        captured_run_result: Any = None
 
         # Langfuse cost reporting is owned by THIS span (recorded onto
         # `cost_details` after the call). Cost source of truth remains
@@ -329,6 +377,8 @@ class LLMClient:
             """Pull the parsed output + usage off a Pydantic AI run."""
             nonlocal parsed_output_value, prompt_tokens, completion_tokens
             nonlocal cache_write_tokens, cache_read_tokens
+            nonlocal captured_run_result
+            captured_run_result = rr
             parsed_output_value = rr.output  # type: ignore[assignment]
             usage = rr.usage()
             prompt_tokens = int(usage.input_tokens or 0)
@@ -342,6 +392,35 @@ class LLMClient:
         # envelope so rate-limiter waits don't count as errors.
         if rate_limiter:
             await rate_limiter.acquire(tokens=prompt_tokens_for_budget or 1)
+
+        await _emit_llm_activity(
+            "LLM_CALL",
+            "STARTED",
+            {
+                "stage": usage_context.stage,
+                "agent_name": usage_context.agent_name,
+                "provider": self.provider_name,
+                "model": self.db_llm_config.model_name,
+            },
+        )
+
+        async def _on_retry(
+            attempt: int, max_retries: int, delay: float, exc: Exception
+        ) -> None:
+            await _emit_llm_activity(
+                "LLM_RETRY",
+                "RETRYING",
+                {
+                    "stage": usage_context.stage,
+                    "agent_name": usage_context.agent_name,
+                    "provider": self.provider_name,
+                    "model": self.db_llm_config.model_name,
+                    "retry_attempt": attempt,
+                    "max_retries": max_retries,
+                    "backoff_ms": int(delay * 1000),
+                    "error_class": exc.__class__.__name__,
+                },
+            )
 
         async def _invoke_llm(run_agent: Agent) -> None:
             """Single LLM invocation with model-quirk fallback.
@@ -386,7 +465,9 @@ class LLMClient:
         try:
             await circuit_breaker_call(
                 key=circuit_key,
-                fn=lambda: retry_with_backoff(lambda: _invoke_llm(agent)),
+                fn=lambda: retry_with_backoff(
+                    lambda: _invoke_llm(agent), on_retry=_on_retry
+                ),
                 is_retryable=_default_is_retryable,
             )
         except Exception as e:
@@ -433,11 +514,39 @@ class LLMClient:
                 mask(parsed_output_value.model_dump_json()),
             )
 
-        cost = cost_estimation.calculate_actual_cost(
-            config=self.db_llm_config,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-        )
+        usage_event_id: Optional[uuid.UUID] = None
+        usage_event_created = False
+        if captured_run_result is not None:
+            try:
+                usage_event_id, ledger_cost, usage_event_created = (
+                    await record_run_usage(
+                        run_result=captured_run_result,
+                        context=usage_context,
+                        config=self.db_llm_config,
+                        effective_override=effective_price_override,
+                    )
+                )
+                cost = float(ledger_cost) if ledger_cost is not None else None
+            except Exception:
+                # Never replay a successful provider request because accounting
+                # persistence failed; that risks charging twice. The missing ledger
+                # is an operational error and must remain an unknown cost.
+                logger.error(
+                    "LLM usage ledger persistence failed",
+                    extra={
+                        "provider": self.provider_name,
+                        "model": self.db_llm_config.model_name,
+                        "operation_kind": usage_context.operation_kind,
+                        "stage": usage_context.stage,
+                    },
+                    exc_info=True,
+                )
+                cost = None
+        else:
+            # No provider response means there is no authoritative usage to
+            # price. Estimated local token counts are never presented as an
+            # actual charge.
+            cost = None
 
         # Stamp output / usage / cost onto the Langfuse span and close
         # it. All Langfuse interactions wrapped in try/except so a flush
@@ -466,6 +575,26 @@ class LLMClient:
             except Exception as e:
                 logger.warning("Langfuse span exit failed: %s", e)
 
+        await _emit_llm_activity(
+            "LLM_CALL",
+            "FAILED" if error_message else "COMPLETED",
+            {
+                "stage": usage_context.stage,
+                "agent_name": usage_context.agent_name,
+                "provider": self.provider_name,
+                "model": self.db_llm_config.model_name,
+                "elapsed_ms": latency_ms,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "provider_requests": (
+                    len(build_request_writes(captured_run_result, self.db_llm_config))
+                    if captured_run_result is not None
+                    else 0
+                ),
+                "error_class": "provider_error" if error_message else None,
+            },
+        )
+
         return AgentLLMResult(
             raw_output="[Structured output — raw text not directly available]",
             parsed_output=parsed_output_value,
@@ -477,6 +606,8 @@ class LLMClient:
             latency_ms=latency_ms,
             cache_creation_tokens=cache_write_tokens,
             cache_read_tokens=cache_read_tokens,
+            usage_event_id=usage_event_id,
+            usage_event_created=usage_event_created,
         )
 
 

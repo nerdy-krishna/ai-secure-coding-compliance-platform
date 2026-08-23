@@ -29,16 +29,21 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
     {
         # code_submission_queue / analysis_approved_queue envelope fields
         "scan_id",
+        "attempt_id",
+        "action",
+        "mode",
         "user_id",
         "project_id",
         "file_paths",
         "git_ref",
         "kind",
+        "gate_id",
+        "gate_version",
+        "gate_sequence",
+        "node_name",
+        "evidence_hash",
         "approved",
         "override_critical_secret",
-        # remediation_queue fields
-        "remediation_id",
-        "apply_fixes",
     }
 )
 

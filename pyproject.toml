@@ -92,6 +92,7 @@ pywebpush = "^2.0.3"
 # pre-pass node (`infrastructure/scanners/bandit_runner.py`) can invoke
 # `/app/.venv/bin/bandit` as a subprocess in the worker.
 bandit = "^1.7"
+boto3 = "^1.43.2"
 croniter = "^5.0"
 # Enterprise SSO. httpx-oauth provides the OIDC client used in
 # infrastructure/auth/sso/oidc.py (PKCE + state + nonce). pyjwt[crypto]
@@ -145,29 +146,6 @@ mypy = "^1.10.0"
 # pre-pass node; pip-audit + pre-commit stay in dev.
 pip-audit = "^2.7"
 pre-commit = "^3.7"
-
-# Test deps live in their own optional group so runtime images don't ship
-# them. Install with `poetry install --with test` locally or in CI.
-[tool.poetry.group.test]
-optional = true
-
-[tool.poetry.group.test.dependencies]
-pytest = "^8.3.5"
-pytest-asyncio = "^0.23.7"
-pytest-cov = "^7.0.0"
-httpx = ">=0.28,<1.0"
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-pythonpath = ["src"]
-testpaths = ["tests"]
-# The Playwright UI setup test needs a running UI container and a browser;
-# keep it manual and off the default pytest target. Run explicitly with
-# `pytest tests/test_ui_setup.py` when exercising the setup flow.
-addopts = "--ignore=tests/test_ui_setup.py"
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
 
 [tool.ruff]
 target-version = "py312"

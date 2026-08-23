@@ -1,6 +1,12 @@
 // secure-code-ui/src/app/providers/AuthProvider.tsx
 import { AxiosError } from "axios";
-import React, { useCallback, useEffect, useState, type ReactNode } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import apiClient, {
   cancelProactiveRefresh,
   scheduleProactiveRefresh,
@@ -10,7 +16,6 @@ import {
   type TokenResponse,
   type UserLoginData,
   type UserRead,
-  type UserRegisterData,
   type SetupStatusResponse,
 } from "../../shared/types/api";
 import { AuthContext, type AuthContextType } from "./AuthContext";
@@ -38,6 +43,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   const [isSetupCompleted, setIsSetupCompleted] = useState<boolean | null>(
     null,
   );
+  const bootstrapStarted = useRef(false);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -122,8 +128,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     }
   }, []);
 
-  // Effect to run on initial load to check for an existing session AND setup status
+  // Run the application bootstrap once. Access-token rotation must not put the
+  // whole application back into its initial loading state every hour.
   useEffect(() => {
+    if (initialAuthChecked || bootstrapStarted.current) return;
+    bootstrapStarted.current = true;
+
     const initializeAuth = async () => {
       setIsLoading(true);
 
@@ -140,7 +150,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       setIsLoading(false);
     };
     initializeAuth();
-  }, [accessToken, fetchAndSetUser, checkSetupStatus]);
+  }, [accessToken, fetchAndSetUser, checkSetupStatus, initialAuthChecked]);
 
   const login = useCallback(async (credentials: UserLoginData) => {
     // V02.4.1: Enforce minimum 1-second interval between login attempts (client-side defense in depth).
@@ -152,12 +162,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     lastLoginAt = now;
 
     // V02.2.1: Enforce non-empty and length bounds before sending credentials to the network.
-    // 320 chars = RFC-5321 max email length; 4096 chars = generous upper bound on password length.
+    // 320 chars = RFC-5321 max email length. The password bound matches the
+    // request schema and prevents the UI accepting input the API rejects.
     if (
       !credentials.username ||
       credentials.username.length > 320 ||
       !credentials.password ||
-      credentials.password.length > 4096
+      credentials.password.length > 256
     ) {
       setError("Invalid credentials format");
       setIsLoading(false);
@@ -200,7 +211,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fetchAndSetUser]);
 
   const loginWithAccessToken = useCallback((token: string): void => {
     if (!token) return;
@@ -214,36 +225,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     // the next render.
     fetchAndSetUser();
   }, [fetchAndSetUser]);
-
-  const register = useCallback(
-    async (credentials: UserRegisterData): Promise<UserRead> => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        return await authService.registerUser(credentials);
-      } catch (err: unknown) {
-        // V16.2.5: Never log the raw axios error — it contains the Bearer token in request headers.
-        console.error("AuthProvider: Registration failed:", {
-          message: (err as { message?: string })?.message,
-          status: (err as { response?: { status?: number } })?.response?.status,
-        });
-        let errorMessage = "Registration failed. Please try again.";
-        if (err instanceof AxiosError && err.response?.data?.detail) {
-          // V16.4.1: Sanitise backend-supplied strings to prevent log-forgery via CRLF injection.
-          const sanitise = (s: string) => s.replace(/[\r\n]/g, " ");
-          errorMessage =
-            typeof err.response.data.detail === "string"
-              ? sanitise(err.response.data.detail)
-              : "An unexpected error occurred.";
-        }
-        setError(errorMessage);
-        throw err;
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [],
-  );
 
   const logout = useCallback(async () => {
     setIsLoading(true);
@@ -278,7 +259,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     error,
     login,
     loginWithAccessToken,
-    register,
     logout,
     clearError,
     checkSetupStatus,

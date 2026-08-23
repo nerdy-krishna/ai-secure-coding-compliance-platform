@@ -1,6 +1,6 @@
 # 14 — LangGraph Worker State Machine
 
-Deep dive into `sccap_worker` — the heart of every scan. Built on **LangGraph 1.1.9** with an `AsyncPostgresSaver` checkpointer so a scan can be paused at an approval gate, the worker can restart, and the flow resumes exactly where it left off.
+Deep dive into `sccap_worker` — the heart of every scan. Built on **LangGraph 1.1.x** with an `AsyncPostgresSaver` checkpointer so a scan can be paused at an approval gate, the worker can restart, and the flow resumes exactly where it left off. The serializer explicitly allowlists SCCAP state models; checkpoint rows cannot request arbitrary Python class construction.
 
 ---
 
@@ -28,8 +28,8 @@ flowchart TB
       N9a["save_raw_llm_findings<br/>snapshot pre-consolidation LLM findings<br/>to raw_llm bucket"]:::app
       N10["consolidate_findings<br/>FindingConsolidator — merge / drop"]:::app
       N11["validate_cross_file<br/>opt-in #81 — no-op unless enabled"]:::app
-      N12["consolidate_and_patch<br/>REMEDIATE: merge agent + tree-sitter verify<br/>(no snapshot for AUDIT / SUGGEST)"]:::app
-      N13["verify_patches<br/>REMEDIATE: re-run Semgrep on patched code"]:::app
+      N12["consolidate_and_patch<br/>SUGGEST/REMEDIATE: deterministic patch plan<br/>REMEDIATE only: promote snapshot"]:::app
+      N13["verify_patches<br/>both modes: scan-bound Semgrep<br/>+ Bandit/Gitleaks/OSV replay"]:::app
       N14["save_results"]:::app
       N15["save_final_report<br/>risk_score + summary JSON<br/>status=COMPLETED / REMEDIATION_COMPLETED"]:::app
       T1["user_decline<br/>status=BLOCKED_USER_DECLINE"]:::app
@@ -131,7 +131,7 @@ classDiagram
       +str  current_scan_status
       +UUID reasoning_llm_config_id          "primary reasoning slot"
       +UUID secondary_reasoning_llm_config_id "optional 2nd analysis LLM (#93)"
-      +UUID utility_llm_config_id            "profiler + fix verification"
+      +UUID utility_llm_config_id            "profiler"
       +dict stage_temperatures               "profiler/analysis/consolidation/merge → float (#78)"
       +bool disable_temperature              "opt-in: provider default temp (#92)"
       +bool cross_file_validation            "opt-in cross-file validation (#81)"
@@ -144,7 +144,8 @@ classDiagram
       +dict file_profiles                    "file_path → FileProfile (#71)"
       +dict all_relevant_agents
       +list[VulnerabilityFinding] findings
-      +list[FixResult] proposed_fixes
+      +list[FixResult] fix_candidates        "stable IDs + source hash + disposition"
+      +list[dict] finding_lineage            "raw UUID → canonical UUID decisions"
       +dict bom_cyclonedx
       +dict prescan_approval                 "approved + override_critical_secret"
       +dict profiling_approval               "approved"
@@ -152,6 +153,9 @@ classDiagram
       +str  error_message
     }
     class VulnerabilityFinding {
+      +uuid raw_finding_id
+      +uuid canonical_finding_id
+      +str source_snapshot_hash
       +str file_path
       +int line_number
       +str title
@@ -166,10 +170,15 @@ classDiagram
       +list[AffectedLocation] affected_locations
       +list[str] corroborating_agents
       +list[str] detected_by_llms          "reasoning LLM(s) that flagged it (#94)"
-      +bool fix_verified                   "Semgrep re-run verdict (REMEDIATE)"
+      +bool fix_verified                   "originating scanner replay verdict"
       +str cross_file_status               "confirmed|mitigated|unconfirmed (#81)"
     }
     class FixResult {
+      +uuid candidate_id
+      +uuid raw_finding_id
+      +uuid canonical_finding_id
+      +str disposition
+      +str validation_status
       +VulnerabilityFinding finding
       +FixSuggestion suggestion
     }
@@ -200,12 +209,12 @@ classDiagram
 | 6   | `profile_files`               | files + repository map                             | `WorkerState.file_profiles` (FileProfiler on the utility LLM slot)                                   |
 | 7   | `estimate_cost`               | `file_profiles`, routed agents, reasoning configs  | `scans.cost_details (analysis)`, `scans.status = PENDING_COST_APPROVAL`                              |
 | 8   | `cost_gate`                   | resume payload                                     | LangGraph interrupt + checkpoint; routes to `analyze_files_parallel`                                 |
-| 9   | `analyze_files_parallel`      | files + routed agents + dep summary (RAG)          | `WorkerState.findings`, `proposed_fixes`, `llm_interactions`, per-file `scan_events(FILE_ANALYZED)` |
-| 10  | `consolidate_findings`        | per-agent findings                                 | `FindingConsolidator` reasoning-LLM pass — merge same-defect findings, drop demonstrable FPs        |
+| 9   | `analyze_files_parallel`      | files + routed agents + dep summary (RAG)          | stable raw findings, source-bound `fix_candidates`, `llm_interactions`, per-file `scan_events(FILE_ANALYZED)` |
+| 10  | `consolidate_findings`        | per-agent findings + candidates                    | merge/drop flow by UUID; selected/duplicate/conflict/rejected candidate decisions                    |
 | 11  | `validate_cross_file`         | consolidated findings                              | opt-in #81 — stamps `cross_file_status`/`cross_file_rationale`; no-op unless `Scan.cross_file_validation` |
-| 12  | `consolidate_and_patch`       | `WorkerState.findings + proposed_fixes`            | REMEDIATE only — `WorkerState.patched_files`, `final_file_map`; merge agent + tree-sitter verify     |
-| 13  | `verify_patches`              | `patched_files` vs original                        | REMEDIATE only — `finding.fix_verified`, Semgrep regression detection                                |
-| 14  | `save_results`                | `WorkerState.findings`                             | `findings` (bulk insert), fixes JSONB                                                                |
+| 12  | `consolidate_and_patch`       | findings + validated selected `fix_candidates`     | REMEDIATE only — `WorkerState.patched_files`, `final_file_map`; merge remaining overlaps             |
+| 13  | `verify_patches`              | `patched_files` vs original + scan-scoped scanner provenance | Both modes — exact prescan Semgrep ruleset binding, native scanner regression evidence; REMEDIATE alone promotes passing content |
+| 14  | `save_results`                | findings + governed candidates                     | idempotent `findings` and `finding_fix_candidates` persistence                                      |
 | 15  | `save_final_report`           | findings + fixes                                   | `scans.summary`, `scans.risk_score`, `scans.status = COMPLETED \| REMEDIATION_COMPLETED`, `adelete_thread()` |
 | —   | `user_decline`                | resume payload (declined)                          | `scans.status = BLOCKED_USER_DECLINE`                                                                |
 | —   | `blocked_pre_llm`             | resume payload (non-overridable critical secret)   | `scans.status = BLOCKED_PRE_LLM`, audit event                                                        |
@@ -222,8 +231,8 @@ The estimate node and its gate node are deliberately split (#84): the estimate n
 
 ### Concurrency
 
-- **CONCURRENT_LLM_LIMIT**: 5 — `analyze_files_parallel` bounds file × chunk × agent calls with a single `asyncio.Semaphore`. With a secondary reasoning LLM configured, each lane gets its own pool. Backpressure is also enforced by the per-provider rate limiter token bucket (`*_TOKENS_PER_MINUTE`).
-- **Merge agent (REMEDIATE)**: when proposed fixes overlap within a file, `consolidate_and_patch` makes a single reasoning-LLM call (`_run_merge_agent`) to unify them; the merged file is tree-sitter parse-checked, and on a parse failure the file is left unpatched rather than emitting broken code (see diagram 05).
+- **CONCURRENT_LLM_LIMIT**: 5 by default — `analyze_files_parallel` uses one fixed semaphore per distinct LLM configuration. A secondary lane on a different configuration gets its own pool. Per-config RPM/TPM buckets and circuit breakers add backpressure; the limit does not adapt dynamically.
+- **Deterministic patch planner (SUGGEST / REMEDIATE)**: selected candidates resolve against the immutable source hash and exact byte ranges. Exact duplicates collapse; ambiguous anchors and every transitive overlap component become manual review. Disjoint edits apply atomically and the whole file is tree-sitter parse-checked. Both modes persist the patch plan; only REMEDIATE promotes a snapshot (see diagram 05).
 - **`SCAN_WORKFLOW_TIMEOUT_SECONDS`**: 7200 (2 h default). The consumer wraps the entire workflow run in `asyncio.wait_for()` — exceeding the bound forces a `handle_error` transition.
 
 ### Resume semantics
@@ -236,6 +245,10 @@ await graph.ainvoke(Command(resume=payload), config)   # continues from the chec
 ```
 
 `payload` is the approval decision (`{"kind": "prescan_approval" | "profiling_approval" | "cost_approval", "approved": ...}`). The interrupt site receives it as the `interrupt()` return value, and the gate's routing function moves the state graph past the interrupt.
+
+The same node-level checkpoint rule protects remediation validation. A worker that stops after
+`consolidate_and_patch` resumes at `verify_patches`; once verification output is checkpointed, a
+later invocation of that thread does not repeat validation, source promotion, or its activity event.
 
 ### Idempotency precheck
 

@@ -89,6 +89,7 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 const ERROR_STATUSES = new Set(["FAILED", "EXPIRED"]);
+const SUCCESS_STATUSES = new Set(["COMPLETED", "REMEDIATION_COMPLETED"]);
 
 /** True when a scan has reached a terminal status. */
 export function isTerminalStatus(status: string | null | undefined): boolean {
@@ -127,6 +128,8 @@ export function deriveScanProgress(
   const stages = railStages(crossFileValidation);
   const isTerminal = !!terminalStatus && TERMINAL_STATUSES.has(terminalStatus);
   const isError = !!terminalStatus && ERROR_STATUSES.has(terminalStatus);
+  const isSuccessfulTerminal =
+    !!terminalStatus && SUCCESS_STATUSES.has(terminalStatus);
 
   // Last-write-wins status per stage_name, in event order. Tolerates
   // duplicated / out-of-order events — only the latest matters.
@@ -169,9 +172,10 @@ export function deriveScanProgress(
   }
 
   if (isTerminal) {
-    // A finished scan: success marks every stage done; a failure leaves
-    // the rail where it stopped (frontier stage stays as-is).
-    if (!isError) {
+    // Only a successful scan traversed the full rail. Stops, safety blocks,
+    // expiry, and failures retain the event-derived frontier so the UI does
+    // not claim that unvisited stages completed.
+    if (isSuccessfulTerminal) {
       for (let i = 0; i < states.length; i++) states[i] = "done";
     }
   }
@@ -189,13 +193,11 @@ export function deriveScanProgress(
 
   const doneCount = states.filter((s) => s === "done").length;
   let progressPct: number;
-  if (isTerminal) {
+  if (isSuccessfulTerminal) {
     progressPct = 100;
   } else {
-    progressPct = Math.min(
-      95,
-      Math.round((doneCount / derived.length) * 100),
-    );
+    const projectedPct = Math.round((doneCount / derived.length) * 100);
+    progressPct = isTerminal ? projectedPct : Math.min(95, projectedPct);
   }
 
   let badge: string;

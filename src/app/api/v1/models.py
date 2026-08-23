@@ -1,6 +1,7 @@
 # src/app/api/v1/models.py
 
 from datetime import datetime
+from decimal import Decimal
 import ipaddress
 import socket
 import uuid
@@ -13,6 +14,8 @@ from pydantic import (
     model_validator,
 )
 from typing import List, Literal, Optional, Dict, Any
+
+from app.shared.lib.llm_usage import BILLABLE_CATEGORIES
 
 # Allowlist of permitted repo hosts for SSRF prevention (V01.3.6)
 _ALLOWED_REPO_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org"})
@@ -101,6 +104,38 @@ class ApprovalRequest(BaseModel):
     )
     approved: bool = True
     override_critical_secret: bool = False
+    gate_id: Optional[uuid.UUID] = None
+    gate_version: Optional[int] = Field(default=None, ge=1)
+    evidence_hash: Optional[str] = Field(default=None, min_length=64, max_length=64)
+
+
+class ApprovalGateResponse(BaseModel):
+    gate_id: uuid.UUID
+    scan_id: uuid.UUID
+    attempt_id: Optional[uuid.UUID] = None
+    node_name: str
+    kind: Literal["prescan_approval", "profiling_approval", "cost_approval"]
+    sequence: int
+    display_name: str
+    purpose: str
+    evidence_hash: str
+    state: Literal[
+        "pending",
+        "decided",
+        "resume_claimed",
+        "resumed",
+        "completed",
+        "expired",
+        "cancelled",
+    ]
+    version: int
+    decision: Optional[bool] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 # === LLM Configuration Schemas (UPDATED) ===
@@ -294,6 +329,55 @@ class LLMConfigurationRead(LLMConfigurationBase):
     id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LLMPriceRate(BaseModel):
+    amount: Decimal = Field(ge=0, max_digits=30, decimal_places=12)
+    unit: Literal["million_tokens", "thousand_requests", "second", "byte_month"]
+    modifier: Decimal = Field(
+        default=Decimal("1"), ge=0, max_digits=20, decimal_places=12
+    )
+
+
+class LLMPriceOverrideCreate(BaseModel):
+    rates: Dict[str, LLMPriceRate]
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    source: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def _require_complete_categories(self) -> "LLMPriceOverrideCreate":
+        supplied = set(self.rates)
+        if supplied != BILLABLE_CATEGORIES:
+            missing = sorted(BILLABLE_CATEGORIES - supplied)
+            extra = sorted(supplied - BILLABLE_CATEGORIES)
+            raise ValueError(
+                f"rates must contain every billable category; missing={missing}, extra={extra}"
+            )
+        if self.rates["provider_request"].unit != "thousand_requests":
+            raise ValueError("provider_request must use thousand_requests")
+        token_units = {
+            rate.unit
+            for category, rate in self.rates.items()
+            if category != "provider_request"
+        }
+        if token_units != {"million_tokens"}:
+            raise ValueError("token categories must use million_tokens")
+        return self
+
+
+class LLMPriceOverrideRead(BaseModel):
+    id: uuid.UUID
+    llm_config_id: uuid.UUID
+    rates: Dict[str, LLMPriceRate]
+    currency: str
+    source: str
+    effective_from: datetime
+    effective_to: Optional[datetime]
+    created_by_user_id: Optional[int]
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -527,6 +611,11 @@ class FixSuggestionResponse(BaseModel):
 
 class VulnerabilityFindingResponse(BaseModel):
     id: int
+    raw_finding_id: Optional[uuid.UUID] = None
+    canonical_finding_id: Optional[uuid.UUID] = None
+    contributing_raw_finding_ids: List[uuid.UUID] = Field(default_factory=list)
+    source_snapshot_hash: Optional[str] = None
+    fix_selection_status: Optional[str] = None
     file_path: str
     title: str
     # Populated only by SAST scanners that emit a CWE; null for LLM findings.
@@ -548,6 +637,7 @@ class VulnerabilityFindingResponse(BaseModel):
     # page can drive a per-source filter chip row off the same
     # value the `source_counts` aggregate is computed from.
     source: Optional[str] = None
+    scanner_rule_id: Optional[str] = None
     corroborating_agents: Optional[List[str]] = None
     # The reasoning LLM(s) that detected the finding (#94 / PRD #91).
     # Two entries ⇒ both models in a dual-LLM scan independently flagged
@@ -572,6 +662,12 @@ class VulnerabilityFindingResponse(BaseModel):
     disposition_by: Optional[int] = None
     disposition_at: Optional[datetime] = None
     disposition_note: Optional[str] = None
+
+    @field_validator("contributing_raw_finding_ids", mode="before")
+    @classmethod
+    def empty_list_for_legacy_lineage(cls, value: Any) -> List[uuid.UUID]:
+        """Legacy findings predate exact lineage and store SQL NULL."""
+        return value or []
 
     @field_validator("fixes", mode="before")
     @classmethod
@@ -701,6 +797,7 @@ class SecurityQueryResponse(BaseModel):
 class LLMInteractionResponse(BaseModel):
     id: int
     scan_id: Optional[uuid.UUID] = None
+    usage_event_id: Optional[uuid.UUID] = None
     file_path: Optional[str] = None
     agent_name: str
     # The LLM this call ran on — id + resolved display name — so the
@@ -866,6 +963,32 @@ class SubmittedFileReportItem(BaseModel):
         from_attributes = True
 
 
+class RemediationCandidateCounts(BaseModel):
+    proposed: int = 0
+    planned: int = 0
+    validated: int = 0
+    deduplicated: int = 0
+    conflicted: int = 0
+    rejected: int = 0
+    unverified: int = 0
+    applied: int = 0
+
+
+class RemediationFileCounts(BaseModel):
+    total: int = 0
+    planned: int = 0
+    manual_review: int = 0
+
+
+class RemediationSummaryResponse(BaseModel):
+    outcome: str
+    candidates: RemediationCandidateCounts = Field(
+        default_factory=RemediationCandidateCounts
+    )
+    files: RemediationFileCounts = Field(default_factory=RemediationFileCounts)
+    validation_checks: Dict[str, int] = Field(default_factory=dict)
+
+
 class SummaryReportResponse(BaseModel):
     submission_id: uuid.UUID
     project_id: uuid.UUID
@@ -879,6 +1002,7 @@ class SummaryReportResponse(BaseModel):
     overall_risk_score: OverallRiskScoreResponse = Field(
         default_factory=OverallRiskScoreResponse
     )
+    remediation: Optional[RemediationSummaryResponse] = None
 
     class Config:
         from_attributes = True
@@ -907,6 +1031,7 @@ class ConsolidationStats(BaseModel):
 
 class AnalysisResultDetailResponse(BaseModel):
     status: str
+    current_attempt_id: Optional[uuid.UUID] = None
     # Human-readable failure reason when status is FAILED. Populated
     # from scan_events or the workflow error handler. Empty string for
     # non-failed scans.
@@ -926,12 +1051,17 @@ class AnalysisResultDetailResponse(BaseModel):
     # LLM-emitted findings whose `source` is NULL. Empty dict when no
     # findings exist.
     source_counts: Dict[str, int] = Field(default_factory=dict)
+    # Immutable runtime/rule evidence for deterministic scanners. The API
+    # exposes a bounded summary; the authenticated scanner-report download
+    # carries the complete per-rule inventory.
+    toolchain_provenance: Dict[str, Any] = Field(default_factory=dict)
     # The estimate produced by the cost node before the user is asked
     # to approve. Surfaced on the ScanRunningPage so the user sees the
     # number alongside the "Approve & run" button. Stored as JSONB on
     # the Scan row so it's an opaque dict here. Non-null only when the
     # cost-estimate node has run; null for very-early-status scans.
     cost_details: Optional[Dict[str, Any]] = None
+    active_approval_gate: Optional[ApprovalGateResponse] = None
     # Whether the scan opted in to cross-file finding validation (#82).
     # Surfaced so ScanRunningPage can show the cross-file-validation
     # stage in the progress rail only for opted-in scans.
@@ -993,6 +1123,7 @@ class PrescanFindingItem(BaseModel):
     description: Optional[str] = None
     severity: Optional[str] = None
     source: Optional[str] = None
+    scanner_rule_id: Optional[str] = None
     cwe: Optional[str] = None
     cve_id: Optional[str] = None
 
@@ -1021,13 +1152,46 @@ class ScanEventItem(BaseModel):
     # `scan_event` stream (which carries the same value) by a stable
     # integer rather than a fragile (stage_name, timestamp) fingerprint.
     event_id: int = Field(validation_alias="id")
+    schema_version: int = Field(default=1, ge=1)
+    cursor: Optional[str] = None
+    attempt_id: Optional[uuid.UUID] = None
+    activity_kind: Literal[
+        "workflow",
+        "scanner",
+        "llm_call",
+        "retry",
+        "warning",
+        "degradation",
+        "decision",
+        "cancellation",
+        "terminal",
+    ] = "workflow"
     stage_name: str
-    status: str
+    status: Literal[
+        "STARTED",
+        "COMPLETED",
+        "WAITING",
+        "FAILED",
+        "RETRYING",
+        "WARNING",
+        "DEGRADED",
+        "REQUESTED",
+        "OBSERVED",
+        "REJECTED",
+    ]
     timestamp: datetime
     # §3.10b: optional per-event payload. For `FILE_ANALYZED` events
     # this carries `{file_path, findings_count, fixes_count}`. NULL
     # for legacy stage events.
     details: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def populate_cursor(self) -> "ScanEventItem":
+        from app.shared.lib.scan_progress import safe_event_details
+
+        self.cursor = self.cursor or str(self.event_id)
+        self.details = safe_event_details(self.details)
+        return self
 
     class Config:
         from_attributes = True
@@ -1085,6 +1249,38 @@ class ScanFindingsDebugResponse(BaseModel):
     cwe_groups: Dict[str, int] = Field(default_factory=dict)
 
 
+class FindingFixCandidateResponse(BaseModel):
+    candidate_id: uuid.UUID
+    raw_finding_id: uuid.UUID
+    canonical_finding_id: Optional[uuid.UUID] = None
+    source_snapshot_hash: str
+    anchor_fingerprint: str
+    patch_fingerprint: str
+    resolved_range: Optional[Dict[str, Any]] = None
+    context_fingerprint: Optional[str] = None
+    patch_hunk_id: Optional[uuid.UUID] = None
+    applicability_status: str = "unresolved"
+    language: Optional[str] = None
+    symbol: Optional[str] = None
+    required_imports: List[str] = Field(default_factory=list)
+    required_dependencies: List[str] = Field(default_factory=list)
+    configuration_changes: List[str] = Field(default_factory=list)
+    migration_changes: List[str] = Field(default_factory=list)
+    manual_steps: List[str] = Field(default_factory=list)
+    file_path: str
+    line_number: int
+    suggestion: Dict[str, Any]
+    disposition: str
+    decision_reason: Optional[str] = None
+    contributing_agents: List[str] = Field(default_factory=list)
+    contributing_models: List[str] = Field(default_factory=list)
+    validation_status: str
+    is_applied: bool
+
+    class Config:
+        from_attributes = True
+
+
 # ── Finding Lineage ────────────────────────────────────────────
 
 
@@ -1119,6 +1315,7 @@ class FindingLineageResponse(BaseModel):
     lineage_quality: str = "inferred"
     warnings: List[str] = Field(default_factory=list)
     available_expansions: Dict[str, int] = Field(default_factory=dict)
+    fix_candidates: List[FindingFixCandidateResponse] = Field(default_factory=list)
     agent_groups: Dict[str, int] = Field(default_factory=dict)
     # Per-finding consolidation flow map (raw→consolidated mapping)
     flow_map: Optional[List[Dict[str, Any]]] = None

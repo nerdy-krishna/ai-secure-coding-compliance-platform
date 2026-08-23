@@ -22,6 +22,9 @@ _COLUMNS = [
     "confidence",
     "cwe",
     "source",
+    "scanner_version",
+    "scanner_binary_sha256",
+    "scanner_provenance_status",
     "title",
     "description",
     "remediation",
@@ -39,6 +42,9 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
     writer = csv.DictWriter(buffer, fieldnames=_COLUMNS, lineterminator="\n")
     writer.writeheader()
     for finding in collect_findings(result):
+        source = finding.source or "agent"
+        provenance = result.toolchain_provenance.get(source, {})
+        binary = provenance.get("binary", {}) if isinstance(provenance, dict) else {}
         writer.writerow(
             {
                 "file_path": finding.file_path,
@@ -49,7 +55,12 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
                 ),
                 "confidence": finding.confidence,
                 "cwe": finding.cwe or "",
-                "source": finding.source or "agent",
+                "source": source,
+                "scanner_version": binary.get("version", ""),
+                "scanner_binary_sha256": binary.get("sha256", ""),
+                "scanner_provenance_status": (
+                    provenance.get("status", "") if isinstance(provenance, dict) else ""
+                ),
                 "title": finding.title,
                 "description": finding.description,
                 "remediation": finding.remediation,

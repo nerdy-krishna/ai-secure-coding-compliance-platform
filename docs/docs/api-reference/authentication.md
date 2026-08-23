@@ -5,104 +5,88 @@ title: Authentication
 
 # Authentication
 
-SCCAP uses [fastapi-users](https://fastapi-users.github.io/fastapi-users/)
-with a **JWT Bearer** transport. The first user to register becomes
-the superuser and is routed through `/setup` before the rest of the
-app unlocks for anyone else.
-
-## Register
-
-```http
-POST /api/v1/auth/register
-Content-Type: application/json
-
-{ "email": "user@example.com", "password": "..." }
-```
-
-Returns the created user (no token). Registration can be disabled by
-setting `auth.allow_registration` to `false` in system config once
-setup completes.
+SCCAP uses fastapi-users with a JWT Bearer access token and a custom
+HttpOnly refresh cookie. Public self-registration is not mounted: the
+first-run `/setup` flow creates the initial superuser, and superusers create
+later local accounts from **Admin → Users**.
 
 ## Login
 
 ```http
-POST /api/v1/auth/jwt/login
+POST /api/v1/auth/login
 Content-Type: application/x-www-form-urlencoded
 
 username=user@example.com&password=...
 ```
 
-Returns `{ "access_token": "...", "token_type": "bearer",
-"refresh_token": "..." }`.
+The JSON body contains `{ "access_token": "...", "token_type": "bearer" }`.
+The response also issues `SecureCodePlatformRefresh` as an HttpOnly,
+SameSite=Strict cookie. It is Secure in normal deployments; the explicit
+HTTP-only local-development profile disables Secure so localhost refresh can
+work. Token responses are marked `Cache-Control: no-store`.
 
-Access token lifetime defaults to 30 minutes
-(`ACCESS_TOKEN_LIFETIME_SECONDS`); refresh token lifetime defaults to
-7 days (`REFRESH_TOKEN_LIFETIME_SECONDS`).
+Access tokens default to 60 minutes (`ACCESS_TOKEN_LIFETIME_SECONDS`). Refresh
+tokens default to seven days, but one login session has a 24-hour absolute
+ceiling by default (`SESSION_ABSOLUTE_LIFETIME_SECONDS`).
 
 ## Refresh
 
-fastapi-users doesn't ship a refresh endpoint for the Bearer
-transport, so SCCAP adds one at `refresh.py`:
-
 ```http
 POST /api/v1/auth/refresh
-Content-Type: application/json
-
-{ "refresh_token": "..." }
+Cookie: SecureCodePlatformRefresh=...
 ```
 
-Returns a fresh `{ access_token, refresh_token }` pair. Rotating the
-refresh token with each use keeps replay attacks from surviving a
-single use.
+There is no request body and browser JavaScript cannot read the cookie. A valid
+request returns a new access token and rotates the refresh cookie while
+preserving the login session's original issue time. Inactive users, expired or
+wrong-type tokens, an exceeded absolute lifetime, and an expired bound IdP
+session are rejected with `401`.
+
+The current refresh JWT is stateless: rotation does not yet provide one-time
+reuse detection or a server-side device/session inventory. Those controls are
+tracked in the production roadmap.
 
 ## Logout
 
 ```http
-POST /api/v1/auth/jwt/logout
+POST /api/v1/auth/logout
 Authorization: Bearer <access_token>
 ```
 
-Invalidates the server-side session row. Clients should also discard
-their stored refresh token.
+Logout expires the refresh cookie, returns no-store headers, and asks the
+browser to clear cache, cookies, and storage. The UI also cancels its proactive
+refresh timer and clears the access token.
 
 ## Password reset
 
-Requires SMTP to be configured. The flow:
+SMTP must be configured:
 
-1. User submits their email to `/auth/forgot-password`.
-2. Backend emails them a short-lived reset token.
-3. UI calls `/auth/reset-password` with `{ token, password }`.
+1. `POST /api/v1/auth/forgot-password` with the account email.
+2. The backend emails a short-lived reset token.
+3. `POST /api/v1/auth/reset-password` with `{ token, password }`.
 
 ## Admin-created users
 
-Admins can create accounts directly from **Admin → Users** via
-`POST /admin/users`. The response shape matches the regular
-registration response; the new user receives an invite email (when
-SMTP is configured) with a password-reset link.
+Superusers create accounts through `POST /api/v1/admin/users`. When SMTP is
+configured, the new user receives a password-setup/reset link.
+
+## SSO, passkeys, and SCIM
+
+- OIDC: `/api/v1/auth/sso/{name}/login` and `/{name}/callback`.
+- SAML: `/api/v1/auth/sso/{name}/login`, `/{name}/acs`, and `/{name}/metadata`.
+- Passkeys: `/api/v1/auth/webauthn/{register,login}/{begin,finish}` plus the
+  authenticated credentials endpoints.
+- SCIM 2.0: `/scim/v2`; administrator token management is under
+  `/api/v1/admin/scim/tokens`.
 
 ## Setup gate
 
-Until the first-run wizard finishes, the backend returns `403` from
-every authenticated endpoint except `/auth/*` and `/setup/*`. The UI
-polls `/setup/status` on every mount and forces a redirect to
-`/setup` when `is_setup_completed === false`.
+Until first-run setup finishes, the UI reads `/api/v1/setup/status` and routes
+the operator to `/setup`. The setup endpoint creates the initial configuration
+and user rather than relying on a public registration route.
 
 ## MCP authentication
 
-The MCP tool surface at `/mcp` accepts the same JWT Bearer tokens
-via a custom `TokenVerifier` wrapping `CustomCookieJWTStrategy`.
-Connect a Claude Code client with:
-
-```json
-{
-  "mcpServers": {
-    "sccap": {
-      "url": "https://<your-host>/mcp",
-      "headers": { "Authorization": "Bearer <jwt>" }
-    }
-  }
-}
-```
-
-Expired tokens return `401` (not `500`) and can be refreshed through
-the regular `/auth/refresh` path.
+The `/mcp` surface accepts the same Bearer access JWT through SCCAP's token
+verifier. Expired tokens return `401`; a browser session can obtain a new access
+token through `/api/v1/auth/refresh`.

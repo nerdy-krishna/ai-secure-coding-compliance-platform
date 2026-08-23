@@ -109,7 +109,7 @@ FEATURE_CATALOG: Dict[str, Feature] = {
     ),
     "log_stack": Feature(
         name="log_stack",
-        description="LLM log viewer plus the Fluentd / Loki / Grafana stack.",
+        description="Runtime logging controls plus the Fluentd / Loki / Grafana stack.",
         container_backed=True,
         compose_profile="log_stack",
     ),

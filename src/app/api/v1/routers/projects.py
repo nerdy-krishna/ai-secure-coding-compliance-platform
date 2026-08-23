@@ -20,6 +20,7 @@ Upload policy (V05.1.1):
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -33,6 +34,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Header,
     Response,
     status,
 )
@@ -56,6 +58,7 @@ from app.core.services.scan import (
 from app.core.services.report import SUPPORTED_FORMATS, generate_report
 from app.api.v1.dependencies import (
     get_current_user_tenant_id,
+    get_current_user_tenant_id_sse,
     get_db,
     get_scan_lifecycle_service,
     get_scan_query_service,
@@ -262,7 +265,6 @@ async def create_scan(
     temperature_profiler: float = Form(0.2, ge=0.0, le=1.0),
     temperature_analysis: float = Form(0.2, ge=0.0, le=1.0),
     temperature_consolidation: float = Form(0.2, ge=0.0, le=1.0),
-    temperature_merge: float = Form(0.2, ge=0.0, le=1.0),
     temperature_analysis_secondary: float = Form(0.2, ge=0.0, le=1.0),
     disable_temperature: bool = Form(False),
     cross_file_validation: bool = Form(False),
@@ -364,7 +366,6 @@ async def create_scan(
         "profiler": temperature_profiler,
         "analysis": temperature_analysis,
         "consolidation": temperature_consolidation,
-        "merge": temperature_merge,
         # The second reasoning LLM's analysis temperature (#95). Used
         # only when a secondary reasoning LLM is configured.
         "analysis_secondary": temperature_analysis_secondary,
@@ -436,18 +437,24 @@ async def create_scan(
 async def approve_scan_analysis(
     scan_id: uuid.UUID,
     request: Optional[api_models.ApprovalRequest] = None,
+    idempotency_key: Optional[str] = Header(
+        default=None, alias="X-Idempotency-Key", max_length=128
+    ),
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
 ):
     """Resume a scan paused at a worker-graph interrupt.
 
-    Two interrupt points exist (ADR-009): the prescan-approval gate
-    (status `PENDING_PRESCAN_APPROVAL`) and the existing cost-approval
-    gate (status `PENDING_COST_APPROVAL`). The body's ``kind`` field
+    Three interrupt points exist: prescan approval
+    (`PENDING_PRESCAN_APPROVAL`), profiling-cost approval
+    (`PENDING_PROFILING_APPROVAL`), and full-analysis cost approval
+    (`PENDING_COST_APPROVAL`). The body's ``kind`` field
     discriminates. Body is optional; missing body defaults to
     ``kind="cost_approval", approved=True`` for backward compat.
     """
-    await service.approve_scan(scan_id, user, request)
+    gate = await service.approve_scan(
+        scan_id, user, request, idempotency_key=idempotency_key
+    )
     logger.info(
         "scans.approved",
         extra={
@@ -461,7 +468,12 @@ async def approve_scan_analysis(
             "approved": getattr(request, "approved", True) if request else True,
         },
     )
-    return {"message": "Scan approved and queued for processing."}
+    return {
+        "message": "Scan decision accepted and queued for processing.",
+        "gate": api_models.ApprovalGateResponse.model_validate(gate).model_dump(
+            mode="json"
+        ),
+    }
 
 
 @router.get(
@@ -525,6 +537,7 @@ async def issue_scan_stream_token(
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Mint a short-TTL JWT for the SSE stream of this scan.
 
@@ -541,19 +554,12 @@ async def issue_scan_stream_token(
     """
     from app.infrastructure.auth.sse_token import mint_scan_stream_token
 
-    scan = await service.get_scan_status(scan_id, user)
-    is_owner = scan.user_id == user.id
-    is_admin = user.is_superuser
-    is_peer = visible_user_ids is not None and scan.user_id in visible_user_ids
-    if not (is_owner or is_admin or is_peer):
-        logger.warning(
-            "scans.stream_token.access_denied",
-            extra={"actor_id": user.id, "scan_id": str(scan_id)},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to stream this scan.",
-        )
+    await service.get_scan_status(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
 
     token, expires_in = mint_scan_stream_token(user.id, scan_id)
     return {"access_token": token, "expires_in": expires_in}
@@ -566,6 +572,7 @@ async def stream_scan_progress(
     user: db_models.User = Depends(current_active_user_sse),
     service: ScanQueryService = Depends(get_scan_query_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids_sse),
+    tenant_id=Depends(get_current_user_tenant_id_sse),
 ):
     """Server-Sent Events stream of a scan's progress.
 
@@ -586,16 +593,12 @@ async def stream_scan_progress(
         TTL, and is intentionally not echoed in any log line.
     """
     # Authz: reuse the existing service check.
-    scan = await service.get_scan_status(scan_id, user)
-    if scan.user_id != user.id and not user.is_superuser:
-        logger.warning(
-            "scans.stream.access_denied",
-            extra={"actor_id": user.id, "scan_id": str(scan_id)},
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to stream this scan.",
-        )
+    await service.get_scan_status(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
 
     terminal_statuses = {
         "COMPLETED",
@@ -653,18 +656,26 @@ async def stream_scan_progress(
     # new EventSource, which doesn't replay the header — it passes
     # the same value as `?last_event_id=…` instead.
     resume_event_id = 0
-    header_resume = request.headers.get("last-event-id")
-    if header_resume:
+    for raw_cursor in (
+        request.headers.get("last-event-id"),
+        request.query_params.get("last_event_id"),
+        request.query_params.get("cursor"),
+    ):
+        if raw_cursor is None:
+            continue
         try:
-            resume_event_id = max(resume_event_id, int(header_resume))
-        except ValueError:
-            pass
-    qp_resume = request.query_params.get("last_event_id")
-    if qp_resume:
-        try:
-            resume_event_id = max(resume_event_id, int(qp_resume))
-        except ValueError:
-            pass
+            parsed_cursor = int(raw_cursor)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Scan activity cursor must be a non-negative integer.",
+            ) from exc
+        if parsed_cursor < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Scan activity cursor must be a non-negative integer.",
+            )
+        resume_event_id = max(resume_event_id, parsed_cursor)
 
     async def event_generator():
         import asyncio as _asyncio
@@ -690,15 +701,35 @@ async def stream_scan_progress(
                     )
                     return
 
-                scan = await service.get_scan_status(scan_id, user)
+                scan = await service.get_scan_status(
+                    scan_id,
+                    user,
+                    visible_user_ids=visible_user_ids,
+                    tenant_id=tenant_id,
+                )
 
                 # Emit on status change (including the first tick).
                 if scan.status != last_status:
                     last_status = scan.status
                     payload: Dict[str, Any] = {
+                        "schema_version": 1,
                         "scan_id": str(scan_id),
                         "status": scan.status,
                     }
+                    from app.infrastructure.database.repositories.approval_gate_repo import (
+                        ApprovalGateRepository,
+                    )
+
+                    active_gate = await ApprovalGateRepository(
+                        service.repo.db
+                    ).get_pending_for_scan(scan_id)
+                    payload["active_approval_gate"] = (
+                        api_models.ApprovalGateResponse.model_validate(
+                            active_gate
+                        ).model_dump(mode="json")
+                        if active_gate is not None
+                        else None
+                    )
                     # Surface `cost_details` on either cost gate so the
                     # frontend can render the estimate live without a
                     # manual refresh. Sent only at the moment we cross
@@ -711,12 +742,27 @@ async def stream_scan_progress(
                         and scan.cost_details
                     ):
                         cd = scan.cost_details
+                        safe_cost_fields = (
+                            "total_estimated_cost",
+                            "expected_estimated_cost",
+                            "upper_bound_estimated_cost",
+                            "total_input_tokens",
+                            "predicted_output_tokens",
+                            "upper_bound_input_tokens",
+                            "upper_bound_output_tokens",
+                            "expected_request_count",
+                            "upper_bound_request_count",
+                            "estimate_confidence",
+                            "estimate_source",
+                            "estimate_price_source",
+                            "estimate_sample_count",
+                            "estimate_assumptions",
+                            "planned_request_count",
+                            "rendered_envelope_includes",
+                            "slots",
+                        )
                         payload["cost_details"] = {
-                            "total_estimated_cost": cd.get("total_estimated_cost"),
-                            "total_input_tokens": cd.get("total_input_tokens"),
-                            "predicted_output_tokens": cd.get(
-                                "predicted_output_tokens"
-                            ),
+                            key: cd[key] for key in safe_cost_fields if key in cd
                         }
                     yield (f"event: scan_state\ndata: {_json.dumps(payload)}\n\n")
 
@@ -727,16 +773,22 @@ async def stream_scan_progress(
                 )
                 for e in events:
                     last_event_id = e.id
+                    from app.shared.lib.scan_progress import safe_event_details
+
                     payload = {
+                        "schema_version": e.schema_version,
+                        "cursor": str(e.id),
                         "scan_id": str(scan_id),
                         "event_id": e.id,
+                        "attempt_id": str(e.attempt_id) if e.attempt_id else None,
+                        "activity_kind": e.activity_kind,
                         "stage_name": e.stage_name,
                         "status": e.status,
                         "timestamp": e.timestamp.isoformat() if e.timestamp else None,
                         # §3.10b: per-event payload (e.g. file_path +
                         # findings_count for `FILE_ANALYZED`). None for
                         # legacy stage events.
-                        "details": e.details,
+                        "details": safe_event_details(e.details),
                     }
                     yield (
                         f"event: scan_event\n"
@@ -744,10 +796,17 @@ async def stream_scan_progress(
                         f"data: {_json.dumps(payload)}\n\n"
                     )
 
-                if scan.status in terminal_statuses:
+                cancellation_complete = any(
+                    e.stage_name == "CANCELLATION" and e.status == "COMPLETED"
+                    for e in (scan.events or [])
+                )
+                terminal_ready = scan.status in terminal_statuses and (
+                    scan.status != "CANCELLED" or cancellation_complete
+                )
+                if terminal_ready:
                     yield (
                         f"event: done\n"
-                        f"data: {_json.dumps({'scan_id': str(scan_id), 'status': scan.status})}\n\n"
+                        f"data: {_json.dumps({'schema_version': 1, 'scan_id': str(scan_id), 'status': scan.status, 'cursor': str(last_event_id)})}\n\n"
                     )
                     return
 
@@ -760,11 +819,11 @@ async def stream_scan_progress(
                             queue.get(), timeout=fallback_interval_seconds
                         )
                     except _asyncio.TimeoutError:
-                        # Heartbeat tick — re-read on next loop iteration.
-                        pass
+                        yield ": keepalive\n\n"
                 else:
                     # Bus unavailable — degrade to legacy 1 Hz poll.
                     await _asyncio.sleep(1.0)
+                    yield ": keepalive\n\n"
         finally:
             # Always unsubscribe so the bus's per-scan subscriber set
             # doesn't leak entries on client-disconnect / timeout.
@@ -793,9 +852,17 @@ async def get_scan_result_details(
     include_source: bool = Query(False),
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Retrieves the full, detailed result of a completed scan."""
-    result = await service.get_scan_result(scan_id, user, include_source=include_source)
+    result = await service.get_scan_result(
+        scan_id,
+        user,
+        include_source=include_source,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
 
     return result
 
@@ -806,6 +873,8 @@ async def download_scan_report(
     format: str = Query("html"),
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Download a scan's findings as a report. `format` is one of
     `html`, `csv`, `pdf`, or `sarif`; the report is rendered server-side on request from
@@ -820,12 +889,67 @@ async def download_scan_report(
                 f"expected one of {', '.join(SUPPORTED_FORMATS)}."
             ),
         )
-    result = await service.get_scan_result(scan_id, user)
+    result = await service.get_scan_result(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
     artifact = generate_report(result, fmt)
     return Response(
         content=artifact.content,
         media_type=artifact.media_type,
         headers={"Content-Disposition": f'attachment; filename="{artifact.filename}"'},
+    )
+
+
+@router.get("/scans/{scan_id}/scanner-reports")
+async def download_scanner_reports(
+    scan_id: uuid.UUID,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    """Download the persisted Bandit, Semgrep, Gitleaks, and OSV JSON bundle."""
+    payload = await service.get_scanner_reports(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+    return Response(
+        content=json.dumps(payload, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="scan-{scan_id}-scanner-reports.json"'
+            )
+        },
+    )
+
+
+@router.get("/scans/{scan_id}/patch-plan")
+async def download_patch_plan(
+    scan_id: uuid.UUID,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    """Download the deterministic candidate-to-hunk unified-diff plan."""
+    payload = await service.get_patch_plan(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+    return Response(
+        content=json.dumps(payload, indent=2, ensure_ascii=False),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="scan-{scan_id}-patch-plan.json"'
+        },
     )
 
 
@@ -860,9 +984,16 @@ async def get_llm_interactions_for_scan(
     scan_id: uuid.UUID,
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Retrieves all LLM interactions associated with a specific scan."""
-    return await service.get_llm_interactions_for_scan(scan_id, user)
+    return await service.get_llm_interactions_for_scan(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
 
 
 @router.get(
@@ -873,12 +1004,19 @@ async def get_scan_findings_debug(
     scan_id: uuid.UUID,
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Return raw and consolidated findings for agent-quality debugging.
 
     Includes SAST and raw-LLM pre-consolidation findings alongside the
     final consolidated set, plus Sankey-flow node/link data."""
-    return await service.get_findings_debug(scan_id, user)
+    return await service.get_findings_debug(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
 
 
 @router.post(
@@ -890,6 +1028,8 @@ async def get_finding_lineage(
     request: api_models.FindingLineageRequest | None = None,
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Return a render-ready Finding Lineage graph.
 
@@ -899,7 +1039,11 @@ async def get_finding_lineage(
     specific nodes; send ``focused_node_id`` to isolate a single
     finding's lineage path."""
     return await service.get_finding_lineage(
-        scan_id, user, request or api_models.FindingLineageRequest()
+        scan_id,
+        user,
+        request or api_models.FindingLineageRequest(),
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 

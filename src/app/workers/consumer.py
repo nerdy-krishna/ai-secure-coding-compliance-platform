@@ -38,11 +38,16 @@ from app.config.config import settings
 from app.config.logging_config import LOGGING_CONFIG, correlation_id_var
 from app.infrastructure.llm_client_rate_limiter import initialize_rate_limiters
 from app.infrastructure.observability import flush_langfuse, get_langchain_handler
+from app.infrastructure.workflows.cancellation import (
+    ScanCancellationRequested,
+    invoke_with_forceful_cancellation,
+    record_cancellation_phase,
+)
 from app.infrastructure.workflows.worker_graph import (
-    WorkerState,
     close_workflow_resources,
     get_workflow,
 )
+from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
@@ -55,6 +60,12 @@ from app.shared.lib.scan_status import (
     STATUS_QUEUED,
     STATUS_QUEUED_FOR_SCAN,
     STATUS_REMEDIATION_COMPLETED,
+)
+from app.shared.lib.scan_progress import (
+    EV_COMPLETED,
+    STAGE_COST_REVIEW,
+    STAGE_PRESCAN_REVIEW,
+    STAGE_PROFILING_REVIEW,
 )
 
 logging.config.dictConfig(LOGGING_CONFIG)
@@ -69,20 +80,26 @@ def _safe(s: Any) -> str:
 
 load_dotenv()
 
-# Scan statuses for which the LangGraph checkpointer thread should be
-# deleted post-workflow. Keeps the `checkpoints` table from
-# accumulating ~50 KB per declined / blocked / completed scan
-# indefinitely (M5 / G7 from ADR-009 threat model).
+# Non-resumable scan statuses for which the LangGraph checkpointer thread
+# should be deleted post-workflow. FAILED is intentionally retained so manual
+# resume has the exact durable graph state; restart deletes it explicitly.
 _TERMINAL_STATUSES_FOR_CLEANUP = frozenset(
     {
         STATUS_COMPLETED,
         STATUS_REMEDIATION_COMPLETED,
-        STATUS_FAILED,
         STATUS_CANCELLED,
         STATUS_BLOCKED_PRE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
     }
 )
+
+
+async def _delete_checkpointer_thread(scan_id_str: str) -> None:
+    """Delete one durable workflow thread, raising on failure."""
+    wf = await get_workflow()
+    checkpointer = getattr(wf, "checkpointer", None)
+    if checkpointer is not None and hasattr(checkpointer, "adelete_thread"):
+        await checkpointer.adelete_thread(thread_id=scan_id_str)
 
 
 async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
@@ -101,6 +118,30 @@ async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
                 scan = await ScanRepository(db).get_scan(uuid.UUID(scan_id_str))
             except ValueError:
                 return
+            if scan is not None:
+                attempt_status = {
+                    STATUS_COMPLETED: "completed",
+                    STATUS_REMEDIATION_COMPLETED: "completed",
+                    STATUS_CANCELLED: "cancelled",
+                    STATUS_BLOCKED_PRE_LLM: "completed",
+                    STATUS_BLOCKED_USER_DECLINE: "completed",
+                }.get(scan.status)
+                if attempt_status is not None:
+                    from app.infrastructure.database.repositories.evidence_repo import (
+                        EvidenceRepository,
+                    )
+                    from app.infrastructure.database.repositories.scan_attempt_repo import (
+                        ScanAttemptRepository,
+                    )
+
+                    attempt = await ScanAttemptRepository(db).mark_current_terminal(
+                        scan.id, status=attempt_status, commit=False
+                    )
+                    if attempt is not None:
+                        await EvidenceRepository(db).finalize_attempt(
+                            attempt.id, actor_user_id=None, commit=False
+                        )
+                    await db.commit()
         if scan is None or scan.status not in _TERMINAL_STATUSES_FOR_CLEANUP:
             return
         # Scan is terminal — fire the scan-completion Web Push so the
@@ -117,11 +158,7 @@ async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
                 "WORKFLOW: scan-completion Web Push failed for %s (non-fatal).",
                 scan_id_str,
             )
-        wf = await get_workflow()
-        ckp = getattr(wf, "checkpointer", None)
-        if ckp is None or not hasattr(ckp, "adelete_thread"):
-            return
-        await ckp.adelete_thread(thread_id=scan_id_str)
+        await _delete_checkpointer_thread(scan_id_str)
         logger.info(
             "WORKFLOW: Cleaned up checkpointer thread for terminal scan %s "
             "(status=%s).",
@@ -160,6 +197,12 @@ _KIND_TO_EXPECTED_STATUS = {
     "cost_approval": STATUS_PENDING_APPROVAL,
 }
 
+_KIND_TO_REVIEW_STAGE = {
+    "prescan_approval": STAGE_PRESCAN_REVIEW,
+    "profiling_approval": STAGE_PROFILING_REVIEW,
+    "cost_approval": STAGE_COST_REVIEW,
+}
+
 # Reconnect backoff for the outer consume loop. aio_pika's robust connection
 # handles per-op retries; this catches the "broker down for minutes" case
 # where the connection itself can't be established.
@@ -167,112 +210,72 @@ _BACKOFF_START_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 30.0
 
 
-async def _try_fast_forward_completed_consolidation(
-    initial_state: WorkerState,
-) -> Optional[bool]:
-    """Finish a manual resume from completed durable consolidation output.
+async def _current_checkpoint_id(
+    workflow: Any, config: RunnableConfig
+) -> Optional[str]:
+    checkpointer = getattr(workflow, "checkpointer", None)
+    if checkpointer is None or not hasattr(checkpointer, "aget_tuple"):
+        return None
+    checkpoint_tuple = await checkpointer.aget_tuple(config)
+    if checkpoint_tuple is None:
+        return None
+    tuple_config = getattr(checkpoint_tuple, "config", None) or {}
+    configurable = tuple_config.get("configurable", {})
+    checkpoint_id = configurable.get("checkpoint_id")
+    if checkpoint_id is None:
+        checkpoint = getattr(checkpoint_tuple, "checkpoint", None) or {}
+        checkpoint_id = checkpoint.get("id")
+    return str(checkpoint_id) if checkpoint_id is not None else None
 
-    If a FAILED scan crashed after per-file consolidation completed, the
-    expensive analysis/consolidation artifacts are already durable. Manual
-    resume should continue from the next workflow boundary instead of
-    replaying prescan approvals and analysis. Returns:
-    - True: fast-forward completed successfully;
-    - False: fast-forward was applicable but failed;
-    - None: no completed consolidation artifact, caller should use graph.
-    """
-    from sqlalchemy import select
 
-    from app.core.schemas import VulnerabilityFinding
+async def _bind_pending_gate_checkpoint(
+    scan_id: uuid.UUID, checkpoint_id: Optional[str]
+) -> None:
+    if checkpoint_id is None:
+        return
     from app.infrastructure.database import AsyncSessionLocal
-    from app.infrastructure.database import models as db_models
+    from app.infrastructure.database.repositories.approval_gate_repo import (
+        ApprovalGateRepository,
+    )
+
+    async with AsyncSessionLocal() as db:
+        gates = ApprovalGateRepository(db)
+        pending = await gates.get_pending_for_scan(scan_id)
+        if pending is not None and not await gates.bind_checkpoint(
+            pending.gate_id, checkpoint_id=checkpoint_id
+        ):
+            raise RuntimeError(
+                f"Gate {pending.gate_id} is bound to a different checkpoint"
+            )
+
+
+async def _complete_gate_after_checkpoint(gate_id: uuid.UUID) -> bool:
+    """Atomically complete the gate and append its one completion event."""
+    from app.infrastructure.database import AsyncSessionLocal
+    from app.infrastructure.database.repositories.approval_gate_repo import (
+        ApprovalGateRepository,
+        approval_gate_payload,
+    )
     from app.infrastructure.database.repositories.scan_repo import ScanRepository
-    from app.infrastructure.workflows.nodes.global_consolidate import (
-        global_consolidate_findings_node,
-    )
-    from app.infrastructure.workflows.nodes.results import (
-        save_final_report_node,
-        save_results_node,
-    )
 
-    scan_id = initial_state["scan_id"]
-    try:
-        async with AsyncSessionLocal() as db:
-            repo = ScanRepository(db)
-            scan = await repo.get_scan(scan_id)
-            if scan is None:
-                logger.warning(
-                    "WORKFLOW: manual resume fast-forward found no scan %s", scan_id
-                )
-                return False
-            task_rows = (
-                (
-                    await db.execute(
-                        select(db_models.ScanTask).where(
-                            db_models.ScanTask.scan_id == scan_id,
-                            db_models.ScanTask.task_type == "consolidation:file",
-                            db_models.ScanTask.status == "completed",
-                            db_models.ScanTask.result_payload.is_not(None),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-
-        if not task_rows:
-            return None
-
-        findings: list[VulnerabilityFinding] = []
-        flow_map: list[dict[str, Any]] = []
-        for task in task_rows:
-            payload = task.result_payload or {}
-            findings.extend(
-                VulnerabilityFinding.model_validate(item)
-                for item in payload.get("findings", [])
-            )
-            flow_map.extend(payload.get("flow_map") or [])
-
-        state: WorkerState = dict(initial_state)  # type: ignore[assignment]
-        state["scan_type"] = scan.scan_type
-        state["findings"] = findings
-
-        async with AsyncSessionLocal() as db:
-            details: dict[str, Any] = {
-                "raw_count": len(flow_map) or len(findings),
-                "consolidated_count": len(findings),
-                "finding_count": len(findings),
-                "fast_forwarded_from_tasks": len(task_rows),
-                "reused_tasks": len(task_rows),
-                "rerun_tasks": 0,
-                "failed_tasks": 0,
-                "completed_tasks": 0,
-            }
-            if flow_map:
-                details["flow_map_json"] = json.dumps(flow_map, default=str)
+    async with AsyncSessionLocal() as db:
+        gates = ApprovalGateRepository(db)
+        gate = await gates.get(gate_id)
+        if gate is None:
+            return False
+        if gate.state == "completed":
+            return True
+        completed = await gates.complete(gate_id, commit=False)
+        if completed:
             await ScanRepository(db).create_scan_event(
-                scan_id=scan_id,
-                stage_name="CONSOLIDATING",
-                status="COMPLETED",
-                details=details,
+                scan_id=gate.scan_id,
+                stage_name=_KIND_TO_REVIEW_STAGE[gate.kind],
+                status=EV_COMPLETED,
+                details=approval_gate_payload(gate),
             )
-
-        global_update = await global_consolidate_findings_node(state)
-        state.update(global_update)
-        await save_results_node(state)
-        await save_final_report_node(state)
-        logger.info(
-            "WORKFLOW: Manual resume fast-forwarded scan %s from %d completed consolidation task(s).",
-            scan_id,
-            len(task_rows),
-        )
-        return True
-    except Exception:
-        logger.error(
-            "WORKFLOW: manual resume fast-forward failed for scan %s",
-            scan_id,
-            exc_info=True,
-        )
-        return False
+        else:
+            await db.rollback()
+        return completed
 
 
 async def _run_workflow_for_scan(
@@ -284,9 +287,9 @@ async def _run_workflow_for_scan(
 
     `resume_payload=None` starts (or restarts) the workflow with the
     initial state. `resume_payload={...}` drives a `Command(resume=...)`
-    invocation against the same thread, which unblocks a paused
-    `interrupt()` inside estimate_cost_node. The `thread_id` is derived
-    from the scan id, so the checkpointer finds the paused state.
+    invocation against the same thread, which unblocks a paused approval
+    gate. The `thread_id` is derived from the scan id, so the checkpointer
+    finds the paused state.
 
     Handles the idempotency precheck, the timeout-wrapped invocation, and the
     FAILED-on-crash DB update. Does NOT ack/nack — the caller owns that.
@@ -315,7 +318,22 @@ async def _run_workflow_for_scan(
                     scan_id_str_log,
                 )
                 return True
+            message_attempt_id = initial_state.get("attempt_id")
+            if (
+                message_attempt_id is not None
+                and existing.current_attempt_id != message_attempt_id
+            ):
+                logger.info(
+                    "WORKFLOW: Stale attempt %s for scan %s; current attempt is %s.",
+                    message_attempt_id,
+                    scan_id_str_log,
+                    existing.current_attempt_id,
+                )
+                return True
             if existing.status not in _WORKFLOW_ENTRY_STATUSES:
+                if existing.status == STATUS_CANCELLED:
+                    await record_cancellation_phase(scan_id_uuid, "OBSERVED")
+                    await record_cancellation_phase(scan_id_uuid, "COMPLETED")
                 logger.info(
                     "WORKFLOW: Scan %s already in status '%s' — treating as duplicate delivery.",
                     scan_id_str_log,
@@ -332,6 +350,12 @@ async def _run_workflow_for_scan(
 
     success = False
     timed_out = False
+    resume_claim_owner: Optional[str] = None
+    claimed_gate_id: Optional[uuid.UUID] = None
+    claimed_gate_checkpoint_id: Optional[str] = None
+    resume_scan_status: Optional[str] = None
+    worker_workflow: Any = None
+    config: Optional[RunnableConfig] = None
 
     # Resume-payload kind validation (M1 / G4 from ADR-009 threat model).
     # Two interrupt points exist (`pending_prescan_approval` +
@@ -357,56 +381,76 @@ async def _run_workflow_for_scan(
         if expected_status is not None:
             try:
                 from app.infrastructure.database import AsyncSessionLocal
+                from app.infrastructure.database.repositories.approval_gate_repo import (
+                    ApprovalGateRepository,
+                )
                 from app.infrastructure.database.repositories.scan_repo import (
                     ScanRepository,
                 )
 
+                raw_gate_id = resume_payload.get("gate_id")
+                if not raw_gate_id:
+                    logger.warning(
+                        "WORKFLOW: Approval delivery for %s has no gate_id; ACKing stale payload.",
+                        scan_id_str_log,
+                    )
+                    return True
+                claimed_gate_id = uuid.UUID(str(raw_gate_id))
+                resume_claim_owner = f"worker:{correlation_id_var.get()}:{uuid.uuid4()}"
                 async with AsyncSessionLocal() as db:
                     current = await ScanRepository(db).get_scan(scan_id_uuid)
+                    resume_scan_status = current.status if current is not None else None
+                    claim_status, gate = await ApprovalGateRepository(db).claim_resume(
+                        claimed_gate_id, owner=resume_claim_owner
+                    )
                 if current is None:
                     logger.warning(
                         "WORKFLOW: Resume for unknown scan %s; ACKing as noop.",
                         scan_id_str_log,
                     )
                     return True
-
-                gate_statuses = (
-                    STATUS_PENDING_PRESCAN_APPROVAL,
-                    STATUS_PENDING_PROFILING_APPROVAL,
-                    STATUS_PENDING_APPROVAL,
-                )
-                if current.status in gate_statuses:
-                    if current.status != expected_status:
-                        logger.warning(
-                            "WORKFLOW: Resume kind=%s does not match scan "
-                            "status %s (expected %s) for %s; rejecting payload.",
-                            payload_kind,
-                            current.status,
-                            expected_status,
-                            scan_id_str_log,
-                        )
-                        return False
-                elif current.status == STATUS_QUEUED_FOR_SCAN:
-                    # Normal post-API transitional state: API has already
-                    # validated kind against the gate, persisted the
-                    # transition, and now we're consuming the message it
-                    # published. Pass through.
-                    pass
-                else:
-                    # Terminal or mid-flight scan — duplicate delivery.
+                if claim_status in {"busy", "completed"}:
                     logger.info(
-                        "WORKFLOW: Resume for scan %s in status %s "
-                        "(non-gate, non-transitional); ACKing as noop.",
+                        "WORKFLOW: Gate %s for scan %s is %s; ACKing duplicate delivery.",
+                        claimed_gate_id,
                         scan_id_str_log,
-                        current.status,
+                        claim_status,
                     )
                     return True
+                if claim_status != "claimed" or gate is None:
+                    logger.warning(
+                        "WORKFLOW: Gate %s for scan %s is stale; ACKing payload.",
+                        claimed_gate_id,
+                        scan_id_str_log,
+                    )
+                    return True
+                if (
+                    gate.scan_id != scan_id_uuid
+                    or gate.attempt_id != current.current_attempt_id
+                    or str(gate.attempt_id or "")
+                    != str(resume_payload.get("attempt_id") or "")
+                    or gate.kind != payload_kind
+                    or gate.node_name != resume_payload.get("node_name")
+                    or gate.evidence_hash != resume_payload.get("evidence_hash")
+                    or gate.version != resume_payload.get("gate_version")
+                ):
+                    async with AsyncSessionLocal() as db:
+                        await ApprovalGateRepository(db).release_resume_claim(
+                            claimed_gate_id, owner=resume_claim_owner
+                        )
+                    logger.warning(
+                        "WORKFLOW: Gate contract mismatch gate=%s scan=%s; ACKing stale payload.",
+                        claimed_gate_id,
+                        scan_id_str_log,
+                    )
+                    return True
+                claimed_gate_checkpoint_id = gate.checkpoint_id
             except Exception as e:
                 # Fail-closed: a DB hiccup at precheck must not let an
                 # un-validated kind through to `Command(resume=...)`.
-                # NACK without requeue → the API has already persisted
-                # the gate; the operator can re-click Continue/Stop on
-                # next page-load. (Medium finding from Phase 9 review.)
+                # Return a retryable failure. The API has already persisted
+                # the gate decision and outbox intent, so dropping this
+                # delivery would strand the scan at QUEUED_FOR_SCAN.
                 logger.warning(
                     "WORKFLOW: kind-validation precheck failed for %s: %s. "
                     "Rejecting payload (fail-closed).",
@@ -441,18 +485,86 @@ async def _run_workflow_for_scan(
         # Returns None when Langfuse is disabled — config stays
         # callbacks-free and execution is unaffected.
         lc_handler = get_langchain_handler()
-        config: RunnableConfig = {"configurable": {"thread_id": scan_id_str_log}}
+        config = {"configurable": {"thread_id": scan_id_str_log}}
         if lc_handler is not None:
             config["callbacks"] = [lc_handler]
+
+        parked_checkpoint_id = await _current_checkpoint_id(worker_workflow, config)
+        if claimed_gate_id is not None:
+            if parked_checkpoint_id is None:
+                raise RuntimeError(
+                    f"Gate {claimed_gate_id} has no durable parked checkpoint"
+                )
+            if claimed_gate_checkpoint_id is None:
+                from app.infrastructure.database import AsyncSessionLocal
+                from app.infrastructure.database.repositories.approval_gate_repo import (
+                    ApprovalGateRepository,
+                )
+
+                async with AsyncSessionLocal() as db:
+                    if not await ApprovalGateRepository(db).bind_checkpoint(
+                        claimed_gate_id, checkpoint_id=parked_checkpoint_id
+                    ):
+                        raise RuntimeError(
+                            f"Gate {claimed_gate_id} checkpoint binding changed"
+                        )
+                claimed_gate_checkpoint_id = parked_checkpoint_id
+            elif parked_checkpoint_id != claimed_gate_checkpoint_id:
+                # Recovery after the graph checkpoint committed but the worker
+                # died before gate completion/ACK. Never issue Command(resume)
+                # against the newer checkpoint.
+                if not await _complete_gate_after_checkpoint(claimed_gate_id):
+                    raise RuntimeError(
+                        f"Gate {claimed_gate_id} could not complete during recovery"
+                    )
+                await _bind_pending_gate_checkpoint(scan_id_uuid, parked_checkpoint_id)
+                logger.info(
+                    "WORKFLOW: Gate %s checkpoint already advanced; completed without replay.",
+                    claimed_gate_id,
+                )
+                return True
+            if resume_scan_status != STATUS_QUEUED_FOR_SCAN:
+                from app.infrastructure.database import AsyncSessionLocal
+                from app.infrastructure.database.repositories.approval_gate_repo import (
+                    ApprovalGateRepository,
+                )
+
+                async with AsyncSessionLocal() as db:
+                    await ApprovalGateRepository(db).release_resume_claim(
+                        claimed_gate_id, owner=resume_claim_owner or ""
+                    )
+                logger.warning(
+                    "WORKFLOW: Gate %s scan %s is no longer queued; ACKing stale payload.",
+                    claimed_gate_id,
+                    scan_id_str_log,
+                )
+                return True
         workflow_input: Any
         if resume_payload is not None:
             workflow_input = Command(resume=resume_payload)
         else:
             workflow_input = initial_state
         final_graph_state = await asyncio.wait_for(
-            worker_workflow.ainvoke(workflow_input, config),
+            invoke_with_forceful_cancellation(
+                worker_workflow, workflow_input, config, scan_id_uuid
+            ),
             timeout=settings.SCAN_WORKFLOW_TIMEOUT_SECONDS,
         )
+
+        advanced_checkpoint_id = await _current_checkpoint_id(worker_workflow, config)
+        if claimed_gate_id is not None:
+            if (
+                advanced_checkpoint_id is None
+                or advanced_checkpoint_id == claimed_gate_checkpoint_id
+            ):
+                raise RuntimeError(
+                    f"Gate {claimed_gate_id} resume did not advance its checkpoint"
+                )
+            if not await _complete_gate_after_checkpoint(claimed_gate_id):
+                raise RuntimeError(
+                    f"Gate {claimed_gate_id} did not durably complete after resume"
+                )
+        await _bind_pending_gate_checkpoint(scan_id_uuid, advanced_checkpoint_id)
 
         logger.info("WORKFLOW: worker_workflow completed for SID: %s.", scan_id_str_log)
 
@@ -479,6 +591,14 @@ async def _run_workflow_for_scan(
             scan_id_str_log,
             exc_info=True,
         )
+    except ScanCancellationRequested:
+        success = True
+        await record_cancellation_phase(scan_id_uuid, "OBSERVED")
+        await record_cancellation_phase(scan_id_uuid, "COMPLETED")
+        logger.info(
+            "WORKFLOW: Scan %s observed durable cancellation; stopping before next node.",
+            scan_id_str_log,
+        )
     except Exception:
         logger.error(
             "WORKFLOW: Exception during worker_workflow invocation",
@@ -487,6 +607,51 @@ async def _run_workflow_for_scan(
 
     # On any failure, mark the scan FAILED so the UI doesn't show it stuck.
     if not success:
+        checkpoint_advanced = False
+        if (
+            claimed_gate_id is not None
+            and claimed_gate_checkpoint_id is not None
+            and worker_workflow is not None
+            and config is not None
+        ):
+            try:
+                failure_checkpoint_id = await _current_checkpoint_id(
+                    worker_workflow, config
+                )
+                if (
+                    failure_checkpoint_id is not None
+                    and failure_checkpoint_id != claimed_gate_checkpoint_id
+                ):
+                    checkpoint_advanced = await _complete_gate_after_checkpoint(
+                        claimed_gate_id
+                    )
+                    await _bind_pending_gate_checkpoint(
+                        scan_id_uuid, failure_checkpoint_id
+                    )
+            except Exception:
+                logger.warning(
+                    "WORKFLOW: Could not reconcile checkpoint progress for gate %s",
+                    claimed_gate_id,
+                    exc_info=True,
+                )
+        if claimed_gate_id is not None and resume_claim_owner is not None:
+            try:
+                from app.infrastructure.database import AsyncSessionLocal
+                from app.infrastructure.database.repositories.approval_gate_repo import (
+                    ApprovalGateRepository,
+                )
+
+                if not checkpoint_advanced:
+                    async with AsyncSessionLocal() as db:
+                        await ApprovalGateRepository(db).release_resume_claim(
+                            claimed_gate_id, owner=resume_claim_owner
+                        )
+            except Exception:
+                logger.warning(
+                    "WORKFLOW: Could not release resume claim for gate %s",
+                    claimed_gate_id,
+                    exc_info=True,
+                )
         try:
             from app.infrastructure.database import AsyncSessionLocal
             from app.infrastructure.database.repositories.scan_repo import (
@@ -537,11 +702,19 @@ async def _build_initial_state(
         logger.error("MSG: Invalid scan_id UUID: %s", scan_id_str)
         return None
 
+    raw_attempt_id = body.get("attempt_id")
+    try:
+        attempt_uuid = uuid.UUID(str(raw_attempt_id)) if raw_attempt_id else None
+    except ValueError:
+        logger.error("MSG: Invalid attempt_id UUID for scan %s", scan_uuid)
+        return None
+
     corr_id = message.correlation_id or body.get("correlation_id") or str(uuid.uuid4())
     correlation_id_var.set(corr_id)
 
     initial_state: WorkerState = {
         "scan_id": scan_uuid,
+        "attempt_id": attempt_uuid,
         "scan_type": "AUDIT",  # overwritten by the DB value in retrieve_and_prepare_data
         "current_scan_status": None,
         "reasoning_llm_config_id": None,
@@ -561,10 +734,14 @@ async def _build_initial_state(
         "all_relevant_agents": {},
         "live_codebase": None,
         "findings": [],
-        "proposed_fixes": None,
+        "fix_candidates": None,
+        "finding_lineage": None,
+        "patch_plan": None,
+        "patch_validation_summary": None,
         "agent_results": None,
         "bom_cyclonedx": None,
         "prescan_approval": None,
+        "active_approval_gate": None,
         "resume_attempts": None,
         "error_message": None,
         "_batch": 1,
@@ -611,17 +788,23 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
     except (json.JSONDecodeError, UnicodeDecodeError):
         body_parse_failed = True
 
-    if (
+    is_manual_restart = (
         (message.routing_key or "") == settings.RABBITMQ_SUBMISSION_QUEUE
-        and body.get("action") == "manual_resume"
-        and body.get("mode") == "resume"
-    ):
-        fast_forwarded = await _try_fast_forward_completed_consolidation(
-            initial_state
-        )
-        if fast_forwarded is not None:
-            if not fast_forwarded:
-                await message.reject(requeue=False)
+        and body.get("action") == "manual_restart"
+        and body.get("mode") == "restart"
+    )
+    if is_manual_restart:
+        try:
+            # Restart is the explicit clean-run boundary. Resume intentionally
+            # keeps this thread so LangGraph owns checkpoint recovery.
+            await _delete_checkpointer_thread(str(initial_state["scan_id"]))
+        except Exception:
+            logger.error(
+                "WORKFLOW: manual restart could not clear checkpoint for %s",
+                initial_state["scan_id"],
+                exc_info=True,
+            )
+            await message.reject(requeue=True)
             return
 
     if (message.routing_key or "") == settings.RABBITMQ_APPROVAL_QUEUE:
@@ -642,6 +825,12 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
             return
         resume_payload = {
             "scan_id": str(initial_state["scan_id"]),
+            "attempt_id": body.get("attempt_id"),
+            "gate_id": body.get("gate_id"),
+            "gate_version": body.get("gate_version"),
+            "gate_sequence": body.get("gate_sequence"),
+            "node_name": body.get("node_name"),
+            "evidence_hash": body.get("evidence_hash"),
             "kind": kind,
             "approved": body.get("approved", True),
             "override_critical_secret": body.get("override_critical_secret", False),
@@ -649,9 +838,7 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         }
         # Spawn background task — don't block the consumer while
         # the full analysis runs (can take 5–30 min of LLM calls).
-        asyncio.create_task(
-            _run_workflow_task(initial_state, resume_payload, message)
-        )
+        asyncio.create_task(_run_workflow_task(initial_state, resume_payload, message))
         return
 
     # Submission queue: process inline with the context manager for
@@ -661,7 +848,7 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
             initial_state, resume_payload=resume_payload
         )
         if not success:
-            await message.reject(requeue=False)
+            await message.reject(requeue=True)
 
 
 # Track in-flight analysis workflows so we don't overwhelm the LLM
@@ -682,7 +869,7 @@ async def _run_workflow_task(
             initial_state, resume_payload=resume_payload
         )
         if not success:
-            await message.reject(requeue=False)
+            await message.reject(requeue=True)
         else:
             await message.ack()
 

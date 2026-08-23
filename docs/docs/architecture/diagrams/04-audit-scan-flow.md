@@ -68,7 +68,7 @@ sequenceDiagram
       Note over W,SC: Node 2 - deterministic_prescan_node
       W->>SC: stage files (temp dir)
       W->>SC: bandit_runner (.py / 120 s)
-      W->>SC: semgrep_runner (180 s · p/security-audit)
+      W->>SC: semgrep_runner (180 s · DB-selected rules)
       W->>SC: gitleaks_runner (180 s · secret patterns)
       W->>SC: osv_runner (180 s · CycloneDX 1.5)
       SC-->>W: per-tool JSON findings + BOM

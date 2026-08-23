@@ -16,7 +16,7 @@ flowchart LR
 
     subgraph DB["PostgreSQL"]
       direction TB
-      SE[("scan_events<br/>id, scan_id, stage_name,<br/>status, timestamp, details JSONB")]:::data
+      SE[("scan_events v1<br/>cursor/id, scan + attempt,<br/>activity kind, stage/status,<br/>timestamp, safe details JSONB")]:::data
       Sc[("scans<br/>status column (state machine)")]:::data
       Bus[("Postgres LISTEN/NOTIFY<br/>channel sccap_scan_events")]:::data
     end
@@ -24,8 +24,8 @@ flowchart LR
     subgraph App["FastAPI app (sccap_app)"]
       direction TB
       ST["POST /api/v1/scans/{id}/stream-token<br/>· checks scan ownership + tenant<br/>· mints JWT (aud=sse:scan-stream, exp 60 s,<br/>  scan_id-bound)"]:::app
-      SSEH["GET /api/v1/scans/{id}/stream?access_token=…<br/>· validates SSE-aud JWT<br/>· opens text/event-stream response<br/>· keepalive comments every 15 s"]:::app
-      Pol["Stream loop<br/>· LISTEN sccap_scan_events (NOTIFY-driven)<br/>· fallback poll scan_events every 1 s<br/>· emits scan_state on scans.status change"]:::app
+      SSEH["GET /api/v1/scans/{id}/stream?access_token=…&cursor=…<br/>· validates SSE-aud JWT + cursor<br/>· opens text/event-stream response<br/>· keepalive comments"]:::app
+      Pol["Stream loop<br/>· LISTEN sccap_scan_events (NOTIFY-driven)<br/>· cursor replay + fallback poll<br/>· emits scan_state on scans.status change"]:::app
     end
 
     %% ===== Edge / SPA =====
@@ -34,7 +34,7 @@ flowchart LR
     subgraph SPA["React SPA · ScanRunningPage"]
       ES["EventSource(...)<br/>{ withCredentials: true }"]:::edge
       Handlers["es.addEventListener<br/>· scan_state<br/>· scan_event<br/>· done<br/>· error"]:::edge
-      Retry["Watchdog: 30 s no-data → close + retry<br/>max 5 retries · then surface error"]:::edge
+      Retry["Fresh stream token + exponential reconnect<br/>last cursor round-tripped · stable-ID dedupe"]:::edge
     end
 
     %% ===== Wiring =====
@@ -69,7 +69,8 @@ event: scan_state
 data: {"scan_id":"…","status":"PENDING_COST_APPROVAL","cost_details":{"total_estimated_cost":1.42,"total_input_tokens":83000,"predicted_output_tokens":5200}}
 
 event: scan_event
-data: {"scan_id":"…","event_id":42,"stage_name":"FILE_ANALYZED","status":"COMPLETED","timestamp":"2026-05-12T14:01:33.221Z","details":{"file_path":"src/auth.py","findings_count":3,"fixes_count":2}}
+id: 42
+data: {"schema_version":1,"cursor":"42","scan_id":"…","event_id":42,"attempt_id":"…","activity_kind":"llm_call","stage_name":"FILE_ANALYZED","status":"COMPLETED","timestamp":"2026-05-12T14:01:33.221Z","details":{"file_path":"src/auth.py","findings_count":3,"fixes_count":2}}
 
 event: scan_event
 data: {"scan_id":"…","event_id":43,"stage_name":"CORRELATING","status":"STARTED","timestamp":"2026-05-12T14:01:34.012Z"}
@@ -79,7 +80,7 @@ event: done
 data: {"scan_id":"…","status":"COMPLETED"}
 ```
 
-The single `:` line is an **SSE comment**, used as a keepalive every 15 seconds so intermediate proxies don't time the connection out.
+The single `:` line is an **SSE comment**, emitted on idle notification/poll intervals so intermediate proxies do not time the connection out.
 
 ---
 
@@ -104,7 +105,7 @@ The same access token cannot stream scans; the SSE endpoint refuses any JWT whos
 async def stream(scan_id, request):
     yield_keepalive_every = 15  # s
     fallback_interval     = 1   # s when no LISTEN/NOTIFY
-    last_event_id         = request.query_params.get("last_event_id")  # auto from EventSource
+    last_event_id         = validated_max(header_last_id, query_cursor)
     async with db.acquire() as conn:
         await conn.execute("LISTEN sccap_scan_events")
         while not await request.is_disconnected():
@@ -115,8 +116,8 @@ async def stream(scan_id, request):
                 last_event_id = row.id
             # 2. emit scan_state on status change
             ...
-            # 3. terminal? emit done; break.
-            if status in TERMINAL_STATES:
+            # 3. terminal? Cancellation waits for durable COMPLETED acknowledgement.
+            if terminal_ready(status, new_rows):
                 yield sse_event("done", {...})
                 break
             # 4. wait for NOTIFY or fallback poll
@@ -132,8 +133,8 @@ sequenceDiagram
     participant Notif as scan_progress_notifier
     participant DB as Postgres
 
-    Node->>Notif: on_node_start / on_node_end<br/>+ on_file_analyzed (custom callback)
-    Notif->>DB: INSERT scan_events(scan_id, stage_name, status, details)<br/>RETURNING id
+    Node->>Notif: workflow/scanner/LLM/retry/decision/cancellation activity
+    Notif->>DB: redact + bound details<br/>INSERT versioned scan_events envelope<br/>RETURNING cursor/id
     Notif->>DB: NOTIFY sccap_scan_events, '{"scan_id":"...","event_id":...}'
 ```
 
@@ -151,8 +152,16 @@ es.addEventListener("error",      (_) => watchdog.bump());
 ```
 
 - `withCredentials: true` so the refresh cookie travels (the Nginx/origin policy already permits it).
-- Each event has its own type, so client handlers don't need to switch on `JSON.parse(e.data).kind`.
-- The browser's native EventSource retry is augmented with a 30-second no-data watchdog and a max-5-retry bound surfaced as a toast.
+- Each activity carries a stable `activity_kind`; the UI can filter by kind and stage without parsing messages.
+- Manual reconnects mint a fresh token, send the highest rendered cursor, and deduplicate seed/SSE/poll rows by event ID.
+
+### Forceful cancellation
+
+The API persists `CANCELLATION/REQUESTED` with the terminal status. A running worker checks that
+flag every 250 ms, persists `OBSERVED`, terminates every registered scanner process group, cancels
+the in-flight provider/workflow task, and persists `COMPLETED` with latency and the two-second SLO
+result. Paused scans acknowledge all phases inline. The server emits `done` for `CANCELLED` only
+after `COMPLETED` is present, so the operator sees the full acknowledgement sequence.
 
 ### Nginx-side tuning (`secure-code-ui/nginx-https.conf`)
 
@@ -183,14 +192,16 @@ location /api/v1/ {
 | User refreshes the page                   | EventSource closed by browser; on re-open the `Last-Event-ID` header is set automatically and the server resumes after that id |
 | SSE token expires (60 s)                  | Endpoint returns 401 with `WWW-Authenticate: Bearer error="invalid_token"`; SPA requests a fresh stream-token and reopens     |
 | Reverse-proxy buffering                   | `proxy_buffering off` + `X-Accel-Buffering: no` prevent Nginx from holding events                                            |
-| LLM provider stalls                       | Worker emits no events; client watchdog kicks in after 30 s and reconnects                                                   |
+| LLM provider stalls                       | Cancellation cancels the provider/workflow task; ordinary provider timeouts remain visible as failed/retry activity          |
 
 ---
 
 ## Source files
 
 - `src/app/api/v1/routers/projects.py` — `stream_scan_token`, `stream_scan`
-- `src/app/infrastructure/workflows/callbacks/scan_progress_notifier.py`
+- `src/app/infrastructure/messaging/scan_progress_notifier.py`
+- `src/app/infrastructure/workflows/cancellation.py`
+- `src/app/shared/lib/owned_subprocess.py`
 - `src/app/infrastructure/database/models.py` — `ScanEvent`
 - `secure-code-ui/src/pages/submission/ScanRunningPage.tsx`
 - `secure-code-ui/src/shared/api/scanService.ts` — `getStreamToken`

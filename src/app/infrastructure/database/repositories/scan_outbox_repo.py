@@ -24,16 +24,39 @@ class ScanOutboxRepository:
         self.db = db_session
 
     async def enqueue(
-        self, scan_id: uuid.UUID, queue_name: str, payload: Dict
+        self,
+        scan_id: uuid.UUID,
+        queue_name: str,
+        payload: Dict,
+        *,
+        idempotency_key: str | None = None,
+        commit: bool = True,
     ) -> db_models.ScanOutbox:
-        """Inserts an unpublished outbox row. Commits."""
+        """Insert an unpublished outbox row.
+
+        ``commit=False`` lets an application service include dispatch intent in
+        the same transaction as its aggregate state change.
+        """
+        attempt_id = await self.db.scalar(
+            select(db_models.Scan.current_attempt_id).where(
+                db_models.Scan.id == scan_id
+            )
+        )
+        payload = dict(payload)
+        if attempt_id is not None:
+            payload.setdefault("attempt_id", str(attempt_id))
         row = db_models.ScanOutbox(
             scan_id=scan_id,
+            attempt_id=attempt_id,
             queue_name=queue_name,
             payload=payload,
+            idempotency_key=idempotency_key,
         )
         self.db.add(row)
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(row)
         logger.info(
             "scan_outbox.enqueued",
@@ -73,9 +96,8 @@ class ScanOutboxRepository:
     ) -> List[db_models.ScanOutbox]:
         """Returns unpublished rows that were created more than N seconds ago.
 
-        The age filter prevents the sweeper from racing the primary publish:
-        we let the request handler try first and only fall back for rows that
-        have been sitting around unpublished.
+        ``older_than_seconds`` is an optional operational delay. Submission
+        uses zero because request handlers never publish inline.
 
         Rows are locked with FOR UPDATE SKIP LOCKED so that concurrent sweeper
         replicas each claim a disjoint set of rows, eliminating the

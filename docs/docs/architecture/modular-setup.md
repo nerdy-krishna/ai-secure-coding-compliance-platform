@@ -81,9 +81,9 @@ startup on a mismatch.
 
 ## Changing features after install
 
-- App-only flags: toggle on the admin Features page — effective immediately
-  for `require_feature` gates and `GET /features`; a router that was skipped
-  at boot needs an app restart to (un)mount.
+- App-only flags: toggle on the admin Features page — `GET /features` reflects
+  the new state immediately, while route mounting remains boot-time behavior
+  and needs an app restart to change.
 - Container-backed flags: edit `COMPOSE_PROFILES` and restart the stack.
 - Disabling `multi_user` is destructive — it deactivates every non-superuser
   account (data preserved, login blocked) and requires explicit confirmation;

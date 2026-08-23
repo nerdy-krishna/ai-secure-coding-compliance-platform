@@ -80,23 +80,14 @@ migrations through `create_async_engine()`, so the URL must use the
 asyncpg driver (`postgresql+asyncpg://…`) even though the Alembic CLI
 itself is sync.
 
-## Tests
+## Verification
 
-```bash
-# Full backend test suite
-docker compose exec app poetry run pytest
-
-# Run one file / test
-docker compose exec app poetry run pytest tests/test_compliance_service.py -v
-docker compose exec app poetry run pytest tests/test_cost_estimation.py::test_admin_override_takes_precedence -v
-
-# The Playwright UI smoke test hits the running UI at http://localhost
-docker compose exec app poetry run pytest tests/test_ui_setup.py::test_setup_flow -v
-```
-
-Tests under `tests/` isolate via a SAVEPOINT-per-test rollback (the
-`db_session` fixture in `tests/conftest.py`); they can be re-run
-against a populated database without cleanup.
+The inherited executable test suites were removed on 2026-08-22. Run
+the static, build, migration, and image checks documented in the
+[Verification Strategy](../development/testing-strategy.md). Passing
+those checks does not substitute for behavioral coverage; replacement
+tests are added alongside reproduced defects and stable production
+contracts.
 
 ## Lint / format / type-check
 

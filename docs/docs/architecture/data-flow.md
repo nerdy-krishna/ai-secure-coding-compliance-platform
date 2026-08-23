@@ -3,245 +3,237 @@ title: Data Flow
 sidebar_position: 5
 ---
 
-# Data Flow
+# Scan data flow
 
-This page is the narrative version of
-[`.agent/scanning_flow.md`](https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform/blob/main/.agent/scanning_flow.md).
-Code references inside the repo — `worker_graph.py`,
-`scan_service.py`, `consumer.py` — are authoritative; this page is a
-pointer-heavy summary.
+This page describes the implemented workflow. Status names come from
+`src/app/shared/lib/scan_status.py`; graph wiring comes from
+`src/app/infrastructure/workflows/worker_graph.py`.
 
-## Scan lifecycle
+## 1. Submission
 
-### 1. Submit (API)
+`POST /api/v1/scans` accepts selected uploads, a supported HTTPS Git URL, or an archive. The
+submission module validates framework and LLM selections, file counts and sizes, executable magic,
+and supported Git hosts. It creates or updates the Project, stores deduplicated SourceCodeFiles,
+creates the Scan, initial `ScanAttempt`, and `ORIGINAL_SUBMISSION` Snapshot, appends the queued event, and writes a
+`scan_outbox` message. Project/source changes and those scan-owned rows commit atomically. The
+request path does not contact RabbitMQ; the sweeper is the sole publisher and preserves the request
+correlation ID from the outbox payload.
 
-- UI posts to `POST /api/v1/scans` with files / git URL / archive +
-  framework selection + per-slot LLM ids + per-stage LLM temperatures
-  (`profiler` / `analysis` / `consolidation` / `merge`, default 0.2
-  each) + an optional `cross_file_validation` opt-in flag.
-- `projects.py` router → `scan_service.create_scan_from_uploads`
-  (or `from_git` / `from_archive`) dedupes files by hash, creates
-  the `Scan` row + an `ORIGINAL_SUBMISSION` code snapshot, and
-  inserts a row into `scan_outbox` targeting
-  `code_submission_queue`. All in one transaction.
-- Response: `{ scan_id, project_id, message }`.
+## 2. Worker preparation
 
-### 2. Outbox sweep
+The RabbitMQ worker consumes `code_submission_queue`, verifies the message's attempt is current,
+creates the initial WorkerState, and invokes the LangGraph thread keyed by `scan_id` using the
+Postgres checkpointer. Resume keeps the same attempt; restart creates the next child attempt.
 
-- `outbox_sweeper` (background task on the API) reads unpublished
-  rows older than 30 s and publishes them to RabbitMQ with
-  exponential backoff on `attempts`. If the broker is down when the
-  API transaction commits, the scan is **still safely enqueued** —
-  the sweeper catches it when RabbitMQ comes back.
+`retrieve_and_prepare_data` reloads the original snapshot, selected frameworks and agents, creates a
+tree-sitter repository map and dependency graph, and stores workflow artifacts for later stages.
 
-### 3. Worker pickup
+`classify_files` applies deterministic first-party, vendor, minified, generated, static, and unknown
+classification. The policy is persisted to `Scan.file_profiles`. Low-value files skip selected
+expensive paths unless `deep_vendor_scan` is enabled.
 
-- `workers/consumer.py` pulls the message, builds a `WorkerState`,
-  and invokes the compiled LangGraph with a Postgres-backed
-  `AsyncPostgresSaver` checkpointer keyed on `scan_id`.
-- Status transitions are written as `ScanEvent` rows so the UI can
-  subscribe to `/scans/{id}/stream` (SSE) and paint a live progress
-  rail.
+## 3. Deterministic prescan
 
-### 4. Context + deterministic prescan
+`deterministic_prescan` stages the selected tree and runs applicable scanners concurrently:
 
-`retrieve_and_prepare_data` → `RepositoryMappingEngine` +
-`ContextBundlingEngine` → `deterministic_prescan`:
+- Bandit for Python security checks.
+- Semgrep using enabled, database-ingested rules selected for the scan.
+- Gitleaks for secrets.
+- OSV-Scanner for dependency vulnerabilities and CycloneDX BOM generation.
 
-- Tree-sitter builds a symbol index for every file; the dependency
-  graph bundles import chains for later cross-file context.
-- `deterministic_prescan` runs Bandit, Semgrep, Gitleaks, and
-  OSV-Scanner against a staged copy of the tree, seeds
-  `WorkerState.findings` with `source="<scanner>"` rows, and persists
-  a CycloneDX BOM. No LLM has been called yet.
-- If the prescan produced findings, the graph pauses at
-  `pending_prescan_approval` (status `PENDING_PRESCAN_APPROVAL`) for
-  operator review. A declined gate ends the scan at
-  `BLOCKED_USER_DECLINE`; an unacknowledged Critical secret ends it
-  at `BLOCKED_PRE_LLM`.
+Parsed findings are persisted in the `sast` bucket before any LLM call. Individual scanner failure
+is non-fatal and is recorded as an event/log. Bounded native scanner reports and a status manifest
+are retained as an encrypted, versioned, attempt-scoped object. Its append-only manifest binds
+exact object version, digests, provenance, actor, and retention metadata. The API authorizes the
+caller, decrypts the exact version, and verifies integrity before returning it. Legacy JSON remains
+readable while backfill expands existing rows; object-integrity failures never fall back.
 
-### 5. Profiling-cost gate + per-file profiler
+If findings exist, `pending_prescan_approval` sets `PENDING_PRESCAN_APPROVAL` and interrupts. A
+decline ends at `BLOCKED_USER_DECLINE`; continuing past a Critical Gitleaks result requires an
+explicit override. With no findings, this gate is skipped.
 
-`estimate_profiling_cost` → `profile_files`:
+## 4. Profiling approval and profiling
 
-- `estimate_profiling_cost` token-counts every file on the **utility**
-  LLM slot, persists the estimate, and pauses at `interrupt()` with
-  status `PENDING_PROFILING_APPROVAL`. This gate fires even when the
-  prescan found nothing.
-- On approval, `profile_files` runs the `FileProfiler` over every
-  file on the utility slot. Each profile carries a summary, the
-  file's security-relevant operations, and its **applicable
-  domains** — the subset of the scan's agent roster relevant to the
-  file. The profiler prompt is grounded in the file's tree-sitter
-  imports + symbol index from the repository map, so the domain picks
-  are anchored to stable structure (#77). Profiles are persisted to
-  `Scan.file_profiles`.
+`estimate_profiling_cost` estimates utility-model profiling cost and always pauses at
+`PENDING_PROFILING_APPROVAL`. Approval resumes the same checkpoint and `profile_files` generates a
+summary, security-relevant operations, and applicable domains for each eligible file. Profiling uses
+a fixed concurrency limit. The estimate counts the complete rendered profiling envelope and returns
+expected/upper-bound cost, confidence, historical sample count, planned requests, and assumptions.
 
-### 6. Analysis-cost gate
+## 5. Deep-analysis cost approval
 
-`estimate_cost`:
+`estimate_cost` resolves routed agents per file, renders the same system/RAG/scanner/dependency/code/
+schema envelope execution will send, and prices one or two reasoning lanes. Model/stage ledger
+history supplies median expected and p90 upper output/retry factors; sparse history uses an explicit
+conservative fallback. It also estimates a rough processing duration and emits configured RPM/TPM or
+prompt-limit warnings. It persists the range and its assumptions, sets `PENDING_COST_APPROVAL`, and
+interrupts. The conservative bound controls scan ceilings and high-value approval flags.
 
-- For each file, resolves the **routed agent set** via
-  `resolve_agents_for_file` — the per-language baseline floor unioned
-  with the profile's applicable domains (see §8).
-- Tokenizes the routed prompt set with `litellm.token_counter` and
-  prices it against `litellm.cost_per_token` (honoring any
-  per-`LLMConfiguration` override) — the estimate reflects the agents
-  each file is actually routed to, not a worst-case roster.
-- `cost_details` is persisted, status flips to
-  `PENDING_COST_APPROVAL`, and the node calls **`interrupt()`**.
+Prompt-size enforcement currently happens at the LLM client and rejects calls over
+`max_prompt_tokens`; no automatic prompt splitting or compaction is implemented.
 
-### 7. User approves (or cancels)
+An accepted approval or decline compare-and-sets the matching gate to `QUEUED_FOR_SCAN`, writes its
+audit events, and inserts an `analysis_approved_queue` outbox intent in one transaction. The request
+does not contact RabbitMQ; the outbox sweeper publishes it and the worker resumes with
+`Command(resume=payload)`. Duplicate or stale decisions create no additional intent.
 
-Each gate works the same way. The UI shows the estimate / findings;
-the user:
+## 6. Parallel analysis and durable tasks
 
-- **Approves** → API publishes to `analysis_approved_queue` with a
-  `kind` discriminator (`prescan_approval` / `profiling_approval` /
-  `cost_approval`); the worker invokes the same LangGraph thread with
-  `Command(resume=payload)` and execution continues from the pause.
-- **Cancels / declines** → `cancel_scan` sets `CANCELLED`, or a
-  declined prescan/profiling gate routes to `BLOCKED_USER_DECLINE`.
-  Checkpointer state is left in place for inspection.
+`analyze_files_parallel` plans file × chunk × agent × lane invocations. Routing combines each
+agent's deterministic language baseline with profiler-selected domains. Low-value classified files
+may be skipped according to policy.
 
-### 8. Single-pass parallel analysis
+Every invocation is represented by a ScanTask keyed by stage and input hash. Matching completed
+tasks are reused during resume. Calls use a fixed semaphore per LLM configuration plus per-config
+RPM/TPM rate limiting, retry with jitter, and a circuit breaker. Concurrency is not adaptive.
 
-`analyze_files_parallel`:
+The optional secondary reasoning model creates a second lane. Findings from both lanes retain model
+provenance. If all attempted agents fail, the scan fails; partial lane degradation is recorded.
 
-- Every file from the `ORIGINAL_SUBMISSION` snapshot is analyzed in
-  parallel — **no topological ordering, no cross-file patch
-  propagation**. The dependency graph is consulted to inject per-file
-  dependency context (symbol signatures from successors) into each
-  chunk's prompt.
-- **Baseline-aware routing**: `resolve_agents_for_file` computes
-  `baseline(language) ∪ (profiler_domains ∩ gating_eligible)`. Every
-  agent declares `baseline_languages`; an agent is force-included for
-  a file in one of its baseline languages regardless of the
-  profiler's pick, so an LLM profiler that drops a relevant agent
-  cannot lose coverage. The profiler's content picks union on top. A
-  file with no baseline and no profile falls back to the full gating
-  roster (#76 / #80).
-- Files larger than `CHUNK_ONLY_IF_LARGER_THAN` (~150 000 chars) are
-  split with `semantic_chunker`; small files run as a single chunk.
-- **Dual-LLM analysis (#93)**: when the scan opted into a second
-  reasoning LLM, the `analysis_dispatch` planner runs every routed
-  agent on **both** reasoning models; the two findings sets union in
-  `consolidate_findings`, and each finding is stamped with the model
-  that produced it (`detected_by_llms`, #94). A single-LLM scan is
-  unchanged.
-- Concurrency is bounded by an `asyncio.Semaphore(CONCURRENT_LLM_LIMIT=5)`
-  **per distinct reasoning-LLM config** over the union of
-  file × chunk × agent calls.
-- No mid-graph DB writes. Findings + `proposed_fixes` flow through
-  state to `consolidate_findings` and beyond.
+`save_raw_llm_findings` snapshots analysis output to the `raw_llm` bucket before consolidation.
 
-### 9. Consolidation
+## 7. Consolidation and validation
 
-`consolidate_findings` (backed by the `FindingConsolidator`, reasoning
-slot) replaces the old exact-key `correlate_findings`. Per file, it
-feeds the source plus all raw findings to the reasoning LLM in one
-pass: findings describing the same root cause merge into one root
-finding (leading with the root cause + fix, listing every
-`affected_location`, unioning `corroborating_agents`, re-assessing
-CVSS); false positives, fully-subsumed duplicates, and non-actionable
-noise are dropped. `save_results_node` then deletes the raw prescan
-rows and writes the consolidated set fresh.
+`consolidate_findings` runs a durable reasoning-model pass per file. It merges same-root findings,
+drops noise/false positives, and records a flow map. Failure falls back to passthrough findings.
 
-### 10. Cross-file validation (opt-in)
+`global_consolidate_findings` then performs deterministic cross-file grouping using exact normalized
+source, CWE, title, and remediation keys. It is not currently an LLM-assisted global root-cause
+analysis.
 
-`validate_cross_file` runs after `consolidate_findings`. It is wired
-permanently but is a **no-op** — no state change, no timeline event —
-unless the scan set `cross_file_validation`, so an opted-out scan is
-byte-identical to before.
+When enabled, `validate_cross_file` makes a non-destructive reasoning pass over eligible findings and
+adds `confirmed`, `mitigated`, or `unconfirmed` status plus rationale. It does not change severity or
+delete findings.
 
-When opted in, the `CrossFileSlicer` runs a deterministic eligibility
-pre-filter (a tree-sitter `calls` query + the repository-map symbol
-index) and, for each eligible finding, the `CrossFileValidator` makes
-one reasoning-LLM call under bounded concurrency. The verdict —
-`cross_file_status` ∈ `confirmed` / `mitigated` / `unconfirmed` plus a
-`cross_file_rationale` — is **non-destructive**: severity is never
-changed and no finding is added or dropped. Empty slices or an LLM
-error fail safe to `unconfirmed`. See
-[Agent System → Cross-file validation](./agent-system.md) (#81 / #82).
+## 8. Remediation and verification
 
-### 11. Remediation (REMEDIATE only)
+For SUGGEST and REMEDIATE, patch candidates are tied to stable raw/canonical finding UUIDs and the
+exact original source hash; consolidation rejects dropped candidates and validates selected anchors
+and syntax. `consolidate_and_patch` resolves exact byte ranges, collapses duplicates, routes
+ambiguous anchors and transitive overlap components to manual review, and atomically applies the
+remaining disjoint edits with a whole-file syntax gate. Each planned file then runs against the
+original repository tree in the fixed-profile, networkless `patch-validator` container. Its child
+cannot access SCCAP secrets, the host workspace, or the shared job spool. Both modes persist a
+versioned unified-diff patch plan. Automatic plans are bounded before persistence to 64 hunks,
+256 KiB positive replacement expansion, and 512 KiB UTF-8 unified diff per file, with scan-wide
+limits of 256 hunks, 1 MiB expansion, and 2 MiB diff. The sorted planner admits files against one
+scan budget; overflow discards that file's proposed output and records a blocking
+`patch_size_policy` manual-review check without growing the checkpoint artifact. Remediation mode
+is selected at submission; there is no current
+post-result workflow where arbitrary findings are selected and applied incrementally.
 
-`consolidate_and_patch` runs after `validate_cross_file`:
+Patch-plan version 2 distinguishes parser pass/failure, tool absence, skipped/not-run checks,
+timeouts, and infrastructure errors. Blocking non-pass outcomes never promote a file. Semgrep
+findings persist native rule identity, and replay uses that identity plus the resolved patch site,
+including line shifts from earlier hunks; file+CWE matching is retained only for legacy findings.
+Semgrep replay validates the current attempt's scanner-report evidence and exact-loads only the
+rule identities recorded by prescan. It verifies the complete ruleset digest and each retained
+YAML body's ingestion hash before materialization. Removed, disabled, reassigned, changed, or newly
+added live rule rows cannot affect replay. Legacy evidence without an exact historical body fails
+closed.
 
-- Groups `proposed_fixes` by file.
-- Detects line-range conflicts and runs `_run_merge_agent` to
-  resolve overlaps.
-- Tree-sitter syntax-verifies the patched content
-  (`_verify_syntax_with_treesitter`).
-- Builds `final_file_map` for the `POST_REMEDIATION` snapshot saved
-  by `save_results_node`, so users can diff against the
-  `ORIGINAL_SUBMISSION`.
+`verify_patches` runs before promotion for both modes. It rejects persistent originating Semgrep,
+Bandit, or Gitleaks rules and new changed-file findings from any of those scanners, then promotes
+passing files only for REMEDIATE. A successfully parsed native report is required; a swallowed
+runner failure is never treated as a clean scan. Failures are file-atomic, so a scan can finish as
+`partial_remediation`. OSV-originated fixes and dependency-lockfile changes use
+the manifest-hashed advisory snapshot through explicit offline/no-resolve
+flags. Missing, mutable, corrupt, timed-out, or invalid OSV replay evidence
+blocks promotion; the exact snapshot digests remain in the validation check.
+LLM-originated fixes use a separate reasoning-model gate over bounded file-local
+before/after evidence at the resolved patch location. Only an evidence-citing `resolved` verdict
+passes; `not_resolved`, `uncertain`, missing configuration, provider failure, and missing audit
+projection all keep the file in manual review. The verdict/rationale are stored separately from
+native scanner replay, and the call is recorded in the usage ledger and retained LLM interaction
+log.
+Candidate summaries reconcile governance and planner outcomes into mutually exclusive terminal
+categories, expose `validated` explicitly, and keep `applied` as its REMEDIATE-only subset.
+Candidate-scoped LLM usage identity is checked before provider invocation. A retained interaction
+is reused only after exact scan/configuration/stage/agent/template/candidate/file binding and
+structured-verdict validation. An orphaned, expired, malformed, or mismatched interaction fails
+closed without another provider call. Before a new call, SCCAP commits a unique, attempt-bound,
+non-reclaimable reservation. A crash after possible provider acceptance therefore blocks retry
+instead of risking a second billable request. The ledger also exposes whether the current response
+won the idempotency insert, preventing a concurrent second verdict from being validated against the
+first response's audit record.
 
-For AUDIT it's a no-op. For SUGGEST the consolidated findings keep
-their embedded `fixes` field (so the UI shows suggested fixes) but
-no `POST_REMEDIATION` snapshot is built.
+## 9. Results and artifacts
 
-### 12. Final report
+`save_results` replaces the Scan's consolidated finding bucket and governed candidate rows
+idempotently. `save_final_report`
+then computes the weighted CVSS aggregate, writes summary/status metadata, saves the remediation
+snapshot when applicable, and persists a versioned finding-lineage ScanArtifact.
 
-`save_final_report`:
+These operations use separate database transactions. New lineage links use exact raw/canonical UUIDs
+and include candidate decisions; stable hash/title inference is retained only for legacy scans.
 
-- Computes the CVSS-weighted 0–10 `risk_score` via
-  `shared.lib.risk_score.compute_cvss_aggregate`.
-- Persists the `summary` JSON.
-- Sets final status `COMPLETED` or `REMEDIATION_COMPLETED`.
+HTML, CSV, PDF, and SARIF reports are rendered from stored results on demand. SARIF is not stored as
+a separate blob.
 
-The per-scan `Scan.risk_score` and the Dashboard / Compliance posture
-score share this one calculation: the worker stores it as a 0–10
-intensity value, and `to_posture_score` maps it to a 0–100 posture
-scale (higher = healthier) for the dashboard. Same math, two views.
+## 10. Activity streaming and cancellation
 
-## Chat (Advisor) flow
+The API exposes a tokenized Server-Sent Events stream; SCCAP does not use WebSockets for scan
+progress. PostgreSQL `LISTEN/NOTIFY` wakes the process when new ScanEvents arrive, and polling/replay
+supports reconnects. The frontend projects these events into its progress model.
 
-1. `POST /chat/sessions` creates a session with a title, LLM config
-   id, optional project id, and framework list.
-2. `POST /chat/sessions/{id}/ask` calls `chat_service.post_message_to_session`:
-   - Persist the user message.
-   - Load full history (or a summary, if the session has been
-     compacted).
-   - Call `chat_agent.generate_response` → RAG retrieval scoped to
-     the session's frameworks via
-     `rag_service.query_guidelines(where={"framework_name": {"$in": [...]}})`
-     → LLM call → Pydantic AI validation.
-   - Persist the assistant message + link to its `llm_interaction`
-     row.
-3. `GET /chat/sessions/{id}/context` aggregates the right-rail feed:
-   session frameworks as knowledge sources, plus the top-severity
-   findings + file paths from the linked project's latest terminal
-   scan.
+Every new activity row is a version-1 envelope containing a monotonic cursor/event ID, attempt ID,
+activity kind, stage/status, timestamp, and bounded redacted details. The taxonomy separates
+workflow, scanner, LLM-call, retry, warning, degradation, decision, cancellation, and terminal
+activity. The browser reconnects from its last cursor, receives only greater IDs, and deduplicates
+the HTTP seed, SSE replay, and polling fallback by the same ID. The running page provides stage and
+type filters and renders timings, retry backoff, warnings, and degraded lanes/components.
 
-## Observability
+Cancellation compare-and-sets an active scan to `CANCELLED` and appends `REQUESTED` in one
+transaction. Paused work records `OBSERVED` and `COMPLETED` immediately. A running worker polls at
+250 ms, acknowledges observation, terminates registered scanner process groups, cancels the current
+provider/workflow task, and records completion latency against a two-second SLO. SSE withholds its
+terminal `done` event until cancellation completion is durable.
 
-Every step above writes at least one log line carrying the request's
-`X-Correlation-ID`, and every LLM call writes an `llm_interaction`
-row with the exact prompt_context + usage + cost. Scans can be
-replayed via Admin → LLM Interactions; logs can be traced via
-Grafana → Loki with the correlation id.
+## 11. Resume and restart
 
-## Queue names
+Eligible failed or cancelled scans can resume when reusable artifacts exist. Resume keeps completed
+matching ScanTasks. Restart deletes tasks, findings, and derived snapshots but preserves the original
+snapshot, configuration, events, and LLM audit records. The status claim, restart cleanup, lifecycle
+events, and replacement outbox intent commit atomically.
 
-Wired from `src/app/config/config.py`:
+Successful graph nodes record their exact node name in `WorkerState.completed_stages` as part of the
+same LangGraph checkpoint update. Failed threads are retained and resume re-enters that thread;
+restart explicitly deletes it. The worker no longer infers a safe jump from completed consolidation
+tasks, so it cannot bypass cross-file validation, patch merge, verification, results persistence, or
+final reporting. Checkpoint deserialization is strict: only SCCAP's explicitly registered state
+models may be reconstructed, rather than allowing checkpoint data to import arbitrary Python types.
 
-- `RABBITMQ_SUBMISSION_QUEUE` → `code_submission_queue`
-- `RABBITMQ_APPROVAL_QUEUE` → `analysis_approved_queue`
+Patch compilation runs in the separate networkless validator. Fixed profiles cover Python
+compile/pytest, JavaScript syntax, TypeScript no-emit type checking, Go package compilation, and
+Java compilation with annotation processing disabled. It never evaluates package-manager scripts;
+Go binaries are compiled behind a fixed no-op executor. Every check records the actual image
+toolchain version because Debian security rebuilds may advance compiler patch levels.
 
-## Status strings
+Before compilation, the planner inventories Python, npm, Go, Maven/fixed-string Gradle, .NET project,
+Ruby Gemfile, and PHP Composer dependency manifests without executing repository code. Requirements
+pass only when the package/module identity is already declared and the requested constraint can be
+proven compatible. A missing declaration, weaker or ambiguous version, malformed relevant manifest,
+configuration/migration requirement, or operator manual step remains blocking evidence. Cross-file
+dependency additions are not silently synthesized under the current file-atomic promotion model.
 
-Canonical values live at the top of
-`src/app/shared/lib/scan_status.py`:
+The planner also builds a bounded, read-only import index from the uploaded
+snapshot. It validates declared required imports and imports introduced directly
+inside replacement code for Python, JavaScript/TypeScript, Go, and Java. Local
+module paths and local Python/JavaScript names must resolve; external module roots
+must be platform-provided or conservatively backed by the existing dependency
+manifest inventory. Malformed, ambiguous, missing, wildcard-Python, oversized,
+or unsupported required imports block the file. This stage parses text only and
+does not import uploaded modules or execute package-manager/repository code.
 
-`QUEUED`, `PENDING_PRESCAN_APPROVAL`, `PENDING_PROFILING_APPROVAL`,
-`PENDING_COST_APPROVAL`, `QUEUED_FOR_SCAN`, `ANALYZING_CONTEXT`,
-`RUNNING_AGENTS`, `GENERATING_REPORTS`, `COMPLETED`,
-`REMEDIATION_COMPLETED`, `BLOCKED_PRE_LLM`, `BLOCKED_USER_DECLINE`,
-`FAILED`, `CANCELLED`.
+## Persistence summary
 
-`ACTIVE_SCAN_STATUSES` and `COMPLETED_SCAN_STATUSES` tuples are
-exported for the filters used across services. `BLOCKED_PRE_LLM` and
-`BLOCKED_USER_DECLINE` are the two terminal states a gate decline can
-produce; the `GENERATING_REPORTS` constant is preserved for tuple
-membership but no node sets it today.
+| Record | Purpose |
+| --- | --- |
+| Scan | Configuration, status, estimates, summary, preferences |
+| ScanEvent | Append-only lifecycle and activity timeline |
+| ScanOutbox | Recoverable RabbitMQ publication intent |
+| ScanTask | Durable per-invocation work ledger |
+| Finding | `sast`, `raw_llm`, or `consolidated` result |
+| CodeSnapshot | Original and post-remediation code trees |
+| ScanArtifact | Versioned structured artifacts such as finding lineage |
+| LLMInteraction | Prompt/output/usage/cost audit record |

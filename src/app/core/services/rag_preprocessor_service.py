@@ -1,6 +1,7 @@
 # src/app/core/services/rag_preprocessor_service.py
 import asyncio
 import io
+import json
 import logging
 import uuid
 import re
@@ -12,8 +13,15 @@ from pydantic import BaseModel, Field
 from app.core.schemas import EnrichedDocument
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
 from app.infrastructure.database.repositories.rag_job_repo import RAGJobRepository
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMPriceOverrideRepository,
+    LLMUsageContext,
+    LLMUsageRepository,
+    build_usage_idempotency_key,
+)
 from app.infrastructure.llm_client import LLMClient, get_llm_client
 from app.shared.lib.cost_estimation import count_tokens, estimate_cost_for_prompt
+from app.shared.lib.llm_estimation import calibrate_estimate
 
 logger = logging.getLogger(__name__)
 
@@ -222,16 +230,35 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
         doc_text: str,
         metadata: Dict[str, Any],
         target_languages: List[str],
-    ) -> Tuple[EnrichedDocument, float]:
+        *,
+        rag_job_id: uuid.UUID,
+        llm_config_id: uuid.UUID,
+    ) -> Tuple[EnrichedDocument, Optional[float]]:
         """Processes a single document row through the LLM."""
 
         prompt = self._create_enrichment_prompt(doc_text, metadata, target_languages)
 
         response = await llm_client.generate_structured_output(
-            prompt, EnrichedContentResponse
+            prompt,
+            EnrichedContentResponse,
+            usage_context=LLMUsageContext(
+                operation_kind="rag",
+                operation_id=str(rag_job_id),
+                stage="document_enrichment",
+                agent_name="RAGPreprocessor",
+                idempotency_key=build_usage_idempotency_key(
+                    operation_kind="rag",
+                    operation_id=rag_job_id,
+                    stage="document_enrichment",
+                    agent_name="RAGPreprocessor",
+                    unit_key=doc_id,
+                    llm_config_id=llm_config_id,
+                ),
+                rag_job_id=rag_job_id,
+            ),
         )
 
-        cost = response.cost or 0.0
+        cost = response.cost
 
         parsed_patterns = {}
         base_content = doc_text  # fallback
@@ -269,7 +296,7 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
         self,
         csv_content: bytes,
         llm_config_id: uuid.UUID,
-        target_languages: List[str] = [],
+        target_languages: Optional[List[str]] = None,
         previous_job_state: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Parses a CSV and estimates the total cost of processing."""
@@ -281,7 +308,9 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
 
         # Apply allow-list and cap to target_languages (V02.2.1)
         target_languages = [
-            t.lower() for t in target_languages if t.lower() in ALLOWED_TARGET_LANGUAGES
+            t.lower()
+            for t in (target_languages or [])
+            if t.lower() in ALLOWED_TARGET_LANGUAGES
         ][:MAX_TARGET_LANGUAGES]
 
         try:
@@ -302,6 +331,7 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
                 existing_map[doc_id] = doc
 
         total_input_tokens = 0
+        planned_request_count = 0
 
         for _, row in df.iterrows():
             # Only include allow-listed metadata columns (V14.2.8)
@@ -341,6 +371,7 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
             # If nothing new to generate, cost is 0 for this row
             if not langs_to_generate and doc_id in existing_map:
                 continue
+            planned_request_count += 1
 
             prompt = self._create_enrichment_prompt(
                 doc_text, metadata, langs_to_generate
@@ -348,16 +379,31 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
 
             # FIX: Use decrypted_api_key
             total_input_tokens += await count_tokens(
-                prompt,
+                f"{prompt}\n\n{json.dumps(EnrichedContentResponse.model_json_schema(), sort_keys=True, separators=(',', ':'))}",
                 llm_config,
                 api_key=getattr(llm_config, "decrypted_api_key", None),
             )
 
-        estimation = estimate_cost_for_prompt(llm_config, total_input_tokens)
+        usage_repo = LLMUsageRepository(self.llm_config_repo.db)
+        observations = await usage_repo.recent_estimation_observations(
+            llm_config_id=llm_config.id,
+            stage="document_enrichment",
+        )
+        price_snapshot = await LLMPriceOverrideRepository(
+            self.llm_config_repo.db
+        ).active_snapshot(llm_config.id)
+        estimation = estimate_cost_for_prompt(
+            llm_config,
+            total_input_tokens,
+            calibration=calibrate_estimate("rag_preprocessing", observations),
+            stage="rag_preprocessing",
+            price_snapshot=price_snapshot,
+            planned_request_count=planned_request_count,
+        )
         estimation["target_languages"] = target_languages
 
         # Reject estimates that exceed the per-job cost ceiling (V02.2.1, V02.1.3)
-        if estimation.get("total_cost", 0.0) > MAX_JOB_COST_USD:
+        if estimation.get("upper_bound_estimated_cost", 0.0) > MAX_JOB_COST_USD:
             from fastapi import HTTPException
 
             raise HTTPException(
@@ -479,7 +525,13 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
         ):
             async with CONCURRENCY_SEMAPHORE:
                 return await self._enrich_document(
-                    llm_client, doc_id, doc_text, metadata, langs_for_this_doc
+                    llm_client,
+                    doc_id,
+                    doc_text,
+                    metadata,
+                    langs_for_this_doc,
+                    rag_job_id=job_id,
+                    llm_config_id=job.llm_config_id,
                 )
 
         for _, row in df.iterrows():
@@ -556,7 +608,7 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
 
         successful_docs: List[EnrichedDocument] = []
         errors = []
-        total_cost = 0.0
+        total_cost: Optional[float] = 0.0
 
         for res in processed_results_with_costs:
             if isinstance(res, Exception):
@@ -596,7 +648,11 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
             elif isinstance(res, tuple):
                 # New enrichment
                 doc, cost = res
-                total_cost += cost
+                total_cost = (
+                    total_cost + cost
+                    if total_cost is not None and cost is not None
+                    else None
+                )
 
                 doc_id = doc.id
                 meta_info = doc_processing_meta.get(doc_id)
@@ -668,27 +724,12 @@ Respond ONLY with a valid JSON object conforming to the schema. Do not include a
     async def preprocess_csv(
         self, csv_content: bytes, llm_config_id: uuid.UUID
     ) -> List[EnrichedDocument]:
-        """Legacy compatibility method."""
-        # Minimal impl fallback
-        llm_client = await get_llm_client(llm_config_id)
-        if not llm_client:
-            raise ValueError("Failed to initialize LLM Client.")
-        try:
-            df = pd.read_csv(io.BytesIO(csv_content))
-        except Exception:
-            return []
+        """Rejected legacy entry point without a durable/auditable job identity.
 
-        tasks = []
-        for _, row in df.iterrows():
-            doc_id = str(row["id"])
-            doc_text = str(row["document"])
-            metadata = row.drop(["id", "document"]).to_dict()
-            tasks.append(
-                self._enrich_document(llm_client, doc_id, doc_text, metadata, [])
-            )
-        processed_docs = await asyncio.gather(*tasks, return_exceptions=True)
-        final = []
-        for res in processed_docs:
-            if isinstance(res, tuple):
-                final.append(res[0])
-        return final
+        No production caller uses this method. It remains temporarily so stale
+        code removal can follow the project's explicit confirmation workflow.
+        """
+        _ = (csv_content, llm_config_id)
+        raise RuntimeError(
+            "preprocess_csv is deprecated; create and run a RAG preprocessing job"
+        )

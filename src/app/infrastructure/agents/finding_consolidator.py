@@ -23,6 +23,7 @@ unit-testable with a fake reasoning LLM.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import List, Optional
 
 import cvss
@@ -30,6 +31,11 @@ from pydantic import BaseModel, Field
 
 from app.core.schemas import AffectedLocation, VulnerabilityFinding
 from app.infrastructure.llm_client import LLMClient, get_llm_client
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMUsageContext,
+    build_usage_idempotency_key,
+)
+from app.shared.lib.finding_lineage_identity import canonical_finding_id, raw_finding_id
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +133,16 @@ class _ConsolidationResponse(BaseModel):
 class FindingConsolidator:
     """Consolidates a file's raw findings via the reasoning LLM slot."""
 
-    def __init__(self, client: LLMClient):
+    def __init__(
+        self,
+        client: LLMClient,
+        *,
+        scan_id: uuid.UUID,
+        llm_config_id: uuid.UUID,
+    ):
         self._client = client
+        self._scan_id = scan_id
+        self._llm_config_id = llm_config_id
         # Running consolidation tally across every `consolidate_file`
         # call — surfaced on the Results page (#83 follow-up).
         # `merged_roots`   — root findings the LLM merged from >1 raw;
@@ -155,11 +169,36 @@ class FindingConsolidator:
         if not findings:
             return [], []
 
+        # The worker node normally assigns these before dispatch. Keep the
+        # consolidator safe for direct callers and durable legacy replays.
+        for index, finding in enumerate(findings):
+            if not finding.raw_finding_id:
+                finding.raw_finding_id = raw_finding_id(
+                    self._scan_id,
+                    f"legacy-consolidator:{finding.source or finding.agent_name or 'unknown'}:{file_path}",
+                    index,
+                )
+
         try:
             result = await self._client.generate_structured_output(
                 prompt=self._build_prompt(file_path, source_code, findings),
                 response_model=_ConsolidationResponse,
                 system_prompt=_SYSTEM_PROMPT,
+                usage_context=LLMUsageContext(
+                    operation_kind="scan",
+                    operation_id=str(self._scan_id),
+                    stage="finding_consolidation",
+                    agent_name="FindingConsolidator",
+                    idempotency_key=build_usage_idempotency_key(
+                        operation_kind="scan",
+                        operation_id=self._scan_id,
+                        stage="finding_consolidation",
+                        agent_name="FindingConsolidator",
+                        unit_key=file_path,
+                        llm_config_id=self._llm_config_id,
+                    ),
+                    scan_id=self._scan_id,
+                ),
             )
         except Exception as exc:  # noqa: BLE001 — never lose findings
             logger.warning(
@@ -201,11 +240,16 @@ class FindingConsolidator:
                 continue
             covered.update(subsumed_nums)
             subsumed = [findings[i - 1] for i in subsumed_nums]
-            consolidated.append(_build_merged_finding(merged, subsumed, file_path))
+            consolidated_finding = _build_merged_finding(merged, subsumed, file_path)
+            consolidated.append(consolidated_finding)
             for i in subsumed_nums:
                 raw_f = findings[i - 1]
                 flow_map.append(
                     {
+                        "raw_finding_id": str(raw_f.raw_finding_id),
+                        "canonical_finding_id": str(
+                            consolidated_finding.canonical_finding_id
+                        ),
                         "raw_title": raw_f.title,
                         "raw_source": raw_f.source,
                         "raw_severity": raw_f.severity,
@@ -213,6 +257,7 @@ class FindingConsolidator:
                         "raw_line": raw_f.line_number,
                         "consolidated_title": merged.title,
                         "status": "merged",
+                        "decision_reason": "Merged into one root cause requiring the same remediation.",
                     }
                 )
 
@@ -227,6 +272,8 @@ class FindingConsolidator:
             raw_f = findings[i - 1]
             flow_map.append(
                 {
+                    "raw_finding_id": str(raw_f.raw_finding_id),
+                    "canonical_finding_id": None,
                     "raw_title": raw_f.title,
                     "raw_source": raw_f.source,
                     "raw_severity": raw_f.severity,
@@ -234,6 +281,7 @@ class FindingConsolidator:
                     "raw_line": raw_f.line_number,
                     "consolidated_title": "__dropped__",
                     "status": "dropped",
+                    "false_positive_reason": drop_reasons.get(i),
                 }
             )
         # Findings the LLM neither merged nor dropped — keep them rather
@@ -249,6 +297,10 @@ class FindingConsolidator:
                 raw_f = findings[i - 1]
                 flow_map.append(
                     {
+                        "raw_finding_id": str(raw_f.raw_finding_id),
+                        "canonical_finding_id": str(
+                            canonical_finding_id([raw_f.raw_finding_id])
+                        ),
                         "raw_title": raw_f.title,
                         "raw_source": raw_f.source,
                         "raw_severity": raw_f.severity,
@@ -256,6 +308,7 @@ class FindingConsolidator:
                         "raw_line": raw_f.line_number,
                         "consolidated_title": raw_f.title,
                         "status": "passthrough",
+                        "decision_reason": "Finding survived consolidation unchanged.",
                     }
                 )
 
@@ -350,6 +403,9 @@ def _passthrough(finding: VulnerabilityFinding) -> VulnerabilityFinding:
     or that the LLM neither merged nor dropped."""
     out = finding.model_copy(deep=True)
     out.id = None
+    if out.raw_finding_id:
+        out.canonical_finding_id = canonical_finding_id([out.raw_finding_id])
+        out.contributing_raw_finding_ids = [out.raw_finding_id]
     if not out.corroborating_agents and out.agent_name:
         out.corroborating_agents = [out.agent_name]
     return out
@@ -410,6 +466,14 @@ def _build_merged_finding(
 
     return VulnerabilityFinding(
         id=None,
+        canonical_finding_id=canonical_finding_id(
+            f.raw_finding_id for f in subsumed if f.raw_finding_id
+        ),
+        contributing_raw_finding_ids=[
+            f.raw_finding_id for f in subsumed if f.raw_finding_id
+        ],
+        source_snapshot_hash=base.source_snapshot_hash,
+        fix_selection_status="none",
         cwe=cwe,
         title=merged.title,
         description=merged.description,
@@ -423,7 +487,9 @@ def _build_merged_finding(
         file_path=file_path,
         vulnerable_snippet=base.vulnerable_snippet,
         affected_locations=affected or None,
-        fixes=base.fixes,
+        # Candidate governance selects the display/apply fix after this merge;
+        # never inherit one arbitrary agent's fix here.
+        fixes=None,
         source=base.source,
         cve_id=base.cve_id,
         agent_name=base.agent_name,
@@ -434,7 +500,9 @@ def _build_merged_finding(
 
 
 async def create_finding_consolidator(
-    reasoning_llm_config_id, temperature: Optional[float] = None
+    reasoning_llm_config_id: uuid.UUID,
+    scan_id: uuid.UUID,
+    temperature: Optional[float] = None,
 ) -> FindingConsolidator:
     """Build a `FindingConsolidator` backed by the scan's reasoning slot.
 
@@ -448,4 +516,8 @@ async def create_finding_consolidator(
             f"Reasoning LLM config {reasoning_llm_config_id} could not be "
             "loaded for finding consolidation."
         )
-    return FindingConsolidator(client)
+    return FindingConsolidator(
+        client,
+        scan_id=scan_id,
+        llm_config_id=reasoning_llm_config_id,
+    )

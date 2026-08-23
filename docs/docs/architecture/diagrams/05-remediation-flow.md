@@ -1,20 +1,15 @@
-# 05 — Remediation Flow
+# 05 — Deterministic Patch Planning and Remediation
 
-What happens when a scan is submitted with `scan_type=REMEDIATE`: the
-analysis agents propose fixes, the worker merges and syntax-verifies
-them in-graph, re-runs Semgrep over the patched code, and persists a
-`POST_REMEDIATION` snapshot.
+SUGGEST and REMEDIATE scans both turn governed fix candidates into an
+immutable, versioned patch plan. The planner never asks an LLM to rewrite a
+file. It resolves exact ranges against the recorded source snapshot, rejects
+ambiguity and overlap, applies accepted edits atomically, and emits a unified
+diff with candidate-to-hunk lineage. Only REMEDIATE promotes accepted files
+into a `POST_REMEDIATION` snapshot.
 
-There is **no separate "apply fixes" trigger.** Remediation is not a
-post-hoc action on a finished scan — it is a scan *type*, chosen at
-submit time. A `REMEDIATE` scan travels the exact same path as `AUDIT`
-/ `SUGGEST` (outbox → `code_submission_queue` → worker graph; prescan,
-profiling-cost and cost-approval gates from diagram **04**); the only
-difference is in three graph nodes near the end.
-
-A `SUGGEST` scan also produces per-finding fixes and runs the same
-merge/conflict resolution, but **stops short of writing a patched
-snapshot** — it is advisory. `AUDIT` produces no fixes at all.
+There is **no separate apply-fixes trigger**. Remediation is a scan type chosen
+at submission. AUDIT produces findings only; SUGGEST produces an advisory patch
+plan; REMEDIATE produces the same plan and promotes its accepted file results.
 
 ---
 
@@ -22,67 +17,70 @@ snapshot** — it is advisory. `AUDIT` produces no fixes at all.
 
 ```mermaid
 flowchart TB
-    Start[/"REMEDIATE scan, post cost-approval<br/>(workflow_mode = remediate)"/]:::edge
+    Start[/"SUGGEST or REMEDIATE scan<br/>after finding consolidation"/]:::edge
 
-    subgraph Analyze["analyze_files_parallel"]
-      A1["Each routed agent emits a finding<br/>+ a proposed FixSuggestion<br/>(original_snippet → code)"]:::app
-      A2["Fixes collect into<br/>WorkerState.proposed_fixes"]:::app
+    subgraph Candidates["Governed fix candidates"]
+      C1["Selected + validation-passed<br/>candidate, canonical finding ID,<br/>original source SHA-256"]:::app
+      C2["Explicit requirements:<br/>imports · dependencies · config<br/>migrations · manual steps"]:::app
     end
 
-    subgraph Consolidate["consolidate_findings → validate_cross_file"]
-      C1["FindingConsolidator merges<br/>same-defect findings"]:::app
+    subgraph Planner["deterministic patch planner"]
+      PR["Bounded static import resolver:<br/>local modules/exports · platform namespaces<br/>existing dependency manifests"]:::app
+      PG{"Every required or newly<br/>introduced import<br/>proven?"}:::gate
+      P1["Normalize path and verify<br/>source snapshot hash"]:::app
+      P2["Resolve exact line/column + byte range<br/>with context fingerprint"]:::app
+      P3{"Anchor unique<br/>and replacement<br/>non-empty?"}:::gate
+      P4["Reject as ambiguous / stale / no-op<br/>→ manual review"]:::app
+      P5["Collapse exact duplicate<br/>range + replacement"]:::app
+      P6["Build transitive overlap<br/>components"]:::app
+      P7{"Component has<br/>more than one<br/>edit?"}:::gate
+      P8["Conflict every candidate<br/>in component → manual review"]:::app
+      P9["Apply disjoint edits in<br/>descending UTF-8 byte order"]:::app
+      PB{"Within per-file + scan budgets?<br/>hunks · expansion · serialized diff"}:::gate
+      PX["Discard proposed file output<br/>patch_size_policy → manual review"]:::app
+      P10{"Whole file<br/>tree-sitter<br/>parse OK?"}:::gate
+      P11["Rollback every edit in file<br/>and reject its candidates"]:::app
+      P12["Emit unified diff + stable hunk IDs<br/>+ candidate-to-hunk lineage"]:::app
     end
 
-    subgraph Patch["consolidate_and_patch_node"]
-      P1["Group proposed_fixes by file"]:::app
-      P2{">1 fix<br/>overlapping in<br/>one file?"}:::gate
-      P3["_resolve_file_fix_conflicts:<br/>apply non-overlapping fixes directly"]:::app
-      P4["_run_merge_agent (reasoning LLM,<br/>single shot → MergedFixResponse)"]:::app
-      P5{"tree-sitter<br/>parse OK?"}:::gate
-      P6["Accept merged code"]:::app
-      P7["Fall back — keep the file unpatched<br/>(never emit broken code)"]:::app
-      P8["Build final_file_map<br/>(REMEDIATE only)"]:::app
+    subgraph Promote["mode-specific output"]
+      M1{"Scan type"}:::gate
+      M2["SUGGEST: persist advisory<br/>patch_plan only"]:::app
+      M3["REMEDIATE: build final_file_map<br/>and POST_REMEDIATION snapshot"]:::app
+      M4["Keep original file<br/>manual review"]:::app
     end
 
-    subgraph Verify["verify_patches_node"]
-      V1["Re-stage patched files,<br/>re-run Semgrep (timeout-bounded)"]:::app
-      V2{"original Semgrep<br/>rule still fires<br/>at the file?"}:::gate
-      V3["finding.fix_verified = False"]:::app
-      V4["finding.fix_verified = True"]:::app
+    subgraph Verify["verify_patches"]
+      V0["Both modes: networkless fixed-profile<br/>compiler / focused tests"]:::app
+      VA["Bind scanner_reports ruleset<br/>exact IDs + body SHA-256"]:::data
+      V1["Both modes: original tree + one patch<br/>Semgrep · Bandit · Gitleaks replay"]:::app
+      V2{"Origin removed and<br/>no new finding?"}:::gate
     end
 
-    subgraph Save["save_results → save_final_report"]
-      S1["Persist findings + fixes"]:::app
-      S2["Write code_snapshots<br/>(type = POST_REMEDIATION)"]:::app
-      S3["status = REMEDIATION_COMPLETED<br/>+ risk_score + summary"]:::app
-    end
+    API["GET /scans/{id}/patch-plan<br/>JSON download"]:::edge
+    DB[("Postgres<br/>finding_fix_candidates · scan_artifacts<br/>code_snapshots")]:::data
 
-    UI["UI ResultsPage<br/>before/after diff tab"]:::edge
-    PG[("Postgres<br/>findings · scans · code_snapshots")]:::data
-    LLM{{Reasoning LLM<br/>via Pydantic AI}}:::ext
-    SG{{Semgrep subprocess}}:::ext
-
-    Start --> Analyze --> Consolidate --> Patch
-    A1 --> A2
-    P1 --> P2
-    P2 -- no --> P3 --> P8
-    P2 -- yes --> P4 -. merge call .-> LLM
-    P4 --> P5
-    P5 -- yes --> P6 --> P8
-    P5 -- no --> P7 --> P8
-    Patch --> Verify
-    V1 -. subprocess .-> SG
-    V1 --> V2
-    V2 -- yes --> V3
-    V2 -- no --> V4
-    Verify --> Save
-    S1 --> S2 --> S3 --> PG
-    PG --> UI
+    Start --> C1 --> C2 --> PR --> PG
+    PG -- no / unproven --> P4
+    PG -- yes --> P1 --> P2 --> P3
+    P3 -- no --> P4 --> P12
+    P3 -- yes --> P5 --> P6 --> P7
+    P7 -- yes --> P8 --> P12
+    P7 -- no --> P9 --> PB
+    PB -- no --> PX --> P12
+    PB -- yes --> P10
+    P10 -- no --> P11 --> P12
+    P10 -- yes --> P12
+    P12 --> V0 --> VA --> V1 --> V2
+    V2 -- no / unavailable --> M4 --> DB
+    V2 -- yes --> M1
+    M1 -- SUGGEST --> M2 --> DB
+    M1 -- REMEDIATE --> M3 --> DB
+    DB --> API
 
     classDef edge fill:#e0f2fe,stroke:#0369a1,color:#082f49;
     classDef app  fill:#e0e7ff,stroke:#4338ca,color:#1e1b4b;
     classDef data fill:#dcfce7,stroke:#15803d,color:#052e16;
-    classDef ext  fill:#ffe4e6,stroke:#9f1239,color:#4c0519;
     classDef gate fill:#ede9fe,stroke:#6d28d9,color:#2e1065,stroke-dasharray: 4 3;
 ```
 
@@ -94,93 +92,139 @@ flowchart TB
 sequenceDiagram
     autonumber
     actor Dev as Developer
-    participant SPA as Submit page
+    participant SPA as Results page
     participant API as FastAPI /api/v1
     participant W as Worker (LangGraph)
-    participant LLM as Reasoning LLM
-    participant SG as Semgrep subprocess
+    participant P as Deterministic planner
+    participant SG as Deterministic scanners
     participant DB as Postgres
 
-    Dev->>SPA: submit code, scan_type = REMEDIATE
-    SPA->>API: POST /scans
-    API->>DB: Scan row + ORIGINAL_SUBMISSION snapshot + scan_outbox
-    Note over W: prescan / profiling / cost gates (diagram 04)
-    W->>LLM: analyze — agents emit findings + proposed fixes
-    W->>W: consolidate_findings, validate_cross_file
-    W->>W: consolidate_and_patch — group fixes per file
-    opt fixes overlap in a file
-      W->>LLM: _run_merge_agent — unify into one block
+    W->>W: consolidate findings and govern candidates
+    W->>P: plan(snapshot, selected candidates, mode)
+    P->>P: statically resolve required/new imports against snapshot + manifests
+    P->>P: verify hash and resolve exact ranges
+    P->>P: de-duplicate and detect transitive overlaps
+    P->>P: apply disjoint edits and enforce file/scan size budgets
+    P->>P: parse whole file
+    P-->>W: versioned plan, unified diff, hunk lineage
+    W->>W: run allowlisted compiler/tests in networkless validator
+    W->>SG: re-run Semgrep, Bandit, Gitleaks on original tree + one planned file
+    SG-->>W: originating-rule + regression evidence
+    alt blocking checks pass
+      W->>DB: persist candidate decisions + patch_plan artifact
+      alt REMEDIATE
+        W->>DB: patched source blobs + POST_REMEDIATION snapshot + fix_verified
+      else SUGGEST
+        Note over W,DB: validated advisory only; no patched snapshot
+      end
+    else failed or unavailable
+      W->>DB: manual-review plan; original file remains authoritative
     end
-    W->>W: tree-sitter parse-check each patched file
-    W->>SG: verify_patches — re-run Semgrep on patched code
-    SG-->>W: post-remediation findings
-    W->>DB: set fix_verified on Semgrep findings
-    W->>DB: code_snapshots (POST_REMEDIATION) + status REMEDIATION_COMPLETED
-    SPA->>API: GET /scans/{id}/result
-    API-->>SPA: findings + before/after diff
+    Dev->>SPA: download Patch plan
+    SPA->>API: GET /scans/{id}/patch-plan
+    API->>DB: read latest authorized artifact
+    DB-->>API: immutable JSON plan
+    API-->>SPA: attachment
 ```
 
 ---
 
-## Legend
+## Planner guarantees
 
-### Where fixes come from
+- The original source SHA-256 must match. A plan cannot silently re-anchor
+  against a different checkout.
+- Recorded location and surrounding context disambiguate repeated snippets.
+  If deterministic line-drift correction does not yield one unique site, the
+  candidate is rejected.
+- Exact duplicates collapse. Disjoint edits are not conflated merely because
+  they are close; true overlap is computed from resolved byte ranges. Every
+  candidate in a transitive overlap component becomes manual review.
+- Edits apply in descending UTF-8 byte order so one edit cannot shift another
+  anchor. Parser failure, absence, skip, or infrastructure error is explicit
+  evidence; a blocking non-pass rolls back the entire file. Python can use its
+  built-in AST parser when tree-sitter is unavailable.
+- Automatic output is limited to 64 hunks, 256 KiB positive replacement
+  expansion, and 512 KiB serialized UTF-8 diff per file, plus 256 hunks,
+  1 MiB expansion, and 2 MiB diff across the sorted scan plan. Overflow is a
+  blocking `patch_size_policy` check; the proposed output, hunks, and diff are
+  discarded before checkpoint/artifact persistence.
+- The networkless validator runs fixed Python, JavaScript, TypeScript, Go, and
+  Java profiles. It does not accept package-manager scripts; Java annotation
+  processing is disabled and Go code is compiled without running its binary.
+- Replaying the same candidate set against the same source yields the same
+  plan and does not double-apply a replacement.
+- Required imports may become deterministic language-specific hunks. Before a
+  hunk is planned, Python, JavaScript/TypeScript, Go, and Java imports are parsed
+  and resolved against bounded snapshot/module/export, platform, and existing
+  manifest evidence. Replacement-embedded imports are checked even when omitted
+  from `required_imports`; malformed, ambiguous, missing, or unsupported
+  required imports block promotion without importing or executing project code.
+  Already-declared compatible Python/npm/Go, Java/Kotlin, .NET, Ruby, and PHP
+  dependencies are proven from manifests without execution. Missing or ambiguous dependencies,
+  configuration/migration changes, and manual steps remain explicit and block
+  source promotion under file-level atomicity.
+- Vendor/generated files are excluded unless the scan explicitly opts into
+  the applicable deep-coverage policy.
 
-In `remediate` workflow mode every analysis agent that reports a
-finding also returns a `FixSuggestion` (`original_snippet` → `code`).
-These ride through `WorkerState.proposed_fixes`; remediation does not
-make a fresh LLM round per finding — the only extra LLM call is the
-**merge agent**, and only when fixes collide.
+## Persistence and UI
 
-### consolidate_and_patch_node
+| Storage | Purpose |
+| --- | --- |
+| `finding_fix_candidates` | Source hash, resolved range, context fingerprint, hunk ID, requirements, applicability/validation/apply state. |
+| `scan_artifacts` (`patch_plan`, version 2) | Immutable JSON plan, unified diffs, and explicit validation checks for all planned files. |
+| `code_snapshots` (`POST_REMEDIATION`) | REMEDIATE-only accepted file tree. |
+| `findings` | Canonical finding and fix verification/application state. |
 
-`proposed_fixes` are grouped per file. `_resolve_file_fix_conflicts`
-applies non-overlapping fixes directly; when two or more fixes touch
-the same region, `_run_merge_agent` makes a **single** reasoning-LLM
-call that returns a `MergedFixResponse`
-(`original_snippet_for_replacement` + `merged_code` + `explanation`)
-unifying them. (The older 3-attempt retry loop was removed — it was
-weak-model scaffolding.) Every candidate file is parse-checked by
-`_verify_syntax_with_treesitter`; if it fails to parse, the merge is
-discarded and the file is left unpatched — the graph never emits
-syntactically broken code. The patched `final_file_map` is built only
-for `REMEDIATE` scans; `SUGGEST` runs the same merge but writes no
-snapshot.
+The Results page exposes **Patch plan** for SUGGEST and REMEDIATE and
+**Download patched codebase** only when a remediation snapshot exists. Candidate
+diagnostics show applicability, hunk, disposition, and validation state.
 
-### verify_patches_node — Semgrep regression check
+## Semgrep verification boundary
 
-After patching, Semgrep is re-run over the patched tree (the only
-deterministic scanner replayable this way). For each **Semgrep-emitted,
-applied** finding, `fix_verified` is set: `True` when the original rule
-no longer fires for that CWE in that file, `False` when it still does.
-Findings from other sources (Bandit / Gitleaks / OSV / LLM agents)
-keep `fix_verified = NULL` — this node can't replay their detection. A
-Semgrep failure here is swallowed; verification is best-effort and
-never blocks the scan.
-
-### Tables touched
-
-| Table            | Write                                                            |
-|------------------|------------------------------------------------------------------|
-| `findings`       | `fixes`, `fix_verified`, `is_applied_in_remediation`             |
-| `scans`          | `status = REMEDIATION_COMPLETED`, `risk_score`, `summary`        |
-| `code_snapshots` | `INSERT` row `type = POST_REMEDIATION` from `final_file_map`     |
-| `scan_events`    | stage events across the patch + verify nodes                    |
-| `llm_interactions` | one row per merge-agent call (token + cost accounting)         |
-
-### Reviewing the result
-
-A completed `REMEDIATE` scan's ResultsPage gains a before/after diff
-tab (`ORIGINAL_SUBMISSION` vs `POST_REMEDIATION`). There is no
-"apply fix" button — the patched snapshot *is* the output of the scan.
-
----
+Before any promotion, Semgrep, Bandit, and Gitleaks are rerun for both SUGGEST
+and REMEDIATE against an original repository tree with exactly one planned file
+changed. Semgrep exact-loads only the prescan identities retained in the
+scan-scoped scanner-report artifact, validates the ruleset digest, and rehashes
+each exact historical YAML body retained by the current attempt before use.
+Missing or malformed retained bodies block; removed, disabled, reassigned,
+changed, or newly added live rule rows cannot affect replay. Legacy hash-only
+artifacts fail closed. Native `check_id`,
+`test_id`, and `RuleID` values survive as
+`scanner_rule_id`. A file is blocked if the originating rule still fires at the
+resolved patch-site window or a changed-file finding does not match the
+line-shifted baseline. The former file+CWE match is legacy-only. OSV origins
+and dependency-lockfile changes use a manifest-hashed read-only advisory
+snapshot with explicit offline/no-resolve flags. CVE identity drives origin
+matching; missing or invalid snapshot/report evidence blocks promotion without
+querying the live service. LLM-originated fixes are checked separately by the
+reasoning model using bounded before/after evidence at the resolved range. Only
+an evidence-citing `resolved` verdict passes; negative, uncertain, unavailable,
+or unaudited outcomes block automatic promotion without being conflated with
+native scanner replay. The candidate-scoped usage identity is checked before
+provider invocation: a complete, exactly bound retained verdict is reused,
+while orphaned or untrustworthy retained state fails closed without a second
+call. New calls require a committed, unique, attempt-bound reservation that is
+never reclaimed after uncertain provider acceptance. A provider response that
+loses the usage-ledger idempotency race cannot be projected onto the winner's
+interaction.
 
 ## Source files
 
-- `src/app/infrastructure/workflows/nodes/consolidate.py` — `consolidate_and_patch_node`, `_resolve_file_fix_conflicts`, `_run_merge_agent`, `_verify_syntax_with_treesitter`
-- `src/app/infrastructure/workflows/nodes/verify.py` — `verify_patches_node`
-- `src/app/infrastructure/workflows/nodes/results.py` — `save_results_node`, `save_final_report_node`
-- `src/app/core/schemas.py` — `FixSuggestion`, `FixResult`, `MergedFixResponse`
-- `src/app/infrastructure/scanners/semgrep_runner.py`
-- `secure-code-ui/src/pages/analysis/ResultsPage.tsx` — before/after diff viewer
+- `src/app/shared/lib/patch_planner.py` — immutable plan contracts, exact
+  resolution, conflicts, atomic application, diff generation.
+- `src/app/shared/lib/import_requirements.py` — bounded, non-executing local
+  module/export and manifest-backed import resolution.
+- `src/app/infrastructure/workflows/nodes/consolidate.py` — workflow adapter,
+  parser gate, and sandbox client.
+- `src/app/infrastructure/agents/patch_evidence_validator.py` — bounded,
+  structured LLM-originated fix re-analysis and audit projection.
+- `src/app/infrastructure/validation/sandbox_client.py` and
+  `src/app/shared/lib/validation_sandbox_runner.py` — bounded job protocol and
+  isolated fixed-command runner.
+- `src/app/infrastructure/workflows/nodes/verify.py` — pre-promotion Semgrep,
+  Bandit, and Gitleaks origin/regression replay.
+- `src/app/infrastructure/workflows/nodes/results.py` — candidate, plan, and
+  snapshot persistence.
+- `src/app/core/schemas.py` — `FixSuggestion` and `FixResult` contracts.
+- `secure-code-ui/src/pages/analysis/ResultsPage.tsx` — artifact download and
+  candidate diagnostics.

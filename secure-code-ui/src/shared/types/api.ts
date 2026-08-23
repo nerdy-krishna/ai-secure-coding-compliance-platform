@@ -4,16 +4,34 @@
 //
 // Types whose shape matches the backend schema 1:1 are aliased from
 // `api-generated.ts` (so schema drift fails the TS build). Frontend-only
-// types and ones whose names diverge from the backend (e.g., our flat
-// `ScanResultResponse` vs. generated `AnalysisResultDetailResponse`) stay
-// hand-maintained for now; a full rename sweep is planned for Phase G
-// when every page's imports get rewritten anyway.
+// view models remain hand-maintained. The scan submission/result/report
+// boundary is operation-derived in `shared/lib/scanContract.ts`, which also
+// narrows the backend's intentionally free-form JSON before rendering.
 //
 // To regenerate `api-generated.ts` against the current backend:
 //     npm run generate:api
 // The generated file should not be edited by hand.
 
 import type { components } from "./api-generated";
+import type {
+  CostDetails,
+  CreateScanResponse,
+  FindingDisposition,
+} from "../lib/scanContract";
+
+export type {
+  ConsolidationStats,
+  CostDetails,
+  Finding,
+  FindingDisposition,
+  LLMUsageItem,
+  OverallRiskScore,
+  ScanResultResponse,
+  SubmittedFile,
+  SuggestedFix,
+  Summary,
+  SummaryReport,
+} from "../lib/scanContract";
 
 type Schemas = components["schemas"];
 
@@ -28,14 +46,6 @@ export interface UserLoginData {
   scope?: string;
   client_id?: string;
   client_secret?: string;
-}
-
-// NOTE: privilege flags (is_active, is_superuser, is_verified) are intentionally
-// absent — registration payloads must never set them. Use AdminUserCreate
-// (aliased from the generated schemas) for admin-only user creation.
-export interface UserRegisterData {
-  email: string;
-  password: string;
 }
 
 export type UserRead = Schemas["UserRead"];
@@ -171,72 +181,13 @@ export interface SubmissionFormValues {
   frameworks: string[];
 }
 
-export type ScanResponse = Schemas["ScanResponse"];
+export type ScanResponse = CreateScanResponse;
 export type GitRepoPreviewRequest = Schemas["GitRepoPreviewRequest"];
 
-// --- Scan results (frontend decomposes the backend's single
-// AnalysisResultDetailResponse into several flat types for UI convenience;
-// kept hand-written to avoid a page-wide rename). -----------------------
-export interface SuggestedFix {
-  description?: string;
-  original_snippet?: string;
-  code?: string;
-}
-
-export interface Finding {
-  id: number;
-  file_path: string;
-  title: string;
-  // Populated only by SAST scanners that emit a CWE; absent for LLM findings.
-  cwe?: string | null;
-  description: string;
-  severity: string;
-  line_number: number;
-  // Exact verbatim vulnerable code; the UI matches it against the file
-  // to highlight the precise span. null for legacy / scanner findings.
-  vulnerable_snippet?: string | null;
-  // Every site a merged finding manifests, beyond the primary location.
-  affected_locations?: { line_number: number; snippet?: string | null }[] | null;
-  remediation: string;
-  confidence: string;
-  // Originating scanner/agent for the finding. Mirrors the
-  // `findings.source` column on the backend (bandit / semgrep /
-  // gitleaks / osv / null for legacy LLM-emitted rows). Used to
-  // drive the by-source filter chip row on ResultsPage.
-  source?: string | null;
-  corroborating_agents?: string[];
-  // Reasoning LLM(s) that detected the finding (#94). Two entries ⇒
-  // both models in a dual-LLM scan independently flagged it. Absent /
-  // null for scanner-emitted and pre-#94 findings.
-  detected_by_llms?: string[] | null;
-  cvss_score?: number;
-  cvss_vector?: string;
-  references: string[];
-  fixes?: SuggestedFix;
-  is_applied_in_remediation?: boolean;
-  // Patch-verifier result (§3.9). true ⇒ a scanner re-run no longer
-  // reports this finding; the tool's fix worked. null ⇒ not verified.
-  fix_verified?: boolean | null;
-  // Opt-in cross-file validation verdict (#81 / PRD #75). null when the
-  // scan did not opt in or the finding was skipped by the eligibility
-  // pre-filter; otherwise "confirmed" / "mitigated" / "unconfirmed".
-  cross_file_status?: "confirmed" | "mitigated" | "unconfirmed" | null;
-  cross_file_rationale?: string | null;
-  // Operator triage disposition (PRD #96 / #97). Defaults to "open".
-  disposition?: FindingDisposition;
-  disposition_by?: number | null;
-  disposition_at?: string | null;
-  disposition_note?: string | null;
-}
-
-// The five operator triage states. `false_positive`, `remediated`, and
-// `risk_accepted` drop a finding out of the risk score.
-export type FindingDisposition =
-  | "open"
-  | "confirmed"
-  | "false_positive"
-  | "remediated"
-  | "risk_accepted";
+// --- Scan results -------------------------------------------------------
+// The full result graph is exported from scanContract.ts. It is derived from
+// concrete OpenAPI operations and only refines backend fields intentionally
+// declared as free-form JSON before they cross the rendering boundary.
 
 export interface FindingDispositionResponse {
   finding_id: number;
@@ -264,108 +215,6 @@ export interface FindingDispositionEvent {
   created_at: string;
 }
 
-export interface SubmittedFile {
-  file_path: string;
-  findings: Finding[];
-  language?: string;
-  analysis_summary?: string;
-  skipped_reason?: string;
-}
-
-export interface Summary {
-  total_findings_count?: number;
-  files_analyzed_count?: number;
-  severity_counts?: {
-    CRITICAL?: number;
-    HIGH?: number;
-    MEDIUM?: number;
-    LOW?: number;
-    INFORMATIONAL?: number;
-  };
-}
-
-export interface OverallRiskScore {
-  score: number | string;
-  severity: string;
-}
-
-export interface SummaryReport {
-  scan_id: string;
-  project_id: string;
-  project_name: string;
-  scan_type: string;
-  primary_language?: string;
-  selected_frameworks: string[];
-  analysis_timestamp: string;
-  summary: Summary;
-  files_analyzed: SubmittedFile[];
-  overall_risk_score?: OverallRiskScore;
-}
-
-// One LLM slot a scan ran with — shown in the Results page "Models
-// used" panel.
-export interface LLMUsageItem {
-  category: string;
-  name: string;
-  provider: string;
-  model_name: string;
-}
-
-// The consolidation-pass tally, shown in the Results "Models used" card.
-export interface ConsolidationStats {
-  raw_count: number;
-  consolidated_count: number;
-  merged_roots: number;
-  merged_inputs: number;
-  dropped: number;
-}
-
-export interface ScanResultResponse {
-  scan_id: string;
-  status: string;
-  // Always-present project pointers (top-level on the backend response).
-  // Populated even when `summary_report` is null because the scan never
-  // produced one (queued / cancelled / failed early).
-  project_id: string;
-  project_name: string;
-  summary_report?: SummaryReport;
-  original_code_map?: { [filePath: string]: string };
-  fixed_code_map?: { [filePath: string]: string };
-  // Per-source finding counts for the per-source counter row on the
-  // results page (sast-prescan-followups Group D2). Empty object when
-  // the scan has no findings.
-  source_counts?: { [source: string]: number };
-  // Estimate produced by the cost node before approval. Surfaced on
-  // ScanRunningPage so the user sees the number alongside the
-  // "Approve & run" button. Null until cost-estimate runs.
-  cost_details?: CostDetails | null;
-  // Whether the scan opted in to cross-file finding validation (#82).
-  // Drives the cross-file-validation stage in ScanRunningPage's rail.
-  cross_file_validation?: boolean;
-  deep_vendor_scan?: boolean;
-  // The LLM configs the scan ran with — reasoning / utility / 2nd
-  // analysis LLM — each with its provider + model. Shown on Results.
-  llms_used?: LLMUsageItem[];
-  // Consolidation-pass tally (raw → consolidated, merged, dropped).
-  consolidation_stats?: ConsolidationStats | null;
-  // Submission settings — shown in the results-page "Scan information"
-  // panel. `scan_type` / `repository_url` are top-level so the panel
-  // never depends on `summary_report`.
-  scan_type?: string;
-  disable_temperature?: boolean;
-  stage_temperatures?: { [stage: string]: number } | null;
-  repository_url?: string | null;
-  // How the code was submitted: "upload" | "archive" | "git".
-  source_type?: string | null;
-  // True when durable scan task artifacts exist for resume/restart.
-  has_resumable_artifacts?: boolean;
-  // Stage-event audit trail. SSE emits these live for in-progress
-  // scans; the same list is included here so a terminal scan's page
-  // can seed the live-event-log deterministically on mount, instead
-  // of waiting for an SSE that may have already closed.
-  events?: ScanEventItem[];
-}
-
 // --- Prescan-approval gate (ADR-009 / G6). One row per deterministic-
 // scanner finding produced before the LLM phase; rendered on the
 // scan-status page when status === "PENDING_PRESCAN_APPROVAL".
@@ -377,6 +226,7 @@ export interface PrescanFindingItem {
   description?: string | null;
   severity?: string | null;
   source?: string | null;
+  scanner_rule_id?: string | null;
   cwe?: string | null;
   cve_id?: string | null;
 }
@@ -386,14 +236,6 @@ export interface PrescanReviewResponse {
   status: string;
   findings: PrescanFindingItem[];
   has_critical_secret: boolean;
-}
-
-export interface CostDetails {
-  input_cost: number;
-  predicted_output_cost: number;
-  total_estimated_cost: number;
-  predicted_output_tokens: number;
-  total_input_tokens: number;
 }
 
 export type ScanEventItem = Schemas["ScanEventItem"];

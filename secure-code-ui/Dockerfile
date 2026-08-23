@@ -39,6 +39,11 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-http.conf /etc/nginx/nginx-http.conf
 COPY nginx-https.conf /etc/nginx/nginx-https.conf
 
+# Exercise the same assembled HTTP configuration used by local/runtime startup.
+# This catches duplicate http-context declarations and invalid server fragments
+# while the image is being built rather than after deployment.
+RUN cp /etc/nginx/nginx-http.conf /etc/nginx/conf.d/default.conf && nginx -t
+
 COPY nginx-entrypoint.sh /docker-entrypoint.d/99-ssl-setup.sh
 RUN chmod +x /docker-entrypoint.d/99-ssl-setup.sh
 

@@ -24,10 +24,8 @@ Threat-model mitigations:
 from __future__ import annotations
 
 import logging
-import time
 from typing import Optional, List
 
-import jwt as _pyjwt
 from fastapi import (
     APIRouter,
     Depends,
@@ -138,24 +136,7 @@ async def _issue_session(response: Response, user) -> str:
     session-lifetime ceiling check in ``/auth/refresh`` works correctly.
     """
     strategy = get_custom_cookie_jwt_strategy()
-    access_token = await strategy.write_token(user)
-
-    secret = (
-        settings.SECRET_KEY.get_secret_value()
-        if hasattr(settings.SECRET_KEY, "get_secret_value")
-        else str(settings.SECRET_KEY)
-    )
-    now_ts = int(time.time())
-    refresh_payload = {
-        "sub": str(user.id),
-        "aud": "fastapi-users:auth",
-        "typ": "refresh",
-        "original_iat": now_ts,
-        "exp": now_ts + settings.REFRESH_TOKEN_LIFETIME_SECONDS,
-    }
-    refresh_token = _pyjwt.encode(refresh_payload, secret, algorithm="HS256")
-    await strategy.write_refresh_token(response, refresh_token)
-    return access_token
+    return await strategy.issue_session(response, user)
 
 
 # ---------------------------------------------------------------------------

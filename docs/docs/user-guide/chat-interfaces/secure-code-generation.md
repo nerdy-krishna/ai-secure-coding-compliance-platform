@@ -58,4 +58,5 @@ path is:
 For AI-suggested fixes produced by specialized agents during a scan,
 use the
 [Managing Findings](../code-analysis/managing-findings.md) flow
-instead — those get applied + merged by SCCAP automatically.
+instead — SCCAP plans those against exact source ranges, rejects conflicts
+for manual review, and promotes accepted patches during REMEDIATE scans.

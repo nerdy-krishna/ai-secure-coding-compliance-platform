@@ -36,11 +36,12 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.schemas import VulnerabilityFinding
+from app.shared.lib.owned_subprocess import run_owned_subprocess
 
 
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ def _bandit_finding_to_vulnerability(
         file_path=str(file_path),
         fixes=None,
         source="bandit",
+        scanner_rule_id=(raw.test_id or "B000").strip()[:512],
         agent_name=None,
         corroborating_agents=None,
         is_applied_in_remediation=False,
@@ -183,7 +185,7 @@ def _invoke_bandit_sync(staged_dir: Path) -> "subprocess.CompletedProcess[str]":
     - ``capture_output=True, text=True`` because Bandit's JSON output
       goes to stdout. ``--quiet`` suppresses progress lines on stderr.
     """
-    return subprocess.run(  # noqa: S603 - args are a literal list, not user-supplied
+    return run_owned_subprocess(
         [
             _bandit_binary(),
             "-r",
@@ -228,7 +230,9 @@ def _timeout_finding(staged_dir: Path) -> VulnerabilityFinding:
 
 
 async def run_bandit(
-    staged_dir: Path, original_paths: Dict[Path, str]
+    staged_dir: Path,
+    original_paths: Dict[Path, str],
+    report_collector: Optional[Callable[[Any], None]] = None,
 ) -> List[VulnerabilityFinding]:
     """Run Bandit against ``staged_dir`` and return findings.
 
@@ -273,6 +277,8 @@ async def run_bandit(
     logger.debug("scanner=bandit raw stderr=%r", completed.stderr)
 
     if not completed.stdout:
+        if completed.returncode == 0 and report_collector is not None:
+            report_collector({"results": []})
         return []
 
     try:
@@ -281,6 +287,9 @@ async def run_bandit(
     except (json.JSONDecodeError, ValidationError) as exc:
         logger.warning("scanner=bandit JSON parse failed: %s", exc)
         return []
+
+    if report_collector is not None:
+        report_collector(payload)
 
     findings: List[VulnerabilityFinding] = []
     for raw in report.results:

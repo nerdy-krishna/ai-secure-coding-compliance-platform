@@ -13,13 +13,17 @@ findings, decide what to remediate, and export downstream artifacts.
 
 - **Header** — scan ID, project name, final status, created/completed
   timestamps, cost (sum of `llm_interactions.cost` for this scan),
-  and a link to the LLM-interactions log.
+  and a link to scan diagnostics.
 - **Summary strip** — total findings grouped by severity; the
   CVSS-weighted 0–10 risk score on the scan row (the same calculation
   the Dashboard / Compliance posture is derived from, shown here as a
   0–10 intensity rather than a 0–100 posture).
 - **Download report** — HTML, CSV, PDF, and SARIF buttons in the header
   export the scan's consolidated findings (see [Reporting](../reporting.md)).
+- **Deterministic scanner provenance** — one card per scanner shows the
+  verified/degraded state, runtime version and digest, selected Semgrep
+  ruleset digest, and advisory-source warning. **Full evidence** downloads
+  the native reports plus the complete per-rule inventory.
 - **Per-file panels** — every analyzed file gets a collapsible
   section. Expand to see its consolidated findings, with:
   - Title + severity chip + CVSS score
@@ -66,7 +70,7 @@ from consolidated findings without a separate reporting node.
 The **Scan Logs** button in the results header opens the Pipeline & Logs
 page (`/scans/{id}/diagnostics`) with two tabs:
 
-- **Findings Pipeline** — an elaborate Sankey diagram showing how findings
+- **Finding Lineage** — an expandable directed graph showing how findings
   flow from individual scanners and LLM agents through consolidation.
   Filter by source, type, severity, or CWE. Breakdown tables show findings
   in each storage bucket (SAST, raw LLM, consolidated).

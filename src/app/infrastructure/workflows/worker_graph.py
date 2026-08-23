@@ -7,10 +7,6 @@ only:
 
 - StateGraph construction + node registration + edges + routing
 - ``get_workflow()`` / ``close_workflow_resources()`` lifecycle
-- back-compat re-exports of the moved node functions and helpers, so
-  existing call sites (`workers/consumer.py`, the two
-  `tests/test_worker_graph_*.py` tests) keep importing them as
-  ``worker_graph.<name>`` attributes
 
 The string identifiers passed to ``workflow.add_node("<name>", fn)``
 are part of the LangGraph checkpointer's on-disk contract — in-flight
@@ -25,23 +21,20 @@ import logging
 from typing import Optional
 
 import psycopg
+from psycopg.rows import dict_row
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, StateGraph
 from langgraph.pregel import Pregel
 
 from app.config.config import settings
+from app.infrastructure.workflows.cancellation import cancellation_aware
+from app.infrastructure.workflows.checkpoint_serde import checkpoint_serializer
 
 from app.infrastructure.workflows.nodes.analyze import (
     analyze_files_parallel_node,
 )
 from app.infrastructure.workflows.nodes.classify import classify_files_node
-from app.infrastructure.workflows.nodes.consolidate import (
-    HAS_TREE_SITTER,
-    _resolve_file_fix_conflicts,
-    _run_merge_agent,
-    _verify_syntax_with_treesitter,
-    consolidate_and_patch_node,
-)
+from app.infrastructure.workflows.nodes.consolidate import consolidate_and_patch_node
 from app.infrastructure.workflows.nodes.consolidate_findings import (
     consolidate_findings_node,
 )
@@ -51,14 +44,9 @@ from app.infrastructure.workflows.nodes.global_consolidate import (
 from app.infrastructure.workflows.nodes.save_raw_llm import (
     save_raw_llm_findings_node,
 )
-from app.infrastructure.workflows.nodes.cost import (
-    CHUNK_ONLY_IF_LARGER_THAN,
-    cost_gate_node,
-    estimate_cost_node,
-)
+from app.infrastructure.workflows.nodes.cost import cost_gate_node, estimate_cost_node
 from app.infrastructure.workflows.nodes.error import handle_error_node
 from app.infrastructure.workflows.nodes.prescan import (
-    PRESCAN_FILE_BYTE_LIMIT,
     blocked_pre_llm_node,
     deterministic_prescan_node,
     pending_prescan_approval_node,
@@ -78,74 +66,15 @@ from app.infrastructure.workflows.nodes.validate_cross_file import (
     validate_cross_file_node,
 )
 from app.infrastructure.workflows.nodes.verify import verify_patches_node
-from app.infrastructure.workflows.state import RelevantAgent, WorkerState
-
-# Status constants — re-exported from the shared module so downstream
-# callers can keep importing them from `worker_graph` if they already do.
-from app.shared.lib.scan_status import (  # noqa: F401
-    STATUS_ANALYZING_CONTEXT,
-    STATUS_BLOCKED_PRE_LLM,
-    STATUS_BLOCKED_USER_DECLINE,
-    STATUS_COMPLETED,
-    STATUS_FAILED,
-    STATUS_PENDING_APPROVAL,
-    STATUS_PENDING_PRESCAN_APPROVAL,
-    STATUS_PENDING_PROFILING_APPROVAL,
-    STATUS_QUEUED_FOR_SCAN,
-    STATUS_REMEDIATION_COMPLETED,
-)
-
-# Re-export concurrency limits at module level for backwards compat
-# (tests and other modules import these from worker_graph).
-CONCURRENT_LLM_LIMIT = settings.CONCURRENT_LLM_LIMIT
-CONCURRENT_SCANNER_LIMIT = settings.CONCURRENT_SCANNER_LIMIT
-CONCURRENT_CONSOLIDATION_LIMIT = settings.CONCURRENT_CONSOLIDATION_LIMIT
-CONCURRENT_VALIDATION_LIMIT = settings.CONCURRENT_VALIDATION_LIMIT
+from app.infrastructure.workflows.state import WorkerState
+from app.shared.lib.approval_policy import is_strict_approval
 
 logger = logging.getLogger(__name__)
 
 
 __all__ = [
-    # Public API the worker consumer + tests rely on:
-    "WorkerState",
-    "RelevantAgent",
     "get_workflow",
     "close_workflow_resources",
-    "CONCURRENT_LLM_LIMIT",
-    "CONCURRENT_SCANNER_LIMIT",
-    "CONCURRENT_CONSOLIDATION_LIMIT",
-    "CONCURRENT_VALIDATION_LIMIT",
-    "PRESCAN_FILE_BYTE_LIMIT",
-    "CHUNK_ONLY_IF_LARGER_THAN",
-    "HAS_TREE_SITTER",
-    # Node + helper re-exports for tests and any external module-attr access:
-    "retrieve_and_prepare_data_node",
-    "deterministic_prescan_node",
-    "pending_prescan_approval_node",
-    "user_decline_node",
-    "blocked_pre_llm_node",
-    "estimate_profiling_cost_node",
-    "profiling_cost_gate_node",
-    "profile_files_node",
-    "estimate_cost_node",
-    "cost_gate_node",
-    "analyze_files_parallel_node",
-    "consolidate_findings_node",
-    "validate_cross_file_node",
-    "consolidate_and_patch_node",
-    "verify_patches_node",
-    "save_results_node",
-    "save_final_report_node",
-    "handle_error_node",
-    "_run_merge_agent",
-    "_resolve_file_fix_conflicts",
-    "_verify_syntax_with_treesitter",
-    # Routing helpers (used by tests via attribute access):
-    "should_continue",
-    "_route_after_retrieve",
-    "_route_after_prescan",
-    "_route_after_prescan_approval",
-    "_route_after_profiling_approval",
 ]
 
 
@@ -157,27 +86,32 @@ __all__ = [
 # strings. NEVER rename them here without a checkpointer migration.
 workflow = StateGraph(WorkerState)
 
-workflow.add_node("retrieve_and_prepare_data", retrieve_and_prepare_data_node)
-workflow.add_node("classify_files", classify_files_node)
-workflow.add_node("deterministic_prescan", deterministic_prescan_node)
-workflow.add_node("pending_prescan_approval", pending_prescan_approval_node)
-workflow.add_node("blocked_pre_llm", blocked_pre_llm_node)
-workflow.add_node("user_decline", user_decline_node)
-workflow.add_node("estimate_profiling_cost", estimate_profiling_cost_node)
-workflow.add_node("profiling_cost_gate", profiling_cost_gate_node)
-workflow.add_node("profile_files", profile_files_node)
-workflow.add_node("estimate_cost", estimate_cost_node)
-workflow.add_node("cost_gate", cost_gate_node)
-workflow.add_node("analyze_files_parallel", analyze_files_parallel_node)
-workflow.add_node("save_raw_llm_findings", save_raw_llm_findings_node)
-workflow.add_node("consolidate_findings", consolidate_findings_node)
-workflow.add_node("global_consolidate_findings", global_consolidate_findings_node)
-workflow.add_node("validate_cross_file", validate_cross_file_node)
-workflow.add_node("consolidate_and_patch", consolidate_and_patch_node)
-workflow.add_node("verify_patches", verify_patches_node)
-workflow.add_node("save_results", save_results_node)
-workflow.add_node("save_final_report", save_final_report_node)
-workflow.add_node("handle_error", handle_error_node)
+
+def _add_workflow_node(name: str, node) -> None:
+    workflow.add_node(name, cancellation_aware(node, stage_name=name))
+
+
+_add_workflow_node("retrieve_and_prepare_data", retrieve_and_prepare_data_node)
+_add_workflow_node("classify_files", classify_files_node)
+_add_workflow_node("deterministic_prescan", deterministic_prescan_node)
+_add_workflow_node("pending_prescan_approval", pending_prescan_approval_node)
+_add_workflow_node("blocked_pre_llm", blocked_pre_llm_node)
+_add_workflow_node("user_decline", user_decline_node)
+_add_workflow_node("estimate_profiling_cost", estimate_profiling_cost_node)
+_add_workflow_node("profiling_cost_gate", profiling_cost_gate_node)
+_add_workflow_node("profile_files", profile_files_node)
+_add_workflow_node("estimate_cost", estimate_cost_node)
+_add_workflow_node("cost_gate", cost_gate_node)
+_add_workflow_node("analyze_files_parallel", analyze_files_parallel_node)
+_add_workflow_node("save_raw_llm_findings", save_raw_llm_findings_node)
+_add_workflow_node("consolidate_findings", consolidate_findings_node)
+_add_workflow_node("global_consolidate_findings", global_consolidate_findings_node)
+_add_workflow_node("validate_cross_file", validate_cross_file_node)
+_add_workflow_node("consolidate_and_patch", consolidate_and_patch_node)
+_add_workflow_node("verify_patches", verify_patches_node)
+_add_workflow_node("save_results", save_results_node)
+_add_workflow_node("save_final_report", save_final_report_node)
+_add_workflow_node("handle_error", handle_error_node)
 
 workflow.set_entry_point("retrieve_and_prepare_data")
 
@@ -313,6 +247,19 @@ def _route_after_profiling_approval(state: WorkerState) -> str:
     return "profile_files"
 
 
+def _route_after_cost_approval(state: WorkerState) -> str:
+    """Only a literal approved=true may start paid analysis."""
+    if state.get("error_message"):
+        return "handle_error"
+    if not is_strict_approval(state.get("cost_approval") or {}):
+        logger.info(
+            "audit.cost_approval_routed: declined scan_id=%s",
+            state.get("scan_id"),
+        )
+        return "user_decline"
+    return "analyze_files_parallel"
+
+
 workflow.add_conditional_edges(
     "retrieve_and_prepare_data",
     _route_after_retrieve,
@@ -389,8 +336,12 @@ workflow.add_conditional_edges(
 )
 workflow.add_conditional_edges(
     "cost_gate",
-    should_continue,
-    {"continue": "analyze_files_parallel", "handle_error": "handle_error"},
+    _route_after_cost_approval,
+    {
+        "analyze_files_parallel": "analyze_files_parallel",
+        "user_decline": "user_decline",
+        "handle_error": "handle_error",
+    },
 )
 
 workflow.add_conditional_edges(
@@ -459,13 +410,27 @@ async def get_workflow() -> Pregel:
                 conn_url = settings.ASYNC_DATABASE_URL.replace(
                     "postgresql+asyncpg://", "postgresql://"
                 )
-                _checkpointer_conn = await psycopg.AsyncConnection.connect(conn_url)
+                # LangGraph's Postgres saver requires autocommit for durable
+                # checkpoint visibility and prepare_threshold=0 for its
+                # dynamically generated statements. Without these settings,
+                # same-process resumes appear to work from the connection's
+                # uncommitted transaction, while another worker (or a restart)
+                # sees no checkpoint rows at all.
+                _checkpointer_conn = await psycopg.AsyncConnection.connect(
+                    conn_url,
+                    autocommit=True,
+                    prepare_threshold=0,
+                    row_factory=dict_row,
+                )
             except Exception as e:
                 # V16.3.4: log without interpolating `e` (which can contain DSN
                 # fragments); exc_info=True still gives the full traceback to ops.
                 logger.error("checkpointer_connect_failed", exc_info=True)
                 raise RuntimeError("Checkpointer connection failed") from e
-        checkpointer = AsyncPostgresSaver(conn=_checkpointer_conn)  # type: ignore
+        checkpointer = AsyncPostgresSaver(  # type: ignore[arg-type]
+            conn=_checkpointer_conn,
+            serde=checkpoint_serializer(),
+        )
         _workflow = workflow.compile(checkpointer=checkpointer)
         # V16.4.1: plain string, no f-string interpolation.
         logger.info(

@@ -3,7 +3,6 @@ import { createContext } from "react";
 import {
   type UserLoginData,
   type UserRead,
-  type UserRegisterData,
 } from "../../shared/types/api";
 export interface AuthContextType {
   user: UserRead | null;
@@ -19,7 +18,6 @@ export interface AuthContextType {
    * password endpoint.
    */
   loginWithAccessToken: (accessToken: string) => void;
-  register: (credentials: UserRegisterData) => Promise<UserRead>;
   logout: () => Promise<void>;
   clearError: () => void;
   isSetupCompleted: boolean | null;

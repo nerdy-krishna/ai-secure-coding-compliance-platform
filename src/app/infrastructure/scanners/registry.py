@@ -2,9 +2,9 @@
 
 Mirrors the extension-based routing used by the LLM agents (see
 `shared/lib/agent_routing.resolve_agents_for_file`). Bandit is
-Python-only; Semgrep covers the multi-language subset its
-`p/security-audit` rule pack flags; Gitleaks scans any text-shaped
-file for secret patterns.
+Python-only; Semgrep is eligible for the supported multi-language
+subset and applies the scan's database-selected rules; Gitleaks scans
+any text-shaped file for secret patterns.
 
 Minified bundles (`*.min.js`, `*.bundle.js`, `*.min.css`) carry a
 lower per-file byte cap to dodge Semgrep's documented multi-minute
@@ -19,9 +19,8 @@ from typing import List
 
 _PYTHON_EXTENSIONS = {".py", ".pyi"}
 
-# Languages Semgrep's `p/security-audit` rule pack covers in the
-# version we ship. Adding extensions here is fine — Semgrep silently
-# skips files for which it has no rules.
+# Languages eligible for database-selected Semgrep rules. Adding extensions
+# here is fine — Semgrep silently skips files for which the scan has no rules.
 _SEMGREP_EXTENSIONS = {
     ".py",
     ".pyi",

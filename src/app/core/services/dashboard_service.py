@@ -140,10 +140,9 @@ class DashboardService:
         """Translate a (visible_user_ids, tenant_id) pair into a SQL predicate
         anchored on the ``scans`` table.
 
-        Tenant filtering follows the project-wide convention from
-        ``shared.lib.tenant_scope``: ``None`` means "no filter" (admin
-        passthrough), a UUID means "rows in this tenant OR rows whose
-        tenant is NULL" (legacy / orphaned).
+        Tenant filtering follows the repository convention: ``None`` means
+        "no filter" (admin passthrough), while a UUID matches the tenant plus
+        legacy rows whose tenant is NULL.
         """
         if visible_user_ids is None:
             user_pred: sa.ColumnElement[bool] = sa.true()

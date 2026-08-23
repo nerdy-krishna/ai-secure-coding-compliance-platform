@@ -58,7 +58,7 @@ flowchart LR
     Admin -- "HTTPS · admin console" --> Edge
     Auditor -- "HTTPS · /compliance, /admin/sso/audit" --> Edge
     CIBot -- "HTTPS · POST /api/v1/scans, POST /api/v1/scans/{id}/approve" --> Edge
-    SCIMClient -- "HTTPS · /api/v1/scim · Bearer SCIM token" --> Edge
+    SCIMClient -- "HTTPS · /scim/v2 · Bearer SCIM token" --> Edge
 
     %% =========================
     %% Internal edges
@@ -117,14 +117,14 @@ flowchart LR
 | Tenant Admin         | Same + `is_superuser=true`        | Admin console: users, frameworks, agents, prompts, system config |
 | Compliance Auditor   | Read-only (group-scoped)          | `/compliance`, control coverage, SSO audit log                   |
 | CI/CD Agent          | Service-account JWT or API key    | Headless scan submission and result polling                      |
-| SCIM 2.0 Client      | Bearer SCIM token                 | Automated user/group provisioning (`/api/v1/scim`)               |
+| SCIM 2.0 Client      | Bearer SCIM token                 | Automated user/group provisioning (`/scim/v2`)                    |
 
 ### SCCAP boundary
 
 | Box                   | Container name        | Image / source                                       | Listens on        |
 |-----------------------|-----------------------|------------------------------------------------------|-------------------|
 | Nginx + Certbot       | `sccap_ui`            | `secure-code-ui/Dockerfile` (`builder` → `nginx:alpine`) | 80, 443           |
-| React SPA             | (served by `sccap_ui`) | Vite 6.3 build → `/dist`                            | n/a (static)      |
+| React SPA             | (served by `sccap_ui`) | Vite 6.4 build → `/dist`                            | n/a (static)      |
 | FastAPI app           | `sccap_app`           | `Dockerfile` target `api`                            | 8000 (internal)   |
 | MCP Server            | mounted inside `sccap_app` | `src/app/api/mcp/server.py`                     | shares 8000       |
 | LangGraph Worker      | `sccap_worker`        | `Dockerfile` target `worker`                         | none (consumer)   |
@@ -154,7 +154,7 @@ flowchart LR
 
 ### Edge labels of note
 
-- **`HTTPS · SPA · cookies (refresh) + Bearer JWT (access)`** — access tokens live in `localStorage` (V15.1.5 risk-accepted); refresh tokens are HttpOnly+Secure cookies set by `/auth/refresh`.
+- **`HTTPS · SPA · cookies (refresh) + Bearer JWT (access)`** — access tokens live in `localStorage` (V15.1.5 risk-accepted); refresh tokens are HttpOnly, SameSite=Strict cookies issued at login and rotated by `/auth/refresh` (Secure except the explicit HTTP local-development profile).
 - **`transactional publish · scan_outbox sweeper`** — the API never publishes directly to RabbitMQ; it writes a row to `scan_outbox`, then `outbox_sweeper.py` publishes durably and marks the row sent.
 - **`consume · aio_pika robust`** — the worker uses `aio_pika.connect_robust` with exponential backoff and a duplicate-delivery idempotency precheck against `scans.status`.
 - **`MCP over stdio/HTTP`** — the same FastAPI process mounts an MCP server so external Claude Code or Cursor sessions can hit scan/chat tools with the user's JWT.

@@ -96,8 +96,14 @@ class ScanTaskRepository:
             scan_id=scan_id, task_type=task_type, task_key=task_key
         )
         if task is None:
+            attempt_id = await self.db.scalar(
+                select(db_models.Scan.current_attempt_id).where(
+                    db_models.Scan.id == scan_id
+                )
+            )
             task = db_models.ScanTask(
                 scan_id=scan_id,
+                attempt_id=attempt_id,
                 task_type=task_type,
                 task_key=task_key,
                 input_hash=input_hash,
@@ -196,8 +202,14 @@ class ScanTaskRepository:
         )
         task = result.scalars().first()
         if task is None:
+            attempt_id = await self.db.scalar(
+                select(db_models.Scan.current_attempt_id).where(
+                    db_models.Scan.id == scan_id
+                )
+            )
             task = db_models.ScanTask(
                 scan_id=scan_id,
+                attempt_id=attempt_id,
                 task_type=task_type,
                 task_key=task_key,
                 input_hash=input_hash,
@@ -337,11 +349,14 @@ class ScanTaskRepository:
         )
         return {status: int(count) for status, count in result.all()}
 
-    async def delete_for_scan(self, scan_id: uuid.UUID) -> int:
+    async def delete_for_scan(self, scan_id: uuid.UUID, *, commit: bool = True) -> int:
         result = await self.db.execute(
             sa.delete(db_models.ScanTask).where(db_models.ScanTask.scan_id == scan_id)
         )
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         return result.rowcount or 0
 
     def _reset_for_rerun(

@@ -48,11 +48,14 @@ export const FindingsDebugPanel: React.FC<Props> = ({ scanId }) => {
     return () => { cancelled = true; };
   }, [scanId]);
 
-  const findingsMap: Record<Bucket, Finding[]> = {
-    sast: data?.sast_findings ?? [],
-    raw_llm: data?.raw_llm_findings ?? [],
-    consolidated: data?.consolidated_findings ?? [],
-  };
+  const findingsMap = useMemo<Record<Bucket, Finding[]>>(
+    () => ({
+      sast: data?.sast_findings ?? [],
+      raw_llm: data?.raw_llm_findings ?? [],
+      consolidated: data?.consolidated_findings ?? [],
+    }),
+    [data],
+  );
 
   const llmAgents = useMemo(() => {
     const s = new Set<string>();

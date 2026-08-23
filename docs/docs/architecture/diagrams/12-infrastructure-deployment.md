@@ -117,8 +117,8 @@ flowchart TB
     S0([./setup.sh]):::edge
     S1["Prerequisite check<br/>docker · python3 · node"]:::app
     S2["Lock + copy .env.example → .env<br/>(flock prevents concurrent runs)"]:::app
-    S3["Generate secrets via scripts/generate_secrets.py<br/>SECRET_KEY · ENCRYPTION_KEY (Fernet)<br/>POSTGRES_PASSWORD · RABBITMQ_DEFAULT_PASS<br/>QDRANT_API_KEY"]:::app
-    S4["Upgrade fix-ups<br/>· replace placeholder QDRANT_API_KEY<br/>· remove retired RAG_VECTOR_STORE"]:::app
+    S3["Atomic secret bootstrap<br/>scripts/bootstrap_env_secrets.py<br/>fresh + existing .env · mode 0600<br/>never prints values"]:::app
+    S4["Upgrade fix-ups<br/>· add missing required secrets<br/>· replace explicit placeholders only<br/>· preserve valid values"]:::app
     S5["Setup wizard<br/>· install variant: vibe_coder / developer / enterprise / custom<br/>  → write SCCAP_VARIANT + matching COMPOSE_PROFILES<br/>· Local / Cloud → (if Cloud) Let's Encrypt Y/N<br/>· (if LE) domain validation [a-zA-Z0-9.-]{1,253}"]:::gate
     S6["Optional: write /etc/docker/daemon.json<br/>(max-size 50m, max-file 5)<br/>backup .bak.sccap-<ts><br/>restart Docker daemon"]:::app
     S7["docker compose up -d --build"]:::app
@@ -176,6 +176,7 @@ All containers join the `scpnetwork` bridge. Internal DNS resolves `app`, `db`, 
 |---------------------------------------|---------------------------------------------------------------|
 | `POSTGRES_PASSWORD`                   | Postgres + asyncpg DSN                                        |
 | `RABBITMQ_DEFAULT_PASS`               | RabbitMQ users + aio-pika DSN                                 |
+| `RABBITMQ_ERLANG_COOKIE`              | RabbitMQ node authentication + cookie-volume bootstrap         |
 | `SECRET_KEY`                          | JWT signing                                                   |
 | `ENCRYPTION_KEY`                      | Fernet key for LLM configs, SSO secrets, SMTP password, etc.  |
 | `QDRANT_API_KEY`                      | Qdrant auth (app refuses to start with placeholder)            |
@@ -232,12 +233,11 @@ Persistence is the 9 named Docker volumes. There is no built-in cron backup — 
 |---------------------------------------|--------------------------------------------------------------------------|
 | `setup.sh`                            | Linux/macOS bring-up (POSIX shell)                                       |
 | `setup.bat`                           | Windows equivalent                                                       |
+| `scripts/bootstrap_env_secrets.py`    | Atomic fresh/upgrade secret repair; preserves valid values, applies POSIX `0600`, and emits no secret material |
 | `scripts/generate_secrets.py`         | Random / Fernet key generation                                           |
 | `scripts/create_superuser.py`         | Bootstrap a master admin if `/setup` UI is unavailable                   |
 | `scripts/reset_superuser.py`          | Rotate the master admin's password                                       |
 | `scripts/reset_app_state.py`          | Dev tool: truncate scans, findings, snapshots                            |
-| `scripts/verify_setup_and_cors.py`    | Post-deploy smoke check                                                  |
-| `scripts/extract_eval_prompts.py`     | Materializes eval inputs for promptfoo                                    |
 
 ### CI / pre-commit
 
@@ -245,7 +245,6 @@ Persistence is the 9 named Docker volumes. There is no built-in cron backup — 
 |--------------------------------------------|-------------------------------------------------------------------------------------------|
 | `.github/workflows/ci.yml`                 | PR + push: ruff 0.11.11 · black 25.1.0 · poetry lock check · bandit · pip-audit · ESLint · Vite build |
 | `.github/workflows/docs.yml`               | mkdocs build                                                                              |
-| `.github/workflows/evals.yml`              | promptfoo eval suite (mock + opt-in live)                                                  |
 | `.pre-commit-config.yaml`                  | end-of-file-fixer · trailing-whitespace · check-merge-conflict · ruff · black · gitleaks 8.21.2 |
 
 ### No Kubernetes / Helm / Terraform

@@ -70,6 +70,9 @@ def render_sarif(result: AnalysisResultDetailResponse) -> str:
                     }
                 },
                 "originalUriBaseIds": {_URI_BASE_ID: {"uri": "file:///"}},
+                "properties": {
+                    "sccapToolchainProvenance": result.toolchain_provenance,
+                },
                 "results": results,
             }
         ],

@@ -15,6 +15,20 @@ logger = logging.getLogger(__name__)
 _CWE_RE = re.compile(r"CWE-(\d+)", re.IGNORECASE)
 
 
+def semgrep_rule_content_hash(raw_rule: dict[str, Any]) -> str:
+    """Return the canonical digest used to bind an ingested Semgrep rule.
+
+    Replay recomputes this value from ``raw_yaml`` instead of trusting the
+    mutable database digest column alone.
+    """
+    canonical = json.dumps(
+        {str(k): raw_rule[k] for k in sorted(raw_rule.keys(), key=str)},
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
 def _extract_list(val: Any) -> list[str]:
     if val is None:
         return []
@@ -61,12 +75,7 @@ def _normalize_rule(
     # Canonical JSON for content hash — stable across runs.
     # YAML allows non-string keys (bool / number); cast to str so
     # sorted() doesn't fail with mixed-type comparison errors.
-    canonical = json.dumps(
-        {str(k): raw_rule[k] for k in sorted(raw_rule.keys(), key=str)},
-        sort_keys=True,
-        default=str,
-    )
-    content_hash = hashlib.sha256(canonical.encode()).hexdigest()
+    content_hash = semgrep_rule_content_hash(raw_rule)
 
     return {
         "namespaced_id": namespaced_id,

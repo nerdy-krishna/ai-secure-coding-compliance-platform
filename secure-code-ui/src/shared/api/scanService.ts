@@ -13,6 +13,14 @@ import {
   type ScanResultResponse
 } from "../types/api";
 import apiClient from "./apiClient";
+import {
+  normalizeScanResult,
+  type ApprovalGate,
+  type CreateScanResponse,
+  type ScanReportQuery,
+  type ScanResultQuery,
+  type ScanResultWire,
+} from "../lib/scanContract";
 
 // V02.2.1 / V15.2.2: URL validation helper — only http(s), max 512 chars.
 function assertHttpUrl(u: string): void {
@@ -40,7 +48,7 @@ function clampPagination(
 }
 
 // V15.2.2: In-flight guard so concurrent createScan calls share one request.
-let createScanInFlight: Promise<ScanResponse> | null = null;
+let createScanInFlight: Promise<CreateScanResponse> | null = null;
 
 export const scanService = {
   /**
@@ -121,8 +129,12 @@ export const scanService = {
    * V01.2.2: scanId is encoded to prevent URL path injection.
    */
   getScanResult: async (scanId: string): Promise<ScanResultResponse> => {
-    const response = await apiClient.get<ScanResultResponse>(`/scans/${encodeURIComponent(scanId)}/result?include_source=true`);
-    return response.data;
+    const params = { include_source: true } satisfies ScanResultQuery;
+    const response = await apiClient.get<ScanResultWire>(
+      `/scans/${encodeURIComponent(scanId)}/result`,
+      { params },
+    );
+    return normalizeScanResult(response.data);
   },
 
   /**
@@ -246,6 +258,9 @@ export const scanService = {
       kind?: "prescan_approval" | "profiling_approval" | "cost_approval";
       approved?: boolean;
       override_critical_secret?: boolean;
+      gate_id?: string;
+      gate_version?: number;
+      evidence_hash?: string;
     },
     idempotencyKey?: string,
   ): Promise<{ message: string }> => {
@@ -263,9 +278,12 @@ export const scanService = {
             kind: payload.kind ?? "cost_approval",
             approved: payload.approved ?? true,
             override_critical_secret: payload.override_critical_secret ?? false,
+            gate_id: payload.gate_id,
+            gate_version: payload.gate_version,
+            evidence_hash: payload.evidence_hash,
           }
         : undefined;
-    const response = await apiClient.post<{ message: string }>(
+    const response = await apiClient.post<{ message: string; gate: ApprovalGate }>(
       `/scans/${encodeURIComponent(scanId)}/approve`, // V01.2.2
       body,
       { headers: { "X-Idempotency-Key": idempotencyKey ?? crypto.randomUUID() } }, // V02.3.4
@@ -365,13 +383,54 @@ export const scanService = {
     scanId: string,
     format: "html" | "csv" | "pdf" | "sarif",
   ): Promise<void> => {
+    const params = { format } satisfies ScanReportQuery;
     const response = await apiClient.get(
       `/scans/${encodeURIComponent(scanId)}/report`,
-      { params: { format }, responseType: "blob" },
+      { params, responseType: "blob" },
     );
     const disposition = String(response.headers["content-disposition"] ?? "");
     const match = /filename="?([^"]+)"?/.exec(disposition);
     const filename = match ? match[1] : `scan-${scanId}-report.${format}`;
+    const url = URL.createObjectURL(response.data as Blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Download the immutable native-output bundle captured during prescan. */
+  downloadScannerReports: async (scanId: string): Promise<void> => {
+    const response = await apiClient.get(
+      `/scans/${encodeURIComponent(scanId)}/scanner-reports`,
+      { responseType: "blob" },
+    );
+    const disposition = String(response.headers["content-disposition"] ?? "");
+    const match = /filename="?([^"]+)"?/.exec(disposition);
+    const filename = match
+      ? match[1]
+      : `scan-${scanId}-scanner-reports.json`;
+    const url = URL.createObjectURL(response.data as Blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Download the immutable candidate-to-hunk patch plan. */
+  downloadPatchPlan: async (scanId: string): Promise<void> => {
+    const response = await apiClient.get(
+      `/scans/${encodeURIComponent(scanId)}/patch-plan`,
+      { responseType: "blob" },
+    );
+    const disposition = String(response.headers["content-disposition"] ?? "");
+    const match = /filename="?([^"]+)"?/.exec(disposition);
+    const filename = match ? match[1] : `scan-${scanId}-patch-plan.json`;
     const url = URL.createObjectURL(response.data as Blob);
     const anchor = document.createElement("a");
     anchor.href = url;

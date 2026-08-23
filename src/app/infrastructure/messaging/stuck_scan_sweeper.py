@@ -19,6 +19,12 @@ from sqlalchemy import func, select, update
 
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database import models as db_models
+from app.shared.lib.scan_status import (
+    STATUS_FAILED,
+    STATUS_QUEUED,
+    STATUS_QUEUED_FOR_SCAN,
+    scan_status_predecessors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +34,7 @@ logger = logging.getLogger(__name__)
 STUCK_SCAN_TIMEOUT_SECONDS = 600  # 10 min
 
 # Only these statuses indicate the scan was picked up but stalled.
-_STUCK_STATUSES = {"QUEUED_FOR_SCAN", "QUEUED"}
+_STUCK_STATUSES = {STATUS_QUEUED_FOR_SCAN, STATUS_QUEUED}
 
 
 async def _sweep_once() -> int:
@@ -55,7 +61,7 @@ async def _sweep_once() -> int:
             .subquery()
         )
 
-        stuck_ids_subq = (
+        stuck_ids = (
             select(db_models.Scan.id)
             .outerjoin(
                 latest_event_subq,
@@ -69,13 +75,19 @@ async def _sweep_once() -> int:
                 )
                 < cutoff,
             )
-            .subquery()
+        )
+
+        allowed_sources = _STUCK_STATUSES.intersection(
+            scan_status_predecessors(STATUS_FAILED)
         )
 
         result = await db.execute(
             update(db_models.Scan)
-            .where(db_models.Scan.id.in_(stuck_ids_subq))
-            .values(status="FAILED")
+            .where(
+                db_models.Scan.id.in_(stuck_ids),
+                db_models.Scan.status.in_(tuple(sorted(allowed_sources))),
+            )
+            .values(status=STATUS_FAILED)
         )
         count = result.rowcount
         if count:

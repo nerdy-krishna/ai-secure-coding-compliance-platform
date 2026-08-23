@@ -1,13 +1,15 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.config_cache import SystemConfigCache
 from app.infrastructure.auth.core import current_active_user, current_active_user_sse
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMPriceOverrideRepository,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.database.repositories.framework_repo import FrameworkRepository
 from app.infrastructure.database.repositories.agent_repo import AgentRepository
@@ -31,30 +33,16 @@ from app.core.services.security_standards_service import SecurityStandardsServic
 from app.shared.lib import scan_scope
 
 
-def require_feature(feature: str):
-    """FastAPI dependency factory that 404s when ``feature`` is disabled.
-
-    Used for endpoints that cannot simply be left unmounted — a route inside a
-    shared router (e.g. ``/auth/register`` under the fastapi-users router) or
-    an endpoint whose *behaviour* is feature-gated. Returns 404 (not 403) so a
-    disabled feature is indistinguishable from one that never existed and no
-    feature-existence signal leaks. Whole-router features are gated more
-    cheaply by skipping ``include_router`` in ``main.py``.
-    """
-
-    def _dependency() -> None:
-        if not SystemConfigCache.is_feature_enabled(feature):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Not Found"
-            )
-
-    return _dependency
-
-
 def get_llm_config_repository(
     db: AsyncSession = Depends(get_db),
 ) -> LLMConfigRepository:
     return LLMConfigRepository(db)
+
+
+def get_llm_price_override_repository(
+    db: AsyncSession = Depends(get_db),
+) -> LLMPriceOverrideRepository:
+    return LLMPriceOverrideRepository(db)
 
 
 def get_framework_repository(
@@ -77,6 +65,9 @@ def get_prompt_template_repository(
 
 def get_admin_service(
     llm_repo: LLMConfigRepository = Depends(get_llm_config_repository),
+    price_override_repo: LLMPriceOverrideRepository = Depends(
+        get_llm_price_override_repository
+    ),
     framework_repo: FrameworkRepository = Depends(get_framework_repository),
     agent_repo: AgentRepository = Depends(get_agent_repository),
     prompt_template_repo: PromptTemplateRepository = Depends(
@@ -85,6 +76,7 @@ def get_admin_service(
 ) -> AdminService:
     return AdminService(
         llm_repo=llm_repo,
+        price_override_repo=price_override_repo,
         framework_repo=framework_repo,
         agent_repo=agent_repo,
         prompt_template_repo=prompt_template_repo,

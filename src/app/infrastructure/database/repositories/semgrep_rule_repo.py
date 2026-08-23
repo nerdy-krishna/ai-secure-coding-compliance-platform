@@ -6,6 +6,7 @@ from typing import List, Optional
 
 from sqlalchemy import select, func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased, selectinload
 
 from app.infrastructure.database import models as db_models
 
@@ -164,6 +165,23 @@ class SemgrepRuleRepository:
         rows = list((await self.db.execute(stmt)).scalars().all())
         return rows, total
 
+    async def get_rules_by_namespaced_ids(
+        self, namespaced_ids: list[str]
+    ) -> List[db_models.SemgrepRule]:
+        """Load exact rule identities without applying mutable live selection.
+
+        Callers must separately validate source/rule enablement and bind every
+        returned body to immutable scan provenance before materialization.
+        """
+        if not namespaced_ids:
+            return []
+        result = await self.db.execute(
+            select(db_models.SemgrepRule)
+            .options(selectinload(db_models.SemgrepRule.source))
+            .where(db_models.SemgrepRule.namespaced_id.in_(namespaced_ids))
+        )
+        return list(result.scalars().all())
+
     async def delete_rules_not_in(
         self, source_id: uuid.UUID, keep_namespaced_ids: set[str]
     ) -> int:
@@ -204,12 +222,11 @@ class SemgrepRuleRepository:
             return []
 
         # Join with source to filter enabled sources
-        from sqlalchemy.orm import aliased
-
         src = aliased(db_models.SemgrepRuleSource)
 
         stmt = (
             select(db_models.SemgrepRule)
+            .options(selectinload(db_models.SemgrepRule.source))
             .join(src, db_models.SemgrepRule.source_id == src.id)
             .where(
                 and_(

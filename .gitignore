@@ -49,7 +49,6 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
-.pytest_cache/
 
 # Translations
 *.mo
@@ -133,6 +132,8 @@ secure-code-ui/dist/
 secure-code-ui/.env
 secure-code-ui/.env.*
 secure-code-ui/coverage/
+secure-code-ui/test-results/
+secure-code-ui/playwright-report/
 secure-code-ui/.DS_Store
 secure-code-ui/npm-debug.log*
 secure-code-ui/yarn-debug.log*
@@ -191,16 +192,6 @@ CLAUDE.md
 # Diagram + log output from the swark generator — generated artefacts.
 swark-output/
 
-# Promptfoo eval scratch dirs (committed: package-lock.json, source files,
-# extracted prompt .txt files — see negation rules below).
-evals/node_modules/
-evals/results/
-evals/.cache/
-evals/.promptfoo/
-
-# Whitelist the extracted prompt files even though `*.txt` is globally
-# ignored above (line ~174). These are committed and CI checks them.
-!evals/agents/**/prompts/*.txt
 # Whitelist docs build dependency manifest (the global *.txt rule above
 # catches recovery dumps; pinned-dep manifests must ship).
 !docs/requirements-docs.txt
@@ -210,3 +201,6 @@ evals/.promptfoo/
 # Personal agent instruction files (keep on laptop only)
 AGENTS.md
 CLAUDE.md
+
+# Private local issue tracker and planning workspace.
+.scratch/

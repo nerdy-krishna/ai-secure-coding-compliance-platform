@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 SCHEMA_USER = "urn:ietf:params:scim:schemas:core:2.0:User"
@@ -61,13 +61,25 @@ class ScimUser(BaseModel):
 class ScimGroupMember(BaseModel):
     """SCIM Group member reference (RFC 7643 §4.2)."""
 
-    # populate_by_name=True so callers can construct with `ref=...` while
-    # IdP wire payloads carrying the spec-mandated `$ref` key still parse.
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    # `$ref` is an OpenAPI/JSON Schema reserved keyword. Using it as a
+    # Pydantic field alias makes FastAPI's schema remapper treat the field
+    # schema itself as a reference string and crashes app.openapi(). Keep
+    # the internal/schema name `ref`, and translate spec-conformant SCIM
+    # input at the validation boundary. Responses are assembled by
+    # `_group_to_dict`, which emits the required `$ref` wire key.
+    model_config = ConfigDict(extra="ignore")
     value: str  # the member's resource id (typically a User id as string)
-    ref: Optional[str] = Field(default=None, alias="$ref")
+    ref: Optional[str] = None
     display: Optional[str] = None
     type: Optional[str] = "User"
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_scim_ref(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "$ref" in value and "ref" not in value:
+            value = dict(value)
+            value["ref"] = value.pop("$ref")
+        return value
 
 
 class ScimGroup(BaseModel):

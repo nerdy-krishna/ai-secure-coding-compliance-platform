@@ -20,8 +20,11 @@ contract — do not rename.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
-from typing import Any, Dict, Iterable, List, Optional
+import time
+import uuid
+from typing import Any, Dict, List, Optional
 
 from langgraph.types import interrupt
 
@@ -29,6 +32,10 @@ from app.config.config import settings
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.approval_gate_repo import (
+    ApprovalGateRepository,
+    approval_gate_payload,
+)
 from app.infrastructure.scanners.bandit_runner import run_bandit
 from app.infrastructure.scanners.gitleaks_runner import run_gitleaks
 from app.infrastructure.scanners.osv_runner import run_osv
@@ -37,12 +44,24 @@ from app.infrastructure.scanners.registry import (
     is_minified,
     scanners_for_file,
 )
+from app.infrastructure.scanners.report_artifact import (
+    bounded_native_report,
+    scanner_completion_status,
+)
+from app.infrastructure.scanners.provenance import (
+    build_semgrep_rule_provenance,
+    collect_runtime_provenance,
+)
+from app.infrastructure.scanners.semgrep_rules import derive_semgrep_languages
 from app.infrastructure.scanners.semgrep_runner import run_semgrep
 from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.file_classification import should_skip_semgrep
+from app.shared.lib.finding_lineage_identity import raw_finding_id
 from app.shared.lib.scan_progress import (
     EV_COMPLETED,
+    EV_FAILED,
+    EV_STARTED,
     EV_WAITING,
     STAGE_PRESCAN_REVIEW,
 )
@@ -53,38 +72,31 @@ from app.shared.lib.scan_status import (
 
 logger = logging.getLogger(__name__)
 
-# Maps file extension → Semgrep language name used in rule `languages:` lists.
-_EXT_TO_SEMGREP_LANG: dict[str, str] = {
-    ".py": "python",
-    ".pyi": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".java": "java",
-    ".go": "go",
-    ".rb": "ruby",
-    ".php": "php",
-    ".cs": "csharp",
-    ".c": "c",
-    ".cpp": "cpp",
-    ".cc": "cpp",
-    ".h": "c",
-    ".hpp": "cpp",
-}
 
-
-def _derive_languages(file_paths: "Iterable[str]") -> list[str]:
-    """Return deduplicated Semgrep language names from the set of file extensions."""
-    from pathlib import PurePosixPath
-
-    langs: set[str] = set()
-    for p in file_paths:
-        ext = PurePosixPath(p).suffix.lower()
-        lang = _EXT_TO_SEMGREP_LANG.get(ext)
-        if lang:
-            langs.add(lang)
-    return list(langs)
+async def _emit_scan_activity(
+    scan_id: Any,
+    stage_name: str,
+    event_status: str,
+    details: Optional[Dict[str, Any]] = None,
+    activity_kind: Optional[str] = None,
+) -> None:
+    """Best-effort durable activity event; never fail scanner execution."""
+    try:
+        async with AsyncSessionLocal() as db:
+            await ScanRepository(db).record_scan_event(
+                scan_id,
+                stage_name,
+                event_status,
+                details=details,
+                activity_kind=activity_kind,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "prescan activity emit failed scan_id=%s stage=%s: %s",
+            scan_id,
+            stage_name,
+            exc,
+        )
 
 
 # Bounds parallel SAST scanner subprocess invocations in the
@@ -135,8 +147,20 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     files: Dict[str, str] = state.get("files") or {}
     file_profiles: Dict[str, Any] = state.get("file_profiles") or {}
     deep_vendor_scan = bool(state.get("deep_vendor_scan"))
+    await _emit_scan_activity(
+        scan_id,
+        "DETERMINISTIC_PRESCAN",
+        EV_STARTED,
+        {"files_total": len(files)},
+    )
     if not files:
         logger.info("deterministic_prescan: no files for scan %s; skipping", scan_id)
+        await _emit_scan_activity(
+            scan_id,
+            "DETERMINISTIC_PRESCAN",
+            EV_COMPLETED,
+            {"files_total": 0, "message": "No submitted files to scan."},
+        )
         return {}
 
     # File-eligibility filter (M6 + N2). The policy is "scan
@@ -184,6 +208,15 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             "deterministic_prescan: no scanner-eligible files for scan %s; skipping",
             scan_id,
         )
+        await _emit_scan_activity(
+            scan_id,
+            "DETERMINISTIC_PRESCAN",
+            EV_COMPLETED,
+            {
+                "files_total": len(files),
+                "message": "No files were eligible for the configured scanners.",
+            },
+        )
         return {}
 
     # Derive languages from eligible file extensions and select matching
@@ -196,8 +229,9 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             file_profiles.get(path) or {}, deep_vendor_scan=deep_vendor_scan
         )
     }
-    languages = _derive_languages(semgrep_eligible.keys())
+    languages = derive_semgrep_languages(semgrep_eligible.keys())
     _semgrep_rules = []
+    _semgrep_sources = []
     if languages:
         try:
             from app.core.services.semgrep_ingestion.selector import (
@@ -209,6 +243,13 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     languages=languages,
                     technologies=[],
                     db=_db,
+                )
+                _semgrep_sources = list(
+                    {
+                        str(rule.source_id): rule.source
+                        for rule in _semgrep_rules
+                        if getattr(rule, "source", None) is not None
+                    }.values()
                 )
             if not _semgrep_rules:
                 logger.info(
@@ -231,6 +272,27 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     # not per file. OSV-Scanner (ADR-009) joins as the fourth scanner;
     # it returns a (findings, bom) tuple instead of just findings.
     scanner_limit = _CONCURRENT_SCANNER_LIMIT
+    native_reports: Dict[str, Any] = {}
+    scanner_statuses: Dict[str, Dict[str, Any]] = {}
+    toolchain_provenance = copy.deepcopy(collect_runtime_provenance())
+    semgrep_rule_provenance = build_semgrep_rule_provenance(
+        _semgrep_rules, _semgrep_sources
+    )
+    toolchain_provenance["semgrep"]["rules"] = semgrep_rule_provenance
+    if semgrep_rule_provenance["status"] == "degraded":
+        toolchain_provenance["semgrep"]["status"] = "degraded"
+        toolchain_provenance["semgrep"]["immutable"] = False
+        toolchain_provenance["semgrep"]["reasons"] = sorted(
+            set(toolchain_provenance["semgrep"]["reasons"])
+            | set(semgrep_rule_provenance["reasons"])
+        )
+
+    def _report_collector(scanner_name: str):
+        def collect(payload: Any) -> None:
+            native_reports[scanner_name] = bounded_native_report(payload)
+
+        return collect
+
     try:
         from app.shared.lib.concurrency_limits import get_concurrency_limit
 
@@ -248,6 +310,67 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 async with semaphore:
                     return await coro_factory()
 
+            async def _with_activity(
+                scanner_name, coro_factory, *, expected_to_run: bool = True
+            ):
+                started_at = time.perf_counter()
+                await _emit_scan_activity(
+                    scan_id,
+                    "SCANNER_RUN",
+                    EV_STARTED,
+                    {"scanner": scanner_name, "files_total": len(eligible)},
+                )
+                try:
+                    result = await _gated(coro_factory)
+                except BaseException:
+                    await _emit_scan_activity(
+                        scan_id,
+                        "SCANNER_RUN",
+                        EV_FAILED,
+                        {
+                            "scanner": scanner_name,
+                            "elapsed_ms": int(
+                                (time.perf_counter() - started_at) * 1000
+                            ),
+                            "message": "Scanner failed; the scan continues with reduced coverage.",
+                        },
+                    )
+                    raise
+                scanner_findings = result[0] if scanner_name == "osv" else result
+                outcome = scanner_completion_status(
+                    expected_to_run,
+                    scanner_name in native_reports,
+                )
+                provenance_status = toolchain_provenance[scanner_name]["status"]
+                if outcome == "completed" and provenance_status == "degraded":
+                    outcome = "degraded"
+                details: Dict[str, Any] = {
+                    "scanner": scanner_name,
+                    "findings_count": len(scanner_findings or []),
+                    "elapsed_ms": int((time.perf_counter() - started_at) * 1000),
+                    "scanner_status": outcome,
+                    "provenance_status": provenance_status,
+                }
+                if outcome == "skipped":
+                    details["message"] = (
+                        "Scanner skipped because no applicable rules or files were available."
+                    )
+                elif outcome == "degraded":
+                    details["message"] = (
+                        "Scanner evidence or immutable provenance is incomplete; "
+                        "deterministic coverage is reduced."
+                    )
+                await _emit_scan_activity(
+                    scan_id,
+                    "SCANNER_RUN",
+                    EV_FAILED if outcome == "degraded" else EV_COMPLETED,
+                    details,
+                    activity_kind=(
+                        "degradation" if outcome == "degraded" else "scanner"
+                    ),
+                )
+                return result
+
             if _semgrep_rules and semgrep_eligible:
                 from app.core.services.semgrep_ingestion.materializer import (
                     materialize_rules as _mat,
@@ -263,20 +386,50 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                                 semgrep_dir,
                                 semgrep_original_paths,
                                 config_path=_cfg_dir,
+                                report_collector=_report_collector("semgrep"),
                             )
 
-                semgrep_task = _gated(_run_semgrep_materialized)
+                semgrep_task = _with_activity("semgrep", _run_semgrep_materialized)
             else:
                 # 0 ingested rules or all files policy-skipped — pass None so run_semgrep returns [] without subprocess
-                semgrep_task = _gated(
-                    lambda: run_semgrep(staged_dir, original_paths, config_path=None)
+                semgrep_task = _with_activity(
+                    "semgrep",
+                    lambda: run_semgrep(
+                        staged_dir,
+                        original_paths,
+                        config_path=None,
+                        report_collector=_report_collector("semgrep"),
+                    ),
+                    expected_to_run=False,
                 )
 
             scanner_tasks = [
-                _gated(lambda: run_bandit(staged_dir, original_paths)),
+                _with_activity(
+                    "bandit",
+                    lambda: run_bandit(
+                        staged_dir,
+                        original_paths,
+                        report_collector=_report_collector("bandit"),
+                    ),
+                ),
                 semgrep_task,
-                _gated(lambda: run_gitleaks(staged_dir, original_paths)),
-                _gated(lambda: run_osv(staged_dir, original_paths, scan_id=scan_id)),
+                _with_activity(
+                    "gitleaks",
+                    lambda: run_gitleaks(
+                        staged_dir,
+                        original_paths,
+                        report_collector=_report_collector("gitleaks"),
+                    ),
+                ),
+                _with_activity(
+                    "osv",
+                    lambda: run_osv(
+                        staged_dir,
+                        original_paths,
+                        scan_id=scan_id,
+                        report_collector=_report_collector("osv"),
+                    ),
+                ),
             ]
             results = await asyncio.gather(*scanner_tasks, return_exceptions=True)
             for scanner_name, result in zip(
@@ -292,14 +445,41 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                         scan_id,
                         result,
                     )
+                    scanner_statuses[scanner_name] = {
+                        "status": "failed",
+                        "error_class": result.__class__.__name__,
+                        "provenance": toolchain_provenance[scanner_name],
+                    }
                     continue
                 if scanner_name == "osv":
                     # OSV returns (findings, bom_cyclonedx_dict).
                     osv_findings, bom = result
                     prescan_findings.extend(osv_findings)
                     bom_cyclonedx = bom
+                    finding_count = len(osv_findings)
                 else:
                     prescan_findings.extend(result)
+                    finding_count = len(result)
+                execution_status = scanner_completion_status(
+                    not (
+                        scanner_name == "semgrep"
+                        and not (_semgrep_rules and semgrep_eligible)
+                    ),
+                    scanner_name in native_reports,
+                )
+                provenance = toolchain_provenance[scanner_name]
+                status_with_provenance = (
+                    "degraded"
+                    if execution_status == "completed"
+                    and provenance["status"] == "degraded"
+                    else execution_status
+                )
+                scanner_statuses[scanner_name] = {
+                    "status": status_with_provenance,
+                    "finding_count": finding_count,
+                    "native_report_available": scanner_name in native_reports,
+                    "provenance": provenance,
+                }
         logger.info(
             "deterministic_prescan: scan_id=%s eligible_files=%d findings=%d bom=%s",
             scan_id,
@@ -316,6 +496,14 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             "deterministic_prescan: scan_id=%s prescan_failed continuing without findings: %s",
             scan_id,
             exc,
+        )
+        await _emit_scan_activity(
+            scan_id,
+            "DETERMINISTIC_PRESCAN",
+            EV_FAILED,
+            {
+                "message": "Prescan failed; continuing with reduced deterministic coverage."
+            },
         )
         return {"findings": [], "bom_cyclonedx": None}
 
@@ -334,6 +522,69 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 e,
             )
 
+    # Persist the raw JSON emitted by each deterministic scanner as one
+    # versioned artifact. Gitleaks is invoked with --redact; every report is
+    # size-bounded before this write. The artifact remains scan-scoped and is
+    # exposed only through the authenticated scanner-report endpoint.
+    try:
+        from app.infrastructure.database.repositories.scan_artifact_repo import (
+            ARTIFACT_TYPE_SCANNER_REPORTS,
+            ScanArtifactRepository,
+        )
+
+        async with AsyncSessionLocal() as db:
+            await ScanArtifactRepository(db).create_next_version(
+                scan_id=scan_id,
+                artifact_type=ARTIFACT_TYPE_SCANNER_REPORTS,
+                payload={
+                    "schema_version": 1,
+                    "scan_id": str(scan_id),
+                    "reports": native_reports,
+                    "scanner_statuses": scanner_statuses,
+                    "toolchain_provenance": toolchain_provenance,
+                },
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "deterministic_prescan: scanner report persistence failed scan_id=%s: %s",
+            scan_id,
+            exc,
+        )
+
+    source_counts: Dict[str, int] = {}
+    lineage_counts: Dict[str, int] = {}
+    original_file_map = state.get("initial_file_map") or {}
+    for finding in prescan_findings:
+        source = finding.source or "unknown"
+        source_counts[source] = source_counts.get(source, 0) + 1
+        producer_key = f"scanner:{source}:{finding.file_path}"
+        occurrence_index = lineage_counts.get(producer_key, 0)
+        lineage_counts[producer_key] = occurrence_index + 1
+        finding.raw_finding_id = finding.raw_finding_id or raw_finding_id(
+            scan_id, producer_key, occurrence_index
+        )
+        finding.source_snapshot_hash = (
+            finding.source_snapshot_hash or original_file_map.get(finding.file_path)
+        )
+    await _emit_scan_activity(
+        scan_id,
+        "DETERMINISTIC_PRESCAN",
+        EV_COMPLETED,
+        {
+            "files_total": len(eligible),
+            "findings_count": len(prescan_findings),
+            "categories": source_counts,
+            "coverage_status": (
+                "degraded"
+                if any(
+                    item.get("status") in {"degraded", "failed"}
+                    for item in scanner_statuses.values()
+                )
+                else "completed"
+            ),
+        },
+    )
+
     # Persist the deterministic findings HERE — exactly once per scan.
     # This used to live inside `pending_prescan_approval_node` (just
     # before its `interrupt()`), but LangGraph re-enters interrupted
@@ -351,12 +602,61 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
             await repo.save_findings(scan_id, prescan_findings, finding_bucket="sast")
+            gate = await ApprovalGateRepository(db).create_or_get_pending(
+                scan_id=scan_id,
+                kind="prescan_approval",
+                node_name="pending_prescan_approval",
+                display_name="Review deterministic scanner findings",
+                purpose=(
+                    "Review deterministic evidence before any LLM profiling or "
+                    "security-analysis spend."
+                ),
+                evidence={
+                    "findings": sorted(
+                        [
+                            {
+                                "raw_finding_id": str(f.raw_finding_id),
+                                "source": f.source,
+                                "scanner_rule_id": f.scanner_rule_id,
+                                "file_path": f.file_path,
+                                "line_number": f.line_number,
+                                "severity": f.severity,
+                            }
+                            for f in prescan_findings
+                        ],
+                        key=lambda item: (
+                            item["file_path"],
+                            item["line_number"] or 0,
+                            item["source"] or "",
+                            item["raw_finding_id"],
+                        ),
+                    ),
+                    "has_critical_secret": any(
+                        f.source == "gitleaks"
+                        and (f.severity or "").lower() == "critical"
+                        for f in prescan_findings
+                    ),
+                },
+                commit=False,
+            )
             # Emit the prescan-gate WAITING event here — this node runs
             # exactly once and never re-enters, so the gate marker is
             # written before the bare `pending_prescan_approval` node
             # owns the interrupt() (#84). Parks status at
             # PENDING_PRESCAN_APPROVAL.
-            await repo.record_scan_event(scan_id, STAGE_PRESCAN_REVIEW, EV_WAITING)
+            gate_data = approval_gate_payload(gate)
+            await repo.record_scan_event(
+                scan_id,
+                STAGE_PRESCAN_REVIEW,
+                EV_WAITING,
+                details=gate_data,
+            )
+
+            return {
+                "findings": prescan_findings,
+                "bom_cyclonedx": bom_cyclonedx,
+                "active_approval_gate": gate_data,
+            }
 
     return {"findings": prescan_findings, "bom_cyclonedx": bom_cyclonedx}
 
@@ -469,8 +769,17 @@ async def pending_prescan_approval_node(state: WorkerState) -> Dict[str, Any]:
     # Native LangGraph human-in-the-loop gate. The resume payload from
     # `Command(resume={"kind": "prescan_approval", ...})` lands as the
     # return value here.
+    gate_data = state.get("active_approval_gate") or {}
+    if not gate_data.get("gate_id"):
+        async with AsyncSessionLocal() as db:
+            gate = await ApprovalGateRepository(db).get_active_for_scan(scan_id)
+            if gate is not None:
+                gate_data = approval_gate_payload(gate)
+    if not gate_data.get("gate_id"):
+        return {"error_message": "Prescan approval gate identity is missing."}
     approval_payload = interrupt(
         {
+            **gate_data,
             "scan_id": str(scan_id),
             "findings_count": len(findings),
             "has_critical_secret": has_critical_secret,
@@ -481,10 +790,13 @@ async def pending_prescan_approval_node(state: WorkerState) -> Dict[str, Any]:
         scan_id,
         approval_payload,
     )
+    if approval_payload.get("gate_id") != gate_data["gate_id"]:
+        return {"error_message": "Stale prescan approval gate payload rejected."}
     async with AsyncSessionLocal() as db:
-        await ScanRepository(db).record_scan_event(
-            scan_id, STAGE_PRESCAN_REVIEW, EV_COMPLETED
-        )
+        if not await ApprovalGateRepository(db).mark_resumed(
+            uuid.UUID(gate_data["gate_id"])
+        ):
+            return {"error_message": "Prescan gate resume claim is no longer active."}
     # V02.4.1 anti-automation: bump the persisted resume-attempt counter on
     # every resume from this gate. The cap is enforced in
     # `_route_after_prescan_approval`. The increment must happen in this node

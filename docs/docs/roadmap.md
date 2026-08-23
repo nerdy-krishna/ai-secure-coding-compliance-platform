@@ -1,85 +1,142 @@
 ---
 sidebar_position: 8
-title: Roadmap
+title: Production Roadmap
 ---
 
-# Roadmap
+# Production roadmap
 
-The short list of things we want to ship next, in rough priority
-order. Nothing here is a promise — priorities shift as real users
-push on the platform.
+This roadmap starts from the application as it exists today. It separates
+release blockers from scale and enterprise work; an item listed here is not a
+claim that it is already implemented.
 
-## Near-term
+## Current baseline
 
-- **Re-introduce impact reporting + SARIF export** — the
-  `impact_reporting_agent` and SARIF generator were removed in the
-  2026-04-26 cleanup because the orchestrator node was registered
-  but never wired into the graph. Re-introducing both with a clean
-  insertion point between `save_results` and `save_final_report` is
-  on the list once we have a clear use-case driving the design.
-- **Test-validated remediation** — detect the project's test
-  runner, apply each selected fix, run existing tests against the
-  patched code, and roll back fixes that break tests. Replaces the
-  "download the patched tree and run tests yourself" step. Tracked
-  under
-  [Unit Test Integration](./user-guide/unit-test-integration.md).
-- **Postgres full-text search** — the global search today is
-  per-column ILIKE (fast enough on small datasets, trivially
-  extendable). Once someone hits a scale wall we'll swap in tsvector
-  + trigram indexes.
-- **Per-project stat rollups beyond the latest scan** — the
-  Projects card currently reflects the latest terminal scan.
-  Adding a rolling 30-day view is straightforward now that the
-  scope filter is threaded through.
-- **Additional MCP tools** — the v1 surface covers scan + advisor.
-  Candidate extensions: compliance stats, RAG ingestion triggers,
-  group membership queries (read-only). Admin-side tools stay
-  REST-only.
+SCCAP already has a FastAPI API, PostgreSQL persistence, a RabbitMQ worker,
+LangGraph scan orchestration, deterministic scanners (Semgrep, Bandit,
+Gitleaks, and OSV-Scanner), AI analysis/remediation, a React operator UI, SSE
+scan events, downloadable HTML/CSV/PDF/SARIF reports, scanner-native JSON,
+finding dispositions, user groups, SAML/OIDC SSO, SCIM, passkeys, and an
+administrative audit surface.
 
-## Medium-term
+The remaining work is primarily correctness under failure, durable evidence,
+operator visibility, tenant enforcement, and repeatable enterprise operation.
 
-- **Finding lifecycle (acknowledge / dismiss / suppress)** — a
-  formal state machine per finding. Today a finding is either
-  open or applied-in-remediation; dismissing a false positive
-  requires re-scanning. Needs a small schema migration + UI.
-- **Keyboard-first Advisor** — the chat is mouse-friendly already;
-  a single-keystroke shortcut overlay + Ctrl-K-style open would
-  make it sticky for power users.
-- **Finding-to-chat handoff** — "ask the Advisor about this
-  finding" on the Results page, pre-populating the session context
-  + the initial question.
-- **Extended language coverage** for specialized agents — the
-  Python / JavaScript / TypeScript / Go paths are mature; Ruby /
-  C# / Rust / Kotlin need love.
+The API already uses one atomic, outbox-only transaction for submission, approval/decline, resume,
+and restart. Cancellation commits its terminal status and event atomically. One declared transition
+policy now guards all scan-status writers, and graph checkpoints carry explicit completed-stage
+state for resume. The frontend OpenAPI contract is generated and drift-gated in CI. Deterministic
+scanner artifacts now append native reports with verified runtime/config digests, exact Semgrep
+rule hashes and resolved source commits; bounded provenance is visible in results and exports.
 
-## Longer-term
+## P0 — release blockers
 
-- **CI / CD integration** — a GitHub Action + GitLab CI template
-  that submits a scan per PR and comments on new findings. Needs
-  an API-token auth path (today the CLI assumes a user JWT).
-- **Multi-tenant mode** — true org-level separation with billing
-  aggregation, SSO, and org-level admin. The User Groups data
-  model (H.2) is the first step; full multi-tenant adds a
-  separate `Organization` layer above it.
-- **Compliance evidence export** — per-framework PDF / CSV export
-  with finding → control mapping for audit teams.
+- Add integration tests around PostgreSQL, RabbitMQ, LangGraph pause/resume,
+  cancellation races, report downloads, token refresh, and tenant visibility.
+  Keep pure unit tests only for important policy boundaries.
+- Keep the implemented frontend OpenAPI generation/drift gate green as endpoint contracts evolve.
+- Replace OSV's current live advisory lookup with a dated, hashed offline snapshot. Scanner
+  binaries/configs and per-scan Semgrep rules/source commits are already verified and retained;
+  OSV is deliberately shown as degraded until the advisory input is equally reproducible.
+- Run authenticated browser regressions for login/refresh/logout, submission,
+  approval, live activity, cancellation, results, and all report downloads.
 
-## Done recently (Phase G → H → I)
+## P1 — trustworthy scanning and evidence
 
-- User Groups + scan-scope filter (H.2).
-- Live dashboard driven by `/dashboard/stats` (H.3).
-- Per-project stats on Projects grid (H.4).
-- Global search across projects / scans / findings (H.5).
-- Advisor context rail backed by
-  `/chat/sessions/{id}/context` (H.6).
-- LangGraph 1.x + LangChain 1.x migration with native
-  `interrupt()` + `Command(resume=...)` (I.1).
-- LiteLLM-backed token counting + cost estimation with per-config
-  admin override (I.2).
-- Pydantic AI structured output with per-call validation retry
-  (I.3).
-- FastMCP server exposing scan + advisor workflow as MCP tools
-  (I.4).
+### Scan attempts and reports
 
-Anything you'd like bumped up the list? Open an issue or a
-discussion.
+- Give every run/retry an immutable scan-attempt identifier. Record tool
+  version, rule-set digest, configuration digest, selected/skipped files,
+  timestamps, exit status, and failure reason per scanner.
+- Store native reports and generated exports in encrypted object storage rather
+  than growing PostgreSQL rows. Preserve digests, retention policy, tenant,
+  attempt, legal-hold state, and a tamper-evident audit record.
+- Distinguish a clean scan from skipped coverage, tool failure, parse failure,
+  timeout, and truncated output. Surface that coverage manifest in the UI and
+  exports.
+
+### Live activity and cancellation
+
+- Version the event schema. Each event needs a sequence/cursor, scan attempt,
+  stage, task, event type (`started`, `progress`, `completed`, `failed`,
+  `cancel_requested`, `cancel_observed`), safe structured details, and timing.
+- Build an operator activity console with stage/scanner/agent filters, progress
+  counts, durations, retries, degraded work, approval pauses, and a detail
+  drawer. Reconnect from the last cursor without duplicating entries.
+- Propagate cancellation into process groups and LLM-provider requests, define
+  a cancellation latency SLO, and show requested versus observed cancellation.
+
+### Identity, authorization, and tenancy
+
+- Harden the existing SAML/OIDC and SCIM implementations with signed metadata,
+  key rotation, domain ownership, group/role mapping, just-in-time policy,
+  deprovisioning tests, and identity-provider conformance suites.
+- Replace the coarse user/superuser model with tenant roles and separation of
+  duties. Enforce two-person approval for high-cost scans; the existing flag is
+  informational only.
+- Centralize tenant predicates and add database-level isolation where feasible.
+  Every list, export, event stream, artifact, search, and background task must
+  prove its tenant scope.
+- Add server-side session inventory, refresh-token rotation/reuse detection,
+  revocation, idle/absolute lifetime, device visibility, and administrator
+  termination. Evaluate a backend-for-frontend/HttpOnly access-token model to
+  remove the current local-storage exposure.
+
+## P2 — AI-to-static rule foundry
+
+AI findings must not be promoted directly into production scanner rules. The
+learning loop should be reviewable and measurable:
+
+1. Start from a confirmed AI-only finding with stable evidence, CWE, root
+   cause, data-flow facts, language, framework, and preconditions.
+2. Produce a candidate Semgrep rule (prefer taint mode when appropriate) plus
+   vulnerable, fixed, and negative fixtures. Secret-pattern candidates may
+   target Gitleaks; dependency issues belong in an advisory feed rather than a
+   regex rule.
+3. Validate candidates in an isolated sandbox against the fixtures and a
+   representative clean/vulnerable corpus. Measure precision, recall,
+   performance, duplicate rate, and rule churn.
+4. Require security-reviewer approval and a signed, versioned registry entry.
+   Scope rules to tenant, technology, and language; deploy first in shadow mode.
+5. Promote only after quality thresholds and observed telemetry. Support rapid
+   rollback, expiry, supersession, and feedback from false positives, false
+   negatives, and remediation regressions.
+
+Semantic findings that cannot be represented faithfully should remain AI
+checks or move to a purpose-built data-flow analyzer. Never weaken a finding
+into a broad regex merely to claim scanner learning. Treat repository content
+as untrusted prompt input and prevent generated rules from executing arbitrary
+code or being promoted autonomously.
+
+## P2 — frontend and integration maturity
+
+- Make finding pages evidence-first: source ranges, trace, scanner/AI
+  provenance, rule version, triage history, remediation diff, verification,
+  and stable lineage identifiers.
+- Add baselines and “new/fixed/unchanged” PR views, policy gates, waivers, and
+  portfolio trend/drill-down views.
+- Complete accessibility, keyboard, responsive, and design-token audits. Split
+  large routes and visualizations to reduce the current main bundle.
+- Add service accounts/OAuth scopes, signed webhooks, GitHub/GitLab/Azure
+  DevOps/Bitbucket CI templates, SARIF upload, ticketing, and SIEM integrations.
+
+## P2/P3 — enterprise operations
+
+- Package stateless APIs and specialized worker pools for Kubernetes with
+  queue-based autoscaling, disruption budgets, safe migrations, and staged
+  rollout/rollback.
+- Add OpenTelemetry traces/metrics/log correlation, SLO dashboards, alerts,
+  queue/backlog and provider-budget controls, and documented incident runbooks.
+- Use a secrets manager/KMS with rotation; produce SBOMs, signed images,
+  provenance, vulnerability gates, and repeatable offline scanner-data updates.
+- Define backup/restore drills, RPO/RTO, regional/tenant retention, legal hold,
+  data export/deletion, and disaster recovery.
+- Performance-test large repositories, concurrent tenants, event replay,
+  artifact downloads, and degraded dependencies before an enterprise release.
+
+## Exit criteria for an enterprise pilot
+
+An enterprise pilot should not begin until P0 is complete, no known cross-
+tenant access path remains, cancellation and session-longevity SLOs pass under
+load, every scanner outcome has auditable evidence, backup/restore has been
+demonstrated, and the supported SSO/SCIM provider matrix passes automated
+conformance tests.

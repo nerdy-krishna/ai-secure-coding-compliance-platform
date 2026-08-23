@@ -12,20 +12,9 @@ import re
 import uuid
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from app.shared.lib.patch_planner import ResolvedPatchRange
 
 WorkflowMode = Literal["audit", "suggest", "remediate"]
-
-
-class MergedFixResponse(BaseModel):
-    original_snippet_for_replacement: str = Field(
-        description="The exact, complete, and unmodified original code block that should be replaced."
-    )
-    merged_code: str = Field(
-        description="A single, cohesive code block that merges conflicting suggestions."
-    )
-    explanation: str = Field(
-        description="A brief explanation of how the fixes were merged."
-    )
 
 
 class CodeChunk(TypedDict):
@@ -49,6 +38,19 @@ class FixSuggestion(BaseModel):
         max_length=200_000,
         description="The secure code snippet to replace the vulnerable part.",
     )
+    required_imports: List[str] = Field(
+        default_factory=list,
+        max_length=100,
+        description="Imports required by this replacement; empty when none are needed.",
+    )
+    required_dependencies: List[str] = Field(
+        default_factory=list,
+        max_length=100,
+        description="New packages required by this replacement; avoid when project facilities exist.",
+    )
+    configuration_changes: List[str] = Field(default_factory=list, max_length=100)
+    migration_changes: List[str] = Field(default_factory=list, max_length=100)
+    manual_steps: List[str] = Field(default_factory=list, max_length=100)
 
 
 class AffectedLocation(BaseModel):
@@ -88,6 +90,26 @@ class FileProfile(BaseModel):
 
 class VulnerabilityFinding(BaseModel):
     id: Optional[int] = None
+    raw_finding_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Stable identity assigned at the raw finding emission boundary.",
+    )
+    canonical_finding_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Stable identity of the surviving consolidated root finding.",
+    )
+    contributing_raw_finding_ids: List[uuid.UUID] = Field(
+        default_factory=list,
+        description="All raw finding identities represented by this canonical root.",
+    )
+    source_snapshot_hash: Optional[str] = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description="SHA-256 source blob reviewed when this finding was emitted.",
+    )
+    fix_selection_status: Optional[
+        Literal["selected", "manual_review_required", "none"]
+    ] = Field(default=None)
     cwe: Optional[str] = Field(
         default=None,
         pattern=r"^CWE-\d{1,5}$",
@@ -161,6 +183,14 @@ class VulnerabilityFinding(BaseModel):
         default=None,
         description="Provenance: 'bandit' / 'semgrep' / 'gitleaks' / 'osv' for deterministic-scanner findings, None for LLM-agent findings.",
     )
+    scanner_rule_id: Optional[str] = Field(
+        default=None,
+        max_length=512,
+        description=(
+            "Stable native rule identity emitted by a deterministic scanner "
+            "(for example Semgrep check_id). None for LLM findings and legacy rows."
+        ),
+    )
     cve_id: Optional[str] = Field(
         default=None,
         pattern=r"^CVE-\d{4}-\d{4,}$",
@@ -188,11 +218,11 @@ class VulnerabilityFinding(BaseModel):
     fix_verified: Optional[bool] = Field(
         default=None,
         description=(
-            "Patch-verifier result (§3.9). NULL for findings where verification "
-            "was not attempted (audit / suggest scans, scanner-only findings, "
-            "fixes that weren't applied). True when re-running Semgrep over the "
-            "patched code no longer reports a finding for this rule at this "
-            "file/line. False when the same Semgrep rule still fires."
+            "Pre-promotion patch-verifier result. NULL where stable originating "
+            "tool replay was not attempted or the patch was not promoted. True "
+            "when the originating native scanner rule no longer fires at the "
+            "resolved patch site. False is retained for legacy post-promotion "
+            "verification rows; new failed patches are not promoted."
         ),
     )
     cross_file_status: Optional[Literal["confirmed", "mitigated", "unconfirmed"]] = (
@@ -292,10 +322,49 @@ class VulnerabilityFinding(BaseModel):
 
 
 class FixResult(BaseModel):
-    """Links a specific finding to its suggested fix for collation."""
+    """A governed patch candidate tied to an exact raw finding and snapshot."""
 
     finding: VulnerabilityFinding
     suggestion: FixSuggestion
+    candidate_id: Optional[uuid.UUID] = None
+    raw_finding_id: Optional[uuid.UUID] = None
+    canonical_finding_id: Optional[uuid.UUID] = None
+    source_snapshot_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    anchor_fingerprint: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    patch_fingerprint: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    disposition: Literal[
+        "pending", "selected", "alternative", "duplicate", "conflict", "rejected"
+    ] = "pending"
+    decision_reason: Optional[str] = Field(default=None, max_length=4000)
+    contributing_agents: List[str] = Field(default_factory=list, max_length=100)
+    contributing_models: List[str] = Field(default_factory=list, max_length=100)
+    validation_status: Literal["not_run", "passed", "failed"] = "not_run"
+    is_applied: bool = False
+    language: Optional[str] = None
+    symbol: Optional[str] = None
+    resolved_range: Optional[ResolvedPatchRange] = None
+    context_fingerprint: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    patch_hunk_id: Optional[uuid.UUID] = None
+    applicability_status: Literal[
+        "unresolved",
+        "planned",
+        "duplicate",
+        "conflict",
+        "ambiguous",
+        "missing",
+        "snapshot_mismatch",
+        "noop",
+        "invalid_path",
+        "syntax_failed",
+        "validation_failed",
+        "validation_unavailable",
+        "excluded",
+    ] = "unresolved"
+    required_imports: List[str] = Field(default_factory=list, max_length=100)
+    required_dependencies: List[str] = Field(default_factory=list, max_length=100)
+    configuration_changes: List[str] = Field(default_factory=list, max_length=100)
+    migration_changes: List[str] = Field(default_factory=list, max_length=100)
+    manual_steps: List[str] = Field(default_factory=list, max_length=100)
 
 
 # --- ADDED: New model for a combined finding-and-fix result from a single LLM call ---
@@ -324,6 +393,11 @@ class SpecializedAgentState(TypedDict, total=False):
     # provider default.
     temperature: Optional[float]
     filename: str
+    # Durable per-invocation identity (file + chunk + lane + model). Usage
+    # capture uses this instead of the filename alone so chunked/dual-lane
+    # calls cannot collapse onto one idempotency key.
+    usage_unit_key: str
+    source_snapshot_hash: str
     code_snippet: str
     workflow_mode: str
     file_content_for_verification: Optional[str]
@@ -341,6 +415,9 @@ class SpecializedAgentState(TypedDict, total=False):
 
 class LLMInteraction(BaseModel):
     scan_id: Optional[uuid.UUID] = None
+    usage_event_id: Optional[uuid.UUID] = Field(
+        None, description="Immutable canonical usage event for this interaction."
+    )
     file_path: Optional[str] = None
     agent_name: str = Field(
         description="The name of the agent that initiated the interaction."

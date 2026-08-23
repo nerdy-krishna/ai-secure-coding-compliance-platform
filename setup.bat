@@ -10,18 +10,14 @@
 :: any other user-controlled variable passed into those calls.
 ::
 :: Dangerous-functionality surface areas:
-::   - the secret-replacement powershell calls in the Environment Setup block:
-::     secret values from generate_secrets.py interpolated into PowerShell
-::     -replace strings (trust boundary: script execution context)
 ::   - the config-replacement powershell calls in SAVE_CONFIG: SSL_DOMAIN and
 ::     other config values interpolated into PowerShell -replace strings
 ::     (trust boundary: operator terminal input). SCCAP_VARIANT /
 ::     COMPOSE_PROFILES come from fixed menu choices, not free-text input.
 ::
 :: Domain input is validated with a strict allow-list regex (STATE_3) to
-:: block PowerShell metacharacters. Secret values come from generate_secrets.py
-:: and should not contain special characters, but are not separately sanitised
-:: here. Hardening the interpolation further is tracked as a follow-up.
+:: block PowerShell metacharacters. Environment secrets are handled by
+:: bootstrap_env_secrets.py and are never interpolated into PowerShell.
 ::
 
 echo ==================================================
@@ -63,25 +59,22 @@ echo [*] Setting up environment configuration...
 copy /-y .env.example .env >nul 2>&1
 if %errorlevel% equ 0 (
     echo  -> Copied .env.example to .env...
+    set ENV_CREATED=1
+) else (
+    echo [!] .env already exists. Preserving existing secrets.
+    set ENV_CREATED=0
+)
 
-    echo  -> Generating secure keys...
-    :: We use python to get the secrets, capturing output to variables
-    for /f "delims=" %%i in ('python scripts/generate_secrets.py random') do set SECRET_KEY=%%i
-    for /f "delims=" %%i in ('python scripts/generate_secrets.py fernet') do set ENCRYPTION_KEY=%%i
-    for /f "delims=" %%i in ('python scripts/generate_secrets.py random') do set POSTGRES_PASSWORD=%%i
-    for /f "delims=" %%i in ('python scripts/generate_secrets.py random') do set RABBITMQ_DEFAULT_PASS=%%i
-
-    :: DANGEROUS SURFACE (V15.1.5): secret values from generate_secrets.py are
-    :: interpolated into PowerShell -replace strings below. See header comment.
-    :: PowerShell is easiest for replacement on Windows without external tools like sed
-    powershell -Command "(Get-Content .env) -replace 'SECRET_KEY=supersecretkey1234567890', 'SECRET_KEY=%SECRET_KEY%' | Set-Content .env"
-    powershell -Command "(Get-Content .env) -replace 'ENCRYPTION_KEY=.*', 'ENCRYPTION_KEY=%ENCRYPTION_KEY%' | Set-Content .env"
-    powershell -Command "(Get-Content .env) -replace 'POSTGRES_PASSWORD=postgres', 'POSTGRES_PASSWORD=%POSTGRES_PASSWORD%' | Set-Content .env"
-    powershell -Command "(Get-Content .env) -replace 'RABBITMQ_DEFAULT_PASS=password', 'RABBITMQ_DEFAULT_PASS=%RABBITMQ_DEFAULT_PASS%' | Set-Content .env"
-
+echo  -> Checking required environment secrets...
+python scripts/bootstrap_env_secrets.py --env-file .env
+if %errorlevel% neq 0 (
+    echo Error: environment secret bootstrap failed.
+    exit /b 1
+)
+if "%ENV_CREATED%"=="1" (
     echo [+] .env created and configured with new secrets.
 ) else (
-    echo [!] .env already exists. Skipping generation.
+    echo [+] Existing .env upgraded; valid secrets were preserved.
 )
 echo.
 

@@ -37,7 +37,7 @@ admins see everything.
   static assets receive full LLM profiling and agent routing instead of
   being skipped by default; reflected in cost and time estimates.
 - Two LLM slots per scan — a **utility** (cheap) model for the
-  per-file profiler and fix verification, and a **reasoning**
+  per-file profiler, and a **reasoning**
   (capable) model for analysis and consolidation. Put the same model
   in both, or split them.
 - Optional **second reasoning LLM** — every analysis agent runs on
@@ -124,8 +124,8 @@ TopNav "Admin" item + an in-page `AdminSubNav` strip:
   ingestion.
 - **Prompts** — CRUD prompt templates consumed by agents.
 - **SMTP** — outbound mail config for password resets.
-- **LLM configs** — encrypted provider credentials + per-config cost
-  overrides.
+- **LLM configs** — encrypted provider credentials, rate limits, and
+  effective-dated complete price override history.
 
 ## MCP server
 
@@ -138,7 +138,7 @@ Current tool surface:
 | `sccap_get_scan_status` | `GET /scans/{id}` |
 | `sccap_get_scan_result` | `GET /scans/{id}/result` |
 | `sccap_approve_scan` | resumes the LangGraph thread with `Command(resume=...)` |
-| `sccap_ask_advisor` | single-shot chat through `chat_service`, skips session persistence |
+| `sccap_ask_advisor` | authenticated single-shot advisor call; skips session persistence but records user/tenant-attributed usage |
 
 External agentic clients (Claude Code, Cursor, etc.) authenticate with
 an ordinary user JWT; all visibility-scope rules apply.

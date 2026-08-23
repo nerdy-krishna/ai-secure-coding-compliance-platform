@@ -8,7 +8,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useDebounce } from "../../shared/hooks/useDebounce";
 import { scanService } from "../../shared/api/scanService";
 import type {
@@ -203,17 +203,19 @@ const ProjectsPage: React.FC = () => {
                 stats.open_findings.informational
               : 0;
             return (
-              <div
+              <Link
                 key={p.id}
                 className="sccap-card"
-                style={{ cursor: "pointer" }}
-                onClick={() => {
-                  navigate(`/analysis/projects/${p.id}`, {
-                    state: {
-                      projectName: p.name,
-                      repoUrl: p.repository_url ?? null,
-                    },
-                  });
+                to={`/analysis/projects/${p.id}`}
+                state={{
+                  projectName: p.name,
+                  repoUrl: p.repository_url ?? null,
+                }}
+                aria-label={`Open project ${p.name}`}
+                style={{
+                  cursor: "pointer",
+                  color: "inherit",
+                  textDecoration: "none",
                 }}
               >
                 <div
@@ -315,7 +317,7 @@ const ProjectsPage: React.FC = () => {
                         : "no scans"}
                   </span>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>

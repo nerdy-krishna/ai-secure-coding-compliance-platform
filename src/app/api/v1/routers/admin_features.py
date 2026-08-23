@@ -12,9 +12,9 @@ after install, so a variant is not locked in forever.
     — a feature can never end up enabled without its dependencies.
 
 App-only flag changes update ``SystemConfigCache`` immediately, so
-``require_feature`` gates and ``GET /features`` reflect them live. A feature
-whose whole router is skipped at boot still needs an app restart to (un)mount
-that router — the response notes this.
+``GET /features`` reflects them live. Feature routers are selected at boot and
+therefore still need an app restart to be mounted or unmounted; the response
+notes this.
 """
 
 import logging

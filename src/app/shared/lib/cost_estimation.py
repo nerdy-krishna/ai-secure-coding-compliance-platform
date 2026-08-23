@@ -15,12 +15,16 @@ Call signatures are unchanged so existing callers don't need to move.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from decimal import Decimal
+import math
+from typing import Any, Dict, Mapping, Optional
 
 import litellm
 
 from app.config.config import settings
 from app.infrastructure.database import models as db_models
+from app.shared.lib.llm_estimation import EstimateCalibration, calibrate_estimate
+from app.shared.lib.llm_usage import PriceSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +152,39 @@ def _compute_cost(
     config: db_models.LLMConfiguration,
     prompt_tokens: int,
     completion_tokens: int,
+    price_snapshot: PriceSnapshot | None = None,
+    request_count: int = 0,
 ) -> tuple[float, float]:
-    """(input_cost, output_cost) in USD. Admin override > LiteLLM map."""
+    """(input_cost, output_cost) in USD. Versioned override > legacy config > catalog."""
+    if price_snapshot is not None:
+        input_rate = price_snapshot.rates.get("uncached_input")
+        output_rate = price_snapshot.rates.get("non_reasoning_output")
+        if input_rate is not None and output_rate is not None:
+            divisors = {
+                "million_tokens": Decimal("1000000"),
+                "thousand_requests": Decimal("1000"),
+                "second": Decimal("1"),
+                "byte_month": Decimal("1"),
+            }
+
+            def _estimate(quantity: int, rate: Any) -> float:
+                return float(
+                    Decimal(quantity)
+                    * rate.amount
+                    * rate.modifier
+                    / divisors[rate.unit]
+                )
+
+            request_rate = price_snapshot.rates.get("provider_request")
+            request_cost = (
+                _estimate(request_count, request_rate)
+                if request_rate is not None and request_count > 0
+                else 0.0
+            )
+            return (
+                _estimate(prompt_tokens, input_rate) + request_cost,
+                _estimate(completion_tokens, output_rate),
+            )
     override = _admin_override(config)
     if override is not None:
         in_rate, out_rate = override
@@ -177,39 +212,121 @@ def _compute_cost(
 def estimate_cost_for_prompt(
     config: db_models.LLMConfiguration,
     input_tokens: int,
-    output_token_percentage: float = 0.25,
-) -> Dict[str, float]:
-    """Pre-call cost estimate. Output tokens are predicted at 25% of input
-    by default (same heuristic as before); admin can tune by passing a
-    different ratio when calling."""
+    output_token_percentage: float | None = None,
+    *,
+    calibration: EstimateCalibration | None = None,
+    stage: str = "generic",
+    price_snapshot: PriceSnapshot | None = None,
+    planned_request_count: int = 1,
+) -> Dict[str, Any]:
+    """Return an expected estimate and a conservative upper bound.
+
+    ``output_token_percentage`` remains as an explicit compatibility override;
+    production callers pass a ledger-backed calibration instead. With neither,
+    the named stage fallback is used and disclosed in the response.
+    """
     if not isinstance(input_tokens, int) or input_tokens < 0:
         raise ValueError("input_tokens must be a non-negative int")
-    if not (0.0 <= output_token_percentage <= 4.0):
-        raise ValueError("output_token_percentage out of range")
-    predicted_output_tokens = max(0, int(input_tokens * output_token_percentage))
+    if not isinstance(planned_request_count, int) or planned_request_count < 0:
+        raise ValueError("planned_request_count must be a non-negative int")
+    if output_token_percentage is not None:
+        if not (0.0 <= output_token_percentage <= 4.0):
+            raise ValueError("output_token_percentage out of range")
+        calibration = EstimateCalibration(
+            stage=stage,
+            source="caller_override",
+            confidence="low",
+            sample_count=0,
+            expected_output_ratio=output_token_percentage,
+            upper_output_ratio=min(
+                4.0, max(output_token_percentage, output_token_percentage * 1.5)
+            ),
+            expected_request_multiplier=1.0,
+            upper_request_multiplier=2.0,
+            assumptions=(
+                "The output ratio was supplied by the caller rather than learned from usage history.",
+                "The upper bound includes one complete retry of every planned request.",
+            ),
+        )
+    calibration = calibration or calibrate_estimate(stage, ())
+
+    expected_input_tokens = max(
+        0, int(input_tokens * calibration.expected_request_multiplier)
+    )
+    upper_input_tokens = max(
+        expected_input_tokens,
+        int(input_tokens * calibration.upper_request_multiplier),
+    )
+    predicted_output_tokens = max(
+        0, int(expected_input_tokens * calibration.expected_output_ratio)
+    )
+    upper_output_tokens = max(
+        predicted_output_tokens,
+        int(upper_input_tokens * calibration.upper_output_ratio),
+    )
+    expected_request_count = math.ceil(
+        planned_request_count * calibration.expected_request_multiplier
+    )
+    upper_request_count = max(
+        expected_request_count,
+        math.ceil(planned_request_count * calibration.upper_request_multiplier),
+    )
     input_cost, predicted_output_cost = _compute_cost(
-        config, input_tokens, predicted_output_tokens
+        config,
+        expected_input_tokens,
+        predicted_output_tokens,
+        price_snapshot,
+        expected_request_count,
+    )
+    upper_input_cost, upper_output_cost = _compute_cost(
+        config,
+        upper_input_tokens,
+        upper_output_tokens,
+        price_snapshot,
+        upper_request_count,
     )
 
     total_estimated_cost = input_cost + predicted_output_cost
+    upper_bound_estimated_cost = upper_input_cost + upper_output_cost
+    assumptions = list(calibration.assumptions)
+    if price_snapshot is not None:
+        assumptions.append(
+            "Preflight pricing treats input as uncached and output as non-reasoning; actual ledger categories remain authoritative."
+        )
     logger.debug(
         "Cost estimate for %s: input_tokens=%d predicted_output=%d total=$%.6f",
         config.model_name,
-        input_tokens,
+        expected_input_tokens,
         predicted_output_tokens,
         total_estimated_cost,
     )
     MAX_PER_SCAN_USD = getattr(settings, "MAX_PER_SCAN_ESTIMATED_COST_USD", 100.0)
-    if total_estimated_cost > MAX_PER_SCAN_USD:
+    if upper_bound_estimated_cost > MAX_PER_SCAN_USD:
         raise ValueError(
-            f"Estimated cost ${total_estimated_cost:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
+            f"Conservative estimated cost ${upper_bound_estimated_cost:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
         )
     return {
         "input_cost": input_cost,
         "predicted_output_cost": predicted_output_cost,
         "total_estimated_cost": total_estimated_cost,
+        "expected_estimated_cost": total_estimated_cost,
+        "upper_bound_estimated_cost": upper_bound_estimated_cost,
         "predicted_output_tokens": float(predicted_output_tokens),
-        "total_input_tokens": float(input_tokens),
+        "total_input_tokens": float(expected_input_tokens),
+        "upper_bound_input_tokens": float(upper_input_tokens),
+        "upper_bound_output_tokens": float(upper_output_tokens),
+        "expected_request_count": expected_request_count,
+        "upper_bound_request_count": upper_request_count,
+        "estimate_confidence": calibration.confidence,
+        "estimate_source": calibration.source,
+        "estimate_price_source": (
+            price_snapshot.source
+            if price_snapshot is not None
+            else "legacy_config_or_litellm"
+        ),
+        "estimate_sample_count": calibration.sample_count,
+        "estimate_assumptions": assumptions,
+        "calibration": calibration.as_dict(),
     }
 
 
@@ -221,7 +338,11 @@ def estimate_cost_two_slot(
     utility_input_tokens: int,
     secondary_reasoning_config: Optional[db_models.LLMConfiguration] = None,
     secondary_reasoning_input_tokens: int = 0,
-    output_token_percentage: float = 0.25,
+    output_token_percentage: float | None = None,
+    calibrations: Mapping[str, EstimateCalibration] | None = None,
+    price_snapshots: Mapping[str, PriceSnapshot | None] | None = None,
+    planned_request_counts: Mapping[str, int] | None = None,
+    stage: str = "analysis",
 ) -> Dict[str, Any]:
     """Pre-call cost estimate across the LLM slots of a scan (#69, #93).
 
@@ -250,42 +371,48 @@ def estimate_cost_two_slot(
     for label, toks in slot_inputs:
         if not isinstance(toks, int) or toks < 0:
             raise ValueError(f"{label}_input_tokens must be a non-negative int")
-    if not (0.0 <= output_token_percentage <= 4.0):
+    if output_token_percentage is not None and not (
+        0.0 <= output_token_percentage <= 4.0
+    ):
         raise ValueError("output_token_percentage out of range")
 
     def _slot(
-        config: db_models.LLMConfiguration, input_tokens: int
-    ) -> Dict[str, float]:
-        predicted_output = max(0, int(input_tokens * output_token_percentage))
-        in_cost, out_cost = _compute_cost(config, input_tokens, predicted_output)
-        return {
-            "input_tokens": float(input_tokens),
-            "predicted_output_tokens": float(predicted_output),
-            "input_cost": in_cost,
-            "predicted_output_cost": out_cost,
-            "total_estimated_cost": in_cost + out_cost,
-        }
+        label: str, config: db_models.LLMConfiguration, input_tokens: int
+    ) -> Dict[str, Any]:
+        return estimate_cost_for_prompt(
+            config,
+            input_tokens,
+            output_token_percentage,
+            calibration=(calibrations or {}).get(label),
+            stage=stage,
+            price_snapshot=(price_snapshots or {}).get(label),
+            planned_request_count=(planned_request_counts or {}).get(label, 0),
+        )
 
-    reasoning = _slot(reasoning_config, reasoning_input_tokens)
-    utility = _slot(utility_config, utility_input_tokens)
-    slots: Dict[str, Dict[str, float]] = {
+    reasoning = _slot("reasoning", reasoning_config, reasoning_input_tokens)
+    utility = _slot("utility", utility_config, utility_input_tokens)
+    slots: Dict[str, Dict[str, Any]] = {
         "reasoning": reasoning,
         "utility": utility,
     }
     priced = [reasoning, utility]
     if secondary_reasoning_config is not None:
         reasoning_secondary = _slot(
-            secondary_reasoning_config, secondary_reasoning_input_tokens
+            "secondary_reasoning",
+            secondary_reasoning_config,
+            secondary_reasoning_input_tokens,
         )
         slots["reasoning_secondary"] = reasoning_secondary
         priced.append(reasoning_secondary)
 
     total = sum(s["total_estimated_cost"] for s in priced)
+    upper_total = sum(s["upper_bound_estimated_cost"] for s in priced)
+    active_priced = [s for s in priced if s["upper_bound_input_tokens"] > 0] or priced
 
     MAX_PER_SCAN_USD = getattr(settings, "MAX_PER_SCAN_ESTIMATED_COST_USD", 100.0)
-    if total > MAX_PER_SCAN_USD:
+    if upper_total > MAX_PER_SCAN_USD:
         raise ValueError(
-            f"Estimated cost ${total:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
+            f"Conservative estimated cost ${upper_total:.2f} exceeds per-scan ceiling ${MAX_PER_SCAN_USD}"
         )
     logger.debug(
         "Two-slot cost estimate: reasoning=$%.6f utility=$%.6f "
@@ -299,8 +426,37 @@ def estimate_cost_two_slot(
         "input_cost": sum(s["input_cost"] for s in priced),
         "predicted_output_cost": sum(s["predicted_output_cost"] for s in priced),
         "total_estimated_cost": total,
+        "expected_estimated_cost": total,
+        "upper_bound_estimated_cost": upper_total,
         "predicted_output_tokens": sum(s["predicted_output_tokens"] for s in priced),
-        "total_input_tokens": sum(s["input_tokens"] for s in priced),
+        "total_input_tokens": sum(s["total_input_tokens"] for s in priced),
+        "upper_bound_input_tokens": sum(s["upper_bound_input_tokens"] for s in priced),
+        "upper_bound_output_tokens": sum(
+            s["upper_bound_output_tokens"] for s in priced
+        ),
+        "expected_request_count": sum(s["expected_request_count"] for s in priced),
+        "upper_bound_request_count": sum(
+            s["upper_bound_request_count"] for s in priced
+        ),
+        "estimate_confidence": min(
+            (s["estimate_confidence"] for s in active_priced),
+            key={"low": 0, "medium": 1, "high": 2}.__getitem__,
+        ),
+        "estimate_source": (
+            "canonical_usage_ledger"
+            if all(
+                s["estimate_source"] == "canonical_usage_ledger" for s in active_priced
+            )
+            else "mixed_or_fallback"
+        ),
+        "estimate_sample_count": sum(s["estimate_sample_count"] for s in active_priced),
+        "estimate_assumptions": list(
+            dict.fromkeys(
+                assumption
+                for slot in active_priced
+                for assumption in slot["estimate_assumptions"]
+            )
+        ),
         "slots": slots,
     }
 

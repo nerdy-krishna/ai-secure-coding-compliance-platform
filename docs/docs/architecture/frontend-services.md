@@ -12,7 +12,7 @@ feature-sliced:
 secure-code-ui/src/
 ├── app/                   # providers, route guards, App shell
 ├── pages/                 # top-level route views
-│   ├── auth/              # login / register / forgot / reset
+│   ├── auth/              # login / SSO callback / forgot / reset
 │   ├── setup/             # first-run wizard
 │   ├── account/           # dashboard + submission history
 │   ├── admin/             # superuser-gated admin pages
@@ -115,7 +115,25 @@ route guard rejects non-superusers regardless of preview.
 ## Generated types
 
 `shared/types/api-generated.ts` is generated from the running
-backend's OpenAPI schema (`npm run generate:api`). Hand-written types
-live in `shared/types/api.ts`; we prefer hand-written for shapes that
-need editor-friendly JSDoc and use the generated file for raw
-endpoint definitions.
+backend's OpenAPI schema (`npm run generate:api`) and is committed so
+frontend builds are reproducible without a live API. CI regenerates it
+from the Compose API and fails on drift.
+
+Endpoint boundaries derive types from concrete entries in the generated
+`operations` map. The scan submission, result, and report calls use this
+path so route parameters, query parameters, success bodies, validation
+errors, and nullability change the TypeScript build when the backend
+contract changes. `shared/lib/scanContract.ts` is the rendering boundary
+for the few backend fields intentionally described as free-form JSON; it
+discards malformed cost, temperature, fix, and affected-location values
+before pages consume them. `shared/types/api.ts` remains a compatibility
+facade and a home for genuinely frontend-only view models, not duplicate
+endpoint response interfaces.
+
+Regenerate and review after any API shape change:
+
+```bash
+SCCAP_OPENAPI_URL=http://127.0.0.1:8000/openapi.json npm run generate:api
+git diff -- src/shared/types/api-generated.ts
+npm run build
+```

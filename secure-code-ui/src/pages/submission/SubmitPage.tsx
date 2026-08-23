@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { frameworkService } from "../../shared/api/frameworkService";
 import { llmConfigService } from "../../shared/api/llmConfigService";
 import { scanService } from "../../shared/api/scanService";
+import { appendScanField } from "../../shared/lib/scanContract";
 import { ruleSourcesService } from "../../shared/api/ruleSourcesService";
 import { Icon } from "../../shared/ui/Icon";
 import { useToast } from "../../shared/ui/Toast";
@@ -283,7 +284,6 @@ const SubmitPage: React.FC = () => {
     profiler: 0.2,
     analysis: 0.2,
     consolidation: 0.2,
-    merge: 0.2,
   });
   const [tempsUnlocked, setTempsUnlocked] = useState(false);
   // #92 / PRD #91: when true, no temperature is sent on any LLM call —
@@ -620,39 +620,41 @@ const SubmitPage: React.FC = () => {
     setSubmitting(true);
     try {
       const payload = new FormData();
-      payload.append("project_name", trimmedName);
-      payload.append("scan_type", scanType);
-      payload.append("reasoning_llm_config_id", llmConfigId);
-      payload.append("utility_llm_config_id", utilityLlmConfigId);
+      appendScanField(payload, "project_name", trimmedName);
+      appendScanField(payload, "scan_type", scanType);
+      appendScanField(payload, "reasoning_llm_config_id", llmConfigId);
+      appendScanField(payload, "utility_llm_config_id", utilityLlmConfigId);
       if (useSecondaryLlm && secondaryLlmConfigId) {
-        payload.append(
+        appendScanField(
+          payload,
           "secondary_reasoning_llm_config_id",
           secondaryLlmConfigId,
         );
-        payload.append(
+        appendScanField(
+          payload,
           "temperature_analysis_secondary",
           String(secondaryAnalysisTemp),
         );
       }
-      payload.append("temperature_profiler", String(stageTemps.profiler));
-      payload.append("temperature_analysis", String(stageTemps.analysis));
-      payload.append(
+      appendScanField(payload, "temperature_profiler", String(stageTemps.profiler));
+      appendScanField(payload, "temperature_analysis", String(stageTemps.analysis));
+      appendScanField(
+        payload,
         "temperature_consolidation",
         String(stageTemps.consolidation),
       );
-      payload.append("temperature_merge", String(stageTemps.merge));
-      payload.append("disable_temperature", String(disableTemperature));
-      payload.append("cross_file_validation", String(crossFileValidation));
-      payload.append("deep_vendor_scan", String(deepVendorScan));
+      appendScanField(payload, "disable_temperature", String(disableTemperature));
+      appendScanField(payload, "cross_file_validation", String(crossFileValidation));
+      appendScanField(payload, "deep_vendor_scan", String(deepVendorScan));
       // V02.2.1: intersect selectedFrameworks with the loaded allowlist before submitting
       const safeFrameworks = selectedFrameworks.filter((n) => frameworks?.some((f) => f.name === n));
-      payload.append("frameworks", safeFrameworks.join(","));
+      appendScanField(payload, "frameworks", safeFrameworks.join(","));
       if (mode === "upload") {
-        for (const f of files) payload.append("files", f);
+        for (const f of files) appendScanField(payload, "files", f);
       } else if (mode === "git") {
-        payload.append("repo_url", repoUrl.trim());
+        appendScanField(payload, "repo_url", repoUrl.trim());
       } else if (mode === "archive" && archiveFile) {
-        payload.append("archive_file", archiveFile);
+        appendScanField(payload, "archive_file", archiveFile);
       }
 
       if (
@@ -661,7 +663,8 @@ const SubmitPage: React.FC = () => {
         selectedFiles.size > 0 &&
         selectedFiles.size < previewFiles.length
       ) {
-        payload.append(
+        appendScanField(
+          payload,
           "selected_files",
           Array.from(selectedFiles).join(","),
         );
@@ -669,14 +672,14 @@ const SubmitPage: React.FC = () => {
 
       const response = await scanService.createScan(payload);
       toast.success("Scan submitted. Tracking progress…");
-      navigate(`/analysis/scanning/${response.scan_id}`, {
-        state: {
-          fromLabel: projectName.trim() || "Projects",
-          fromPath: selectedProjectId
-            ? `/analysis/projects/${selectedProjectId}`
-            : "/analysis/results",
-        },
-      });
+      // This transition originates after an upload promise settles. In the
+      // BrowserRouter tree, programmatic history updates changed the URL but
+      // intermittently left SubmitPage mounted. A document navigation makes
+      // the post-submit boundary deterministic and starts the status page
+      // with a fresh SSE connection; its project breadcrumb is API-derived.
+      window.location.assign(
+        `/analysis/scanning/${encodeURIComponent(response.scan_id)}`,
+      );
     } catch (err) {
       const e = err as {
         response?: { data?: { detail?: string | unknown[] } };
@@ -687,7 +690,6 @@ const SubmitPage: React.FC = () => {
           ? e.response.data.detail
           : e.message || "Submission failed";
       toast.error(detail);
-    } finally {
       setSubmitting(false);
     }
   };
@@ -1210,8 +1212,8 @@ const SubmitPage: React.FC = () => {
                   color: "var(--fg-subtle)",
                 }}
               >
-                Drives analysis, consolidation, and the remediation merge —
-                pick a capable model.
+                Drives analysis and finding consolidation — pick a capable
+                model. Patch planning is deterministic.
               </div>
 
               <label
@@ -1432,7 +1434,6 @@ const SubmitPage: React.FC = () => {
                     ["profiler", "Profiler"],
                     ["analysis", "Analysis"],
                     ["consolidation", "Consolidation"],
-                    ["merge", "Merge"],
                   ] as const
                 ).map(([key, label]) => (
                   <label

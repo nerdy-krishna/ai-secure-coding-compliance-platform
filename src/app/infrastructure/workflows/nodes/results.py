@@ -16,8 +16,10 @@ from typing import Any, Dict
 
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.llm_usage_repo import LLMUsageRepository
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.risk_score import compute_cvss_aggregate
+from app.shared.lib.risk_severity import risk_severity_for_score
 from app.shared.lib.scan_progress import EV_STARTED
 from app.shared.lib.scan_status import (
     STATUS_COMPLETED,
@@ -31,6 +33,9 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
     scan_id = state["scan_id"]
     scan_type = state["scan_type"]
     findings = state.get("findings", [])
+    fix_candidates = state.get("fix_candidates", []) or []
+    patch_plan = state.get("patch_plan")
+    patch_validation_summary = state.get("patch_validation_summary")
     final_file_map = state.get("final_file_map")
     batch = state.get("_batch", 1)
 
@@ -40,6 +45,28 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
             repo = ScanRepository(db)
 
             await repo.replace_findings_for_scan(scan_id, findings, batch=batch)
+            await repo.replace_fix_candidates_for_scan(
+                scan_id, fix_candidates, batch=batch
+            )
+            if patch_plan is not None:
+                from app.infrastructure.database.repositories.scan_artifact_repo import (
+                    ARTIFACT_TYPE_PATCH_PLAN,
+                    ScanArtifactRepository,
+                )
+
+                await ScanArtifactRepository(db).upsert(
+                    scan_id=scan_id,
+                    artifact_type=ARTIFACT_TYPE_PATCH_PLAN,
+                    version=2,
+                    payload=patch_plan,
+                )
+            if patch_validation_summary is not None:
+                await repo.create_scan_event(
+                    scan_id=scan_id,
+                    stage_name="PATCH_VALIDATION",
+                    status="COMPLETED",
+                    details=patch_validation_summary,
+                )
 
             if scan_type == "REMEDIATE" and final_file_map:
                 logger.info("Saving POST_REMEDIATION snapshot for scan %s.", scan_id)
@@ -60,13 +87,16 @@ async def save_results_node(state: WorkerState) -> Dict[str, Any]:
 async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
     scan_id, findings = state["scan_id"], state.get("findings", [])
     logger.info("Saving final reports and risk score for scan %s.", scan_id)
-    try:
-        async with AsyncSessionLocal() as _db_start:
-            await ScanRepository(_db_start).record_scan_event(
-                scan_id, "GENERATING_REPORTS", EV_STARTED
-            )
-    except Exception as _e:
-        logger.warning("GENERATING_REPORTS started-event emit failed: %s", _e)
+    async with AsyncSessionLocal() as _db_start:
+        generation_claimed = await ScanRepository(_db_start).record_scan_event(
+            scan_id, "GENERATING_REPORTS", EV_STARTED
+        )
+    if not generation_claimed:
+        logger.info(
+            "save_final_report: report-generation transition rejected for scan %s",
+            scan_id,
+        )
+        return {}
     severity_map: Dict[str, int] = {
         "CRITICAL": 0,
         "HIGH": 0,
@@ -87,8 +117,13 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
             "files_analyzed_count": len(set(f.file_path for f in findings)),
             "severity_counts": severity_map,
         },
-        "overall_risk_score": {"score": final_risk_score, "severity": "High"},
+        "overall_risk_score": {
+            "score": final_risk_score,
+            "severity": risk_severity_for_score(final_risk_score),
+        },
     }
+    if state.get("patch_validation_summary") is not None:
+        summary_data["remediation"] = state["patch_validation_summary"]
     final_status = (
         STATUS_REMEDIATION_COMPLETED
         if state.get("scan_type") == "REMEDIATE"
@@ -108,12 +143,25 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
     try:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
-            await repo.save_final_reports_and_status(
+            # Close the estimate feedback loop before terminal status is
+            # persisted. Future preflights consume these same canonical
+            # analysis events as model/stage calibration observations.
+            await LLMUsageRepository(db).measure_scan_estimate_variance(
+                scan_id=scan_id,
+                stage="analysis",
+            )
+            finalized = await repo.save_final_reports_and_status(
                 scan_id=scan_id,
                 status=final_status,
                 summary=summary_data,
                 risk_score=final_risk_score,
             )
+            if not finalized:
+                logger.info(
+                    "save_final_report: terminal transition rejected for scan %s",
+                    scan_id,
+                )
+                return {}
             try:
                 await repo.create_scan_event(
                     scan_id=scan_id,
@@ -140,6 +188,30 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
         logger.warning(
             "save_final_report: lineage artifact persistence failed "
             "(non-fatal) for scan %s",
+            scan_id,
+            exc_info=True,
+        )
+
+    try:
+        from app.infrastructure.database.repositories.evidence_repo import (
+            EvidenceRepository,
+        )
+        from app.infrastructure.database.repositories.scan_attempt_repo import (
+            ScanAttemptRepository,
+        )
+
+        async with AsyncSessionLocal() as db:
+            attempt = await ScanAttemptRepository(db).mark_current_terminal(
+                scan_id, status="completed", commit=False
+            )
+            if attempt is not None:
+                await EvidenceRepository(db).finalize_attempt(
+                    attempt.id, actor_user_id=None, commit=False
+                )
+            await db.commit()
+    except Exception:
+        logger.warning(
+            "save_final_report: attempt manifest finalization failed for scan %s",
             scan_id,
             exc_info=True,
         )
@@ -176,8 +248,19 @@ async def _persist_finding_lineage_artifact(
             .scalars()
             .all()
         )
+        candidate_rows = list(
+            (
+                await db.execute(
+                    select(db_models.FindingFixCandidate).where(
+                        db_models.FindingFixCandidate.scan_id == scan_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
-        flow_map_raw: list = []
+        flow_map_raw: list = list(state.get("finding_lineage") or [])
         events = list(
             (
                 await db.execute(
@@ -193,7 +276,7 @@ async def _persist_finding_lineage_artifact(
             .scalars()
             .all()
         )
-        if events and events[0].details:
+        if not flow_map_raw and events and events[0].details:
             raw = events[0].details.get("flow_map_json")
             if isinstance(raw, str):
                 flow_map_raw = _json.loads(raw)
@@ -225,10 +308,16 @@ async def _persist_finding_lineage_artifact(
                 ],
                 sort_keys=True,
             )
-            lineage_ref = f"raw:sha256:{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+            stable_raw_id = getattr(f, "raw_finding_id", None)
+            lineage_ref = (
+                f"raw:{stable_raw_id}"
+                if stable_raw_id
+                else f"raw:sha256:{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+            )
             raw_records.append(
                 {
                     "lineage_ref": lineage_ref,
+                    "raw_finding_id": str(stable_raw_id) if stable_raw_id else None,
                     "db_id": lid,
                     "title": getattr(f, "title", ""),
                     "source": getattr(f, "source", "") or getattr(f, "agent_name", ""),
@@ -251,12 +340,18 @@ async def _persist_finding_lineage_artifact(
                 ],
                 sort_keys=True,
             )
+            stable_canonical_id = getattr(f, "canonical_finding_id", None)
             lineage_ref = (
-                f"final:sha256:{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+                f"canonical:{stable_canonical_id}"
+                if stable_canonical_id
+                else f"final:sha256:{hashlib.sha256(key.encode()).hexdigest()[:16]}"
             )
             final_records.append(
                 {
                     "lineage_ref": lineage_ref,
+                    "canonical_finding_id": (
+                        str(stable_canonical_id) if stable_canonical_id else None
+                    ),
                     "db_id": fid,
                     "title": getattr(f, "title", ""),
                     "severity": getattr(f, "severity", "INFO"),
@@ -271,17 +366,23 @@ async def _persist_finding_lineage_artifact(
             status = (fm.get("status") or "passthrough").lower()
             cons_title = fm.get("consolidated_title", "")
 
-            raw_ref = None
-            for rec in raw_records:
-                if rec["title"] == raw_title:
-                    raw_ref = rec["lineage_ref"]
-                    break
+            stable_raw_id = fm.get("raw_finding_id")
+            raw_ref = f"raw:{stable_raw_id}" if stable_raw_id else None
+            if raw_ref is None:  # Legacy scans only.
+                for rec in raw_records:
+                    if rec["title"] == raw_title:
+                        raw_ref = rec["lineage_ref"]
+                        break
 
-            final_ref = None
-            for rec in final_records:
-                if rec["title"] == cons_title:
-                    final_ref = rec["lineage_ref"]
-                    break
+            stable_canonical_id = fm.get("canonical_finding_id")
+            final_ref = (
+                f"canonical:{stable_canonical_id}" if stable_canonical_id else None
+            )
+            if final_ref is None and not stable_raw_id:  # Legacy scans only.
+                for rec in final_records:
+                    if rec["title"] == cons_title:
+                        final_ref = rec["lineage_ref"]
+                        break
 
             link: dict = {
                 "raw_ref": raw_ref,
@@ -293,11 +394,46 @@ async def _persist_finding_lineage_artifact(
                 link["drop_kind"] = "false_positive"
             links.append(link)
 
+        fix_candidate_records = [
+            {
+                "candidate_id": str(row.candidate_id),
+                "raw_finding_id": str(row.raw_finding_id),
+                "canonical_finding_id": (
+                    str(row.canonical_finding_id) if row.canonical_finding_id else None
+                ),
+                "source_snapshot_hash": row.source_snapshot_hash,
+                "anchor_fingerprint": row.anchor_fingerprint,
+                "patch_fingerprint": row.patch_fingerprint,
+                "resolved_range": row.resolved_range,
+                "context_fingerprint": row.context_fingerprint,
+                "patch_hunk_id": str(row.patch_hunk_id) if row.patch_hunk_id else None,
+                "applicability_status": row.applicability_status,
+                "language": row.language,
+                "symbol": row.symbol,
+                "required_imports": row.required_imports,
+                "required_dependencies": row.required_dependencies,
+                "configuration_changes": row.configuration_changes,
+                "migration_changes": row.migration_changes,
+                "manual_steps": row.manual_steps,
+                "file_path": row.file_path,
+                "line_number": row.line_number,
+                "suggestion": row.suggestion,
+                "disposition": row.disposition,
+                "decision_reason": row.decision_reason,
+                "validation_status": row.validation_status,
+                "is_applied": row.is_applied,
+                "contributing_agents": row.contributing_agents,
+                "contributing_models": row.contributing_models,
+            }
+            for row in candidate_rows
+        ]
+
         payload = {
             "schema_version": 1,
             "raw_findings": raw_records,
             "final_findings": final_records,
             "links": links,
+            "fix_candidates": fix_candidate_records,
         }
 
         await ScanArtifactRepository(db).upsert(

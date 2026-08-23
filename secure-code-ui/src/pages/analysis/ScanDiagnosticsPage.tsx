@@ -31,14 +31,25 @@ export const ScanDiagnosticsPage: React.FC = () => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([
+    Promise.allSettled([
       debugService.getFindingsDebug(scanId),
       scanService.getLlmInteractionsForScan(scanId),
     ])
-      .then(([d, i]) => { if (!cancelled) { setDebug(d); setInteractions(i); } })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load diagnostics");
+      .then(([debugResult, interactionResult]) => {
+        if (cancelled) return;
+        if (debugResult.status === "fulfilled") setDebug(debugResult.value);
+        if (interactionResult.status === "fulfilled") {
+          setInteractions(interactionResult.value);
+        }
+        const failures = [debugResult, interactionResult].filter(
+          (result) => result.status === "rejected",
+        ).length;
+        if (failures > 0) {
+          setError(
+            failures === 2
+              ? "Failed to load scan diagnostics."
+              : "Part of the scan diagnostics is temporarily unavailable.",
+          );
         }
       })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -101,11 +112,14 @@ const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) =>
   const [sourceAgent, setSourceAgent] = useState<string>("All Agents");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const findingsMap: Record<Bucket, Finding[]> = {
-    sast: debug.sast_findings,
-    raw_llm: debug.raw_llm_findings,
-    consolidated: debug.consolidated_findings,
-  };
+  const findingsMap = useMemo<Record<Bucket, Finding[]>>(
+    () => ({
+      sast: debug.sast_findings,
+      raw_llm: debug.raw_llm_findings,
+      consolidated: debug.consolidated_findings,
+    }),
+    [debug],
+  );
 
   const llmAgents = useMemo(() => {
     const s = new Set<string>();
@@ -336,14 +350,14 @@ const LLMTab: React.FC<{ interactions: LLMInteractionResponse[]; scanId: string 
     <div style={{ display: "grid", gap: 16 }}>
 
       {/* Stats */}
-      <div className="surface" style={{ padding: 18, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 18 }}>
+      <div className="surface diagnostics-stats" style={{ padding: 18 }}>
         <Stat label="Total scan cost" value={`$${overall.cost.toFixed(6)}`} />
         <Stat label="Input tokens" value={overall.inp.toLocaleString()} />
         <Stat label="Output tokens" value={overall.out.toLocaleString()} />
         <Stat label="Total tokens" value={overall.tot.toLocaleString()} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, alignItems: "start" }}>
+      <div className="diagnostics-split">
         {/* Sidebar filters */}
         <div className="surface" style={{ padding: 8, maxHeight: "70vh", overflowY: "auto" }}>
           {models.length > 1 && <>
@@ -378,7 +392,7 @@ const LLMTab: React.FC<{ interactions: LLMInteractionResponse[]; scanId: string 
         {/* Table */}
         <div className="surface" style={{ padding: 0 }}>
           {fileStats && (
-            <div style={{ padding: 14, background: "var(--bg-soft)", borderBottom: "1px solid var(--border)", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
+            <div className="diagnostics-stats" style={{ padding: 14, background: "var(--bg-soft)", borderBottom: "1px solid var(--border)" }}>
               <Stat small label="File cost" value={`$${fileStats.cost.toFixed(6)}`} />
               <Stat small label="Input tokens" value={fileStats.inp.toLocaleString()} />
               <Stat small label="Output tokens" value={fileStats.out.toLocaleString()} />

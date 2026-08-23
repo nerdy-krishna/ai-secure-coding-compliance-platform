@@ -90,8 +90,9 @@ After adding the module:
 2. Wire it into the orchestrator's dispatch table if the new agent
    is called directly rather than via the `generic_specialized_agent`
    template.
-3. Add a unit test under `tests/test_my_agent.py` using the
-   `mock_llm_client` fixture.
+3. Add a focused `unittest` regression under `tests/agents/`. Patch the
+   LLM boundary with `AsyncMock`, and assert the typed input/output or routing
+   contract rather than snapshotting prompt prose.
 
 ## Checklist
 
@@ -99,7 +100,7 @@ After adding the module:
 - [ ] Agent row registered in DB.
 - [ ] Framework → agent mapping updated (for every framework the
       agent applies to).
-- [ ] Smoke scan run; output appears in LLM Interactions viewer.
+- [ ] Smoke scan run; output appears under Results → Pipeline & Logs → LLM Calls.
 - [ ] Unit test added (if code-driven).
 - [ ] README / docs updated if the agent introduces a new finding
       category.

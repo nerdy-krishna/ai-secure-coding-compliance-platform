@@ -12,8 +12,6 @@ per-framework variants (Framework Expansion #57) — Proactive Controls
 and Cheatsheets each get their own scan/remediation prompt, selected in
 `_build_prompt_templates` by the agent's framework.
 
-The eval extractor at `scripts/extract_eval_prompts.py` re-imports the
-loaded constants (`_AUDIT_TEMPLATE`, `_REMEDIATION_TEMPLATE`,
-`_CHAT_TEMPLATE`) from `default_seed_service`; those names stay bound to
-the generic templates so the eval suite is unaffected.
+The generic templates remain available as fallbacks when a framework-specific
+template is unavailable.
 """

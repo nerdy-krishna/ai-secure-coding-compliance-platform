@@ -1,93 +1,169 @@
 ---
 sidebar_position: 3
-title: Testing Strategy
+title: Verification Strategy
 ---
 
-# Testing Strategy
+# Verification strategy
 
-## Backend
+## Current baseline
 
-- **Runner**: `pytest` + `pytest-asyncio` (function-scoped async
-  event loop; no session-wide loop — it breaks asyncpg).
-- **Config**: `[tool.pytest.ini_options]` block in
-  `pyproject.toml`. `asyncio_mode = "auto"` means every `async def
-  test_*` runs automatically without a marker.
-- **Isolation**: every test runs in a SAVEPOINT-per-test rollback
-  via the `db_session` fixture in `tests/conftest.py`. This means
-  tests can be re-run against a populated database without
-  cleanup; they never commit.
-- **Factories**: `seeded_user`, `seeded_admin` yield fully-hydrated
-  User rows with `hashed_password="x" * 64`. Grab whichever matches
-  the scope you need.
-- **LLM mocking**: `mock_llm_client` monkeypatches
-  `app.infrastructure.llm_client.get_llm_client` so tests never
-  make network calls.
+The inherited backend, frontend, browser, and prompt-evaluation suites were removed on
+2026-08-22. They had become a mixture of useful checks, placeholder tests, implementation-coupled
+mocks, and claims that no longer matched production behavior. SCCAP is rebuilding verification
+around observed defects and stable domain interfaces rather than restoring a target test count.
 
-### Run locally
+The backend replacement checks now cover refresh-cookie issuance/expiry, SCIM schema
+generation, scan-detail peer/tenant visibility, cooperative cancellation, cost-approval policy,
+native-report size/outcome bounds, CVSS severity boundaries, stable Semgrep language selection,
+scanner runtime/config digest verification and immutable Semgrep ruleset/source snapshots,
+the PostgreSQL scan-submission commit/rollback boundary, atomic approval/decline/resume/restart,
+cancellation, terminal-state race rejection, checkpointed stage markers, public refresh sessions,
+tenant-scoped result access, native scanner-report downloads, and HTML/CSV/PDF/SARIF exports. A
+real RabbitMQ/worker scenario covers outbox recovery and terminal cancellation; a deterministic
+provider drives all three approval gates on one LangGraph thread. Three focused Vitest checks also
+protect successful, failed, and user-stopped scan-progress projections after the authenticated
+browser audit exposed false 100% completion. Passing these checks still does **not** prove every
+tenant-scoped endpoint, arbitrary end-to-end scan correctness, event-stream reliability, or all
+browser behavior.
+
+## Always-run checks
+
+Backend and worker commands run inside Docker because the application configuration uses Compose
+service hostnames.
 
 ```bash
-docker compose exec app poetry run pytest            # full suite
-docker compose exec app poetry run pytest -xvs       # stop on first failure, verbose
-docker compose exec app poetry run pytest tests/test_compliance_service.py -v
+docker compose config
+docker compose build app worker
+docker compose exec app alembic upgrade head
+docker compose exec app python -m unittest discover -s /app/tests/auth -v
+docker compose exec app python -m unittest discover -s /app/tests/risk -v
+docker compose exec app python -m unittest discover -s /app/tests/scanners -v
+docker compose exec app python -m unittest discover -s /app/tests/workflows -v
+
+# Opt-in, real PostgreSQL + public FastAPI integration layer. The Compose API
+# and database must already be running; the environment flag prevents this
+# layer from being pulled accidentally into a fast unit run.
+docker compose exec \
+  -e SCCAP_RUN_INTEGRATION=1 \
+  -e SCCAP_INTEGRATION_BASE_URL=http://127.0.0.1:8000 \
+  app python -m unittest discover -s /app/tests/integration -v
+docker compose exec app python -m ruff check src tests
+docker compose exec app python -m black --check src tests
+
+npm --prefix secure-code-ui run lint
+npm --prefix secure-code-ui test
+npm --prefix secure-code-ui run build
+
+# With the Compose API running on :8000. This regenerates the committed
+# contract and fails if the working tree differs afterward.
+SCCAP_OPENAPI_URL=http://127.0.0.1:8000/openapi.json \
+npm --prefix secure-code-ui run check:api
+
+# Requires a disposable UI/API Compose stack. The Playwright global fixture
+# creates its own superuser, LLM config, framework, projects, scans, events,
+# approval gates, finding, and scanner artifact, then deletes that exact
+# ownership boundary in global teardown. Do not run a worker in this topology:
+# submissions and approval decisions must remain parked and deterministic.
+SCCAP_BROWSER_BASE_URL=http://127.0.0.1 \
+SCCAP_BROWSER_EMAIL=browser-ci@example.com \
+SCCAP_BROWSER_PASSWORD='V7!BrowserRefresh-CI-2026' \
+npm --prefix secure-code-ui run test:browser
+
+cd docs && mkdocs build --strict
 ```
 
-### Existing smoke tests
+The worker-image scanner smoke is container-specific because host binaries are irrelevant:
 
-Under `tests/` today:
+```bash
+docker run --rm --entrypoint python \
+  -e PYTHONPATH=/app/src \
+  -v "$PWD/tests:/app/tests:ro" \
+  sccap-worker:test -m tests.scanners.scanner_toolchain_smoke
+```
 
-- `test_default_seed_service.py` — idempotency + "seed if empty"
-  semantics for the 3 default frameworks.
-- `test_compliance_service.py` — per-framework stats including the
-  score drop as findings accumulate.
-- `test_cost_estimation.py` — LiteLLM token-count + cost in a
-  known plausible range for OpenAI / Anthropic / Google models,
-  plus the admin-override path.
-- `test_seed_endpoint.py` — `POST /admin/seed/defaults` rejects
-  non-admins and returns the correct shape for admins.
-- `test_ui_setup.py` — Playwright smoke of the setup wizard +
-  first-user flow (heavy; excluded from CI pytest job because it
-  needs the full stack up).
+CI supplies the required application configuration variables. The smoke check fails on any runtime
+version, binary digest, or Gitleaks-config mismatch and permits only OSV's explicitly documented
+`advisory_snapshot_identifier_unavailable` degraded reason.
 
-The goal is scaffolding + regression coverage of the
-highest-leverage code paths, not broad coverage. New services
-should ship with at least a smoke test that exercises the happy
-path.
+The CI workflow gives backend unit contracts and real-infrastructure integration tests separate
+jobs. The integration job starts a clean PostgreSQL, RabbitMQ, Qdrant, API, and worker stack,
+runs migrations through the normal API entrypoint, executes the opt-in integration package, and
+then stops RabbitMQ, submits a scan through the public HTTP API, restarts the broker, and proves the
+durable outbox reaches the real worker before cancelling the fixture scan. The outage scenario is
+intentionally CI-orchestrated; do not run its phases against a shared developer stack. While the
+broker is paused, CI also exercises public resume/restart transactions without racing dispatch. CI
+removes its volumes afterward. A deterministic OpenAI-compatible fixture drives the prescan,
+profiling, and analysis-cost gates without a paid provider; the scenario asserts that checkpoint
+counts advance under the same scan/thread id at every pause.
 
-## Frontend
+The separate browser job starts a clean API/UI stack without a worker. It proves password login,
+single-flight concurrent 401 refresh with cookie rotation, canonical submission routing, profiling
+and analysis approval gates, cursor-bearing SSE reconnect and replay de-duplication, cancellation
+requested/observed/completed persistence, cancelled and completed terminal projections, and HTML,
+PDF, CSV, SARIF, and native scanner-evidence downloads. Its global fixture creates and safely removes
+all owned rows. On failure, screenshots, video, and traces are retained for seven days only after a
+fail-closed sanitizer removes fixture credentials, submitted-source markers, bearer tokens, refresh
+cookies, and JWTs. An optional `workflow_dispatch` live-provider
+job is off by default and never runs on pushes or pull requests. When explicitly enabled, it makes
+exactly one structured OpenAI Responses API call, caps output at 400 tokens, refuses the call when
+the pinned LiteLLM cost map estimates more than USD 0.01, and verifies a known SQL injection is
+classified as CWE-89. It requires the repository `OPENAI_API_KEY` secret; the selected model must
+exist in the pinned LiteLLM map or preflight fails before network access. The backend-integration
+job also generates the frontend contract from the running API and rejects an uncommitted
+`api-generated.ts` diff. The strict documentation build runs in the separate Docs workflow.
 
-- **Unit / component**: not yet wired up. The main frontend gate is
-  `npm run lint` (ESLint) + `npm run build` (`tsc -b && vite build`);
-  type errors block CI.
-- **Integration**: the Playwright test above covers the most
-  valuable flow (first-user registration → setup wizard completion).
+## OpenAPI contract workflow
 
-## CI
+`secure-code-ui/src/shared/types/api-generated.ts` is committed build input. Never edit it by
+hand. After changing a route, request model, response model, or nullability:
 
-`.github/workflows/ci.yml` runs five jobs on every push:
+```bash
+docker compose up -d app
+SCCAP_OPENAPI_URL=http://127.0.0.1:8000/openapi.json \
+npm --prefix secure-code-ui run generate:api
+git diff -- secure-code-ui/src/shared/types/api-generated.ts
+npm --prefix secure-code-ui run build
+```
 
-1. **Backend lint** — `ruff check src` + `black --check src`.
-2. **Frontend lint + build** — `npm run lint && npm run build` in
-   `secure-code-ui/`.
-3. **poetry.lock drift check** — fails if `poetry lock --check`
-   sees the lockfile out of sync with `pyproject.toml`.
-4. **Docker build (api + worker)** — full multi-stage build, no
-   push. Validates the `Dockerfile` every PR.
-5. **Backend tests (pytest)** — spins up a Postgres 16 service
-   container, runs Alembic, then pytest.
+Review the generated diff alongside the backend change, including success, validation-error, and
+nullable response shapes, then commit it. `check:api` repeats generation and uses `git diff
+--exit-code` as the drift gate. The scan submission, result, and report query boundaries derive
+their request/response types from concrete generated OpenAPI operations. Free-form JSON fields are
+narrowed once in `shared/lib/scanContract.ts` before rendering; pages must not recreate endpoint
+response interfaces.
 
-All five must be green for a PR to merge.
+## Requirements for replacement tests
 
-## When to add a test
+A new test must protect at least one of these:
 
-- **Fixing a bug**: add a test that reproduces it first.
-- **Adding a scope-filter consumer**: test that admin (scope=None)
-  and regular user (scope=[id, ...peers]) return the expected
-  rows.
-- **Adding an LLM agent**: use `mock_llm_client` so the test is
-  deterministic; assert on the parsed Pydantic model.
+1. A reproduced user-visible defect at the interface where it actually occurs.
+2. A security or tenancy invariant that could expose another user's data or secrets.
+3. A scan-lifecycle contract involving status, event, approval, cancellation, resume, or restart.
+4. A durable persistence contract involving tasks, snapshots, findings, or artifacts.
+5. A frontend/backend request or event contract used by a real page.
+6. A scanner parser contract using a representative native report fixture.
+7. A migration or deployment path whose failure would prevent startup or recovery.
 
-When **not** to add a test:
+Avoid tests that only assert a mock was called, duplicate type checking, pin private function
+structure, or pass without exercising the production call chain.
 
-- Pure CRUD endpoints with no business logic. The integration
-  coverage from the router-level smoke is usually enough; add one
-  only if the shape is complex or a future refactor is likely.
+## Preferred layers
+
+- **Domain tests:** fast deterministic checks for pure policies such as classification, risk, and
+  status projection.
+- **Database integration tests:** real Postgres transactions for tenancy, outbox, task ledger,
+  lifecycle, and idempotency behavior.
+- **Scanner contract tests:** real native JSON/SARIF fixtures through the production parser.
+- **Worker integration tests:** RabbitMQ + Postgres + LangGraph checkpoints for approval,
+  cancellation, resume, and restart.
+- **Browser tests:** a running Compose stack for login refresh, submission, live activity,
+  cancellation, results, and downloads.
+- **LLM evaluations:** versioned prompts and adversarial cases with deterministic structural gates;
+  live-model evaluation is opt-in and must have an explicit cost ceiling.
+
+## Bug-fix loop
+
+For a reported defect, first build a deterministic reproduction at the correct interface. Turn that
+reproduction into a failing test, apply the fix, prove the test passes, and rerun the original user
+scenario. If no reliable seam exists, record that architectural limitation rather than adding a
+shallow test that gives false confidence.

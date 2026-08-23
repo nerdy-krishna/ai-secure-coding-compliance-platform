@@ -582,12 +582,15 @@ async def sccap_ask_advisor(payload: AskAdvisorInput) -> Dict[str, Any]:
             from app.infrastructure.agents.chat_agent import ChatAgent
 
             agent = ChatAgent()
+            usage_operation_id = uuid.uuid4()
             (content, _llm_interaction_id, cost) = await agent.generate_response(
-                session_id=uuid.uuid4(),  # ephemeral — not persisted
+                session_id=usage_operation_id,  # ephemeral — not persisted
                 user_question=payload.question,
                 history=[],
                 llm_config_id=llm_config_id,
+                user_id=user.id,
                 frameworks=payload.frameworks or [],
+                usage_operation_id=usage_operation_id,
             )
 
             # Keep user reference warm for the type-checker on sessions without

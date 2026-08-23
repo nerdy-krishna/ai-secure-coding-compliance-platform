@@ -36,10 +36,9 @@ const LoginPageContent: React.FC = () => {
   const lastSubmitRef = useRef<number>(0);
   const mountedAt = useRef<number>(Date.now());
 
-  const [form, setForm] = useState<UserLoginData & { remember: boolean }>({
+  const [form, setForm] = useState<UserLoginData>({
     username: "",
     password: "",
-    remember: true,
   });
 
   const [providers, setProviders] = useState<SsoProviderPublic[]>([]);
@@ -109,7 +108,7 @@ const LoginPageContent: React.FC = () => {
     // V2.4.2: reject sub-750ms scripted submissions
     if (Date.now() - mountedAt.current < 750) return;
     // V2.2.1: enforce input length bounds
-    if (!form.username || !form.password || form.username.length > 320 || form.password.length > 4096) {
+    if (!form.username || !form.password || form.username.length > 320 || form.password.length > 256) {
       toast.error("Username or password is too long.");
       return;
     }
@@ -252,25 +251,6 @@ const LoginPageContent: React.FC = () => {
             style={{ paddingLeft: 32 }}
           />
         </div>
-      </label>
-
-      <label
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 8,
-          fontSize: 13,
-          color: "var(--fg-muted)",
-          cursor: "pointer",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={form.remember}
-          onChange={(e) => setForm({ ...form, remember: e.target.checked })}
-          style={{ accentColor: "var(--primary)" }}
-        />
-        Remember me on this device
       </label>
 
       <button

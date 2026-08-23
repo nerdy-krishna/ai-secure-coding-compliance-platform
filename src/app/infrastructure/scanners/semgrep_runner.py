@@ -9,11 +9,9 @@ Hardening (per the sast-prescan + sast-prescan-followups threat models):
 
 - M1 / N2: ``subprocess.run([...], shell=False, check=False, timeout=120)``;
   arguments are a list; ``--`` separator before the user-derived path;
-  ``--config`` pinned to the bundled pack so user-tree ``.semgrep.yml``
-  / ``.semgrepignore`` cannot redirect behavior.
-- N2: bundled ``p/security-audit`` pack lives at
-  ``/app/scanners/configs/semgrep/security-audit.yml`` (downloaded +
-  sha256-verified at Docker build time).
+  ``--config`` points to the scan-specific file materialized from selected
+  Postgres rules so user-tree ``.semgrep.yml`` / ``.semgrepignore`` cannot
+  redirect behavior.
 - M5 / N1: scanner ``stdout`` is parsed and discarded; never logged
   above DEBUG.
 - M6: 120-second hard timeout; ``TimeoutExpired`` returns a single
@@ -35,12 +33,13 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.scanners.bandit_runner import _resolve_binary
+from app.shared.lib.owned_subprocess import run_owned_subprocess
 
 
 logger = logging.getLogger(__name__)
@@ -165,6 +164,7 @@ def _semgrep_finding_to_vulnerability(
         file_path=str(file_path),
         fixes=None,
         source="semgrep",
+        scanner_rule_id=raw.check_id[:512],
         agent_name=None,
         corroborating_agents=None,
         is_applied_in_remediation=False,
@@ -187,7 +187,7 @@ def _invoke_semgrep_sync(
     - ``timeout`` is enforced and raises ``TimeoutExpired``; caller
       maps to a Low-severity timeout finding (M6).
     """
-    return subprocess.run(  # noqa: S603 - args are a literal list
+    return run_owned_subprocess(
         [
             _semgrep_binary(),
             "--config",
@@ -238,6 +238,7 @@ async def run_semgrep(
     staged_dir: Path,
     original_paths: Dict[Path, str],
     config_path: Optional[Path] = None,
+    report_collector: Optional[Callable[[Any], None]] = None,
 ) -> List[VulnerabilityFinding]:
     """Run Semgrep against ``staged_dir`` and return findings.
 
@@ -287,6 +288,8 @@ async def run_semgrep(
     logger.debug("scanner=semgrep raw stderr=%r", completed.stderr)
 
     if not completed.stdout:
+        if completed.returncode == 0 and report_collector is not None:
+            report_collector({"results": []})
         return []
 
     try:
@@ -295,6 +298,9 @@ async def run_semgrep(
     except (json.JSONDecodeError, ValidationError) as exc:
         logger.warning("scanner=semgrep JSON parse failed: %s", exc)
         return []
+
+    if report_collector is not None:
+        report_collector(payload)
 
     findings: List[VulnerabilityFinding] = []
     for raw in report.results:

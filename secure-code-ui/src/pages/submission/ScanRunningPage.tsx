@@ -26,6 +26,7 @@ import type { PrescanReviewResponse } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 import { StageIcon } from "../../shared/ui/StageIcon";
 import { deriveScanProgress } from "../../shared/lib/scanProgress";
+import type { ApprovalGate, CostDetails } from "../../shared/lib/scanContract";
 import { useElapsed } from "../../shared/lib/useElapsed";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
 import { Modal } from "../../shared/ui/Modal";
@@ -33,8 +34,21 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
 
 interface ScanEventMsg {
+  schema_version: number;
+  cursor: string;
   scan_id: string;
   event_id: number;
+  attempt_id?: string | null;
+  activity_kind:
+    | "workflow"
+    | "scanner"
+    | "llm_call"
+    | "retry"
+    | "warning"
+    | "degradation"
+    | "decision"
+    | "cancellation"
+    | "terminal";
   stage_name: string;
   status: string; // "COMPLETED" / "STARTED" / "FAILED" for the event itself
   timestamp: string | null;
@@ -42,6 +56,7 @@ interface ScanEventMsg {
   // fixes_count}` for `FILE_ANALYZED` events; null for legacy stage
   // events (QUEUED / ANALYZING_CONTEXT / etc.).
   details?: {
+    [key: string]: unknown;
     file_path?: string;
     findings_count?: number;
     fixes_count?: number;
@@ -53,6 +68,15 @@ interface ScanEventMsg {
     elapsed_ms?: number;
     classification?: string;
     progress_category?: string;
+    phase?: string;
+    latency_ms?: number;
+    retry_attempt?: number;
+    max_retries?: number;
+    backoff_ms?: number;
+    provider?: string;
+    model?: string;
+    agent_name?: string;
+    within_slo?: boolean;
   } | null;
 }
 
@@ -81,12 +105,8 @@ interface ScanStateMsg {
   // routers/projects.py. Lets the frontend surface the estimate the
   // moment status flips to PENDING_COST_APPROVAL without a manual
   // page refresh.
-  cost_details?: {
-    total_estimated_cost?: number;
-    total_input_tokens?: number;
-    predicted_output_tokens?: number;
-    slots?: Record<string, { total_estimated_cost?: number }>;
-  } | null;
+  cost_details?: CostDetails | null;
+  active_approval_gate?: ApprovalGate | null;
 }
 
 // Normalise a scan-event from any source — the result-endpoint seed,
@@ -97,13 +117,18 @@ const toScanEventMsg = (
   raw: unknown,
 ): ScanEventMsg | null => {
   const e = raw as {
+    schema_version?: unknown;
+    cursor?: unknown;
     event_id?: unknown;
+    attempt_id?: unknown;
+    activity_kind?: unknown;
     stage_name?: unknown;
     status?: unknown;
     timestamp?: unknown;
     details?: ScanEventMsg["details"];
   };
   if (
+    (e.schema_version !== undefined && e.schema_version !== 1) ||
     typeof e.stage_name !== "string" ||
     e.stage_name.length >= 64 ||
     typeof e.status !== "string" ||
@@ -111,9 +136,32 @@ const toScanEventMsg = (
   ) {
     return null;
   }
+  const allowedKinds = new Set<ScanEventMsg["activity_kind"]>([
+    "workflow",
+    "scanner",
+    "llm_call",
+    "retry",
+    "warning",
+    "degradation",
+    "decision",
+    "cancellation",
+    "terminal",
+  ]);
+  const activityKind = allowedKinds.has(
+    e.activity_kind as ScanEventMsg["activity_kind"],
+  )
+    ? (e.activity_kind as ScanEventMsg["activity_kind"])
+    : "workflow";
   return {
+    schema_version: 1,
+    cursor:
+      typeof e.cursor === "string"
+        ? e.cursor
+        : String(typeof e.event_id === "number" ? e.event_id : 0),
     scan_id: scanId,
     event_id: typeof e.event_id === "number" ? e.event_id : 0,
+    attempt_id: typeof e.attempt_id === "string" ? e.attempt_id : null,
+    activity_kind: activityKind,
     stage_name: e.stage_name,
     status: e.status,
     timestamp: typeof e.timestamp === "string" ? e.timestamp : null,
@@ -138,8 +186,122 @@ const eventDisplayName = (stageName: string): string => {
     case "GLOBAL_CONSOLIDATION":
       return "Global consolidation";
     default:
-      return stageName;
+      return stageName
+        .toLowerCase()
+        .replace(/_/g, " ")
+        .replace(/^./, (first: string) => first.toUpperCase());
   }
+};
+
+const ACTIVITY_DETAIL_KEYS = [
+  "message",
+  "scanner",
+  "scanner_status",
+  "file_path",
+  "classification",
+  "progress_category",
+  "findings_count",
+  "fixes_count",
+  "llm_calls",
+  "reused_tasks",
+  "skipped_tasks",
+  "failed_tasks",
+  "rerun_tasks",
+  "completed_tasks",
+  "elapsed_ms",
+  "warnings",
+  "files_total",
+  "warnings_total",
+  "categories",
+  "raw_count",
+  "consolidated_count",
+  "merged_roots",
+  "merged_inputs",
+  "dropped",
+  "validated_count",
+  "rejected_count",
+  "eligible_count",
+  "total_findings",
+  "confirmed",
+  "mitigated",
+  "unconfirmed",
+  "input_count",
+  "output_count",
+  "merged_clusters",
+  "findings_total",
+  "risk_score",
+  "total_estimated_cost",
+  "expected_estimated_cost",
+  "upper_bound_estimated_cost",
+  "estimate_confidence",
+  "total_input_tokens",
+  "predicted_output_tokens",
+  "lane",
+  "calls",
+  "failures",
+  "successful_lanes",
+  "skip_reason",
+  "token_count",
+  "mode",
+  "phase",
+  "latency_ms",
+  "slo_ms",
+  "within_slo",
+  "terminated_processes",
+  "provider",
+  "model",
+  "agent_name",
+  "stage",
+  "retry_attempt",
+  "max_retries",
+  "backoff_ms",
+  "provider_requests",
+  "prompt_tokens",
+  "completion_tokens",
+  "error_class",
+] as const;
+
+const formatActivityValue = (key: string, value: unknown): string | null => {
+  if (value === null || value === undefined || value === "") return null;
+  if (
+    ["elapsed_ms", "latency_ms", "backoff_ms", "slo_ms"].includes(key) &&
+    typeof value === "number"
+  ) {
+    return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}s`;
+  }
+  if (
+    [
+      "total_estimated_cost",
+      "expected_estimated_cost",
+      "upper_bound_estimated_cost",
+    ].includes(key) &&
+    typeof value === "number"
+  ) {
+    return `$${value.toFixed(4)}`;
+  }
+  if (Array.isArray(value)) return value.slice(0, 5).map(String).join(", ");
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .slice(0, 6)
+      .map(([nestedKey, nestedValue]) => `${nestedKey}: ${String(nestedValue)}`)
+      .join(", ");
+  }
+  return String(value);
+};
+
+const formatActivityDetails = (
+  details: ScanEventMsg["details"],
+): string => {
+  if (!details) return "";
+  const fragments: string[] = [];
+  for (const key of ACTIVITY_DETAIL_KEYS) {
+    if (!(key in details)) continue;
+    const value = formatActivityValue(key, details[key]);
+    if (!value) continue;
+    if (key === "message" || key === "file_path") fragments.push(value);
+    else fragments.push(`${key.replace(/_/g, " ")}: ${value}`);
+  }
+  return fragments.length > 0 ? ` — ${fragments.join(" · ")}` : "";
 };
 
 // Merge new scan-events into the existing list, deduped by the stable
@@ -184,6 +346,12 @@ const TERMINAL_STATUSES = new Set([
   "BLOCKED_USER_DECLINE",
 ]);
 
+const hasCompletedCancellation = (events: ScanEventMsg[]) =>
+  events.some(
+    (event) =>
+      event.stage_name === "CANCELLATION" && event.status === "COMPLETED",
+  );
+
 // `fmtStatus` was a raw `BLOCKED_USER_DECLINE → "blocked user decline"`
 // transform that surfaced the backend enum name in chips and the
 // status card. Replaced by `displayStatus()` from
@@ -208,6 +376,8 @@ const ScanRunningPage: React.FC = () => {
   const [crossFileValidation, setCrossFileValidation] = useState(false);
   const [hasResumableArtifacts, setHasResumableArtifacts] = useState(false);
   const [events, setEvents] = useState<ScanEventMsg[]>([]);
+  const [activityKindFilter, setActivityKindFilter] = useState("all");
+  const [activityStageFilter, setActivityStageFilter] = useState("all");
   // §3.10b — per-file analysis progress, keyed by file_path so a file
   // showing up multiple times collapses to one row. Renders below the
   // pipeline stages while RUNNING_AGENTS is active.
@@ -215,12 +385,9 @@ const ScanRunningPage: React.FC = () => {
     Record<string, FileProgressItem>
   >({});
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [costDetails, setCostDetails] = useState<{
-    total_estimated_cost?: number;
-    total_input_tokens?: number;
-    predicted_output_tokens?: number;
-    slots?: Record<string, { total_estimated_cost?: number }>;
-  } | null>(null);
+  const [costDetails, setCostDetails] = useState<CostDetails | null>(null);
+  const [activeApprovalGate, setActiveApprovalGate] =
+    useState<ApprovalGate | null>(null);
   const [approving, setApproving] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
@@ -252,9 +419,11 @@ const ScanRunningPage: React.FC = () => {
   // The dismiss only applies while `submittedForStatus === status`;
   // once status changes value, the flag naturally falls away and the
   // next gate (if any) renders normally.
-  const [submittedForStatus, setSubmittedForStatus] = useState<string | null>(
+  const [submittedForGateId, setSubmittedForGateId] = useState<string | null>(
     null,
   );
+  const decisionKeysRef = useRef(new Map<string, string>());
+  const closedGateIdsRef = useRef(new Set<string>());
   const lastFetchedStatusRef = useRef<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
@@ -287,6 +456,7 @@ const ScanRunningPage: React.FC = () => {
         if (r.cost_details) {
           setCostDetails(r.cost_details);
         }
+        setActiveApprovalGate(r.active_approval_gate ?? null);
         // Seed the live-event-log + stage-progress from the DB.
         // Terminal scans' SSE streams emit these once and close, so
         // a user landing AFTER the scan finished otherwise sees
@@ -320,7 +490,12 @@ const ScanRunningPage: React.FC = () => {
   // stops as soon as the scan reaches a terminal status.
   useEffect(() => {
     if (!scanId) return;
-    if (status && TERMINAL_STATUSES.has(status)) return;
+    if (
+      status &&
+      TERMINAL_STATUSES.has(status) &&
+      !(status === "CANCELLED" && !hasCompletedCancellation(events))
+    )
+      return;
     let cancelled = false;
     const POLL_INTERVAL_MS = 5000;
 
@@ -330,14 +505,15 @@ const ScanRunningPage: React.FC = () => {
         if (cancelled) return;
         if (typeof r.status === "string" && r.status.length < 64) {
           setStatus(r.status);
-          if ((r as any).error_message) {
-            setErrorMessage((r as any).error_message);
+          if (r.error_message) {
+            setErrorMessage(r.error_message);
           }
         }
         setHasResumableArtifacts(Boolean(r.has_resumable_artifacts));
         if (r.cost_details) {
           setCostDetails((prev) => ({ ...(prev ?? {}), ...r.cost_details }));
         }
+        setActiveApprovalGate(r.active_approval_gate ?? null);
         const polled = (r.events ?? [])
           .map((e) => toScanEventMsg(scanId, e))
           .filter((e): e is ScanEventMsg => e !== null);
@@ -354,7 +530,7 @@ const ScanRunningPage: React.FC = () => {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [scanId, status]);
+  }, [scanId, status, events]);
 
   // Open the SSE stream on mount; close on unmount or when status goes
   // terminal. EventSource cannot send Authorization headers, so we
@@ -407,6 +583,12 @@ const ScanRunningPage: React.FC = () => {
               ...payload.cost_details,
             }));
           }
+          const streamedGate = payload.active_approval_gate ?? null;
+          setActiveApprovalGate(
+            streamedGate && !closedGateIdsRef.current.has(streamedGate.gate_id)
+              ? streamedGate
+              : null,
+          );
         } catch {
           // noop
         }
@@ -595,7 +777,7 @@ const ScanRunningPage: React.FC = () => {
       );
       return () => clearTimeout(t);
     }
-  }, [status, scanId, navigate]);
+  }, [status, scanId, navigate, projectInfo]);
 
   // Scan-completion notifications are fired by the global ScanWatcher
   // (#89), mounted at the app root — so they land regardless of which
@@ -607,20 +789,30 @@ const ScanRunningPage: React.FC = () => {
   // (e.g. PENDING_PRESCAN_APPROVAL → PENDING_COST_APPROVAL) doesn't
   // hide the second gate's card under a stale flag.
   const prescanSubmitted =
-    submittedForStatus === "PENDING_PRESCAN_APPROVAL" &&
-    status === "PENDING_PRESCAN_APPROVAL";
+    submittedForGateId === activeApprovalGate?.gate_id;
   const costSubmitted =
-    submittedForStatus === "PENDING_COST_APPROVAL" &&
-    status === "PENDING_COST_APPROVAL";
+    submittedForGateId === activeApprovalGate?.gate_id;
   const profilingSubmitted =
-    submittedForStatus === "PENDING_PROFILING_APPROVAL" &&
-    status === "PENDING_PROFILING_APPROVAL";
+    submittedForGateId === activeApprovalGate?.gate_id;
   const isPendingApproval =
-    status === "PENDING_COST_APPROVAL" && !costSubmitted;
+    status === "PENDING_COST_APPROVAL" &&
+    activeApprovalGate?.kind === "cost_approval" &&
+    activeApprovalGate.state === "pending" &&
+    !costSubmitted;
   const isPendingPrescan =
-    status === "PENDING_PRESCAN_APPROVAL" && !prescanSubmitted;
+    status === "PENDING_PRESCAN_APPROVAL" &&
+    activeApprovalGate?.kind === "prescan_approval" &&
+    activeApprovalGate.state === "pending" &&
+    !prescanSubmitted;
   const isPendingProfiling =
-    status === "PENDING_PROFILING_APPROVAL" && !profilingSubmitted;
+    status === "PENDING_PROFILING_APPROVAL" &&
+    activeApprovalGate?.kind === "profiling_approval" &&
+    activeApprovalGate.state === "pending" &&
+    !profilingSubmitted;
+  const expectedCost =
+    costDetails?.expected_estimated_cost ?? costDetails?.total_estimated_cost;
+  const upperBoundCost = costDetails?.upper_bound_estimated_cost;
+  const estimateConfidence = costDetails?.estimate_confidence;
 
   // Scan progress (#85): the rail, the progress bar, and the live
   // badge all derive from ONE pure function over the `scan_events`
@@ -632,7 +824,29 @@ const ScanRunningPage: React.FC = () => {
     [events, status, crossFileValidation],
   );
   const progress = scanProgress.progressPct;
-  const isTerminal = status !== null && TERMINAL_STATUSES.has(status);
+  const cancellationComplete = useMemo(
+    () => hasCompletedCancellation(events),
+    [events],
+  );
+  const isTerminal =
+    status !== null &&
+    TERMINAL_STATUSES.has(status) &&
+    (status !== "CANCELLED" || cancellationComplete);
+  const filteredEvents = useMemo(
+    () =>
+      events.filter(
+        (event) =>
+          (activityKindFilter === "all" ||
+            event.activity_kind === activityKindFilter) &&
+          (activityStageFilter === "all" ||
+            event.stage_name === activityStageFilter),
+      ),
+    [events, activityKindFilter, activityStageFilter],
+  );
+  const activityStages = useMemo(
+    () => Array.from(new Set(events.map((event) => event.stage_name))).sort(),
+    [events],
+  );
   // Scan-event timestamps bound the elapsed timer — earliest event is
   // the start; once terminal, the latest event freezes it.
   const scanStartedAt = useMemo(() => {
@@ -679,10 +893,35 @@ const ScanRunningPage: React.FC = () => {
   // "is status still pending" check would miss that hop and trap the
   // cost card behind a stale prescan submission.
   useEffect(() => {
-    if (submittedForStatus !== null && submittedForStatus !== status) {
-      setSubmittedForStatus(null);
+    if (
+      submittedForGateId !== null &&
+      submittedForGateId !== activeApprovalGate?.gate_id
+    ) {
+      setSubmittedForGateId(null);
     }
-  }, [status, submittedForStatus]);
+  }, [activeApprovalGate?.gate_id, submittedForGateId]);
+
+  const gateDecisionPayload = useCallback(
+    (kind: ApprovalGate["kind"]) => {
+      if (!activeApprovalGate || activeApprovalGate.kind !== kind) {
+        throw new Error("This approval gate is no longer active. Refresh and try again.");
+      }
+      let idempotencyKey = decisionKeysRef.current.get(activeApprovalGate.gate_id);
+      if (!idempotencyKey) {
+        idempotencyKey = crypto.randomUUID();
+        decisionKeysRef.current.set(activeApprovalGate.gate_id, idempotencyKey);
+      }
+      return {
+        idempotencyKey,
+        contract: {
+          gate_id: activeApprovalGate.gate_id,
+          gate_version: activeApprovalGate.version,
+          evidence_hash: activeApprovalGate.evidence_hash,
+        },
+      };
+    },
+    [activeApprovalGate],
+  );
 
   // Defensive fallback: if the page lands on PENDING_COST_APPROVAL
   // but we never received the SSE `cost_details` payload (e.g. SSE
@@ -749,32 +988,43 @@ const ScanRunningPage: React.FC = () => {
 
   const handleApprove = useCallback(async () => {
     if (!scanId) return;
-    setSubmittedForStatus("PENDING_COST_APPROVAL");
+    const { contract, idempotencyKey } = gateDecisionPayload("cost_approval");
+    setSubmittedForGateId(contract.gate_id);
     setApproving(true);
     try {
-      await scanService.approveScan(scanId);
+      await scanService.approveScan(
+        scanId,
+        { kind: "cost_approval", approved: true, ...contract },
+        idempotencyKey,
+      );
+      closedGateIdsRef.current.add(contract.gate_id);
+      setActiveApprovalGate(null);
       toast.success("Scan approved. Analysis resuming.");
     } catch (err) {
       const e = err as { message?: string };
       toast.error(e.message || "Failed to approve scan");
       // Re-show the panel so the user can retry.
-      setSubmittedForStatus(null);
+      setSubmittedForGateId(null);
     } finally {
       setApproving(false);
     }
-  }, [scanId, toast]);
+  }, [gateDecisionPayload, scanId, toast]);
 
   const submitPrescanApproval = useCallback(
     async (override: boolean) => {
       if (!scanId) return;
-      setSubmittedForStatus("PENDING_PRESCAN_APPROVAL");
+      const { contract, idempotencyKey } = gateDecisionPayload("prescan_approval");
+      setSubmittedForGateId(contract.gate_id);
       setApproving(true);
       try {
         await scanService.approveScan(scanId, {
           kind: "prescan_approval",
           approved: true,
           override_critical_secret: override,
-        });
+          ...contract,
+        }, idempotencyKey);
+        closedGateIdsRef.current.add(contract.gate_id);
+        setActiveApprovalGate(null);
         toast.success(
           override
             ? "Override recorded. Continuing to LLM analysis."
@@ -784,12 +1034,12 @@ const ScanRunningPage: React.FC = () => {
       } catch (err) {
         const e = err as { message?: string };
         toast.error(e.message || "Failed to continue scan");
-        setSubmittedForStatus(null);
+        setSubmittedForGateId(null);
       } finally {
         setApproving(false);
       }
     },
-    [scanId, toast],
+    [gateDecisionPayload, scanId, toast],
   );
 
   const handlePrescanContinue = useCallback(() => {
@@ -802,79 +1052,87 @@ const ScanRunningPage: React.FC = () => {
 
   const handlePrescanStop = useCallback(async () => {
     if (!scanId) return;
-    setSubmittedForStatus("PENDING_PRESCAN_APPROVAL");
+    const { contract, idempotencyKey } = gateDecisionPayload("prescan_approval");
+    setSubmittedForGateId(contract.gate_id);
     setDeclining(true);
     try {
       await scanService.approveScan(scanId, {
         kind: "prescan_approval",
         approved: false,
         override_critical_secret: false,
-      });
+        ...contract,
+      }, idempotencyKey);
+      closedGateIdsRef.current.add(contract.gate_id);
+      setActiveApprovalGate(null);
       toast.info("Scan stopped before LLM analysis.");
     } catch (err) {
       const e = err as { message?: string };
       toast.error(e.message || "Failed to stop scan");
-      setSubmittedForStatus(null);
+      setSubmittedForGateId(null);
     } finally {
       setDeclining(false);
     }
-  }, [scanId, toast]);
+  }, [gateDecisionPayload, scanId, toast]);
 
   const handleProfilingApprove = useCallback(async () => {
     if (!scanId) return;
-    setSubmittedForStatus("PENDING_PROFILING_APPROVAL");
+    const { contract, idempotencyKey } = gateDecisionPayload("profiling_approval");
+    setSubmittedForGateId(contract.gate_id);
     setApproving(true);
     try {
       await scanService.approveScan(scanId, {
         kind: "profiling_approval",
         approved: true,
-      });
+        ...contract,
+      }, idempotencyKey);
+      closedGateIdsRef.current.add(contract.gate_id);
+      setActiveApprovalGate(null);
       toast.success("Profiling approved. Profiling files…");
     } catch (err) {
       const e = err as { message?: string };
       toast.error(e.message || "Failed to approve profiling");
-      setSubmittedForStatus(null);
+      setSubmittedForGateId(null);
     } finally {
       setApproving(false);
     }
-  }, [scanId, toast]);
+  }, [gateDecisionPayload, scanId, toast]);
 
   const handleProfilingDecline = useCallback(async () => {
     if (!scanId) return;
-    setSubmittedForStatus("PENDING_PROFILING_APPROVAL");
+    const { contract, idempotencyKey } = gateDecisionPayload("profiling_approval");
+    setSubmittedForGateId(contract.gate_id);
     setDeclining(true);
     try {
       await scanService.approveScan(scanId, {
         kind: "profiling_approval",
         approved: false,
-      });
+        ...contract,
+      }, idempotencyKey);
+      closedGateIdsRef.current.add(contract.gate_id);
+      setActiveApprovalGate(null);
       toast.info("Scan stopped before profiling.");
     } catch (err) {
       const e = err as { message?: string };
       toast.error(e.message || "Failed to stop scan");
-      setSubmittedForStatus(null);
+      setSubmittedForGateId(null);
     } finally {
       setDeclining(false);
     }
-  }, [scanId, toast]);
+  }, [gateDecisionPayload, scanId, toast]);
 
   const handleCancel = useCallback(async () => {
     if (!scanId) return;
     setCancelling(true);
     try {
       await scanService.cancelScan(scanId);
-      toast.info("Scan cancelled.");
+      // The durable status flips immediately while activity progresses through
+      // requested → observed → completed acknowledgement phases.
+      setStatus("CANCELLED");
+      toast.info("Cancellation requested. Stopping active work…");
       queryClient.invalidateQueries({
         queryKey: ["project-scans", projectInfo?.id],
       });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
-      if (projectInfo) {
-        navigate(`/analysis/projects/${projectInfo.id}`, {
-          state: { projectName: projectInfo.name },
-        });
-      } else {
-        navigate("/analysis/results");
-      }
     } catch (err) {
       const e = err as { message?: string };
       toast.error(e.message || "Failed to cancel scan");
@@ -882,7 +1140,7 @@ const ScanRunningPage: React.FC = () => {
       setCancelling(false);
       setStopConfirmOpen(false);
     }
-  }, [scanId, projectInfo, navigate, queryClient, toast]);
+  }, [scanId, projectInfo?.id, queryClient, toast]);
 
   const handleRunControl = useCallback(async () => {
     if (!scanId || !runControlMode) return;
@@ -1006,13 +1264,15 @@ const ScanRunningPage: React.FC = () => {
               : isPendingApproval
                 ? "Ready to run — approve the estimated cost"
                 : status === "COMPLETED" || status === "REMEDIATION_COMPLETED"
-                  ? "Scan complete — redirecting to results…"
+                  ? "Scan complete"
                   : status === "BLOCKED_PRE_LLM"
                     ? "Scan stopped — critical secret detected"
                     : status === "BLOCKED_USER_DECLINE"
                       ? "Scan stopped at your request"
                       : status === "CANCELLED"
-                        ? "Scan stopped at your request"
+                        ? cancellationComplete
+                          ? "Scan stopped at your request"
+                          : "Stopping scan…"
                         : isExpired
                           ? "Scan expired"
                           : isError
@@ -1232,15 +1492,23 @@ const ScanRunningPage: React.FC = () => {
               </div>
             )}
             {prescanReview && (
-              <PrescanReviewCard
-                findings={prescanReview.findings}
-                hasCriticalSecret={prescanReview.has_critical_secret}
-                approving={approving}
-                declining={declining}
-                onContinue={handlePrescanContinue}
-                onStop={handlePrescanStop}
-                readOnly={!isPendingPrescan}
-              />
+              <>
+                {isPendingPrescan && activeApprovalGate && (
+                  <div style={{ color: "var(--fg-subtle)", fontSize: 11 }}>
+                    Step 1 of 3 · {activeApprovalGate.display_name} · Evidence{" "}
+                    {activeApprovalGate.evidence_hash}
+                  </div>
+                )}
+                <PrescanReviewCard
+                  findings={prescanReview.findings}
+                  hasCriticalSecret={prescanReview.has_critical_secret}
+                  approving={approving}
+                  declining={declining}
+                  onContinue={handlePrescanContinue}
+                  onStop={handlePrescanStop}
+                  readOnly={!isPendingPrescan}
+                />
+              </>
             )}
           </>
         )}
@@ -1273,8 +1541,8 @@ const ScanRunningPage: React.FC = () => {
                   marginBottom: 4,
                 }}
               >
-                Profiling cost estimate ready
-                {typeof costDetails?.total_estimated_cost === "number" && (
+                {activeApprovalGate?.display_name ?? "Approve file profiling cost"}
+                {typeof expectedCost === "number" && (
                   <span
                     style={{
                       marginLeft: 10,
@@ -1283,15 +1551,40 @@ const ScanRunningPage: React.FC = () => {
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
-                    · ${costDetails.total_estimated_cost.toFixed(4)}
+                    · expected ${expectedCost.toFixed(4)}
+                    {typeof upperBoundCost === "number"
+                      ? ` · upper $${upperBoundCost.toFixed(4)}`
+                      : ""}
                   </span>
                 )}
               </div>
               <div style={{ color: "var(--fg)", fontSize: 13 }}>
-                Every file is profiled on the utility model before analysis.
-                Approve to run profiling, then you'll see the full analysis
-                cost estimate.
+                Step 2 of 3 · {activeApprovalGate?.purpose ??
+                  "Approve profiling before the full analysis estimate is prepared."}
               </div>
+              {activeApprovalGate && (
+                <div style={{ marginTop: 4, color: "var(--fg-subtle)", fontSize: 11 }}>
+                  Evidence {activeApprovalGate.evidence_hash}
+                </div>
+              )}
+              {estimateConfidence && (
+                <div style={{ marginTop: 4, color: "var(--fg-subtle)", fontSize: 12 }}>
+                  {estimateConfidence.toUpperCase()} confidence
+                  {typeof costDetails?.estimate_sample_count === "number"
+                    ? ` · ${costDetails.estimate_sample_count} historical observations`
+                    : ""}
+                </div>
+              )}
+              {!!costDetails?.estimate_assumptions?.length && (
+                <details style={{ marginTop: 6, fontSize: 12, color: "var(--fg-subtle)" }}>
+                  <summary>Estimate assumptions</summary>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                    {costDetails.estimate_assumptions.map((assumption) => (
+                      <li key={assumption}>{assumption}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button
@@ -1334,8 +1627,9 @@ const ScanRunningPage: React.FC = () => {
                   marginBottom: 4,
                 }}
               >
-                Cost estimate ready
-                {typeof costDetails?.total_estimated_cost === "number" && (
+                {activeApprovalGate?.display_name ??
+                  "Approve full security analysis cost"}
+                {typeof expectedCost === "number" && (
                   <span
                     style={{
                       marginLeft: 10,
@@ -1344,16 +1638,47 @@ const ScanRunningPage: React.FC = () => {
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
-                    · ${costDetails.total_estimated_cost.toFixed(4)}
+                    · expected ${expectedCost.toFixed(4)}
+                    {typeof upperBoundCost === "number"
+                      ? ` · upper $${upperBoundCost.toFixed(4)}`
+                      : ""}
                   </span>
                 )}
               </div>
               <div style={{ color: "var(--fg)", fontSize: 13 }}>
+                Step 3 of 3 · {activeApprovalGate?.purpose ??
+                  "Approve the full security analysis estimate."}{" "}
                 {typeof costDetails?.total_input_tokens === "number" &&
                 typeof costDetails?.predicted_output_tokens === "number"
                   ? `~${costDetails.total_input_tokens.toLocaleString()} input tokens + ~${costDetails.predicted_output_tokens.toLocaleString()} predicted output tokens. Approve to run the full analysis.`
                   : "Approve to run the full analysis."}
               </div>
+              {activeApprovalGate && (
+                <div style={{ marginTop: 4, color: "var(--fg-subtle)", fontSize: 11 }}>
+                  Evidence {activeApprovalGate.evidence_hash}
+                </div>
+              )}
+              {estimateConfidence && (
+                <div style={{ marginTop: 4, color: "var(--fg-subtle)", fontSize: 12 }}>
+                  {estimateConfidence.toUpperCase()} confidence
+                  {typeof costDetails?.planned_request_count === "number"
+                    ? ` · ${costDetails.planned_request_count} planned model requests`
+                    : ""}
+                  {typeof costDetails?.estimate_sample_count === "number"
+                    ? ` · ${costDetails.estimate_sample_count} historical observations`
+                    : ""}
+                </div>
+              )}
+              {!!costDetails?.estimate_assumptions?.length && (
+                <details style={{ marginTop: 6, fontSize: 12, color: "var(--fg-subtle)" }}>
+                  <summary>Estimate assumptions</summary>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                    {costDetails.estimate_assumptions.map((assumption) => (
+                      <li key={assumption}>{assumption}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               {/* Dual-LLM per-model breakdown (#93) — shown only when a
                   second reasoning LLM was configured. */}
               {costDetails?.slots?.reasoning_secondary && (
@@ -1494,7 +1819,7 @@ const ScanRunningPage: React.FC = () => {
             <SectionHead
               title={
                 <>
-                  <Icon.File size={14} /> Files analyzed (live)
+                  <Icon.File size={14} /> Files analyzed{isTerminal ? "" : " (live)"}
                 </>
               }
             />
@@ -1583,10 +1908,53 @@ const ScanRunningPage: React.FC = () => {
           <SectionHead
             title={
               <>
-                <Icon.Terminal size={14} /> Live event log
+                <Icon.Terminal size={14} /> {isTerminal ? "Activity log" : "Live event log"}
               </>
             }
           />
+          <div
+            aria-label="Activity filters"
+            style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}
+          >
+            <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+              Type{" "}
+              <select
+                aria-label="Filter activity by type"
+                value={activityKindFilter}
+                onChange={(event) => setActivityKindFilter(event.target.value)}
+                className="sccap-input"
+                style={{ width: "auto", padding: "4px 8px", fontSize: 11 }}
+              >
+                <option value="all">All types</option>
+                <option value="workflow">Workflow</option>
+                <option value="scanner">Scanners</option>
+                <option value="llm_call">LLM calls</option>
+                <option value="retry">Retries</option>
+                <option value="warning">Warnings</option>
+                <option value="degradation">Degraded</option>
+                <option value="decision">Decisions</option>
+                <option value="cancellation">Cancellation</option>
+                <option value="terminal">Terminal</option>
+              </select>
+            </label>
+            <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+              Stage{" "}
+              <select
+                aria-label="Filter activity by stage"
+                value={activityStageFilter}
+                onChange={(event) => setActivityStageFilter(event.target.value)}
+                className="sccap-input"
+                style={{ width: "auto", padding: "4px 8px", fontSize: 11 }}
+              >
+                <option value="all">All stages</option>
+                {activityStages.map((stageName) => (
+                  <option key={stageName} value={stageName}>
+                    {eventDisplayName(stageName)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {streamError && (
             <div
               style={{
@@ -1609,10 +1977,12 @@ const ScanRunningPage: React.FC = () => {
           >
             {events.length === 0
               ? "Waiting for events…\n"
-              : events
+              : filteredEvents.length === 0
+                ? "No activity matches these filters.\n"
+                : filteredEvents
                   .map(
                     (e) =>
-                      `[${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : "—"}] ${eventDisplayName(e.stage_name)} · ${e.status}`,
+                      `[${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : "—"}] ${e.activity_kind.replace(/_/g, " ")} · ${eventDisplayName(e.stage_name)} · ${e.status}${formatActivityDetails(e.details)}`,
                   )
                   .join("\n")}
           </pre>

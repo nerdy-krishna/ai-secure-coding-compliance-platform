@@ -55,10 +55,10 @@ Required form fields:
 | `project_name` | Creates the project on first use; reuses it on subsequent submissions. |
 | `scan_type` | `AUDIT` (read-only), `SUGGEST` (findings + inline suggested fixes), or `REMEDIATE` (applies fixes + builds a patched snapshot). |
 | `frameworks` | Comma-separated framework names (e.g. `asvs,proactive_controls`). |
-| `reasoning_llm_config_id` | UUID of the registered `LLMConfiguration` for the **reasoning** slot (analysis, consolidation, merge). Falls back to the first registered config when omitted. |
-| `utility_llm_config_id` | UUID for the **utility** slot (per-file profiler, fix verification). Falls back to the reasoning slot's config when omitted — "the same model in both slots" is the baseline. |
+| `reasoning_llm_config_id` | UUID of the registered `LLMConfiguration` for the **reasoning** slot (analysis and consolidation). Falls back to the first registered config when omitted. |
+| `utility_llm_config_id` | UUID for the **utility** slot (per-file profiler). Falls back to the reasoning slot's config when omitted — "the same model in both slots" is the baseline. |
 | `secondary_reasoning_llm_config_id` | *Optional.* UUID of a **second** reasoning LLM. When set, every analysis agent runs on both this config and `reasoning_llm_config_id` and the findings union (PRD #91). Rejected with `400` if it is not a registered config. Null ⇒ single-LLM analysis. |
-| `temperature_profiler` / `temperature_analysis` / `temperature_consolidation` / `temperature_merge` | *Optional* per-stage LLM temperature, `0.0`–`1.0`, default `0.2`. |
+| `temperature_profiler` / `temperature_analysis` / `temperature_consolidation` | *Optional* per-stage LLM temperature, `0.0`–`1.0`, default `0.2`. |
 | `temperature_analysis_secondary` | *Optional* analysis temperature for the second reasoning LLM, `0.0`–`1.0`, default `0.2`. Used only when `secondary_reasoning_llm_config_id` is set. |
 | `disable_temperature` | *Optional* boolean, default `false`. When `true`, no temperature is sent on any LLM call — each model runs at its provider default and the per-stage temperatures are ignored. |
 | `cross_file_validation` | *Optional* boolean, default `false`. Opt in to cross-file finding validation. |
@@ -84,21 +84,30 @@ POST /scans/{scan_id}/approve        # resume the scan past its current gate
 POST /scans/{scan_id}/cancel         # flip to CANCELLED
 ```
 
-A scan can pause at three native-`interrupt()` gates. The `approve`
-body's `kind` field discriminates which one is being resumed; the
-service validates `kind` against the scan's current status:
+A scan can pause at three native-`interrupt()` gates. Read
+`active_approval_gate` from `GET /scans/{scan_id}/result` or the `scan_state`
+SSE projection, then echo its identity in the decision. Supply a stable,
+caller-generated `X-Idempotency-Key` header (maximum 128 characters):
 
 | `kind` | Gate status | Body |
 | ------ | ----------- | ---- |
-| `prescan_approval` | `PENDING_PRESCAN_APPROVAL` | `{ "kind", "approved", "override_critical_secret" }` |
-| `profiling_approval` | `PENDING_PROFILING_APPROVAL` | `{ "kind", "approved" }` |
-| `cost_approval` | `PENDING_COST_APPROVAL` | `{ "kind", "approved" }` (empty body also accepted, defaults to `cost_approval` + approved) |
+| `prescan_approval` | `PENDING_PRESCAN_APPROVAL` | `{ "gate_id", "gate_version", "evidence_hash", "kind", "approved", "override_critical_secret" }` |
+| `profiling_approval` | `PENDING_PROFILING_APPROVAL` | `{ "gate_id", "gate_version", "evidence_hash", "kind", "approved" }` |
+| `cost_approval` | `PENDING_COST_APPROVAL` | `{ "gate_id", "gate_version", "evidence_hash", "kind", "approved" }` |
 
 `approved=false` at the prescan or profiling gate ends the scan at
-`BLOCKED_USER_DECLINE`. Approve publishes to `analysis_approved_queue`;
-the worker resumes the paused LangGraph thread with
+`BLOCKED_USER_DECLINE`. An accepted decision atomically records the transitional status, audit
+events, and durable `analysis_approved_queue` outbox intent. The API does not publish inline;
+the worker eventually resumes the paused LangGraph thread with
 `Command(resume=...)`. Scans left at the prescan or profiling gate
 for over 24 h are auto-declined by a background sweeper.
+
+The response includes the recorded gate. Repeating the same decision with the same idempotency key
+returns `202` and that original gate without creating another resume intent. A different or stale
+decision for an already-decided gate returns `409`. Compatibility clients may omit identity only
+while exactly one matching pending gate exists; new clients should always bind all three identity
+fields. Profiling and full-analysis gates have different IDs, sequences, labels, purposes, and
+evidence hashes.
 
 ## Stream scan progress (SSE)
 
@@ -111,6 +120,13 @@ transition, a `scan_event` for each new `ScanEvent` row, and a
 terminal `done` event when the scan reaches a final state. The
 client reconnects via EventSource's native retry.
 
+When `scan_state.status` enters `PENDING_PROFILING_APPROVAL` or
+`PENDING_COST_APPROVAL`, its allow-listed `cost_details` includes the expected
+and conservative upper-bound costs/tokens/request counts, confidence, sample
+count, assumptions, rendered-envelope components, and per-model slots. This is
+the same persisted contract returned by the scan result endpoint; the UI does
+not need to wait for a polling refresh to render the approval card.
+
 Because browsers can't set arbitrary headers on an `EventSource`,
 the endpoint reads the access token from the `token` query param via
 `current_active_user_sse`.
@@ -119,10 +135,23 @@ the endpoint reads the access token from the `token` query param via
 
 There is no separate apply-fixes endpoint. To have fixes applied to
 the code, submit the scan with `scan_type=REMEDIATE` — the worker
-graph then merges the per-finding fixes, syntax-verifies them with
-tree-sitter, and writes a patched `POST_REMEDIATION` snapshot. A
-`SUGGEST` scan is advisory: it shows the suggested fix inline but does
-not mutate code.
+graph then resolves candidates against exact source ranges, rejects
+ambiguity and overlap for manual review, atomically applies disjoint
+edits, syntax-verifies each whole file, and writes a patched
+`POST_REMEDIATION` snapshot. A `SUGGEST` scan persists the same advisory
+plan but does not mutate code.
+
+### Download the patch plan
+
+```http
+GET /scans/{scan_id}/patch-plan
+```
+
+Returns the latest authorized version-2 `patch_plan` artifact as a JSON
+attachment for SUGGEST or REMEDIATE scans. It contains source hashes,
+resolved ranges, unified diffs, stable hunk IDs, candidate-to-hunk lineage,
+requirements, explicit validation outcomes, and rejected/manual-review decisions. Returns `404`
+when no patch plan was produced.
 
 ## Preview endpoints
 

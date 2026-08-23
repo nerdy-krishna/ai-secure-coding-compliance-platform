@@ -53,12 +53,13 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.scanners.bandit_runner import _resolve_binary
+from app.shared.lib.owned_subprocess import run_owned_subprocess
 
 
 logger = logging.getLogger(__name__)
@@ -130,6 +131,7 @@ def _gitleaks_finding_to_vulnerability(
         file_path=str(file_path),
         fixes=None,
         source="gitleaks",
+        scanner_rule_id=(raw.RuleID or "rule.unknown").strip()[:512],
         agent_name=None,
         corroborating_agents=None,
         is_applied_in_remediation=False,
@@ -152,7 +154,7 @@ def _invoke_gitleaks_sync(
       ``-``. We pass a real temp path and the caller reads + unlinks
       it. ``capture_output`` still grabs stderr for logging.
     """
-    return subprocess.run(  # noqa: S603 - args are a literal list
+    return run_owned_subprocess(
         [
             _gitleaks_binary(),
             "detect",
@@ -208,7 +210,9 @@ def _timeout_finding(staged_dir: Path) -> VulnerabilityFinding:
 
 
 async def run_gitleaks(
-    staged_dir: Path, original_paths: Dict[Path, str]
+    staged_dir: Path,
+    original_paths: Dict[Path, str],
+    report_collector: Optional[Callable[[Any], None]] = None,
 ) -> List[VulnerabilityFinding]:
     """Run Gitleaks against ``staged_dir`` and return findings.
 
@@ -277,6 +281,8 @@ async def run_gitleaks(
         logger.debug("scanner=gitleaks raw stderr=%r", completed.stderr)
 
         if not report_bytes.strip():
+            if completed.returncode == 0 and report_collector is not None:
+                report_collector([])
             return []
 
         try:
@@ -289,6 +295,9 @@ async def run_gitleaks(
 
         if not isinstance(payload, list):
             return []
+
+        if report_collector is not None:
+            report_collector(payload)
 
         findings: List[VulnerabilityFinding] = []
         for raw_dict in payload:

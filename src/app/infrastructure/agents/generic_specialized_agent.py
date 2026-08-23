@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import cvss
@@ -10,6 +11,10 @@ from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMUsageContext,
+    build_usage_idempotency_key,
+)
 from app.infrastructure.database.repositories.prompt_template_repo import (
     PromptTemplateRepository,
 )
@@ -24,6 +29,12 @@ from app.core.schemas import (
     FixResult,
     VulnerabilityFinding,
     FixSuggestion,
+)
+from app.shared.lib.finding_lineage_identity import (
+    anchor_fingerprint,
+    fix_candidate_id,
+    patch_fingerprint,
+    raw_finding_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -191,6 +202,15 @@ class InitialFinding(BaseModel):
 
 class InitialAnalysisResponse(BaseModel):
     findings: List[InitialFinding]
+
+
+def analysis_response_schema_text() -> str:
+    """Canonical structured-output schema included in the provider envelope."""
+    return json.dumps(
+        InitialAnalysisResponse.model_json_schema(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 class CorrectedSnippet(BaseModel):
@@ -564,6 +584,47 @@ def _redact_dict(d: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+async def render_analysis_prompt_envelope(
+    *,
+    agent_name: str,
+    agent_description: str,
+    domain_query: Dict[str, Any],
+    filename: str,
+    code_bundle: str,
+    workflow_mode: str,
+    scanner_findings: Optional[List[Any]] = None,
+) -> tuple[Optional[str], str, str]:
+    """Render the same analysis messages used by execution and preflight."""
+    template_type = (
+        "DETAILED_REMEDIATION" if workflow_mode == "remediate" else "QUICK_AUDIT"
+    )
+    rag_context = _build_rag_context(agent_name, domain_query, filename)
+    if rag_context is None:
+        raise RuntimeError(f"[{agent_name}] Failed to get RAG service.")
+    vulnerability_patterns_str, secure_patterns_str = rag_context
+
+    variant = "anthropic" if SystemConfigCache.is_anthropic_optimized() else "generic"
+    async with AsyncSessionLocal() as db:
+        prompt_template = await PromptTemplateRepository(
+            db
+        ).get_template_by_name_and_type(agent_name, template_type, variant=variant)
+    if not prompt_template:
+        raise LookupError(
+            f"No prompt template found for agent '{agent_name}' with type '{template_type}'."
+        )
+
+    domain_scoping_instruction = f"You are an expert security auditor specializing in the following domain: '{agent_description}'. Your sole focus is on vulnerabilities related to this domain. Do not report findings outside of this specific scope. IMPORTANT: If you suggest a fix, the 'fix' code MUST be different from the original code. Do not return a 'fix' that is identical to the source. If the provided code snippet lacks sufficient context to confidently identify a vulnerability or generate a correct fix, skip it rather than guessing. PRESERVE COMMENTS: When generating a fix, you MUST preserve all existing comments unless they pose a security risk. SCAN COMMENTS: Pay special attention to comments for hardcoded secrets, TODOs indicating security flaws, or sensitive data - these SHOULD be reported."
+    system_prompt, user_prompt = _split_template_around_code_bundle(
+        template_text=prompt_template.template_text,
+        domain_scoping_instruction=domain_scoping_instruction,
+        vulnerability_patterns_str=vulnerability_patterns_str,
+        secure_patterns_str=secure_patterns_str,
+        code_bundle=code_bundle,
+        scanner_findings_block=_format_scanner_findings_block(scanner_findings),
+    )
+    return system_prompt, user_prompt, prompt_template.name
+
+
 async def analysis_node(
     state: SpecializedAgentState,
     config: RunnableConfig,
@@ -672,46 +733,20 @@ async def analysis_node(
         },
     )
 
-    rag_context = _build_rag_context(agent_name, domain_query, filename)
-    if rag_context is None:
-        return {"error": f"[{agent_name}] Failed to get RAG service."}
-    vulnerability_patterns_str, secure_patterns_str = rag_context
-
-    # Pick the prompt variant matching the active LLM optimization mode.
-    # Falls back to 'generic' inside the repo if no matching variant exists.
-    variant = "anthropic" if SystemConfigCache.is_anthropic_optimized() else "generic"
-    async with AsyncSessionLocal() as db:
-        prompt_repo = PromptTemplateRepository(db)
-        prompt_template = await prompt_repo.get_template_by_name_and_type(
-            agent_name, template_type, variant=variant
+    try:
+        system_prompt, user_prompt, prompt_template_name = (
+            await render_analysis_prompt_envelope(
+                agent_name=agent_name,
+                agent_description=agent_description,
+                domain_query=domain_query,
+                filename=filename,
+                code_bundle=code_bundle,
+                workflow_mode=workflow_mode,
+                scanner_findings=state.get("prescan_findings_for_file"),
+            )
         )
-
-    if not prompt_template:
-        return {
-            "error": f"No prompt template found for agent '{agent_name}' with type '{template_type}'."
-        }
-
-    domain_scoping_instruction = f"You are an expert security auditor specializing in the following domain: '{agent_description}'. Your sole focus is on vulnerabilities related to this domain. Do not report findings outside of this specific scope. IMPORTANT: If you suggest a fix, the 'fix' code MUST be different from the original code. Do not return a 'fix' that is identical to the source. If the provided code snippet lacks sufficient context to confidently identify a vulnerability or generate a correct fix, skip it rather than guessing. PRESERVE COMMENTS: When generating a fix, you MUST preserve all existing comments unless they pose a security risk. SCAN COMMENTS: Pay special attention to comments for hardcoded secrets, TODOs indicating security flaws, or sensitive data - these SHOULD be reported."
-
-    # Split the prompt into a stable prefix (domain instruction + RAG patterns
-    # + template header) and a variable suffix (the per-file code bundle +
-    # template footer). The prefix is cacheable; on Anthropic, LLMClient
-    # wraps it in a cache_control="ephemeral" SystemMessage so repeated
-    # agent-per-file calls within a scan hit the prompt cache.
-    # Verified-findings prefix (B4). Scanner findings for THIS file
-    # only — `analyze_files_parallel_node` filters before passing.
-    scanner_findings_block = _format_scanner_findings_block(
-        state.get("prescan_findings_for_file")
-    )
-
-    system_prompt, user_prompt = _split_template_around_code_bundle(
-        template_text=prompt_template.template_text,
-        domain_scoping_instruction=domain_scoping_instruction,
-        vulnerability_patterns_str=vulnerability_patterns_str,
-        secure_patterns_str=secure_patterns_str,
-        code_bundle=code_bundle,
-        scanner_findings_block=scanner_findings_block,
-    )
+    except (LookupError, RuntimeError) as exc:
+        return {"error": str(exc)}
 
     logger.debug(
         "agent: prompt split",
@@ -743,6 +778,21 @@ async def analysis_node(
         prompt=user_prompt,
         response_model=response_model,
         system_prompt=system_prompt,
+        usage_context=LLMUsageContext(
+            operation_kind="scan",
+            operation_id=str(scan_id),
+            stage="analysis",
+            agent_name=agent_name,
+            idempotency_key=build_usage_idempotency_key(
+                operation_kind="scan",
+                operation_id=scan_id,
+                stage="analysis",
+                agent_name=agent_name,
+                unit_key=state.get("usage_unit_key") or filename,
+                llm_config_id=llm_config_id,
+            ),
+            scan_id=scan_id,
+        ),
     )
 
     # ... logging logic ...
@@ -751,14 +801,15 @@ async def analysis_node(
     )
     prompt_context_for_log = {
         "code_bundle_length": len(code_bundle),
-        "vulnerability_patterns_length": len(vulnerability_patterns_str),
-        "secure_patterns_length": len(secure_patterns_str),
+        "system_prompt_length": len(system_prompt or ""),
+        "user_prompt_length": len(user_prompt),
     }
     interaction = LLMInteraction(
         scan_id=scan_id,
+        usage_event_id=llm_response.usage_event_id,
         agent_name=agent_name,
         llm_config_id=llm_config_id,
-        prompt_template_name=prompt_template.name,
+        prompt_template_name=prompt_template_name,
         prompt_context=prompt_context_for_log,
         raw_response=_redact_for_persistence(llm_response.raw_output or ""),
         parsed_output=_redact_dict(parsed_output_dict) if parsed_output_dict else None,
@@ -800,7 +851,7 @@ async def analysis_node(
         )
         initial_results.findings = initial_results.findings[:MAX_FINDINGS_PER_FILE]
 
-    for initial_finding in initial_results.findings:
+    for finding_index, initial_finding in enumerate(initial_results.findings, start=1):
         # V02.4.1 — check per-file LLM call / cost ceilings before each sub-call
         if _llm_call_count >= MAX_LLM_CALLS_PER_FILE:
             logger.warning(
@@ -820,6 +871,13 @@ async def analysis_node(
             agent_name,
             file_content=state.get("file_content_for_verification"),
         )
+        producer_key = (
+            state.get("usage_unit_key") or f"analysis:{filename}:{agent_name}"
+        )
+        finding_obj.raw_finding_id = raw_finding_id(
+            scan_id, producer_key, finding_index
+        )
+        finding_obj.source_snapshot_hash = state.get("source_snapshot_hash")
 
         if workflow_mode == "remediate" and initial_finding.fix:
             # --- STRICT DIFF CHECK ---
@@ -840,11 +898,49 @@ async def analysis_node(
                 llm_client=llm_client,
                 code_to_search=code_for_verification or "",
                 suggestion=initial_finding.fix,
+                scan_id=scan_id,
+                llm_config_id=llm_config_id,
+                agent_name=agent_name,
+                unit_key=f"{state.get('usage_unit_key') or filename}:finding:{finding_index}",
             )
             if verified_suggestion:
                 finding_obj.fixes = verified_suggestion
+                source_snapshot_hash = state.get("source_snapshot_hash")
+                if not source_snapshot_hash:
+                    logger.warning(
+                        "agent: fix candidate missing original source snapshot hash",
+                        extra={"agent": agent_name, "source_file_path": filename},
+                    )
+                    final_findings.append(finding_obj)
+                    continue
+                anchor = anchor_fingerprint(
+                    file_path=filename,
+                    source_snapshot_hash=source_snapshot_hash,
+                    line_number=finding_obj.line_number,
+                    original_snippet=verified_suggestion.original_snippet,
+                )
+                patch = patch_fingerprint(
+                    anchor=anchor, replacement_code=verified_suggestion.code
+                )
                 final_fixes.append(
-                    FixResult(finding=finding_obj, suggestion=verified_suggestion)
+                    FixResult(
+                        finding=finding_obj,
+                        suggestion=verified_suggestion,
+                        candidate_id=fix_candidate_id(
+                            raw_id=finding_obj.raw_finding_id, patch=patch
+                        ),
+                        raw_finding_id=finding_obj.raw_finding_id,
+                        source_snapshot_hash=source_snapshot_hash,
+                        anchor_fingerprint=anchor,
+                        patch_fingerprint=patch,
+                        contributing_agents=[agent_name],
+                        language=_detect_target_lang(filename).lower(),
+                        required_imports=verified_suggestion.required_imports,
+                        required_dependencies=verified_suggestion.required_dependencies,
+                        configuration_changes=verified_suggestion.configuration_changes,
+                        migration_changes=verified_suggestion.migration_changes,
+                        manual_steps=verified_suggestion.manual_steps,
+                    )
                 )
             else:
                 logger.warning(
@@ -872,7 +968,14 @@ async def analysis_node(
 
 
 async def _verify_and_correct_snippet(
-    llm_client: LLMClient, code_to_search: str, suggestion: FixSuggestion
+    llm_client: LLMClient,
+    code_to_search: str,
+    suggestion: FixSuggestion,
+    *,
+    scan_id,
+    llm_config_id,
+    agent_name: str,
+    unit_key: str,
 ) -> Optional[FixSuggestion]:
     # ... This function remains the same as before ...
     original_snippet = suggestion.original_snippet
@@ -907,7 +1010,23 @@ async def _verify_and_correct_snippet(
         """
         try:
             correction_result = await llm_client.generate_structured_output(
-                correction_prompt, CorrectedSnippet
+                correction_prompt,
+                CorrectedSnippet,
+                usage_context=LLMUsageContext(
+                    operation_kind="scan",
+                    operation_id=str(scan_id),
+                    stage="snippet_correction",
+                    agent_name=agent_name,
+                    idempotency_key=build_usage_idempotency_key(
+                        operation_kind="scan",
+                        operation_id=scan_id,
+                        stage="snippet_correction",
+                        agent_name=agent_name,
+                        unit_key=f"{unit_key}:attempt:{attempt + 1}",
+                        llm_config_id=llm_config_id,
+                    ),
+                    scan_id=scan_id,
+                ),
             )
             if isinstance(correction_result.parsed_output, CorrectedSnippet):
                 original_snippet = (

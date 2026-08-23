@@ -3,9 +3,8 @@
 Handles the prescan-approval gate, cost-approval gate, and scan
 cancellation.
 
-Split out of `core/services/scan_service.py` (2026-04-26). Method
-bodies are verbatim copies — no logic change. The threat-model
-mitigations carry through unchanged: kind-vs-status guard +
+Split out of `core/services/scan_service.py` (2026-04-26). The threat-model
+mitigations include the kind-vs-status guard +
 PRESCAN_OVERRIDE_CRITICAL_SECRET / PRESCAN_USER_DECLINED audit
 ScanEvent writes (M4 / G-split-5).
 """
@@ -20,13 +19,19 @@ from fastapi import HTTPException, status
 
 from app.api.v1 import models as api_models
 from app.config.config import settings
+from app.config.logging_config import correlation_id_var
 from app.infrastructure.database import models as db_models
 from app.core.services.scan.task_ledger import ScanTaskLedgerService
 from app.infrastructure.database.repositories.scan_outbox_repo import (
     ScanOutboxRepository,
 )
+from app.infrastructure.database.repositories.approval_gate_repo import (
+    ApprovalGateRepository,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
-from app.infrastructure.messaging.publisher import publish_message
+from app.infrastructure.database.repositories.scan_attempt_repo import (
+    ScanAttemptRepository,
+)
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     STATUS_CANCELLED,
@@ -41,6 +46,18 @@ from app.shared.lib.scan_task_status import STATUS_SCAN_TASK_COMPLETED
 
 logger = logging.getLogger(__name__)
 
+_APPROVAL_GATE_STATUS = {
+    "prescan_approval": STATUS_PENDING_PRESCAN_APPROVAL,
+    "profiling_approval": STATUS_PENDING_PROFILING_APPROVAL,
+    "cost_approval": STATUS_PENDING_APPROVAL,
+}
+_NO_RUNNING_WORK_CANCELLATION_STATUSES = {
+    STATUS_QUEUED,
+    STATUS_PENDING_PRESCAN_APPROVAL,
+    STATUS_PENDING_PROFILING_APPROVAL,
+    STATUS_PENDING_APPROVAL,
+}
+
 
 class ScanLifecycleService:
     """Post-creation scan transitions.
@@ -53,6 +70,7 @@ class ScanLifecycleService:
     def __init__(self, repo: ScanRepository):
         self.repo = repo
         self.outbox = ScanOutboxRepository(repo.db)
+        self.gates = ApprovalGateRepository(repo.db)
 
     async def _get_scan_or_404(self, scan_id: uuid.UUID) -> db_models.Scan:
         """Internal helper. Mirrors the legacy `get_scan_status` shape
@@ -69,11 +87,13 @@ class ScanLifecycleService:
         scan_id: uuid.UUID,
         user: db_models.User,
         request: Optional[Any] = None,
-    ) -> None:
+        *,
+        idempotency_key: Optional[str] = None,
+    ) -> db_models.ApprovalGate:
         """Approve / decline a scan paused at a worker-graph interrupt.
 
-        Two interrupt points (ADR-009): prescan-approval and cost-
-        approval. ``request.kind`` discriminates; the consumer
+        Three interrupt points: prescan approval, profiling-cost approval,
+        and full-analysis cost approval. ``request.kind`` discriminates; the consumer
         re-validates kind against the scan's pause point before
         invoking LangGraph (defense in depth).
 
@@ -89,6 +109,12 @@ class ScanLifecycleService:
 
         if request is None:
             request = ApprovalRequest()
+        idempotency_key = idempotency_key or str(uuid.uuid4())
+        if len(idempotency_key) > 128:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="X-Idempotency-Key must be at most 128 characters.",
+            )
 
         logger.info(
             "Attempting to approve scan.",
@@ -113,129 +139,240 @@ class ScanLifecycleService:
                 status_code=403, detail="Not authorized to approve this scan"
             )
 
-        # Validate kind against current pause point. Keeps a
-        # `kind="cost_approval"` payload from accidentally (or
-        # adversarially) advancing past a `PENDING_PRESCAN_APPROVAL`
-        # gate. (M1 / G4 — also re-checked in the worker consumer.)
-        if request.kind == "prescan_approval":
-            if scan.status != STATUS_PENDING_PRESCAN_APPROVAL:
+        conflict_audit_committed = False
+        try:
+            # Compatibility clients may omit gate_id, but only while exactly one
+            # pending gate exists. The row lock makes decision + event + outbox a
+            # single one-shot transaction.
+            gate = None
+            if request.gate_id is not None:
+                gate = await self.gates.lock_for_decision(request.gate_id)
+            else:
+                pending = await self.gates.get_pending_for_scan(scan_id)
+                if pending is not None:
+                    gate = await self.gates.lock_for_decision(pending.gate_id)
+                else:
+                    prior = await self.gates.get_by_decision_key(
+                        scan_id, idempotency_key
+                    )
+                    if prior is not None:
+                        gate = await self.gates.lock_for_decision(prior.gate_id)
+                    elif scan.status == _APPROVAL_GATE_STATUS[request.kind]:
+                        legacy_contract = {
+                            "prescan_approval": (
+                                "pending_prescan_approval",
+                                "Review deterministic scanner findings",
+                                "Review deterministic evidence before LLM work.",
+                            ),
+                            "profiling_approval": (
+                                "profiling_cost_gate",
+                                "Approve file profiling cost",
+                                "Approve utility-model file profiling.",
+                            ),
+                            "cost_approval": (
+                                "cost_gate",
+                                "Approve full security analysis cost",
+                                "Approve the full security-analysis estimate.",
+                            ),
+                        }[request.kind]
+                        pending = await self.gates.create_or_get_pending(
+                            scan_id=scan_id,
+                            kind=request.kind,
+                            node_name=legacy_contract[0],
+                            display_name=legacy_contract[1],
+                            purpose=legacy_contract[2],
+                            evidence={
+                                "legacy_upgrade_gate": True,
+                                "status": scan.status,
+                                "cost_details": scan.cost_details,
+                            },
+                            commit=False,
+                        )
+                        gate = await self.gates.lock_for_decision(pending.gate_id)
+
+            if gate is None or gate.scan_id != scan_id:
                 raise HTTPException(
-                    status_code=400,
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="No matching active approval gate exists for this scan.",
+                )
+            if gate.kind != request.kind:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        f"Approval kind 'prescan_approval' requires status "
-                        f"PENDING_PRESCAN_APPROVAL; current status: {scan.status}"
+                        f"Gate {gate.gate_id} requires kind '{gate.kind}', not "
+                        f"'{request.kind}'."
                     ),
                 )
-        elif request.kind == "profiling_approval":
-            if scan.status != STATUS_PENDING_PROFILING_APPROVAL:
+            if gate.state != "pending":
+                same_request = (
+                    gate.decision_idempotency_key == idempotency_key
+                    and gate.decision is request.approved
+                    and gate.override_critical_secret
+                    is request.override_critical_secret
+                )
+                if same_request:
+                    return gate
+                if gate.decision is not None and gate.decision != request.approved:
+                    await self.repo.create_scan_event(
+                        scan_id=scan_id,
+                        stage_name="APPROVAL_DECISION_REJECTED",
+                        status="REJECTED",
+                        details={
+                            "gate_id": str(gate.gate_id),
+                            "gate_sequence": gate.sequence,
+                            "kind": gate.kind,
+                            "recorded_decision": gate.decision,
+                            "requested_decision": request.approved,
+                            "actor_user_id": user.id,
+                            "reason": "first_decision_wins",
+                        },
+                    )
+                    conflict_audit_committed = True
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "This gate already has a different durable decision; "
+                            "the first decision wins."
+                        ),
+                    )
                 raise HTTPException(
-                    status_code=400,
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This approval gate was already decided.",
+                )
+
+            if (
+                request.gate_version is not None
+                and gate.version != request.gate_version
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Approval gate version changed; refresh before deciding.",
+                )
+            if (
+                request.evidence_hash is not None
+                and gate.evidence_hash != request.evidence_hash
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Approval evidence changed; refresh before deciding.",
+                )
+
+            # Validate kind against the current pause point after locking the
+            # durable gate. A stale gate can never approve a later occurrence.
+            expected_status = _APPROVAL_GATE_STATUS[request.kind]
+            if scan.status != expected_status:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        f"Approval kind 'profiling_approval' requires status "
-                        f"PENDING_PROFILING_APPROVAL; current status: {scan.status}"
+                        f"Gate {gate.gate_id} requires status {expected_status}; "
+                        f"current status: {scan.status}"
                     ),
                 )
-        elif request.kind == "cost_approval":
-            if scan.status != STATUS_PENDING_APPROVAL:
+
+            # Claim the gate with compare-and-set. Approved and declined
+            # decisions both become queued durable work, preventing a second
+            # click from enqueueing the same resume while RabbitMQ is down.
+            changed = await self.repo.update_status(
+                scan_id,
+                STATUS_QUEUED_FOR_SCAN,
+                allowed_current_statuses=(expected_status,),
+                commit=False,
+            )
+            if not changed:
                 raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"Approval kind 'cost_approval' requires status "
-                        f"PENDING_COST_APPROVAL; current status: {scan.status}"
-                    ),
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Scan state changed before the approval could be applied.",
                 )
 
-        # NOTE: Each repo method below commits its own transaction (see
-        # update_status / create_scan_event / outbox.enqueue). Wrapping
-        # them in `begin_nested()` does NOT make the sequence atomic —
-        # the inner commits close the parent transaction and the next
-        # call dies with `InvalidRequestError: Can't operate on closed
-        # transaction`. So we run each step on its own and accept the
-        # narrow window where a crash between (1) and (2) could leave
-        # the scan at QUEUED_FOR_SCAN with no outbox row. The recovery
-        # is observable: the worker won't resume, the UI shows a stuck
-        # status, and the user can re-approve. Proper transaction
-        # discipline (caller-managed commits in repos) is a wider
-        # refactor tracked separately.
+            if (
+                request.kind == "prescan_approval"
+                and request.approved
+                and request.override_critical_secret
+            ):
+                await self.repo.create_scan_event(
+                    scan_id=scan_id,
+                    stage_name="PRESCAN_OVERRIDE_CRITICAL_SECRET",
+                    status="COMPLETED",
+                    commit=False,
+                )
 
-        # Audit trail for the override path (M10): if the operator is
-        # honoring an override on a Critical Gitleaks finding, persist
-        # a scan_event so the decision is auditable.
-        if (
-            request.kind == "prescan_approval"
-            and request.approved
-            and request.override_critical_secret
-        ):
+            decline_stage = {
+                "prescan_approval": "PRESCAN_USER_DECLINED",
+                "profiling_approval": "PROFILING_USER_DECLINED",
+                "cost_approval": "COST_USER_DECLINED",
+            }.get(request.kind)
+            if not request.approved and decline_stage:
+                await self.repo.create_scan_event(
+                    scan_id=scan_id,
+                    stage_name=decline_stage,
+                    status="COMPLETED",
+                    commit=False,
+                )
+
             await self.repo.create_scan_event(
                 scan_id=scan_id,
-                stage_name="PRESCAN_OVERRIDE_CRITICAL_SECRET",
+                stage_name="QUEUED_FOR_SCAN",
                 status="COMPLETED",
+                details={
+                    "gate_id": str(gate.gate_id),
+                    "gate_sequence": gate.sequence,
+                    "kind": request.kind,
+                    "approved": request.approved,
+                    "evidence_hash": gate.evidence_hash,
+                    "actor_user_id": user.id,
+                },
+                commit=False,
             )
-
-        # Audit trail for the decline path: operator chose Stop on the
-        # prescan card. The worker then routes to `user_decline_node`
-        # which sets STATUS_BLOCKED_USER_DECLINE.
-        if request.kind == "prescan_approval" and not request.approved:
-            await self.repo.create_scan_event(
+            await self.gates.record_decision(
+                gate,
+                actor_user_id=user.id,
+                approved=request.approved,
+                override_critical_secret=request.override_critical_secret,
+                idempotency_key=idempotency_key,
+            )
+            approval_payload = {
+                "scan_id": str(scan_id),
+                "gate_id": str(gate.gate_id),
+                "gate_version": gate.version,
+                "gate_sequence": gate.sequence,
+                "node_name": gate.node_name,
+                "evidence_hash": gate.evidence_hash,
+                "action": "resume_analysis",
+                "kind": request.kind,
+                "approved": request.approved,
+                "override_critical_secret": request.override_critical_secret,
+                "user_id": user.id,
+                "correlation_id": correlation_id_var.get(),
+            }
+            await self.outbox.enqueue(
                 scan_id=scan_id,
-                stage_name="PRESCAN_USER_DECLINED",
-                status="COMPLETED",
+                queue_name=settings.RABBITMQ_APPROVAL_QUEUE,
+                payload=approval_payload,
+                idempotency_key=f"approval-gate:{gate.gate_id}",
+                commit=False,
             )
-
-        # Audit trail for a declined profiling-cost gate (#71). Same
-        # shape as the prescan decline — the worker routes to
-        # `user_decline_node` which sets STATUS_BLOCKED_USER_DECLINE.
-        if request.kind == "profiling_approval" and not request.approved:
-            await self.repo.create_scan_event(
-                scan_id=scan_id,
-                stage_name="PROFILING_USER_DECLINED",
-                status="COMPLETED",
-            )
-
-        # For cost_approval and the *approved* prescan / profiling
-        # gates, the next worker phase actually progresses so
-        # transitioning to QUEUED_FOR_SCAN is a reasonable intermediate.
-        # For a *declined* prescan or profiling gate, leave the status
-        # at the gate — the worker's user_decline_node will set
-        # BLOCKED_USER_DECLINE within milliseconds of resume.
-        is_gate_decline = (
-            request.kind in ("prescan_approval", "profiling_approval")
-            and not request.approved
-        )
-        if not is_gate_decline:
-            await self.repo.update_status(scan_id, STATUS_QUEUED_FOR_SCAN)
-            await self.repo.create_scan_event(
-                scan_id=scan_id, stage_name="QUEUED_FOR_SCAN", status="COMPLETED"
-            )
-        approval_payload = {
-            "scan_id": str(scan_id),
-            "action": "resume_analysis",
-            "kind": request.kind,
-            "approved": request.approved,
-            "override_critical_secret": request.override_critical_secret,
-        }
-        outbox_row = await self.outbox.enqueue(
-            scan_id=scan_id,
-            queue_name=settings.RABBITMQ_APPROVAL_QUEUE,
-            payload=approval_payload,
-        )
-        published = await publish_message(
-            settings.RABBITMQ_APPROVAL_QUEUE,
-            approval_payload,
-        )
-        if published:
-            await self.outbox.mark_published(outbox_row.id)
+            await self.repo.db.commit()
             logger.info(
-                "Scan approved and queued for processing.",
+                "Scan decision committed for outbox dispatch.",
+                extra={
+                    "scan_id": str(scan_id),
+                    "kind": request.kind,
+                    "approved": request.approved,
+                },
+            )
+            return gate
+        except HTTPException:
+            if not conflict_audit_committed:
+                await self.repo.db.rollback()
+            raise
+        except Exception:
+            await self.repo.db.rollback()
+            logger.error(
+                "scan: approval transaction failed",
                 extra={"scan_id": str(scan_id), "kind": request.kind},
+                exc_info=True,
             )
-        else:
-            await self.outbox.record_failed_attempt(outbox_row.id)
-            logger.warning(
-                "Approval enqueued to outbox but RabbitMQ publish failed; "
-                "sweeper will retry.",
-                extra={"scan_id": str(scan_id)},
-            )
+            raise
 
     async def resume_or_restart_scan(
         self,
@@ -294,91 +431,123 @@ class ScanLifecycleService:
         artifact_total = sum(artifact_counts.values())
         completed_artifacts = artifact_counts.get(STATUS_SCAN_TASK_COMPLETED, 0)
 
-        if scan.status == STATUS_CANCELLED and artifact_total == 0:
+        if scan.status == STATUS_CANCELLED and mode == "resume" and artifact_total == 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cancelled scan has no resumable artifacts.",
             )
 
-        deleted_tasks = 0
-        deleted_findings = 0
-        deleted_snapshots = 0
-        if mode == "restart":
-            deleted_tasks = await task_ledger.delete_scan_tasks(scan_id)
-            deleted_findings = await self.repo.delete_findings_for_scan(scan_id)
-            deleted_snapshots = await self.repo.delete_derived_snapshots_for_scan(
-                scan_id
+        try:
+            changed = await self.repo.reset_scan_for_manual_run(
+                scan_id,
+                status=STATUS_QUEUED,
+                clear_final_outputs=(mode == "restart"),
+                allowed_current_statuses=(scan.status,),
+                commit=False,
             )
-            artifact_counts = {}
-            artifact_total = 0
-            completed_artifacts = 0
+            if not changed:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Scan state changed before run control could be applied.",
+                )
 
-        boundary_stage = (
-            "MANUAL_RESUME_REQUESTED"
-            if mode == "resume"
-            else "MANUAL_RESTART_REQUESTED"
-        )
-        await self.repo.create_scan_event(
-            scan_id=scan_id,
-            stage_name=boundary_stage,
-            status="COMPLETED",
-            details={
-                "mode": mode,
-                "actor_user_id": user.id,
-                "artifact_counts": artifact_counts,
-                "artifact_total": artifact_total,
-                "completed_artifacts": completed_artifacts,
-                "deleted_tasks": deleted_tasks,
-                "deleted_findings": deleted_findings,
-                "deleted_derived_snapshots": deleted_snapshots,
-                "approvals_preserved": True,
-            },
-        )
-        if mode == "resume":
+            deleted_tasks = 0
+            deleted_findings = 0
+            deleted_snapshots = 0
+            if mode == "restart":
+                await self.gates.close_active(scan_id, state="cancelled", commit=False)
+                deleted_tasks = await task_ledger.delete_scan_tasks(
+                    scan_id, commit=False
+                )
+                deleted_findings = await self.repo.delete_findings_for_scan(
+                    scan_id, commit=False
+                )
+                deleted_snapshots = await self.repo.delete_derived_snapshots_for_scan(
+                    scan_id, commit=False
+                )
+                artifact_counts = {}
+                artifact_total = 0
+                completed_artifacts = 0
+
+            attempts = ScanAttemptRepository(self.repo.db)
+            if mode == "restart":
+                attempt = await attempts.create_restart(
+                    scan_id, actor_user_id=user.id, commit=False
+                )
+            else:
+                attempt = await attempts.activate_resume(scan_id, commit=False)
+
+            boundary_stage = (
+                "MANUAL_RESUME_REQUESTED"
+                if mode == "resume"
+                else "MANUAL_RESTART_REQUESTED"
+            )
             await self.repo.create_scan_event(
                 scan_id=scan_id,
-                stage_name="RESUME_ARTIFACT_EVALUATION",
+                stage_name=boundary_stage,
                 status="COMPLETED",
                 details={
+                    "mode": mode,
+                    "attempt_id": str(attempt.id),
+                    "attempt_sequence": attempt.sequence,
+                    "actor_user_id": user.id,
                     "artifact_counts": artifact_counts,
                     "artifact_total": artifact_total,
                     "completed_artifacts": completed_artifacts,
-                    "reusable_artifacts": completed_artifacts,
+                    "deleted_tasks": deleted_tasks,
+                    "deleted_findings": deleted_findings,
+                    "deleted_derived_snapshots": deleted_snapshots,
+                    "approvals_preserved": True,
                 },
+                commit=False,
+            )
+            if mode == "resume":
+                await self.repo.create_scan_event(
+                    scan_id=scan_id,
+                    stage_name="RESUME_ARTIFACT_EVALUATION",
+                    status="COMPLETED",
+                    details={
+                        "artifact_counts": artifact_counts,
+                        "artifact_total": artifact_total,
+                        "completed_artifacts": completed_artifacts,
+                        "reusable_artifacts": completed_artifacts,
+                    },
+                    commit=False,
+                )
+
+            await self.repo.create_scan_event(
+                scan_id=scan_id,
+                stage_name="QUEUED",
+                status="COMPLETED",
+                details={"mode": mode, "manual_run_control": True},
+                commit=False,
             )
 
-        await self.repo.reset_scan_for_manual_run(
-            scan_id,
-            status=STATUS_QUEUED,
-            clear_final_outputs=(mode == "restart"),
-        )
-        await self.repo.create_scan_event(
-            scan_id=scan_id,
-            stage_name="QUEUED",
-            status="COMPLETED",
-            details={"mode": mode, "manual_run_control": True},
-        )
-
-        payload = {
-            "scan_id": str(scan_id),
-            "action": f"manual_{mode}",
-            "mode": mode,
-        }
-        outbox_row = await self.outbox.enqueue(
-            scan_id=scan_id,
-            queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
-            payload=payload,
-        )
-        published = await publish_message(settings.RABBITMQ_SUBMISSION_QUEUE, payload)
-        if published:
-            await self.outbox.mark_published(outbox_row.id)
-        else:
-            await self.outbox.record_failed_attempt(outbox_row.id)
-            logger.warning(
-                "Manual %s enqueued to outbox but RabbitMQ publish failed; sweeper will retry.",
-                mode,
-                extra={"scan_id": str(scan_id)},
+            payload = {
+                "scan_id": str(scan_id),
+                "attempt_id": str(attempt.id),
+                "action": f"manual_{mode}",
+                "mode": mode,
+                "correlation_id": correlation_id_var.get(),
+            }
+            await self.outbox.enqueue(
+                scan_id=scan_id,
+                queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
+                payload=payload,
+                commit=False,
             )
+            await self.repo.db.commit()
+        except HTTPException:
+            await self.repo.db.rollback()
+            raise
+        except Exception:
+            await self.repo.db.rollback()
+            logger.error(
+                "scan: manual run-control transaction failed",
+                extra={"scan_id": str(scan_id), "mode": mode},
+                exc_info=True,
+            )
+            raise
 
         return {
             "message": f"Scan {mode} queued for processing.",
@@ -475,10 +644,84 @@ class ScanLifecycleService:
                 detail=f"Scan cannot be cancelled from its current state: {scan.status}",
             )
 
-        await self.repo.update_status(scan_id, STATUS_CANCELLED)
-        await self.repo.create_scan_event(
-            scan_id=scan.id, stage_name="CANCELLED", status="COMPLETED"
-        )
+        prior_status = scan.status
+        try:
+            changed = await self.repo.update_status(
+                scan_id,
+                STATUS_CANCELLED,
+                allowed_current_statuses=ACTIVE_SCAN_STATUSES,
+                commit=False,
+            )
+            if not changed:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Scan state changed before cancellation could be applied.",
+                )
+            await self.repo.create_scan_event(
+                scan_id=scan.id,
+                stage_name="CANCELLATION",
+                status="REQUESTED",
+                details={
+                    "phase": "requested",
+                    "actor_user_id": user.id,
+                    "slo_ms": 2000,
+                },
+                activity_kind="cancellation",
+                commit=False,
+            )
+            if prior_status in _NO_RUNNING_WORK_CANCELLATION_STATUSES:
+                await self.repo.create_scan_event(
+                    scan_id=scan.id,
+                    stage_name="CANCELLATION",
+                    status="OBSERVED",
+                    details={
+                        "phase": "observed",
+                        "latency_ms": 0,
+                        "slo_ms": 2000,
+                        "within_slo": True,
+                        "terminated_processes": 0,
+                    },
+                    activity_kind="cancellation",
+                    commit=False,
+                )
+                await self.repo.create_scan_event(
+                    scan_id=scan.id,
+                    stage_name="CANCELLATION",
+                    status="COMPLETED",
+                    details={
+                        "phase": "completed",
+                        "latency_ms": 0,
+                        "slo_ms": 2000,
+                        "within_slo": True,
+                        "terminated_processes": 0,
+                    },
+                    activity_kind="cancellation",
+                    commit=False,
+                )
+            await self.gates.close_active(scan_id, state="cancelled", commit=False)
+            attempt = await ScanAttemptRepository(self.repo.db).mark_current_terminal(
+                scan_id, status="cancelled", commit=False
+            )
+            if attempt is not None:
+                from app.infrastructure.database.repositories.evidence_repo import (
+                    EvidenceRepository,
+                )
+
+                await EvidenceRepository(self.repo.db).finalize_attempt(
+                    attempt.id, actor_user_id=user.id, commit=False
+                )
+            await self.repo.db.commit()
+        except HTTPException:
+            await self.repo.db.rollback()
+            raise
+        except Exception:
+            await self.repo.db.rollback()
+            logger.error(
+                "scan: cancellation transaction failed",
+                extra={"scan_id": str(scan_id)},
+                exc_info=True,
+            )
+            raise
         logger.info(
             "scan: cancelled", extra={"scan_id": str(scan_id), "actor_user_id": user.id}
         )

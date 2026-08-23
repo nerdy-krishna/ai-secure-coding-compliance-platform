@@ -1,0 +1,11 @@
+services:
+  worker:
+    environment:
+      OSV_OFFLINE_SNAPSHOT_DIR: /var/lib/sccap-osv-snapshot
+    volumes:
+      - type: bind
+        source: ${OSV_OFFLINE_SNAPSHOT_HOST_DIR:?set a verified snapshot directory}
+        target: /var/lib/sccap-osv-snapshot
+        read_only: true
+        bind:
+          create_host_path: false

@@ -110,13 +110,15 @@ through; the repositories already honor it.
 
 ## Transactional outbox
 
-The `scan_outbox` table is the only way scan jobs reach RabbitMQ.
-`scan_service` inserts an outbox row in the **same transaction** as
-the scan row; an in-process sweeper
+The `scan_outbox` table is the only way scan work reaches RabbitMQ.
+`ScanSubmissionService` inserts the Project/source rows, Scan, original
+Snapshot, queued event, and outbox row in **one transaction**. `ScanLifecycleService` applies the
+same boundary to approval/decline and manual resume/restart; restart cleanup is part of that
+transaction. Cancellation commits its compare-and-set status and audit event together. An in-process sweeper
 (`src/app/infrastructure/messaging/outbox_sweeper.py`) reads
-unpublished rows and actually publishes them with an exponential
-backoff on `attempts`. This guarantees the worker always sees every
-scan even if RabbitMQ was down when the API committed.
+unpublished rows and publishes them on a fixed retry interval while tracking
+`attempts`. This preserves durable dispatch intent when RabbitMQ is down at
+commit time. API request handlers do not publish to RabbitMQ inline.
 
 ## MCP server
 

@@ -105,6 +105,7 @@ async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
     try:
         validator = await create_cross_file_validator(
             reasoning_llm_id,
+            scan_id=state["scan_id"],
             temperature=resolve_temperature(LLMStep.CONSOLIDATION, state),
         )
     except Exception as exc:  # noqa: BLE001

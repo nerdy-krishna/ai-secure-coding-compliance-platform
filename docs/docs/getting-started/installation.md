@@ -205,9 +205,9 @@ If your build fails with disk space errors despite having plenty of free space o
     docker compose up --build -d
     ```
     This command will:
-    * `--build`: Build the Docker image for the application and worker services as defined in the `Dockerfile` (if they haven't been built before or if the `Dockerfile` has changed).
+    * `--build`: Build the API, worker, UI, and networkless patch-validator images defined by the project Dockerfiles.
     * Pull the official images for PostgreSQL, RabbitMQ, and Qdrant if they are not already present locally.
-    * Create and start all services (application, worker, database, message queue, vector database) in detached mode (`-d`), meaning they will run in the background.
+    * Create and start the application, worker, patch validator, database, message queue, Qdrant, and UI in detached mode (`-d`).
     * The initial build process might take a few minutes depending on your internet connection and system resources.
 
 4.  **Initialize the Database Schema (First-Time Setup)**:
@@ -224,7 +224,7 @@ If your build fails with disk space errors despite having plenty of free space o
 After completing the steps above, you can verify that the platform is running correctly:
 
 1.  **Check Docker Containers**:
-    Run `docker compose ps`. All services (`app`, `worker`, `db`, `rabbitmq`, `vector_db`, `fluentd`, `loki`, `grafana`, `ui`) should have a status of `Up` or `healthy`.
+    Run `docker compose ps`. Core services (`app`, `worker`, `patch-validator`, `db`, `rabbitmq`, `qdrant`, and `ui`) should be `Up` or healthy. Observability services appear only when their compose profiles are enabled.
 
 2.  **Access the Backend API**:
     * The FastAPI backend should be available at `http://localhost:<APP_PORT>` (e.g., `http://localhost:8000` if `APP_PORT=8000` in your `.env`).
@@ -249,8 +249,12 @@ This command stops and removes the containers. Your data stored in Docker volume
 To update to the latest version of the platform:
 1.  Navigate to the project root: `cd ai-secure-coding-compliance-platform`
 2.  Pull the latest changes from the Git repository: `git pull origin main` (or the relevant branch)
-3.  Rebuild the images if there have been changes to `Dockerfile` or application dependencies: `docker compose up --build -d`
-4.  Apply any new database migrations: `docker compose exec app poetry run alembic upgrade head`
+3.  Repair newly required `.env` secrets without rotating existing values:
+    `python3 scripts/bootstrap_env_secrets.py --env-file .env` (Windows: use `python`).
+    The command never prints generated values and applies mode `0600` on POSIX systems.
+4.  Validate interpolation before changing running services: `docker compose config --quiet`
+5.  Rebuild the images if there have been changes to `Dockerfile` or application dependencies: `docker compose up --build -d`
+6.  Apply any new database migrations: `docker compose exec app poetry run alembic upgrade head`
 
 ## Troubleshooting Common Issues
 

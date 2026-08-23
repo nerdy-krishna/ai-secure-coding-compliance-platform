@@ -24,11 +24,11 @@ knowledge bases. The platform is organized around three surfaces:
 * **Versatile submission** — file uploads, Git repository URLs, or archive uploads (`.zip` / `.tar.gz`). GitHub repos are previewed via the GitHub API without cloning. An interactive file tree lets you include or exclude paths before estimation.
 * **Multi-framework scanning** — pick any combination of the 8 bundled OWASP frameworks (ASVS, Proactive Controls, Cheatsheets, CWE Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) plus custom frameworks ingested from CSV or Git URLs.
 * **Consolidated findings + downloadable report** — per-file reasoning-model consolidation merges raw findings, followed by a global cross-file consolidation pass that unifies same-root findings across files; export any scan as an HTML, CSV, PDF, or SARIF 2.1.0 report.
-* **Intelligent, incremental remediation** — choose findings, let specialized agents generate fixes, merge via a dedicated conflict-resolution agent, and download the patched tree.
+* **Remediation scan mode** — submit a scan as `REMEDIATE` to generate fixes during analysis, merge overlapping edits, verify supported patches, and download the patched tree. Incremental post-result application is not implemented.
 * **Per-project stats on the Projects page** — each card shows the latest terminal scan's risk score, severity bar, and fixes-ready count, no client-side heuristics.
 * **Global search** — one TopNav combobox across projects, scans, and findings, always scoped to what the current user is allowed to see.
 * **Durable tasks & resume/restart** — every analysis and consolidation invocation is a durable task keyed by input hash. Failed or interrupted scans can be manually resumed (reuses completed work) or restarted (reruns from the original snapshot), preserving full audit history.
-* **Adaptive concurrency & rate limits** — scan LLM concurrency adjusts dynamically based on wait time and error signals; per-LLM-config RPM/TPM budgets and prompt-size guardrails prevent oversized prompts from failing the scan.
+* **LLM resilience controls** — fixed per-config concurrency, RPM/TPM budgets, retry with jitter, and circuit breakers protect provider calls. Prompt caps currently reject oversized calls; splitting/compaction remains planned work.
 * **Security Advisor with live context rail** — framework-scoped chat backed by RAG retrieval, with a right-hand rail that surfaces the knowledge sources, referenced findings, and files most likely discussed.
 
 ### For security admins

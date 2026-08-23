@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any, Dict, List
 
-from app.core.schemas import VulnerabilityFinding
+from app.core.schemas import FixResult, VulnerabilityFinding
 from app.infrastructure.agents.finding_consolidator import (
     _passthrough,
     create_finding_consolidator,
@@ -33,6 +33,10 @@ from app.shared.lib.llm_slots import (
     resolve_temperature,
 )
 from app.shared.lib.scan_progress import EV_STARTED
+from app.shared.lib.finding_lineage_identity import (
+    govern_fix_candidates,
+    raw_finding_id,
+)
 
 from app.config.config import settings
 
@@ -105,6 +109,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
     fresh.
     """
     findings: List[VulnerabilityFinding] = state.get("findings") or []
+    fix_candidates: List[FixResult] = state.get("fix_candidates") or []
     async with AsyncSessionLocal() as db:
         await ScanRepository(db).record_scan_event(
             state["scan_id"], "CONSOLIDATING", EV_STARTED
@@ -121,7 +126,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
                 "finding_count": 0,
             },
         )
-        return {"findings": []}
+        return {"findings": [], "fix_candidates": [], "finding_lineage": []}
 
     reasoning_llm_id = resolve_llm_config_id(LLMStep.CONSOLIDATION, state)
     if not reasoning_llm_id:
@@ -131,6 +136,25 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
 
     live_codebase: Dict[str, str] = state.get("live_codebase") or {}
 
+    # Deterministic scanners do not yet carry an agent invocation key. Give
+    # every legacy/raw scanner occurrence a stable producer/index identity
+    # before consolidation. LLM findings already arrive with their exact
+    # durable analysis-task identity and are left unchanged.
+    producer_counts: dict[str, int] = {}
+    source_map = state.get("initial_file_map") or {}
+    for finding in findings:
+        producer = (
+            f"{finding.source or finding.agent_name or 'unknown'}:{finding.file_path}"
+        )
+        occurrence_index = producer_counts.get(producer, 0)
+        producer_counts[producer] = occurrence_index + 1
+        if not finding.raw_finding_id:
+            finding.raw_finding_id = raw_finding_id(
+                state["scan_id"], producer, occurrence_index
+            )
+        if not finding.source_snapshot_hash:
+            finding.source_snapshot_hash = source_map.get(finding.file_path)
+
     # Group raw findings by file — consolidation is per-file.
     by_file: Dict[str, List[VulnerabilityFinding]] = {}
     for f in findings:
@@ -139,6 +163,7 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
     try:
         consolidator = await create_finding_consolidator(
             reasoning_llm_id,
+            scan_id=state["scan_id"],
             temperature=resolve_temperature(LLMStep.CONSOLIDATION, state),
         )
     except Exception as exc:  # noqa: BLE001
@@ -248,6 +273,9 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
         len(consolidated),
         len(by_file),
     )
+    governed_candidates = govern_fix_candidates(
+        fix_candidates, all_flow_maps, consolidated
+    )
     # Store consolidation flow map for the sankey diagram
     flow_map_json = json.dumps(all_flow_maps, default=str)
     await _emit_event(
@@ -266,7 +294,11 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             "flow_map_json": flow_map_json,
         },
     )
-    return {"findings": consolidated}
+    return {
+        "findings": consolidated,
+        "fix_candidates": governed_candidates,
+        "finding_lineage": all_flow_maps,
+    }
 
 
 async def _emit_event(scan_id, stats: Dict[str, int]) -> None:

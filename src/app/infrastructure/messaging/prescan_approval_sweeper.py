@@ -22,11 +22,15 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select, update
 
 from app.infrastructure.database import AsyncSessionLocal
+from app.infrastructure.database.repositories.approval_gate_repo import (
+    ApprovalGateRepository,
+)
 from app.infrastructure.database import models as db_models
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_USER_DECLINE,
     STATUS_PENDING_PRESCAN_APPROVAL,
     STATUS_PENDING_PROFILING_APPROVAL,
+    scan_status_predecessors,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +91,7 @@ async def _sweep_once() -> int:
     gate_statuses = list(_GATE_STATUS_EVENTS)
     transitioned = 0
     transitioned_ids: list[str] = []
+    allowed_gate_sources = set(scan_status_predecessors(STATUS_BLOCKED_USER_DECLINE))
     async with AsyncSessionLocal() as db:
         latest_event_ts = (
             select(func.max(db_models.ScanEvent.timestamp))
@@ -95,12 +100,16 @@ async def _sweep_once() -> int:
             .scalar_subquery()
         )
         stmt = (
-            select(db_models.Scan.id, db_models.Scan.status)
+            select(
+                db_models.Scan.id,
+                db_models.Scan.status,
+                db_models.Scan.current_attempt_id,
+            )
             .where(db_models.Scan.status.in_(gate_statuses))
             .where(latest_event_ts < cutoff)
         )
         rows = (await db.execute(stmt)).all()
-        for scan_id, gate_status in rows:
+        for scan_id, gate_status, attempt_id in rows:
             # Atomic transition: only flip the status if the scan is
             # still at the SAME gate. Defends against a race with a
             # concurrent operator click on the approve / decline
@@ -108,7 +117,10 @@ async def _sweep_once() -> int:
             res = await db.execute(
                 update(db_models.Scan)
                 .where(db_models.Scan.id == scan_id)
-                .where(db_models.Scan.status == gate_status)
+                .where(
+                    db_models.Scan.status == gate_status,
+                    db_models.Scan.status.in_(tuple(sorted(allowed_gate_sources))),
+                )
                 .values(status=STATUS_BLOCKED_USER_DECLINE)
             )
             if res.rowcount != 1:
@@ -117,9 +129,13 @@ async def _sweep_once() -> int:
             db.add(
                 db_models.ScanEvent(
                     scan_id=scan_id,
+                    attempt_id=attempt_id,
                     stage_name=_GATE_STATUS_EVENTS[gate_status],
                     status="COMPLETED",
                 )
+            )
+            await ApprovalGateRepository(db).close_active(
+                scan_id, state="expired", commit=False
             )
             transitioned += 1
             transitioned_ids.append(str(scan_id))

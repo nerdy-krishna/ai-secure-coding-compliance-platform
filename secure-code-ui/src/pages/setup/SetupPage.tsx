@@ -190,10 +190,19 @@ const SetupPage: React.FC = () => {
           setStepError("Enter the production frontend URL (max 512 characters).");
           return false;
         }
-        const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/.test(
-          form.frontend_url,
+        let frontendUrl: URL;
+        try {
+          frontendUrl = new URL(form.frontend_url);
+        } catch {
+          setStepError("Enter a valid absolute frontend URL.");
+          return false;
+        }
+        const isLocalhost = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(
+          frontendUrl.hostname,
         );
-        if (!isLocalhost && !/^https:\/\//i.test(form.frontend_url)) {
+        const isHttp = frontendUrl.protocol === "http:";
+        const isHttps = frontendUrl.protocol === "https:";
+        if ((!isHttp && !isHttps) || (!isLocalhost && !isHttps)) {
           setStepError(
             "Enter the production frontend URL with an https:// scheme. Cloud deployments must terminate TLS.",
           );

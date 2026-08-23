@@ -24,10 +24,8 @@ yarn-error.log
 .idea/
 .DS_Store
 # Test + debug artifacts
-.pytest_cache/
 .mypy_cache/
 .ruff_cache/
-tests/
 *.patch
 cookies.txt
 # Logs

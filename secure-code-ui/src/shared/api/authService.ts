@@ -5,7 +5,6 @@ import {
   type TokenResponse,
   type UserLoginData,
   type UserRead,
-  type UserRegisterData,
 } from "../types/api";
 
 type AdminUserCreate = components["schemas"]["AdminUserCreate"];
@@ -53,20 +52,6 @@ export const authService = {
     // The refresh token is in an HttpOnly cookie, so the browser sends it automatically.
     // We just need to hit the refresh endpoint at the correct path.
     const response = await apiClient.post<TokenResponse>("/auth/refresh");
-    return response.data;
-  },
-
-  // Register
-  registerUser: async (
-    registerData: UserRegisterData,
-  ): Promise<UserRead> => {
-    // V08.2.3 / V15.3.3: explicit payload prevents mass-assignment of privileged fields
-    // (is_superuser, is_active, is_verified). Backend mass-assignment guards remain authoritative.
-    const payload = { email: registerData.email, password: registerData.password };
-    const response = await apiClient.post<UserRead>(
-      "/auth/register", // CORRECT PATH: relative to baseURL
-      payload,
-    );
     return response.data;
   },
 

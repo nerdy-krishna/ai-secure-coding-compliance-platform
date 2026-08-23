@@ -20,16 +20,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Any, Dict
 
 from langgraph.types import interrupt
 
-from app.infrastructure.agents.file_profiler import create_file_profiler
+from app.infrastructure.agents.file_profiler import (
+    create_file_profiler,
+    file_profile_response_schema_text,
+    render_file_profile_prompt,
+)
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMPriceOverrideRepository,
+    LLMUsageRepository,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.approval_gate_repo import (
+    ApprovalGateRepository,
+    approval_gate_payload,
+)
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib import cost_estimation
+from app.shared.lib.llm_estimation import calibrate_estimate
 from app.shared.lib.file_classification import should_skip_llm_profile
 from app.shared.lib.llm_slots import (
     LLMStep,
@@ -80,6 +94,13 @@ async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
         }
 
     total_input_tokens = 0
+    all_relevant_agents = state.get("all_relevant_agents") or {}
+    domain_vocabulary: Dict[str, str] = {
+        name: (agent.get("description") or "")
+        for name, agent in all_relevant_agents.items()
+    }
+    repository_map = state.get("repository_map")
+    repo_files = getattr(repository_map, "files", None) or {}
     async with AsyncSessionLocal() as db:
         utility_config = await LLMConfigRepository(db).get_by_id_with_decrypted_key(
             utility_llm_config_id
@@ -96,30 +117,92 @@ async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
                 file_profiles.get(path) or {}, deep_vendor_scan=deep_vendor_scan
             ):
                 continue
-            total_input_tokens += await cost_estimation.count_tokens(
-                content, utility_config
+            system_prompt, prompt = render_file_profile_prompt(
+                path,
+                content,
+                domain_vocabulary,
+                repo_files.get(path),
             )
+            # Count the actual rendered messages plus the structured-output
+            # schema the provider receives, not merely the raw file body.
+            total_input_tokens += await cost_estimation.count_tokens(
+                f"{system_prompt}\n\n{prompt}\n\n{file_profile_response_schema_text()}",
+                utility_config,
+            )
+        observations = await LLMUsageRepository(db).recent_estimation_observations(
+            llm_config_id=utility_config.id,
+            stage="file_profiling",
+        )
+        price_snapshot = await LLMPriceOverrideRepository(db).active_snapshot(
+            utility_config.id
+        )
 
-    cost_details = cost_estimation.estimate_cost_for_prompt(
-        utility_config, total_input_tokens
+    planned_request_count = sum(
+        1
+        for path in files
+        if not should_skip_llm_profile(
+            file_profiles.get(path) or {}, deep_vendor_scan=deep_vendor_scan
+        )
     )
+    cost_details = cost_estimation.estimate_cost_for_prompt(
+        utility_config,
+        total_input_tokens,
+        calibration=calibrate_estimate("file_profiling", observations),
+        stage="file_profiling",
+        price_snapshot=price_snapshot,
+        planned_request_count=planned_request_count,
+    )
+    cost_details["planned_request_count"] = planned_request_count
+    cost_details["rendered_envelope_includes"] = [
+        "system_prompt",
+        "file_path",
+        "domain_vocabulary",
+        "repository_structure",
+        "file_content",
+        "structured_output_schema",
+    ]
 
     async with AsyncSessionLocal() as db:
         repo = ScanRepository(db)
-        await repo.update_cost_and_status(
-            scan_id, STATUS_PENDING_PROFILING_APPROVAL, cost_details
+        changed = await repo.update_cost_and_status(
+            scan_id,
+            STATUS_PENDING_PROFILING_APPROVAL,
+            cost_details,
+            commit=False,
         )
+        if not changed:
+            await db.rollback()
+            return {"error_message": "Scan left profiling approval path."}
         await repo.record_scan_event(
             scan_id,
             "ESTIMATING_PROFILING_COST",
             EV_COMPLETED,
             details=cost_details,
+            commit=False,
         )
+        gate = await ApprovalGateRepository(db).create_or_get_pending(
+            scan_id=scan_id,
+            kind="profiling_approval",
+            node_name="profiling_cost_gate",
+            display_name="Approve file profiling cost",
+            purpose=(
+                "Approve the utility-model estimate used to profile files before "
+                "full security analysis."
+            ),
+            evidence={"cost_details": cost_details, "stage": "file_profiling"},
+            commit=False,
+        )
+        gate_data = approval_gate_payload(gate)
         # The gate's WAITING event — parks `scans.status` at
         # PENDING_PROFILING_APPROVAL. The bare `profiling_cost_gate`
         # node owns the interrupt(), so this work node runs exactly once
         # and never re-fires these writes on resume (#84).
-        await repo.record_scan_event(scan_id, STAGE_PROFILING_REVIEW, EV_WAITING)
+        await repo.record_scan_event(
+            scan_id,
+            STAGE_PROFILING_REVIEW,
+            EV_WAITING,
+            details=gate_data,
+        )
 
     logger.info(
         "estimate_profiling_cost: scan_id=%s files=%d tokens=%d est=$%.4f — gated",
@@ -128,7 +211,7 @@ async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
         total_input_tokens,
         cost_details.get("total_estimated_cost", 0.0),
     )
-    return {}
+    return {"active_approval_gate": gate_data}
 
 
 async def profiling_cost_gate_node(state: WorkerState) -> Dict[str, Any]:
@@ -141,18 +224,27 @@ async def profiling_cost_gate_node(state: WorkerState) -> Dict[str, Any]:
     `PROFILING_REVIEW/WAITING` event and set the pause status.
     """
     scan_id = state["scan_id"]
-    approval_payload = interrupt(
-        {"scan_id": str(scan_id), "kind": "profiling_approval"}
-    )
+    gate_data = state.get("active_approval_gate") or {}
+    if not gate_data.get("gate_id"):
+        async with AsyncSessionLocal() as db:
+            gate = await ApprovalGateRepository(db).get_active_for_scan(scan_id)
+            if gate is not None:
+                gate_data = approval_gate_payload(gate)
+    if not gate_data.get("gate_id"):
+        return {"error_message": "Profiling approval gate identity is missing."}
+    approval_payload = interrupt(gate_data)
     logger.info(
         "profiling_cost_gate: scan_id=%s resumed payload=%s",
         scan_id,
         approval_payload,
     )
+    if approval_payload.get("gate_id") != gate_data["gate_id"]:
+        return {"error_message": "Stale profiling approval gate payload rejected."}
     async with AsyncSessionLocal() as db:
-        await ScanRepository(db).record_scan_event(
-            scan_id, STAGE_PROFILING_REVIEW, EV_COMPLETED
-        )
+        if not await ApprovalGateRepository(db).mark_resumed(
+            uuid.UUID(gate_data["gate_id"])
+        ):
+            return {"error_message": "Profiling gate resume claim is no longer active."}
     return {"profiling_approval": approval_payload or {}}
 
 
@@ -199,6 +291,7 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     try:
         profiler = await create_file_profiler(
             utility_llm_config_id,
+            scan_id=scan_id,
             temperature=resolve_temperature(LLMStep.PROFILER, state),
         )
     except Exception as exc:  # noqa: BLE001

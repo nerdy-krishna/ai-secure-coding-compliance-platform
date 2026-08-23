@@ -15,8 +15,8 @@ flowchart TB
       CertbotEntry["nginx-entrypoint.sh<br/>· Certbot renew loop (12 h)<br/>· fail-closed on missing cert"]:::edge
     end
 
-    subgraph Build["Build pipeline (Vite 6.3 → /dist)"]
-      Vite["Vite 6.3.5 · @vitejs/plugin-react (SWC)"]:::app
+    subgraph Build["Build pipeline (Vite 6.4 → /dist)"]
+      Vite["Vite 6.4.3 · @vitejs/plugin-react"]:::app
       TSC["TypeScript 5.8 (strict)"]:::app
       Gen["openapi-typescript 7.13<br/>npm run generate:api"]:::app
     end
@@ -27,12 +27,12 @@ flowchart TB
       subgraph Providers["Provider chain (App.tsx)"]
         QC["QueryClientProvider<br/>@tanstack/react-query 5.77"]:::app
         Feat["FeatureProvider<br/>· GET /features (public, pre-auth)<br/>· useFeatures() → isFeatureEnabled(name)<br/>· staleTime: Infinity"]:::gate
-        Auth["AuthProvider<br/>· login / register / refresh<br/>· proactive 5 min before exp<br/>· cross-tab storage sync<br/>· circuit breaker (3 fails → 30 s)"]:::app
+        Auth["AuthProvider<br/>· login / refresh / logout<br/>· proactive 5 min before exp<br/>· cross-tab storage sync<br/>· circuit breaker (3 fails → 30 s)"]:::app
         Theme["ThemeProvider<br/>light/dark · variant A/B · accent<br/>localStorage: sccap-theme/variant/accent"]:::app
         ToastP["ToastProvider<br/>top-right · auto-dismiss 4.5 s"]:::app
       end
 
-      subgraph Router["React Router v7.6"]
+      subgraph Router["React Router v7.18"]
         RG["RouteGuard<br/>requires: unauth · auth · superuser · root-redirect<br/>+ feature gate (redirect when feature off)"]:::app
         LayoutA["AuthLayout"]:::app
         LayoutD["DashboardLayout<br/>+ TopNav + (admin) AdminSubNav<br/>nav links hidden by isFeatureEnabled()"]:::app
@@ -45,7 +45,7 @@ flowchart TB
         PDash["DashboardPage<br/>UserDashboard · AdminSnapshot"]:::app
         PSubmit["SubmitPage<br/>· tabs: files / git / archive<br/>· ScanReadinessPanel<br/>· ScanCoverageWizard"]:::app
         PScan["ScanRunningPage<br/>· EventSource SSE client<br/>· PrescanReviewCard<br/>· CriticalSecretOverrideModal<br/>· Cost-approval UI"]:::app
-        PResults["ProjectsPage · ProjectDetailPage<br/>ResultsPage · LlmLogViewerPage"]:::app
+        PResults["ProjectsPage · ProjectDetailPage<br/>ResultsPage · ScanDiagnosticsPage"]:::app
         PChat["SecurityAdvisorPage<br/>(3-col: sessions · thread · context)"]:::app
         PComp["CompliancePage<br/>(posture cards + ingest UI)"]:::app
         PAdmin["Admin pages (12+)<br/>SystemConfig · Users · Groups · Tenants<br/>· Agents · Frameworks · Prompts · SMTP<br/>· SSO · SCIM · AuthAudit · LLMConfigs · Findings"]:::app
@@ -78,7 +78,7 @@ flowchart TB
       end
 
       subgraph Client["HTTP client (shared/api/apiClient.ts)"]
-        Axios["axios 1.9.0<br/>baseURL = VITE_API_BASE_URL || /api/v1<br/>withCredentials: true · maxRedirects: 0"]:::app
+        Axios["axios 1.19.0<br/>baseURL = VITE_API_BASE_URL || /api/v1<br/>withCredentials: true · maxRedirects: 0"]:::app
         ReqI["Request interceptor<br/>Authorization: Bearer (localStorage)"]:::app
         ResI["Response interceptor<br/>401 → refreshAccessToken() → retry<br/>(single-flight dedup)"]:::app
       end
@@ -89,7 +89,7 @@ flowchart TB
 
       subgraph Storage["Browser storage"]
         LS[("localStorage<br/>accessToken · sccap-theme · sccap-variant · sccap-accent")]:::data
-        CK[("Cookies<br/>refresh_token (HttpOnly · Secure · SameSite)")]:::data
+        CK[("Cookies<br/>refresh token (HttpOnly · SameSite strict)<br/>Secure except explicit local HTTP profile")]:::data
       end
     end
 
@@ -137,10 +137,10 @@ flowchart TB
 |----------------------------|----------|-------------------------------------------------------------------------------------------|
 | React                      | 18.3.1   | UI library (automatic JSX runtime, `react-jsx`)                                           |
 | TypeScript                 | 5.8.3    | Strict mode (`noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`)         |
-| Vite                       | 6.3.5    | Bundler with `@vitejs/plugin-react` (SWC transform)                                       |
+| Vite                       | 6.4.3    | Bundler with `@vitejs/plugin-react`                                                       |
 | @tanstack/react-query      | 5.77.2   | Server-state cache (123+ `useQuery`/`useMutation` hooks)                                   |
-| axios                      | 1.9.0    | HTTP client (`maxRedirects: 0` to prevent auth-header leakage on redirect)                 |
-| react-router-dom           | 7.6.1    | Routing                                                                                   |
+| axios                      | 1.19.0   | HTTP client (`maxRedirects: 0` to prevent auth-header leakage on redirect)                 |
+| react-router-dom           | 7.18.2   | Routing                                                                                   |
 | openapi-typescript         | 7.13.0   | Generates `src/shared/types/api-generated.ts` from FastAPI's `/openapi.json`               |
 | file-saver                 | 2.0.5    | Report and CSV blob downloads                                                            |
 | eslint-plugin-security     | latest   | Lints for unsafe React/DOM patterns                                                       |
@@ -178,7 +178,7 @@ flowchart TB
 | Results            | `/analysis/results`                            | `ProjectsPage`                           |
 | Results            | `/analysis/projects/:projectId`                | `ProjectDetailPage`                      |
 | Results            | `/analysis/results/:scanId`                    | `ResultsPage`                            |
-| LLM logs           | `/scans/:scanId/llm-logs`                      | `LlmLogViewerPage`                       |
+| Diagnostics        | `/scans/:scanId/diagnostics`                   | `ScanDiagnosticsPage`                    |
 | Chat               | `/advisor`                                     | `SecurityAdvisorPage`                    |
 | Compliance         | `/compliance`                                  | `CompliancePage`                         |
 | Admin              | `/admin/{system,users,user-groups,tenants,findings,agents,frameworks,prompts,smtp,sso/providers,sso/audit,scim/tokens,appearance}` | matching `*Page` / `*Tab` components |
@@ -189,7 +189,7 @@ flowchart TB
 
 | Service                | LOC | Notable methods                                                                                                   |
 |------------------------|-----|-------------------------------------------------------------------------------------------------------------------|
-| `authService`          | —   | `loginUser`, `refreshToken`, `registerUser`, `getCurrentUser`, `logoutUser`, plus admin user CRUD                  |
+| `authService`          | —   | `loginUser`, `refreshToken`, `getCurrentUser`, `logoutUser`, password recovery, plus admin user CRUD              |
 | `scanService`          | 332 | `createScan(FormData)`, `previewGitRepo`, `previewArchive`, `getScanResult`, `getPrescanReview`, `approveScan`, `applySelectiveFixes`, `cancelScan`, `getStreamToken`, `getLlmInteractionsForScan`, `createProject`, `deleteScan`, `deleteProject` |
 | `chatService`          | —   | `createSession`, `getSessions`, `getSessionMessages`, `askQuestion`, `deleteSession`, `getSessionContext`          |
 | `frameworkService`     | 122 | Framework CRUD                                                                                                    |
@@ -228,7 +228,9 @@ flowchart TB
 5. es.addEventListener("done", …)         // terminal status; close stream and redirect
 ```
 
-Includes a 30-second no-data safety timer and a max-5-retry frontend bound on top of the browser's native EventSource backoff.
+The client persists the last version-1 event cursor, reconnects with that cursor, and de-duplicates
+visible activity by event ID. Idle streams use SSE keepalives; cancellation remains non-terminal in
+the UI until the server emits the persisted `CANCELLATION/COMPLETED` acknowledgement.
 
 ### Theming & accessibility
 
@@ -254,13 +256,13 @@ Includes a 30-second no-data safety timer and a max-5-retry frontend bound on to
 | `scan`            | — (always on: submission, scan runtime, results, dashboard)                                |
 | `chat`            | `/advisor` route + `SecurityAdvisorPage`, TopNav **Advisor** link                          |
 | `compliance`      | `/compliance` route + `CompliancePage`, TopNav **Compliance** link                         |
-| `multi_user`      | `/admin/users`, self-service registration                                                  |
+| `multi_user`      | `/admin/users` and user administration                                                       |
 | `user_groups`     | `/admin/user-groups`, group-membership UI                                                   |
 | `sso`             | SSO buttons on `LoginPage`, `/admin/sso/providers` + `/admin/sso/audit`                     |
 | `scim`            | `/admin/scim/tokens`                                                                         |
 | `multi_tenant`    | `/admin/tenants`                                                                             |
 | `email`           | `/forgot-password` + `/reset-password` flow                                                  |
-| `log_stack`       | `LlmLogViewerPage`, `/scans/:scanId/llm-logs`, LLM-log links on results                      |
+| `log_stack`       | Runtime log-level controls plus the Fluentd/Loki/Grafana containers                          |
 | `tracing`         | — (no dedicated SPA surface; Langfuse has its own UI — see diagram 10)                       |
 | `mcp`             | — (no SPA surface; the `/mcp` tool endpoint is backend-only)                                 |
 | `admin_authoring` | `/admin/{agents,frameworks,prompts}` + RAG ingest UI                                         |

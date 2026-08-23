@@ -1,7 +1,9 @@
 # src/app/infrastructure/auth/backend.py
 import logging
+import time
 from typing import Optional, Literal
 
+import jwt
 from fastapi import Response, Request
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -14,6 +16,13 @@ from fastapi_users import models as fastapi_users_typing_models
 from app.config.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def mark_auth_response_no_store(response: Response) -> None:
+    """Prevent browsers and intermediaries from caching token responses."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+
 
 # Bearer Transport for Access Tokens (remains the same)
 bearer_transport = BearerTransport(tokenUrl="/api/v1/auth/login")
@@ -42,7 +51,7 @@ class CustomCookieJWTStrategy(
         self.refresh_token_lifetime_seconds = refresh_token_lifetime_seconds
         self.cookie_name = "SecureCodePlatformRefresh"
         self.cookie_path = "/"
-        self.cookie_secure = not getattr(settings, "ALLOW_INSECURE_COOKIES", False)
+        self.cookie_secure = not settings.ALLOW_INSECURE_COOKIES
         self.cookie_httponly = True
         self.cookie_samesite: Literal["lax", "strict", "none"] = "strict"
 
@@ -68,8 +77,28 @@ class CustomCookieJWTStrategy(
             httponly=self.cookie_httponly,
             samesite=self.cookie_samesite,  # This will now pass type checking
         )
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Pragma"] = "no-cache"
+
+    async def issue_refresh_token(self, response: Response, user) -> None:
+        """Mint the browser refresh credential for a newly authenticated user."""
+        now_ts = int(time.time())
+        refresh_token = jwt.encode(
+            {
+                "sub": str(user.id),
+                "aud": self.token_audience,
+                "typ": "refresh",
+                "original_iat": now_ts,
+                "exp": now_ts + self.refresh_token_lifetime_seconds,
+            },
+            self.encode_key,
+            algorithm=self.algorithm,
+        )
+        await self.write_refresh_token(response, refresh_token)
+
+    async def issue_session(self, response: Response, user) -> str:
+        """Issue the access token and matching rotating refresh cookie."""
+        access_token = await self.write_token(user)
+        await self.issue_refresh_token(response, user)
+        mark_auth_response_no_store(response)
         logger.info(
             "auth: refresh token issued",
             extra={
@@ -78,6 +107,7 @@ class CustomCookieJWTStrategy(
                 "secure": self.cookie_secure,
             },
         )
+        return access_token
 
     async def read_refresh_token(self, request: Request) -> Optional[str]:
         token = request.cookies.get(self.cookie_name)
@@ -97,7 +127,7 @@ class CustomCookieJWTStrategy(
             )
         return token
 
-    async def destroy_refresh_token(self, response: Response, request: Request) -> None:
+    async def destroy_refresh_token(self, response: Response) -> None:
         response.set_cookie(
             key=self.cookie_name,
             value="",
@@ -107,13 +137,33 @@ class CustomCookieJWTStrategy(
             httponly=self.cookie_httponly,
             samesite=self.cookie_samesite,
         )
+
+
+class RefreshCookieAuthenticationBackend(AuthenticationBackend):
+    """FastAPI Users backend that completes the browser-session contract.
+
+    ``AuthenticationBackend`` only asks a strategy for an access token. The
+    SCCAP refresh endpoint therefore had no cookie to rotate after password
+    login. SSO and WebAuthn minted one independently; this backend makes the
+    password path equivalent and clears the cookie on logout.
+    """
+
+    async def login(self, strategy, user) -> Response:
+        response = await super().login(strategy, user)
+        await strategy.issue_refresh_token(response, user)
+        mark_auth_response_no_store(response)
+        return response
+
+    async def logout(self, strategy, user, token: str) -> Response:
+        response = await super().logout(strategy, user, token)
+        await strategy.destroy_refresh_token(response)
         response.headers["Clear-Site-Data"] = '"cache", "cookies", "storage"'
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Pragma"] = "no-cache"
+        mark_auth_response_no_store(response)
         logger.info(
             "auth: refresh token destroyed",
-            extra={"cookie_name": self.cookie_name},
+            extra={"cookie_name": strategy.cookie_name},
         )
+        return response
 
 
 def get_custom_cookie_jwt_strategy() -> CustomCookieJWTStrategy:
@@ -135,7 +185,7 @@ def get_custom_cookie_jwt_strategy() -> CustomCookieJWTStrategy:
 
 
 # This is our main authentication backend.
-auth_backend = AuthenticationBackend(
+auth_backend = RefreshCookieAuthenticationBackend(
     name="jwt",
     transport=bearer_transport,
     get_strategy=get_custom_cookie_jwt_strategy,

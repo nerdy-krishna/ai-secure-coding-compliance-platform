@@ -5,6 +5,18 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_live_provider:
+        description: Run the one-call, cost-bounded live OpenAI evaluation
+        required: true
+        type: boolean
+        default: false
+      live_provider_model:
+        description: OpenAI model id for the opt-in evaluation
+        required: true
+        type: string
+        default: gpt-4o-mini
 
 # Cancel superseded runs on the same ref so PRs don't queue up.
 concurrency:
@@ -26,12 +38,12 @@ jobs:
         # needed for linting the source).
         run: pip install "ruff==0.11.11" "black==25.1.0"
       - name: ruff
-        run: ruff check src
+        run: ruff check src tests
       - name: black --check
-        run: black --check src
+        run: black --check src tests
 
   lint-frontend:
-    name: Frontend lint + build (eslint + vite)
+    name: Frontend test + lint + build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -45,10 +57,91 @@ jobs:
           cache-dependency-path: secure-code-ui/package-lock.json
       - name: Install deps
         run: npm ci
+      - name: Focused frontend regressions
+        run: npm test
       - name: ESLint
         run: npm run lint
       - name: Vite build
         run: npm run build
+
+  browser:
+    name: Browser (authenticated lifecycle)
+    runs-on: ubuntu-latest
+    env:
+      SCCAP_BROWSER_EMAIL: browser-ci@example.com
+      SCCAP_BROWSER_PASSWORD: "V7!BrowserRefresh-CI-2026"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: secure-code-ui/package-lock.json
+      - name: Create isolated browser configuration
+        run: |
+          cp .env.example .env
+          sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=/' .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-browser-postgres/' .env
+          sed -i 's/^RABBITMQ_DEFAULT_PASS=.*/RABBITMQ_DEFAULT_PASS=ci-browser-rabbit/' .env
+          sed -i 's/^RABBITMQ_ERLANG_COOKIE=.*/RABBITMQ_ERLANG_COOKIE=ci-browser-cookie-0123456789/' .env
+          sed -i 's/^SECRET_KEY=.*/SECRET_KEY=ci-browser-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ/' .env
+          sed -i 's|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=|' .env
+          sed -i 's/^QDRANT_API_KEY=.*/QDRANT_API_KEY=ci-browser-qdrant/' .env
+          sed -i 's/^SSL_DEV_INSECURE=.*/SSL_DEV_INSECURE=true/' .env
+      - name: Start isolated API and UI
+        run: docker compose up -d --build db rabbitmq app ui
+      - name: Wait for the same-origin UI proxy
+        run: curl --fail --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1/api/v1/setup/status --output /dev/null
+      - name: Install browser test dependencies
+        working-directory: secure-code-ui
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Authenticated browser lifecycle regressions
+        working-directory: secure-code-ui
+        env:
+          SCCAP_BROWSER_BASE_URL: http://127.0.0.1
+        run: npm run test:browser
+      - name: Upload sanitized browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: browser-failure-evidence
+          path: secure-code-ui/test-results/browser-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Browser service logs
+        if: failure()
+        run: docker compose logs --no-color --tail=300 app ui db rabbitmq
+      - name: Tear down isolated browser stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  live-provider-evaluation:
+    name: Live provider evaluation (manual, max $0.01)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_live_provider
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Build evaluation runtime
+        run: docker build --target api --tag sccap-live-eval .
+      - name: One-call structured security evaluation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SCCAP_LIVE_PROVIDER_MODEL: ${{ inputs.live_provider_model }}
+          SCCAP_LIVE_MAX_OUTPUT_TOKENS: "400"
+          SCCAP_LIVE_MAX_COST_USD: "0.01"
+        run: |
+          docker run --rm \
+            --entrypoint python \
+            -e PYTHONPATH=/app/src \
+            -e OPENAI_API_KEY \
+            -e SCCAP_LIVE_PROVIDER_MODEL \
+            -e SCCAP_LIVE_MAX_OUTPUT_TOKENS \
+            -e SCCAP_LIVE_MAX_COST_USD \
+            -v "${{ github.workspace }}/tests:/app/tests:ro" \
+            sccap-live-eval \
+            -m tests.evaluations.live_provider_security_eval
 
   poetry-lock-check:
     name: poetry.lock drift check
@@ -154,11 +247,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build-backend-images:
-    name: Docker build (api + worker)
+  backend-unit:
+    name: Backend unit contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Compose secret bootstrap contract
+        run: |
+          cp .env.example .env
+          sed -i '/^RABBITMQ_ERLANG_COOKIE=/d' .env
+          python scripts/bootstrap_env_secrets.py --env-file .env
+          python -m unittest discover -s tests/scripts -v
+          docker compose config --quiet
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
       - name: Build api stage
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
@@ -168,9 +271,52 @@ jobs:
           target: api
           # Don't push from PRs; just verify the image builds.
           push: false
-          load: false
+          load: true
+          tags: sccap-api:test
           cache-from: type=gha,scope=api
           cache-to: type=gha,scope=api,mode=max
+      - name: Focused backend unit contracts
+        run: |
+          docker run --rm \
+            --entrypoint python \
+            --env-file .env.example \
+            -e PYTHONPATH=/app/src \
+            -e SECRET_KEY=ci-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
+            -e ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA= \
+            -e QDRANT_API_KEY=ci-only-qdrant-key-not-used \
+            -v "${{ github.workspace }}/tests:/app/tests:ro" \
+            sccap-api:test \
+            -m unittest discover -s /app/tests/auth -v
+          docker run --rm \
+            --entrypoint python \
+            --env-file .env.example \
+            -e PYTHONPATH=/app/src \
+            -e SECRET_KEY=ci-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
+            -e ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA= \
+            -e QDRANT_API_KEY=ci-only-qdrant-key-not-used \
+            -v "${{ github.workspace }}/tests:/app/tests:ro" \
+            sccap-api:test \
+            -m unittest discover -s /app/tests/risk -v
+          docker run --rm \
+            --entrypoint python \
+            --env-file .env.example \
+            -e PYTHONPATH=/app/src \
+            -e SECRET_KEY=ci-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
+            -e ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA= \
+            -e QDRANT_API_KEY=ci-only-qdrant-key-not-used \
+            -v "${{ github.workspace }}/tests:/app/tests:ro" \
+            sccap-api:test \
+            -m unittest discover -s /app/tests/scanners -v
+          docker run --rm \
+            --entrypoint python \
+            --env-file .env.example \
+            -e PYTHONPATH=/app/src \
+            -e SECRET_KEY=ci-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
+            -e ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA= \
+            -e QDRANT_API_KEY=ci-only-qdrant-key-not-used \
+            -v "${{ github.workspace }}/tests:/app/tests:ro" \
+            sccap-api:test \
+            -m unittest discover -s /app/tests/workflows -v
       - name: Build worker stage
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
         with:
@@ -178,67 +324,99 @@ jobs:
           file: Dockerfile
           target: worker
           push: false
-          load: false
+          load: true
+          tags: sccap-worker:test
           cache-from: type=gha,scope=worker
           cache-to: type=gha,scope=worker,mode=max
+      - name: Verify scanner runtime versions and digests
+        run: |
+          docker run --rm \
+            --entrypoint python \
+            --env-file .env.example \
+            -e PYTHONPATH=/app/src \
+            -e SECRET_KEY=ci-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ \
+            -e ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA= \
+            -e QDRANT_API_KEY=ci-only-qdrant-key-not-used \
+            -v "${{ github.workspace }}/tests:/app/tests:ro" \
+            sccap-worker:test \
+            -m tests.scanners.scanner_toolchain_smoke
 
-  pytest:
-    name: Backend tests (pytest)
+  backend-integration:
+    name: Backend integration (Postgres + RabbitMQ + worker)
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: secure_coding_platform
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      # Match the default docker-compose DB so tests hit the same schema
-      # shape the app expects.
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: secure_coding_platform
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: "5432"
-      POSTGRES_HOST_ALEMBIC: localhost
-      ASYNC_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/secure_coding_platform
-      # alembic/env.py drives migrations through create_async_engine(), so
-      # this URL must use the async driver even though Alembic itself is sync.
-      ALEMBIC_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/secure_coding_platform
-      SECRET_KEY: test-secret-key-at-least-32-characters-long
-      ENCRYPTION_KEY: zH6_8nNpMc7XxS3mLqJdRvKuBtYfGhWePk4AaCcTbEE=
-      # Cost lookups stay offline in CI — no LiteLLM network.
-      LITELLM_LOCAL_MODEL_COST_MAP: "True"
-      # Skip SMTP / fluentd wiring the app lazy-initialises.
-      RABBITMQ_HOST: localhost
-      RABBITMQ_DEFAULT_USER: user
-      RABBITMQ_DEFAULT_PASS: password
-      ALLOWED_ORIGINS: http://localhost:5173
-      # Qdrant is not run in CI — the test/migration code never reaches
-      # the vector store — but `Settings()` requires QDRANT_API_KEY at
-      # construction time (validator rejects empty + the `.env.example`
-      # placeholder). Use any non-placeholder value so config loads.
-      QDRANT_HOST: localhost
-      QDRANT_PORT: "6333"
-      QDRANT_API_KEY: ci-test-qdrant-key-not-used
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
         with:
-          python-version: "3.12"
-      - name: Install Poetry
-        run: pip install "poetry==1.8.3"
-      - name: Install dependencies (with test group)
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: secure-code-ui/package-lock.json
+      - name: Create isolated CI configuration
         run: |
-          poetry install --no-interaction --no-ansi --no-root --without dev --with test
-      - name: Run Alembic migrations
-        run: poetry run alembic upgrade head
-      - name: pytest
-        run: poetry run pytest -xvs
+          cp .env.example .env
+          sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=/' .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-postgres-password/' .env
+          sed -i 's/^RABBITMQ_DEFAULT_PASS=.*/RABBITMQ_DEFAULT_PASS=ci-rabbit-password/' .env
+          sed -i 's/^RABBITMQ_ERLANG_COOKIE=.*/RABBITMQ_ERLANG_COOKIE=ci-rabbit-cookie-0123456789/' .env
+          sed -i 's/^SECRET_KEY=.*/SECRET_KEY=ci-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ/' .env
+          sed -i 's|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=|' .env
+          sed -i 's/^QDRANT_API_KEY=.*/QDRANT_API_KEY=ci-only-qdrant-key/' .env
+          sed -i 's/^SSL_DEV_INSECURE=.*/SSL_DEV_INSECURE=true/' .env
+      - name: Start isolated API infrastructure
+        run: docker compose up -d --build db rabbitmq qdrant app
+      - name: Wait for public API
+        run: curl --fail --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1:8000/openapi.json --output /dev/null
+      - name: Reject generated OpenAPI contract drift
+        working-directory: secure-code-ui
+        env:
+          SCCAP_OPENAPI_URL: http://127.0.0.1:8000/openapi.json
+        run: |
+          npm ci
+          npm run check:api
+      - name: Start real worker
+        run: docker compose up -d --build worker
+      - name: Real-infrastructure integration suite
+        run: |
+          docker compose exec -T \
+            -e SCCAP_RUN_INTEGRATION=1 \
+            -e SCCAP_INTEGRATION_BASE_URL=http://127.0.0.1:8000 \
+            app python -m unittest discover -s /app/tests/integration -v
+      - name: Start deterministic OpenAI-compatible fixture
+        run: |
+          docker compose exec -T -d app \
+            python -m tests.integration.fake_openai_server
+          docker compose exec -T app python -c \
+            'import urllib.request; assert urllib.request.urlopen("http://127.0.0.1:8765/v1/models").status == 200'
+      - name: Resume all three gates on one durable graph thread
+        run: |
+          docker compose exec -T \
+            -e SCCAP_INTEGRATION_BASE_URL=http://127.0.0.1:8000 \
+            app python -m tests.integration.gate_resume_scenario
+      - name: Prepare RabbitMQ outage scenario
+        run: |
+          docker compose exec -T app python -m tests.integration.outbox_recovery_scenario \
+            prepare --run-id ci-rabbit-recovery
+      - name: Stop RabbitMQ and exercise durable API transactions
+        run: |
+          docker compose stop rabbitmq
+          docker compose exec -T \
+            -e SCCAP_INTEGRATION_BASE_URL=http://127.0.0.1:8000 \
+            app python -m tests.integration.run_control_scenario
+          docker compose exec -T app python -m tests.integration.outbox_recovery_scenario \
+            submit --run-id ci-rabbit-recovery
+      - name: Restore RabbitMQ and prove outbox recovery
+        run: |
+          docker compose start rabbitmq
+          docker compose exec -T app python -m tests.integration.outbox_recovery_scenario \
+            assert-recovered --run-id ci-rabbit-recovery
+      - name: Remove outage-scenario fixtures
+        if: always()
+        run: |
+          docker compose exec -T app python -m tests.integration.outbox_recovery_scenario \
+            cleanup --run-id ci-rabbit-recovery
+      - name: Integration service logs
+        if: failure()
+        run: docker compose logs --no-color --tail=300 app worker rabbitmq db
+      - name: Tear down isolated integration stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans

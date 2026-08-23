@@ -13,24 +13,28 @@ installation's `ENCRYPTION_KEY`.
 
 !!! danger "Permissions"
 
-    Create / delete endpoints require **Superuser** authentication. The
-    list endpoint is open to any authenticated user (so the submit UI can
-    offer a slot picker).
+    All endpoints on this router require **Superuser** authentication.
 
-## Pricing: LiteLLM + admin override
+## Pricing: estimates, catalog actuals, and versioned overrides
 
-Token counting and cost estimation for every LLM call run through
-LiteLLM. The `input_cost_per_million` / `output_cost_per_million`
-fields on a configuration are **overrides**, not required values:
+Pre-call token counting and estimates use LiteLLM's local model map.
+Post-call actuals use provider-reported Pydantic AI usage and the
+immutable request-aware usage ledger. The legacy
+`input_cost_per_million` / `output_cost_per_million` fields remain a
+text-only fallback when no versioned price override exists:
 
 - **Leave them zero** (default) and SCCAP calls
   `litellm.cost_per_token(model=model_name, ...)` against the
   community-maintained model price map. Offline-pinnable with
   `LITELLM_LOCAL_MODEL_COST_MAP=True`.
-- **Set them to non-zero** to override LiteLLM for bespoke endpoints
-  (Azure, private deployments, negotiated rates). SCCAP treats the
-  override as authoritative for both pre-call estimation and
-  post-call actuals.
+- **Set both to non-zero** only for a simple text-token contract. Calls
+  containing cache categories are marked unknown because two flat rates
+  cannot represent those prices safely.
+- **For negotiated or private pricing**, append a complete effective-dated
+  version through `POST /{config_id}/price-overrides`. It must include all
+  text, cache read/write, reasoning, audio, image, and provider-request
+  categories. Zero is valid for a category explicitly priced at zero;
+  omitted categories are rejected.
 
 ## Supported providers
 
@@ -97,7 +101,7 @@ Creates a new LLM provider configuration. The provided API key will be encrypted
 Retrieves a list of all available LLM configurations. API keys are not included in the response.
 
 -   **Endpoint:** `GET /`
--   **Permissions:** Any Authenticated User
+-   **Permissions:** Superuser
 -   **Response (`200 OK`):**
 
     ```json
@@ -116,6 +120,28 @@ Retrieves a list of all available LLM configurations. API keys are not included 
       }
     ]
     ```
+
+## Append a Price Override Version
+
+Closes the current active version and appends a complete immutable price set.
+Existing usage events retain their original snapshot.
+
+- **Endpoint:** `POST /{config_id}/price-overrides`
+- **Permissions:** Superuser
+- **Request body:** `rates` must contain exactly these categories:
+  `uncached_input`, `cache_read_input`, `cache_write_input`, `input_audio`,
+  `cache_audio_read`, `image_input`, `non_reasoning_output`,
+  `reasoning_output`, `output_audio`, `image_output`, and `provider_request`.
+  Token categories use `million_tokens`; `provider_request` uses
+  `thousand_requests`. Each rate contains decimal `amount` and optional
+  `modifier`.
+
+## List Price Override History
+
+- **Endpoint:** `GET /{config_id}/price-overrides`
+- **Permissions:** Superuser
+- **Response:** newest-first versions with `effective_from`, `effective_to`,
+  source, currency, creator, and the complete rate set.
 
 ## Delete LLM Configuration
 

@@ -6,32 +6,47 @@ services:
       context: .
       dockerfile: Dockerfile
       target: api
-      args:
-        INSTALL_DEV_DEPS: "true"
     container_name: sccap_app
     env_file:
       - .env
     environment:
       - PYTHONPATH=/app/src
       - SERVICE_NAME=app
+      # Share the UI's explicit HTTP-only local-development opt-in with the
+      # refresh-cookie issuer. Settings reject this in ENVIRONMENT=production.
+      - ALLOW_INSECURE_COOKIES=${SSL_DEV_INSECURE:-false}
       # Pin LiteLLM to its bundled model_prices_and_context_window.json so
       # cost lookups never hit api.litellm.ai at runtime. The map refreshes
       # whenever we bump the litellm pin.
       - LITELLM_LOCAL_MODEL_COST_MAP=True
+      - EVIDENCE_STORE_ENABLED=true
+      - EVIDENCE_S3_ENDPOINT=http://evidence-minio:9000
+      - EVIDENCE_S3_ACCESS_KEY_ID=${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
+      - EVIDENCE_S3_SECRET_ACCESS_KEY=${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
+      # Repository-level bootstrap contract tests inspect these artifacts.
+      # Mount them read-only for the development/test service; they are not
+      # copied into the production API image.
+      - ./.env.example:/app/.env.example:ro
+      - ./setup.sh:/app/setup.sh:ro
+      - ./setup.bat:/app/setup.bat:ro
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
       - ./alembic.ini:/app/alembic.ini
       - ./alembic:/app/alembic
       - ./tests:/app/tests
       - ./data:/app/data:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
+      - validation_jobs:/var/lib/sccap-validation/jobs
     ports:
       - "${APP_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      evidence-minio:
         condition: service_healthy
     # fluentd is gated behind the `log_stack` compose profile (modular
     # setup). The fluentd logging driver below is async, so app starts
@@ -145,6 +160,30 @@ services:
     networks:
       - scpnetwork
 
+  # Dedicated SCCAP evidence store. It is intentionally independent of the
+  # optional Langfuse MinIO service, credentials, bucket, and lifecycle.
+  evidence-minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    container_name: sccap_evidence_minio
+    command: server /data --address ":9000" --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
+      MINIO_ROOT_PASSWORD: ${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
+    volumes:
+      - evidence_minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || curl -fs http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - scpnetwork
+
   worker:
     build:
       context: .
@@ -155,14 +194,27 @@ services:
       - .env
     volumes:
       - ./src:/app/src
+      # The shared entrypoint runs Alembic before the consumer starts. Keep
+      # live source and live migration revisions in sync during development.
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./alembic:/app/alembic:ro
+      - validation_jobs:/var/lib/sccap-validation/jobs
     environment:
       - PYTHONPATH=/app/src
       - SERVICE_NAME=worker
       - LITELLM_LOCAL_MODEL_COST_MAP=True
+      - EVIDENCE_STORE_ENABLED=true
+      - EVIDENCE_S3_ENDPOINT=http://evidence-minio:9000
+      - EVIDENCE_S3_ACCESS_KEY_ID=${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
+      - EVIDENCE_S3_SECRET_ACCESS_KEY=${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
     depends_on:
       db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      patch-validator:
+        condition: service_started
+      evidence-minio:
         condition: service_healthy
     # fluentd gated behind the `log_stack` profile; async driver tolerates
     # its absence (modular setup).
@@ -177,6 +229,43 @@ services:
     networks:
       - scpnetwork
     command: [ "python", "-m", "app.workers.consumer" ]
+
+  patch-validator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: patch-validator
+    container_name: sccap_patch_validator
+    network_mode: "none"
+    read_only: true
+    tmpfs:
+      - /tmp:size=268435456,mode=1777,nosuid,nodev,noexec
+    volumes:
+      - validation_jobs:/jobs
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+      # The daemon must manage and remove files created by uid 1002 inside
+      # ephemeral workspaces. These capabilities never survive the child
+      # setuid transition, and the service has no network or SCCAP mounts.
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 0.50
+    environment:
+      - SCCAP_VALIDATION_JOB_DIR=/jobs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/jobs/.ready"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
 
   fluentd:
     build: ./fluentd
@@ -533,6 +622,8 @@ volumes:
   langfuse_redis_data:
   langfuse_minio_data:
   qdrant_data:
+  evidence_minio_data:
+  validation_jobs:
 
 
 networks:

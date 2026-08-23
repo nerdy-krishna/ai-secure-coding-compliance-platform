@@ -31,8 +31,8 @@ When remediation is requested, SCCAP will:
 The current remediation pipeline (see
 [Managing Findings](./code-analysis/managing-findings.md)):
 
-- Applies fixes incrementally with a merge agent for overlapping
-  edits.
+- Resolves exact source ranges, rejects ambiguous or overlapping edits
+  for manual review, and applies each accepted file atomically.
 - Writes a `POST_REMEDIATION` snapshot for diffing.
 - **Does not** run your tests. Run them yourself on the downloaded
   patched codebase before merging.

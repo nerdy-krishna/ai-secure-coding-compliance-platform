@@ -72,7 +72,7 @@ flowchart TB
       WF["LangGraph StateGraph<br/>AsyncPostgresSaver (checkpoints)"]:::app
       Scanners["Deterministic scanners<br/>Bandit · Semgrep 1.95 · Gitleaks 8.21 · OSV-Scanner 2.3"]:::app
       Agents["Per-framework analysis agents<br/>ASVS · CWE · ISVS · MASVS · Proactive · …<br/>generic_specialized_agent · finding_consolidator"]:::app
-      Merge["consolidate_and_patch (REMEDIATE)<br/>_run_merge_agent · single-shot<br/>tree-sitter syntax verify"]:::app
+      Merge["consolidate_and_patch (SUGGEST / REMEDIATE)<br/>exact-range deterministic planner<br/>atomic apply · tree-sitter verify"]:::app
     end
 
     %% ===== Data tier =====

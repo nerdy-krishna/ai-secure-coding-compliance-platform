@@ -24,12 +24,17 @@ reasoning LLM.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from app.infrastructure.llm_client import LLMClient, get_llm_client
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMUsageContext,
+    build_usage_idempotency_key,
+)
 from app.shared.analysis_tools.cross_file_slicer import CrossFileSlices
 
 logger = logging.getLogger(__name__)
@@ -88,8 +93,16 @@ class _ValidationResponse(BaseModel):
 class CrossFileValidator:
     """Validates one finding against its cross-file slices."""
 
-    def __init__(self, client: LLMClient):
+    def __init__(
+        self,
+        client: LLMClient,
+        *,
+        scan_id: uuid.UUID,
+        llm_config_id: uuid.UUID,
+    ):
         self._client = client
+        self._scan_id = scan_id
+        self._llm_config_id = llm_config_id
 
     async def validate(
         self, finding: object, slices: CrossFileSlices
@@ -109,6 +122,25 @@ class CrossFileValidator:
                 prompt=self._build_prompt(finding, slices),
                 response_model=_ValidationResponse,
                 system_prompt=_SYSTEM_PROMPT,
+                usage_context=LLMUsageContext(
+                    operation_kind="scan",
+                    operation_id=str(self._scan_id),
+                    stage="cross_file_validation",
+                    agent_name="CrossFileValidator",
+                    idempotency_key=build_usage_idempotency_key(
+                        operation_kind="scan",
+                        operation_id=self._scan_id,
+                        stage="cross_file_validation",
+                        agent_name="CrossFileValidator",
+                        unit_key=(
+                            f"{getattr(finding, 'file_path', '')}:"
+                            f"{getattr(finding, 'line_number', 0)}:"
+                            f"{getattr(finding, 'title', '')}"
+                        ),
+                        llm_config_id=self._llm_config_id,
+                    ),
+                    scan_id=self._scan_id,
+                ),
             )
         except Exception as exc:  # noqa: BLE001 — fail safe, never raise
             logger.warning(
@@ -176,7 +208,9 @@ class CrossFileValidator:
 
 
 async def create_cross_file_validator(
-    reasoning_llm_config_id, temperature: Optional[float] = None
+    reasoning_llm_config_id: uuid.UUID,
+    scan_id: uuid.UUID,
+    temperature: Optional[float] = None,
 ) -> CrossFileValidator:
     """Build a `CrossFileValidator` backed by the scan's reasoning slot.
 
@@ -192,4 +226,8 @@ async def create_cross_file_validator(
             f"Reasoning LLM config {reasoning_llm_config_id} could not be "
             "loaded for cross-file validation."
         )
-    return CrossFileValidator(client)
+    return CrossFileValidator(
+        client,
+        scan_id=scan_id,
+        llm_config_id=reasoning_llm_config_id,
+    )

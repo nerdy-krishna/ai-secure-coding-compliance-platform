@@ -14,7 +14,7 @@ import html
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.api.v1.models import (
     AnalysisResultDetailResponse,
@@ -180,6 +180,7 @@ class ReportData:
     cross_file: bool
     source: str
     temperature: str
+    toolchain_provenance: Dict[str, Any]
     exec_summary: str = field(default="")
 
 
@@ -291,6 +292,7 @@ def build_report_data(result: AnalysisResultDetailResponse) -> ReportData:
         cross_file=bool(result.cross_file_validation),
         source=_source_label(result),
         temperature=_temperature_label(result),
+        toolchain_provenance=dict(result.toolchain_provenance or {}),
     )
     data.exec_summary = _exec_summary(data)
     return data
@@ -432,6 +434,51 @@ def render_models_section(data: ReportData) -> str:
         )
     return (
         '<h2 class="section">Models &amp; pipeline</h2>'
+        f'<div class="models">{"".join(cards)}</div>'
+    )
+
+
+def render_toolchain_section(data: ReportData) -> str:
+    """Bounded scanner/runtime/rules evidence for reproducibility review."""
+    if not data.toolchain_provenance:
+        return (
+            '<h2 class="section">Deterministic scanner provenance</h2>'
+            '<p class="muted">Provenance was not retained for this scan; '
+            "coverage is degraded.</p>"
+        )
+    cards: List[str] = []
+    for name in sorted(data.toolchain_provenance):
+        record = data.toolchain_provenance[name]
+        if not isinstance(record, dict):
+            continue
+        binary = record.get("binary") if isinstance(record.get("binary"), dict) else {}
+        rules = record.get("rules") if isinstance(record.get("rules"), dict) else {}
+        advisory = (
+            record.get("advisory_database")
+            if isinstance(record.get("advisory_database"), dict)
+            else {}
+        )
+        digest = str(binary.get("sha256") or "unavailable")
+        details = [
+            f"version {_e(binary.get('version') or 'unavailable')}",
+            f"binary sha256 {_e(digest[:16])}…" if digest != "unavailable" else digest,
+        ]
+        if rules:
+            details.append(
+                f"{_e(rules.get('selected_rule_count', 0))} rules · "
+                f"ruleset {_e(str(rules.get('ruleset_sha256') or 'unavailable')[:16])}…"
+            )
+        if advisory:
+            details.append(f"advisories: {_e(advisory.get('mode') or 'unknown')}")
+        cards.append(
+            '<div class="model-card">'
+            f'<div class="model-cat">{_e(record.get("status") or "degraded")}</div>'
+            f'<div class="model-name">{_e(name)}</div>'
+            f'<div class="model-meta">{"<br>".join(details)}</div>'
+            "</div>"
+        )
+    return (
+        '<h2 class="section">Deterministic scanner provenance</h2>'
         f'<div class="models">{"".join(cards)}</div>'
     )
 

@@ -529,6 +529,16 @@ async def lifespan(app: FastAPI):
         name="retention-sweeper",
     )
 
+    from app.infrastructure.messaging.evidence_retention_sweeper import (
+        run_evidence_retention_sweeper,
+    )
+
+    evidence_retention_stop = asyncio.Event()
+    evidence_retention_task = asyncio.create_task(
+        run_evidence_retention_sweeper(evidence_retention_stop),
+        name="evidence-retention-sweeper",
+    )
+
     # --- Stuck-scan sweeper: mark scans FAILED when the worker is down ---
     from app.infrastructure.messaging.stuck_scan_sweeper import (
         run_stuck_scan_sweeper,
@@ -634,6 +644,7 @@ async def lifespan(app: FastAPI):
     prescan_sweeper_stop.set()
     findings_source_sweeper_stop.set()
     retention_sweeper_stop.set()
+    evidence_retention_stop.set()
     semgrep_sweeper_stop.set()
     stuck_scan_stop.set()
     if progress_bus is not None:
@@ -670,6 +681,13 @@ async def lifespan(app: FastAPI):
         retention_sweeper_task.cancel()
     except Exception as e:
         logger.warning(f"retention_sweeper shutdown error: {e}")
+    try:
+        await asyncio.wait_for(evidence_retention_task, timeout=5)
+    except asyncio.TimeoutError:
+        logger.warning("evidence_retention_sweeper did not stop within 5s; cancelling.")
+        evidence_retention_task.cancel()
+    except Exception as e:
+        logger.warning(f"evidence_retention_sweeper shutdown error: {e}")
     try:
         await asyncio.wait_for(semgrep_sweeper_task, timeout=5)
     except asyncio.TimeoutError:
@@ -990,7 +1008,7 @@ _include_if_enabled(
     tags=["Admin: RAG Management"],
 )
 
-# System Logs (LLM log viewer) — gated by the container-backed `log_stack`.
+# Runtime log-level controls — gated with the container-backed `log_stack`.
 _include_if_enabled(
     "log_stack", logs_router, prefix="/api/v1/admin", tags=["Admin: System Logs"]
 )

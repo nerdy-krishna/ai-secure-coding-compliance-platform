@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.infrastructure.database import models as db_models
 from app.core import schemas as agent_schemas
-from app.shared.lib.scan_status import STATUS_QUEUED
+from app.shared.lib.scan_status import STATUS_QUEUED, scan_status_predecessors
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,8 @@ class ScanRepository:
         user_id: int,
         repo_url: Optional[str] = None,
         tenant_id: Optional[uuid.UUID] = None,
+        *,
+        commit: bool = True,
     ) -> db_models.Project:
         """Retrieves a project by name for a user, or creates it if it doesn't exist.
 
@@ -68,7 +70,10 @@ class ScanRepository:
         )
         try:
             await self.db.execute(insert_stmt)
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.get_or_create_project.commit_failed",
@@ -109,6 +114,8 @@ class ScanRepository:
         deep_vendor_scan: bool = False,
         source_type: Optional[str] = None,
         tenant_id: Optional[uuid.UUID] = None,
+        *,
+        commit: bool = True,
     ) -> db_models.Scan:
         """Creates a new Scan record. ``tenant_id`` is stamped from the
         submitter so the per-tenant scope filter (Chunk 9) is correct
@@ -136,7 +143,10 @@ class ScanRepository:
         )
         self.db.add(scan)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.create_scan.commit_failed",
@@ -151,7 +161,7 @@ class ScanRepository:
         return scan
 
     async def get_or_create_source_files(
-        self, files_data: List[Dict[str, Any]]
+        self, files_data: List[Dict[str, Any]], *, commit: bool = True
     ) -> List[str]:
         """
         Accepts a list of files, hashes them, and saves new ones to the database.
@@ -193,7 +203,10 @@ class ScanRepository:
             )
             try:
                 await self.db.execute(stmt)
-                await self.db.commit()
+                if commit:
+                    await self.db.commit()
+                else:
+                    await self.db.flush()
             except SQLAlchemyError as e:
                 logger.error(
                     "scan_repo.get_or_create_source_files.commit_failed",
@@ -205,7 +218,12 @@ class ScanRepository:
         return file_hashes
 
     async def create_code_snapshot(
-        self, scan_id: uuid.UUID, file_map: Dict[str, str], snapshot_type: str
+        self,
+        scan_id: uuid.UUID,
+        file_map: Dict[str, str],
+        snapshot_type: str,
+        *,
+        commit: bool = True,
     ) -> db_models.CodeSnapshot:
         """Creates a code snapshot record for a scan."""
         snapshot = db_models.CodeSnapshot(
@@ -213,7 +231,10 @@ class ScanRepository:
         )
         self.db.add(snapshot)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.create_code_snapshot.commit_failed",
@@ -327,8 +348,20 @@ class ScanRepository:
             )
             raise
 
-    async def update_status(self, scan_id: uuid.UUID, status: str):
-        """Updates the status of a single scan."""
+    async def update_status(
+        self,
+        scan_id: uuid.UUID,
+        status: str,
+        *,
+        allowed_current_statuses: Optional[tuple[str, ...]] = None,
+        commit: bool = True,
+    ) -> bool:
+        """Atomically update status without resurrecting a cancelled scan.
+
+        Cancellation is terminal unless the manual run-control path calls its
+        dedicated reset method. ``allowed_current_statuses`` provides a
+        compare-and-swap guard for API transitions such as cancellation.
+        """
         # Local import — avoid pulling the messaging package + psycopg
         # at module import time, which historically caused circulars
         # during Alembic env.py setup.
@@ -341,17 +374,24 @@ class ScanRepository:
             "Updating scan status in DB.",
             extra={"scan_id": str(scan_id), "new_status": status},
         )
-        stmt = (
-            update(db_models.Scan)
-            .where(db_models.Scan.id == scan_id)
-            .values(status=status)
+        policy_sources = set(scan_status_predecessors(status))
+        if allowed_current_statuses is not None:
+            policy_sources.intersection_update(allowed_current_statuses)
+        stmt = update(db_models.Scan).where(
+            db_models.Scan.id == scan_id,
+            db_models.Scan.status.in_(tuple(sorted(policy_sources))),
         )
-        await self.db.execute(stmt)
+        result = await self.db.execute(stmt.values(status=status))
+        changed = bool(result.rowcount)
         # Emit the NOTIFY in the same transaction so it fires iff the
         # status update commits (§3.10a).
-        await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_STATUS)
+        if changed:
+            await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_STATUS)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.update_status.commit_failed",
@@ -359,10 +399,11 @@ class ScanRepository:
                 exc_info=True,
             )
             raise
+        return changed
 
     async def set_error_message(self, scan_id: uuid.UUID, error_message: str):
         """Persist a human-readable error message for a failed scan.
-        
+
         Must be called in the same transaction as update_status.
         """
         stmt = (
@@ -397,6 +438,9 @@ class ScanRepository:
         stage_name: str,
         status: str = "STARTED",
         details: Optional[Dict[str, Any]] = None,
+        activity_kind: Optional[str] = None,
+        *,
+        commit: bool = True,
     ):
         """Adds a new event to the scan's timeline.
 
@@ -414,14 +458,38 @@ class ScanRepository:
             "scan_repo.scan_event.added",
             extra={"scan_id": str(scan_id), "stage_name": stage_name, "status": status},
         )
+        from app.shared.lib.scan_progress import (
+            EVENT_SCHEMA_VERSION,
+            safe_event_details,
+            validate_activity_envelope,
+        )
+
+        stage_name, status, resolved_activity_kind = validate_activity_envelope(
+            stage_name, status, activity_kind
+        )
+
+        attempt_id = await self.db.scalar(
+            select(db_models.Scan.current_attempt_id).where(
+                db_models.Scan.id == scan_id
+            )
+        )
         event = db_models.ScanEvent(
-            scan_id=scan_id, stage_name=stage_name, status=status, details=details
+            scan_id=scan_id,
+            attempt_id=attempt_id,
+            schema_version=EVENT_SCHEMA_VERSION,
+            activity_kind=resolved_activity_kind,
+            stage_name=stage_name,
+            status=status,
+            details=safe_event_details(details),
         )
         self.db.add(event)
         # Notify within the same transaction (§3.10a).
         await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_EVENT)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.create_scan_event.commit_failed",
@@ -436,7 +504,10 @@ class ScanRepository:
         stage_name: str,
         status: str,
         details: Optional[Dict[str, Any]] = None,
-    ) -> None:
+        activity_kind: Optional[str] = None,
+        *,
+        commit: bool = True,
+    ) -> bool:
         """Record a scan-progress event and sync the ``scans.status`` cache.
 
         The single writer for the event-sourced scan model (#84): it
@@ -453,30 +524,67 @@ class ScanRepository:
             KIND_STATUS,
             notify_scan_progress,
         )
-        from app.shared.lib.scan_progress import cache_status_for
+        from app.shared.lib.scan_progress import (
+            EVENT_SCHEMA_VERSION,
+            cache_status_for,
+            safe_event_details,
+            validate_activity_envelope,
+        )
 
+        stage_name, status, resolved_activity_kind = validate_activity_envelope(
+            stage_name, status, activity_kind
+        )
+
+        cache_status = cache_status_for(stage_name, status)
+        if cache_status is not None:
+            result = await self.db.execute(
+                update(db_models.Scan)
+                .where(
+                    db_models.Scan.id == scan_id,
+                    db_models.Scan.status.in_(scan_status_predecessors(cache_status)),
+                )
+                .values(status=cache_status)
+            )
+            cache_status_changed = bool(result.rowcount)
+            if not cache_status_changed:
+                await self.db.rollback()
+                logger.info(
+                    "scan_repo.record_scan_event.transition_rejected",
+                    extra={
+                        "scan_id": str(scan_id),
+                        "stage_name": stage_name,
+                        "target_status": cache_status,
+                    },
+                )
+                return False
+        else:
+            cache_status_changed = False
+        attempt_id = await self.db.scalar(
+            select(db_models.Scan.current_attempt_id).where(
+                db_models.Scan.id == scan_id
+            )
+        )
         self.db.add(
             db_models.ScanEvent(
                 scan_id=scan_id,
+                attempt_id=attempt_id,
+                schema_version=EVENT_SCHEMA_VERSION,
+                activity_kind=resolved_activity_kind,
                 stage_name=stage_name,
                 status=status,
-                details=details,
+                details=safe_event_details(details),
             )
         )
-        cache_status = cache_status_for(stage_name, status)
-        if cache_status is not None:
-            await self.db.execute(
-                update(db_models.Scan)
-                .where(db_models.Scan.id == scan_id)
-                .values(status=cache_status)
-            )
         # One NOTIFY per kind so SSE subscribers refresh both the event
         # log and the status badge from a single committed transaction.
         await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_EVENT)
-        if cache_status is not None:
+        if cache_status_changed:
             await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_STATUS)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.record_scan_event.commit_failed",
@@ -484,11 +592,17 @@ class ScanRepository:
                 exc_info=True,
             )
             raise
+        return True
 
     async def save_llm_interaction(
         self, interaction_data: agent_schemas.LLMInteraction
-    ):
-        """Saves a single LLM interaction record to the database."""
+    ) -> db_models.LLMInteraction:
+        """Save one legacy interaction projection idempotently.
+
+        ``usage_event_id`` is the canonical logical-call identity. A worker
+        replay therefore returns the existing projection instead of violating
+        its one-to-one constraint or duplicating audit data.
+        """
         logger.debug(
             "Saving LLM interaction to DB.",
             extra={
@@ -496,6 +610,16 @@ class ScanRepository:
                 "agent_name": interaction_data.agent_name,
             },
         )
+        if interaction_data.usage_event_id is not None:
+            existing = await self.db.scalar(
+                select(db_models.LLMInteraction).where(
+                    db_models.LLMInteraction.usage_event_id
+                    == interaction_data.usage_event_id
+                )
+            )
+            if existing is not None:
+                return existing
+
         # V14.2.7 — stamp retention expiry from the cached config.
         from app.core.config_cache import (
             RETENTION_KIND_LLM_INTERACTION,
@@ -510,6 +634,40 @@ class ScanRepository:
             payload["expires_at"] = datetime.datetime.now(
                 datetime.timezone.utc
             ) + datetime.timedelta(days=retention_days)
+        if interaction_data.usage_event_id is not None:
+            try:
+                inserted_id = await self.db.scalar(
+                    pg_insert(db_models.LLMInteraction)
+                    .values(**payload)
+                    .on_conflict_do_nothing(index_elements=["usage_event_id"])
+                    .returning(db_models.LLMInteraction.id)
+                )
+                await self.db.commit()
+            except SQLAlchemyError as e:
+                logger.error(
+                    "scan_repo.save_llm_interaction.commit_failed",
+                    extra={
+                        "scan_id": str(interaction_data.scan_id),
+                        "error_class": e.__class__.__name__,
+                    },
+                    exc_info=True,
+                )
+                raise
+            if inserted_id is not None:
+                inserted = await self.db.get(db_models.LLMInteraction, inserted_id)
+                if inserted is None:  # pragma: no cover - defensive
+                    raise RuntimeError("inserted LLM interaction could not be reloaded")
+                return inserted
+            existing = await self.db.scalar(
+                select(db_models.LLMInteraction).where(
+                    db_models.LLMInteraction.usage_event_id
+                    == interaction_data.usage_event_id
+                )
+            )
+            if existing is None:  # pragma: no cover - defensive
+                raise RuntimeError("LLM interaction conflict row disappeared")
+            return existing
+
         db_interaction = db_models.LLMInteraction(**payload)
         self.db.add(db_interaction)
         try:
@@ -524,6 +682,8 @@ class ScanRepository:
                 exc_info=True,
             )
             raise
+        await self.db.refresh(db_interaction)
+        return db_interaction
 
     async def save_findings(
         self,
@@ -658,7 +818,88 @@ class ScanRepository:
             schema.id = row.id
         return len(db_findings)
 
-    async def delete_findings_for_scan(self, scan_id: uuid.UUID) -> int:
+    async def replace_fix_candidates_for_scan(
+        self,
+        scan_id: uuid.UUID,
+        candidates: List[agent_schemas.FixResult],
+        batch: int = 1,
+    ) -> int:
+        """Idempotently persist the governed candidate decisions for a batch."""
+        await self.db.execute(
+            delete(db_models.FindingFixCandidate).where(
+                db_models.FindingFixCandidate.scan_id == scan_id,
+                db_models.FindingFixCandidate.batch == batch,
+            )
+        )
+        rows: list[db_models.FindingFixCandidate] = []
+        for candidate in candidates:
+            if not all(
+                (
+                    candidate.candidate_id,
+                    candidate.raw_finding_id,
+                    candidate.source_snapshot_hash,
+                    candidate.anchor_fingerprint,
+                    candidate.patch_fingerprint,
+                )
+            ):
+                logger.warning(
+                    "scan_repo.fix_candidate.skipped_incomplete",
+                    extra={"scan_id": str(scan_id)},
+                )
+                continue
+            rows.append(
+                db_models.FindingFixCandidate(
+                    candidate_id=candidate.candidate_id,
+                    scan_id=scan_id,
+                    raw_finding_id=candidate.raw_finding_id,
+                    canonical_finding_id=candidate.canonical_finding_id,
+                    source_snapshot_hash=candidate.source_snapshot_hash,
+                    anchor_fingerprint=candidate.anchor_fingerprint,
+                    patch_fingerprint=candidate.patch_fingerprint,
+                    resolved_range=(
+                        candidate.resolved_range.model_dump(mode="json")
+                        if candidate.resolved_range
+                        else None
+                    ),
+                    context_fingerprint=candidate.context_fingerprint,
+                    patch_hunk_id=candidate.patch_hunk_id,
+                    applicability_status=candidate.applicability_status,
+                    language=candidate.language,
+                    symbol=candidate.symbol,
+                    required_imports=candidate.required_imports,
+                    required_dependencies=candidate.required_dependencies,
+                    configuration_changes=candidate.configuration_changes,
+                    migration_changes=candidate.migration_changes,
+                    manual_steps=candidate.manual_steps,
+                    file_path=candidate.finding.file_path,
+                    line_number=candidate.finding.line_number,
+                    suggestion=candidate.suggestion.model_dump(mode="json"),
+                    disposition=candidate.disposition,
+                    decision_reason=candidate.decision_reason,
+                    contributing_agents=candidate.contributing_agents,
+                    contributing_models=candidate.contributing_models,
+                    validation_status=candidate.validation_status,
+                    is_applied=candidate.is_applied,
+                    batch=batch,
+                )
+            )
+        if rows:
+            self.db.add_all(rows)
+        try:
+            await self.db.commit()
+        except SQLAlchemyError as exc:
+            await self.db.rollback()
+            logger.error(
+                "scan_repo.replace_fix_candidates_for_scan.commit_failed",
+                extra={"scan_id": str(scan_id), "error_class": exc.__class__.__name__},
+                exc_info=True,
+            )
+            raise
+        return len(rows)
+
+    async def delete_findings_for_scan(
+        self, scan_id: uuid.UUID, *, commit: bool = True
+    ) -> int:
         """Delete only consolidated findings for a scan (restart path).
 
         SAST and raw-LLM buckets are preserved across restarts for
@@ -671,7 +912,10 @@ class ScanRepository:
             )
         )
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.delete_findings_for_scan.commit_failed",
@@ -681,7 +925,9 @@ class ScanRepository:
             raise
         return result.rowcount or 0
 
-    async def delete_derived_snapshots_for_scan(self, scan_id: uuid.UUID) -> int:
+    async def delete_derived_snapshots_for_scan(
+        self, scan_id: uuid.UUID, *, commit: bool = True
+    ) -> int:
         """Delete generated snapshots while preserving ORIGINAL_SUBMISSION."""
         result = await self.db.execute(
             db_models.CodeSnapshot.__table__.delete().where(
@@ -690,7 +936,10 @@ class ScanRepository:
             )
         )
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.delete_derived_snapshots_for_scan.commit_failed",
@@ -706,7 +955,9 @@ class ScanRepository:
         *,
         status: str,
         clear_final_outputs: bool,
-    ) -> None:
+        allowed_current_statuses: Optional[tuple[str, ...]] = None,
+        commit: bool = True,
+    ) -> bool:
         """Prepare a terminal scan for a manually queued resume/restart.
 
         ``clear_final_outputs`` is true for restart: summary/risk/completed-at
@@ -716,11 +967,27 @@ class ScanRepository:
         values: Dict[str, Any] = {"status": status, "completed_at": None}
         if clear_final_outputs:
             values.update({"summary": None, "risk_score": None})
-        await self.db.execute(
-            update(db_models.Scan).where(db_models.Scan.id == scan_id).values(**values)
+        from app.infrastructure.messaging.scan_progress_notifier import (
+            KIND_STATUS,
+            notify_scan_progress,
         )
+
+        policy_sources = set(scan_status_predecessors(status, manual=True))
+        if allowed_current_statuses is not None:
+            policy_sources.intersection_update(allowed_current_statuses)
+        stmt = update(db_models.Scan).where(
+            db_models.Scan.id == scan_id,
+            db_models.Scan.status.in_(tuple(sorted(policy_sources))),
+        )
+        result = await self.db.execute(stmt.values(**values))
+        changed = bool(result.rowcount)
+        if changed:
+            await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_STATUS)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.reset_scan_for_manual_run.commit_failed",
@@ -728,6 +995,7 @@ class ScanRepository:
                 exc_info=True,
             )
             raise
+        return changed
 
     async def update_correlated_findings(
         self, findings: List[agent_schemas.VulnerabilityFinding]
@@ -872,6 +1140,7 @@ class ScanRepository:
             compute_cvss_aggregate,
             scoreable_findings,
         )
+        from app.shared.lib.risk_severity import risk_severity_for_score
 
         findings = await self.get_findings_for_scan(scan_id)
         aggregate = compute_cvss_aggregate(
@@ -887,6 +1156,7 @@ class ScanRepository:
                 new_summary = dict(scan.summary)
                 overall = dict(new_summary.get("overall_risk_score") or {})
                 overall["score"] = new_score
+                overall["severity"] = risk_severity_for_score(new_score)
                 new_summary["overall_risk_score"] = overall
                 scan.summary = new_summary
         return new_score
@@ -1132,8 +1402,13 @@ class ScanRepository:
             raise
 
     async def update_cost_and_status(
-        self, scan_id: uuid.UUID, status: str, estimated_cost: Dict[str, Any]
-    ):
+        self,
+        scan_id: uuid.UUID,
+        status: str,
+        estimated_cost: Dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> bool:
         """Atomically updates the status and the estimated cost of a scan."""
         # Sibling of `update_status`: emit a NOTIFY in the same
         # transaction so SSE subscribers wake on the cost-approval
@@ -1153,13 +1428,22 @@ class ScanRepository:
         )
         stmt = (
             update(db_models.Scan)
-            .where(db_models.Scan.id == scan_id)
+            .where(
+                db_models.Scan.id == scan_id,
+                db_models.Scan.status.in_(
+                    scan_status_predecessors(status, include_self=False)
+                ),
+            )
             .values(status=status, cost_details=estimated_cost)
         )
-        await self.db.execute(stmt)
-        await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_STATUS)
+        result = await self.db.execute(stmt)
+        if result.rowcount:
+            await notify_scan_progress(self.db, scan_id=str(scan_id), kind=KIND_STATUS)
         try:
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
         except SQLAlchemyError as e:
             logger.error(
                 "scan_repo.update_cost_and_status.commit_failed",
@@ -1167,6 +1451,7 @@ class ScanRepository:
                 exc_info=True,
             )
             raise
+        return bool(result.rowcount)
 
     async def save_final_reports_and_status(
         self,
@@ -1188,9 +1473,16 @@ class ScanRepository:
             "summary": summary,
         }
         stmt = (
-            update(db_models.Scan).where(db_models.Scan.id == scan_id).values(**values)
+            update(db_models.Scan)
+            .where(
+                db_models.Scan.id == scan_id,
+                db_models.Scan.status.in_(
+                    scan_status_predecessors(status, include_self=False)
+                ),
+            )
+            .values(**values)
         )
-        await self.db.execute(stmt)
+        result = await self.db.execute(stmt)
         try:
             await self.db.commit()
         except SQLAlchemyError as e:
@@ -1200,6 +1492,7 @@ class ScanRepository:
                 exc_info=True,
             )
             raise
+        return bool(result.rowcount)
 
     async def get_project_by_id(
         self, project_id: uuid.UUID
@@ -1291,8 +1584,7 @@ class ScanRepository:
 
         ``tenant_id is set`` → restrict to rows whose tenant matches
         OR whose tenant is NULL. The NULL allowance keeps legacy /
-        orphaned rows visible — see ``shared.lib.tenant_scope`` for
-        the rationale.
+        orphaned rows visible during tenant migration.
         """
         if tenant_id is None:
             return sa.true()
@@ -1483,6 +1775,34 @@ class ScanRepository:
         """
         scan = await self.db.get(db_models.Scan, scan_id)
         if scan:
+            from app.config.config import settings
+            from app.infrastructure.database.repositories.evidence_repo import (
+                EvidenceRepository,
+            )
+
+            if settings.EVIDENCE_STORE_ENABLED:
+                evidence_rows = list(
+                    (
+                        await self.db.scalars(
+                            select(db_models.EvidenceObject).where(
+                                db_models.EvidenceObject.scan_id == scan_id,
+                                db_models.EvidenceObject.state == "available",
+                            )
+                        )
+                    ).all()
+                )
+                if any(row.legal_hold for row in evidence_rows):
+                    raise PermissionError(
+                        "Scan cannot be deleted while its evidence is under legal hold."
+                    )
+                evidence_repo = EvidenceRepository(self.db)
+                for evidence in evidence_rows:
+                    await evidence_repo.schedule_deletion(
+                        evidence,
+                        actor_user_id=scan.user_id,
+                        reason="scan_deleted",
+                        commit=False,
+                    )
             await self.db.execute(
                 delete(db_models.LLMInteraction).where(
                     db_models.LLMInteraction.scan_id == scan_id
@@ -1519,6 +1839,34 @@ class ScanRepository:
             )
             scan_ids = [row[0] for row in scan_ids_result.all()]
             if scan_ids:
+                from app.config.config import settings
+                from app.infrastructure.database.repositories.evidence_repo import (
+                    EvidenceRepository,
+                )
+
+                if settings.EVIDENCE_STORE_ENABLED:
+                    evidence_rows = list(
+                        (
+                            await self.db.scalars(
+                                select(db_models.EvidenceObject).where(
+                                    db_models.EvidenceObject.scan_id.in_(scan_ids),
+                                    db_models.EvidenceObject.state == "available",
+                                )
+                            )
+                        ).all()
+                    )
+                    if any(row.legal_hold for row in evidence_rows):
+                        raise PermissionError(
+                            "Project cannot be deleted while evidence is under legal hold."
+                        )
+                    evidence_repo = EvidenceRepository(self.db)
+                    for evidence in evidence_rows:
+                        await evidence_repo.schedule_deletion(
+                            evidence,
+                            actor_user_id=project.user_id,
+                            reason="project_deleted",
+                            commit=False,
+                        )
                 await self.db.execute(
                     delete(db_models.LLMInteraction).where(
                         db_models.LLMInteraction.scan_id.in_(scan_ids)

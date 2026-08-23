@@ -18,8 +18,8 @@ sources:
     description: >
       Official multi-language security and best-practice rules from Semgrep Inc
       and community contributors. Covers Python, JavaScript/TypeScript, Java, Go,
-      Ruby, PHP, C/C++, C#, and more. This source supersedes the bundled
-      p/security-audit ruleset — enable it to restore and extend that coverage.
+      Ruby, PHP, C/C++, C#, and more. Enable this source to establish broad
+      baseline coverage, then review additional sources for specialist rules.
     repo_url: https://github.com/semgrep/semgrep-rules
     branch: develop
     subpath: null

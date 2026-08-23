@@ -2,7 +2,6 @@
 import {
   type LLMConfiguration,
   type LLMConfigurationCreate,
-  type LLMInteractionResponse,
 } from "../types/api";
 import apiClient from "./apiClient";
 
@@ -155,10 +154,5 @@ export const llmConfigService = {
 
     // V01.2.2: encodeURIComponent prevents URL path manipulation via configId metacharacters.
     await apiClient.delete(`/admin/llm-configs/${encodeURIComponent(configId)}`);
-  },
-
-  getLlmInteractions: async (): Promise<LLMInteractionResponse[]> => {
-    const response = await apiClient.get<LLMInteractionResponse[]>("/llm-interactions/");
-    return response.data;
   },
 };

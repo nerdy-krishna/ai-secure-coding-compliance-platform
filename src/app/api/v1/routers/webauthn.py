@@ -28,12 +28,10 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import time
 import uuid as _uuid
 from typing import Any, List, Optional
 from urllib.parse import urlparse
 
-import jwt as _pyjwt
 from fastapi import (
     APIRouter,
     Body,
@@ -117,26 +115,9 @@ def _options_to_dict(options: Any) -> dict:
 
 
 async def _issue_session_for_user(response: Response, user: db_models.User) -> str:
-    """Mint access token + set refresh cookie. Mirrors `_issue_session` in
-    routers/sso.py — duplicated to avoid an import cycle."""
+    """Mint the same access/refresh session used by password and SSO login."""
     strategy = get_custom_cookie_jwt_strategy()
-    access_token = await strategy.write_token(user)
-    secret = (
-        settings.SECRET_KEY.get_secret_value()
-        if hasattr(settings.SECRET_KEY, "get_secret_value")
-        else str(settings.SECRET_KEY)
-    )
-    now_ts = int(time.time())
-    refresh_payload = {
-        "sub": str(user.id),
-        "aud": "fastapi-users:auth",
-        "typ": "refresh",
-        "original_iat": now_ts,
-        "exp": now_ts + settings.REFRESH_TOKEN_LIFETIME_SECONDS,
-    }
-    refresh_token = _pyjwt.encode(refresh_payload, secret, algorithm="HS256")
-    await strategy.write_refresh_token(response, refresh_token)
-    return access_token
+    return await strategy.issue_session(response, user)
 
 
 async def _audit_safe(

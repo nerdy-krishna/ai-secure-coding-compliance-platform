@@ -17,7 +17,10 @@ import jwt
 from fastapi import APIRouter, Request, Response, HTTPException, status, Depends
 
 from app.config.config import settings
-from app.infrastructure.auth.backend import get_custom_cookie_jwt_strategy
+from app.infrastructure.auth.backend import (
+    get_custom_cookie_jwt_strategy,
+    mark_auth_response_no_store,
+)
 from app.infrastructure.auth.manager import get_user_manager, UserManager
 
 logger = logging.getLogger(__name__)
@@ -258,6 +261,7 @@ async def refresh_access_token(
         algorithm=ALGORITHM,
     )
     await strategy.write_refresh_token(response, new_refresh_token)
+    mark_auth_response_no_store(response)
 
     # M12: never log plaintext email — hash for correlation.
     import hashlib as _hashlib

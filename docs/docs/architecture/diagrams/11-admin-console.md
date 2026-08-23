@@ -175,7 +175,7 @@ lifespan warns on a mismatch).
 
 | Endpoint                                       | Effect                                                                              |
 |------------------------------------------------|-------------------------------------------------------------------------------------|
-| `POST /admin/llm-configurations`               | Register provider (`anthropic`, `openai`, `google`), model, tokenizer, costs        |
+| `POST /admin/llm-configurations`               | Register provider (`anthropic`, `openai`, `google`, `deepseek`, `xai`, `custom_openai`), model, base URL where applicable, tokenizer, and costs |
 | `GET /admin/llm-configurations`                | List (API key marked `info={"sensitive": True}` — never returned)                   |
 | `PATCH /admin/llm-configurations/{id}`         | Update name / cost / token limits / API key (re-encrypted)                          |
 | `DELETE /admin/llm-configurations/{id}`        | Retire (refused if referenced by an active scan or chat session)                    |

@@ -123,5 +123,7 @@ class ScanTaskLedgerService:
     async def summarize_scan_tasks(self, scan_id: uuid.UUID) -> Dict[str, int]:
         return await self.repo.count_by_status_for_scan(scan_id)
 
-    async def delete_scan_tasks(self, scan_id: uuid.UUID) -> int:
-        return await self.repo.delete_for_scan(scan_id)
+    async def delete_scan_tasks(
+        self, scan_id: uuid.UUID, *, commit: bool = True
+    ) -> int:
+        return await self.repo.delete_for_scan(scan_id, commit=commit)

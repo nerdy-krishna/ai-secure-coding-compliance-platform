@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     ACCESS_TOKEN_LIFETIME_SECONDS: int = 60 * 60  # 60 minutes
     REFRESH_TOKEN_LIFETIME_SECONDS: int = 60 * 60 * 24 * 7  # 7 days
+    # Explicit local-development escape hatch. Compose maps the UI's existing
+    # SSL_DEV_INSECURE opt-in to this backend setting so an HTTP localhost
+    # deployment can receive its refresh cookie. Production rejects it below.
+    ALLOW_INSECURE_COOKIES: bool = False
     # Absolute session lifetime: hard ceiling on how long a single login
     # session can be extended via refresh-token rotation. Default 24 h.
     # Ceiling 7 d (matches REFRESH_TOKEN_LIFETIME_SECONDS — anything longer
@@ -369,6 +373,20 @@ class Settings(BaseSettings):
             )
         return v
 
+    # --- Immutable evidence object store (ADR-012) ---
+    EVIDENCE_STORE_ENABLED: bool = False
+    EVIDENCE_S3_ENDPOINT: Optional[str] = None
+    EVIDENCE_S3_REGION: str = "us-east-1"
+    EVIDENCE_S3_BUCKET: str = "sccap-evidence"
+    EVIDENCE_S3_ACCESS_KEY_ID: Optional[SecretStr] = None
+    EVIDENCE_S3_SECRET_ACCESS_KEY: Optional[SecretStr] = None
+    EVIDENCE_S3_FORCE_PATH_STYLE: bool = True
+    EVIDENCE_KEY_PROVIDER: Literal["local", "aws_kms"] = "local"
+    EVIDENCE_LOCAL_KEK: Optional[SecretStr] = None
+    EVIDENCE_KMS_KEY_ID: Optional[str] = None
+    EVIDENCE_RETENTION_DAYS: int = Field(default=90, ge=1, le=3650)
+    EVIDENCE_DUAL_WRITE_LEGACY: bool = True
+
     # --- Observability (Langfuse v3, optional) ---
     # Disabled by default; opt in by setting LANGFUSE_ENABLED=true plus the
     # public/secret keys minted from the self-hosted Langfuse UI. When
@@ -434,6 +452,8 @@ class Settings(BaseSettings):
                 )
         # Production invariants (V13.4.2)
         if self.ENVIRONMENT == "production":
+            if self.ALLOW_INSECURE_COOKIES:
+                raise ValueError("ALLOW_INSECURE_COOKIES must be False in production.")
             if self.DB_ECHO:
                 raise ValueError("DB_ECHO must be False in production.")
             if self.LANGFUSE_ENABLED and (
@@ -442,6 +462,35 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set when "
                     "LANGFUSE_ENABLED is True in production."
+                )
+            if self.EVIDENCE_STORE_ENABLED:
+                if self.EVIDENCE_KEY_PROVIDER != "aws_kms":
+                    raise ValueError(
+                        "Production evidence storage requires EVIDENCE_KEY_PROVIDER=aws_kms."
+                    )
+                if not self.EVIDENCE_KMS_KEY_ID:
+                    raise ValueError(
+                        "EVIDENCE_KMS_KEY_ID is required when production evidence storage is enabled."
+                    )
+        if self.EVIDENCE_STORE_ENABLED:
+            has_access = self.EVIDENCE_S3_ACCESS_KEY_ID is not None
+            has_secret = self.EVIDENCE_S3_SECRET_ACCESS_KEY is not None
+            if has_access != has_secret:
+                raise ValueError(
+                    "Evidence S3 credentials must provide both access-key ID and secret, "
+                    "or neither when workload identity is used."
+                )
+            if (
+                self.ENVIRONMENT != "production"
+                and self.EVIDENCE_S3_ENDPOINT
+                and not has_access
+            ):
+                raise ValueError(
+                    "Local S3-compatible evidence storage requires credentials."
+                )
+            if self.EVIDENCE_KEY_PROVIDER == "aws_kms" and not self.EVIDENCE_KMS_KEY_ID:
+                raise ValueError(
+                    "EVIDENCE_KMS_KEY_ID is required for EVIDENCE_KEY_PROVIDER=aws_kms."
                 )
         return self
 

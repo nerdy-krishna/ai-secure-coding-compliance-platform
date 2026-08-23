@@ -126,38 +126,6 @@ export const ragService = {
     });
   },
 
-  // V15.3.3: typed primitives; FormData is built internally from an explicit
-  // allow-list of fields to prevent callers from injecting unexpected entries.
-  preprocessFramework: async (
-    file: File,
-    frameworkName: string,
-    targetLanguages: string[],
-    llmConfigId: string,
-  ): Promise<PreprocessingResponse> => {
-    // V02.2.1 validations
-    assertIngestFile(file);
-    assertFrameworkName(frameworkName);
-    if (targetLanguages.length > 10) throw new Error("targetLanguages must have at most 10 entries");
-    for (const lang of targetLanguages) {
-      if (!lang || lang.length > 32) throw new Error("Each targetLanguage must be 1-32 chars");
-    }
-    assertUUID(llmConfigId, "llmConfigId");
-
-    // Build FormData from explicit allow-list only (V15.3.3 defense in depth
-    // alongside backend payload validators)
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("framework_name", frameworkName);
-    for (const lang of targetLanguages) formData.append("target_languages", lang);
-    formData.append("llm_config_id", llmConfigId);
-
-    const response = await apiClient.post<PreprocessingResponse>(
-      "/admin/rag/preprocess-framework",
-      formData,
-    );
-    return response.data;
-  },
-
   ingestProcessed: async (
     payload: PreprocessingResponse,
   ): Promise<{ message: string }> => {

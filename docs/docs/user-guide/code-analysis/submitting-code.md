@@ -52,10 +52,9 @@ appear below the defaults.
 
 Two slots:
 
-- **Utility** — a cheap model. Drives the per-file profiler and
-  fix-snippet verification.
+- **Utility** — a cheap model. Drives the per-file profiler.
 - **Reasoning** — a capable model. Drives the per-file analysis,
-  finding consolidation, and the remediation merge agent.
+  and finding consolidation. Patch planning itself is deterministic.
 
 You can use the same `LLMConfiguration` for both; the UI defaults
 both to the first registered config, and a submitted utility slot
@@ -68,7 +67,7 @@ controls beyond the two LLM slots:
 
 - **Disable temperature** — when ticked, the scan sends *no*
   temperature to any LLM call; each model runs at its own provider
-  default instead of SCCAP's per-stage values. The four per-stage
+  default instead of SCCAP's per-stage values. The per-stage
   temperature inputs are then disabled.
 - **Add a second reasoning LLM** — opt in to a *second* reasoning
   model. When enabled, every analysis agent runs on **both** reasoning
@@ -85,8 +84,7 @@ controls beyond the two LLM slots:
   model and run it at two temperatures.
 
 The second reasoning LLM is confined to the analysis stage —
-consolidation, the remediation merge, and the profiler always run on
-the primary slots.
+consolidation and the profiler always run on the primary slots.
 
 - **Deep vendor scan** — by default vendor, minified, and static
   assets skip expensive LLM profiling and full agent routing while
@@ -106,11 +104,12 @@ After you click **Start scan**:
    **Scanning in progress** page with a live SSE status stream.
 2. The worker runs the **audit pass**: builds a repo map, classifies
    every file (first-party / vendor / minified / static), runs
-   deterministic SAST, and if findings are present pauses at
-   `PENDING_PRESCAN_APPROVAL` for review. Profiling cost and
-   deep-analysis cost estimates follow at successive approval gates.
-   The page shows an estimate modal — tokens + USD + estimated
-   processing duration — with **Approve** and **Cancel**.
+   deterministic SAST, and if findings are present pauses at step 1,
+   prescan review. Step 2 is **Approve file profiling cost**; step 3 is
+   **Approve full security analysis cost**. The two cost prompts are
+   intentional, have separate estimates, and show different gate IDs/evidence
+   hashes. A page refresh or SSE reconnect restores only the currently active
+   gate; an accepted gate is not shown again.
 3. On **Approve** the worker resumes the paused LangGraph thread and
    runs the deep analysis under a fixed concurrency pool with circuit-breaker and retry+jitter protection. The UI flips
    to a progress rail showing each pipeline stage with per-file

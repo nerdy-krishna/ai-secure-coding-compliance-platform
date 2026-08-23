@@ -7,6 +7,5 @@ helpers and constants.
 
 The string names registered via `workflow.add_node(...)` in
 `worker_graph.py` are part of the LangGraph checkpointer's on-disk
-contract — in-flight scans key off them. Node functions here are
-re-exported as `worker_graph.<name>` attributes for back-compat.
+contract — in-flight scans key off them.
 """

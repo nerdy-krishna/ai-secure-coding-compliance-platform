@@ -16,7 +16,7 @@ import logging
 import uuid
 from itertools import groupby
 from operator import attrgetter
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -24,9 +24,14 @@ from sqlalchemy import func, select
 from app.api.v1 import models as api_models
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.approval_gate_repo import (
+    ApprovalGateRepository,
+)
 from app.infrastructure.database.repositories.scan_task_repo import ScanTaskRepository
 from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.risk_score import compute_cvss_aggregate, scoreable_findings
+from app.shared.lib.risk_severity import risk_severity_for_score
+from app.shared.lib.scan_visibility import can_view_scan
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     COMPLETED_SCAN_STATUSES,
@@ -90,7 +95,12 @@ class ScanQueryService:
         self.repo = repo
 
     async def get_scan_status(
-        self, scan_id: uuid.UUID, user: db_models.User
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Scan:
         """Retrieves the status and basic details of a scan."""
         logger.info(
@@ -109,7 +119,12 @@ class ScanQueryService:
         if not scan:
             logger.warning("Scan not found.", extra={"scan_id": str(scan_id)})
             raise HTTPException(status_code=404, detail="Scan not found")
-        if scan.user_id != user.id and not user.is_superuser:
+        if not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan-query: authorization denied",
                 extra={
@@ -125,11 +140,72 @@ class ScanQueryService:
             )
         return scan
 
+    async def get_scanner_reports(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> Dict[str, Any]:
+        """Return the persisted, size-bounded native SAST report bundle."""
+        await self.get_scan_status(
+            scan_id,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        )
+        from app.infrastructure.database.repositories.scan_artifact_repo import (
+            ARTIFACT_TYPE_SCANNER_REPORTS,
+            ScanArtifactRepository,
+        )
+
+        artifacts = ScanArtifactRepository(self.repo.db)
+        artifact = await artifacts.get_by_type(scan_id, ARTIFACT_TYPE_SCANNER_REPORTS)
+        if artifact is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scanner reports are not available for this scan.",
+            )
+        return await artifacts.resolve_payload(artifact, actor_user_id=user.id)
+
+    async def get_patch_plan(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> Dict[str, Any]:
+        """Return the persisted deterministic unified-diff patch plan."""
+        await self.get_scan_status(
+            scan_id,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        )
+        from app.infrastructure.database.repositories.scan_artifact_repo import (
+            ARTIFACT_TYPE_PATCH_PLAN,
+            ScanArtifactRepository,
+        )
+
+        artifacts = ScanArtifactRepository(self.repo.db)
+        artifact = await artifacts.get_by_type(scan_id, ARTIFACT_TYPE_PATCH_PLAN)
+        if artifact is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="A patch plan is not available for this scan.",
+            )
+        return await artifacts.resolve_payload(artifact, actor_user_id=user.id)
+
     async def get_scan_result(
         self,
         scan_id: uuid.UUID,
         user: db_models.User,
         include_source: bool = False,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> api_models.AnalysisResultDetailResponse:
         """
         Constructs the detailed analysis result for a given scan, including findings,
@@ -153,7 +229,12 @@ class ScanQueryService:
             )
             raise
 
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
+        if not scan or not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan-query: authorization denied",
                 extra={
@@ -249,6 +330,21 @@ class ScanQueryService:
 
             summary_dict = scan.summary.get("summary", {})
             risk_score_dict = scan.summary.get("overall_risk_score", {})
+            remediation_response = None
+            remediation_dict = scan.summary.get("remediation")
+            if isinstance(remediation_dict, dict):
+                try:
+                    remediation_response = (
+                        api_models.RemediationSummaryResponse.model_validate(
+                            remediation_dict
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001 - tolerate legacy JSON
+                    logger.warning(
+                        "Ignoring malformed remediation summary for scan %s: %s",
+                        scan_id,
+                        type(exc).__name__,
+                    )
 
             # Recompute the risk score fresh from findings so the results
             # page always reflects the current formula, not a stale
@@ -258,7 +354,11 @@ class ScanQueryService:
                 fresh_score = compute_cvss_aggregate(
                     active_findings, scan_id=str(scan_id)
                 )
-                risk_score_dict = dict(risk_score_dict, score=fresh_score)
+                risk_score_dict = dict(
+                    risk_score_dict,
+                    score=fresh_score,
+                    severity=risk_severity_for_score(fresh_score),
+                )
 
             summary_report_response = api_models.SummaryReportResponse(
                 submission_id=scan.id,
@@ -272,6 +372,7 @@ class ScanQueryService:
                     **risk_score_dict
                 ),
                 files_analyzed=list(files_analyzed_map.values()),
+                remediation=remediation_response,
             )
 
         # --- ADD THIS LOGGING BLOCK ---
@@ -357,8 +458,43 @@ class ScanQueryService:
             scan_id
         )
 
+        toolchain_provenance: Dict[str, Any] = {}
+        try:
+            from app.infrastructure.database.repositories.scan_artifact_repo import (
+                ARTIFACT_TYPE_SCANNER_REPORTS,
+                ScanArtifactRepository,
+            )
+            from app.infrastructure.scanners.provenance import (
+                summarize_toolchain_provenance,
+            )
+
+            artifacts = ScanArtifactRepository(self.repo.db)
+            scanner_artifact = await artifacts.get_by_type(
+                scan_id, ARTIFACT_TYPE_SCANNER_REPORTS
+            )
+            if scanner_artifact is not None:
+                scanner_payload = await artifacts.resolve_payload(
+                    scanner_artifact, actor_user_id=user.id, audit=False
+                )
+                raw_provenance = scanner_payload.get("toolchain_provenance", {})
+                if isinstance(raw_provenance, dict):
+                    toolchain_provenance = summarize_toolchain_provenance(
+                        raw_provenance
+                    )
+        except Exception as exc:  # noqa: BLE001 - legacy installs fail open
+            logger.warning(
+                "scan-query: toolchain provenance unavailable scan_id=%s: %s",
+                scan_id,
+                exc,
+            )
+
+        active_gate = await ApprovalGateRepository(self.repo.db).get_pending_for_scan(
+            scan_id
+        )
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
+            current_attempt_id=scan.current_attempt_id,
             error_message=scan.error_message or "",
             project_id=scan.project_id,
             project_name=scan.project.name if scan.project else "N/A",
@@ -366,7 +502,13 @@ class ScanQueryService:
             original_code_map=original_code_map or None,
             fixed_code_map=fixed_code_map or None,
             source_counts=source_counts,
+            toolchain_provenance=toolchain_provenance,
             cost_details=scan.cost_details,
+            active_approval_gate=(
+                api_models.ApprovalGateResponse.model_validate(active_gate)
+                if active_gate is not None
+                else None
+            ),
             cross_file_validation=bool(scan.cross_file_validation),
             deep_vendor_scan=bool(scan.deep_vendor_scan),
             llms_used=llms_used,
@@ -543,7 +685,12 @@ class ScanQueryService:
         return [project.name for project in projects]
 
     async def get_llm_interactions_for_scan(
-        self, scan_id: uuid.UUID, user: db_models.User
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> List[api_models.LLMInteractionResponse]:
         """Gets all LLM interactions for a given scan, ensuring user has
         access. Each interaction is enriched with the resolved LLM
@@ -553,7 +700,12 @@ class ScanQueryService:
             extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
         )
         scan = await self.repo.get_scan(scan_id)
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
+        if not scan or not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan-query: authorization denied",
                 extra={
@@ -591,11 +743,21 @@ class ScanQueryService:
         return responses
 
     async def get_findings_debug(
-        self, scan_id: uuid.UUID, user: db_models.User
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> api_models.ScanFindingsDebugResponse:
         """Return raw and consolidated findings for agent debugging."""
         scan = await self.repo.get_scan(scan_id)
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
+        if not scan or not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Scan not found or not authorized.",
@@ -867,6 +1029,9 @@ class ScanQueryService:
         scan_id: uuid.UUID,
         user,
         request: api_models.FindingLineageRequest,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> api_models.FindingLineageResponse:
         """Build and return a render-ready Finding Lineage graph."""
         from app.core.services.scan.lineage import (
@@ -875,7 +1040,12 @@ class ScanQueryService:
         )
 
         scan = await self.repo.get_scan(scan_id)
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
+        if not scan or not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             raise HTTPException(
                 status_code=404, detail="Scan not found or not authorized."
             )
@@ -892,14 +1062,16 @@ class ScanQueryService:
                 ScanArtifactRepository,
             )
 
-            artifact = await ScanArtifactRepository(self.repo.db).get_by_type(
-                scan_id, ARTIFACT_TYPE_LINEAGE
-            )
+            artifacts = ScanArtifactRepository(self.repo.db)
+            artifact = await artifacts.get_by_type(scan_id, ARTIFACT_TYPE_LINEAGE)
             if artifact is not None:
+                lineage_payload = await artifacts.resolve_payload(
+                    artifact, actor_user_id=user.id, audit=False
+                )
                 graph = build_lineage_from_records(
-                    raw_records=artifact.payload.get("raw_findings", []),
-                    final_records=artifact.payload.get("final_findings", []),
-                    links=artifact.payload.get("links", []),
+                    raw_records=lineage_payload.get("raw_findings", []),
+                    final_records=lineage_payload.get("final_findings", []),
+                    links=lineage_payload.get("links", []),
                     expanded_node_ids=expanded_ids,
                     focused_node_id=focused,
                     filters=filters,
@@ -911,6 +1083,10 @@ class ScanQueryService:
                     lineage_quality=graph["lineage_quality"],
                     warnings=graph["warnings"],
                     available_expansions=graph.get("available_expansions", {}),
+                    fix_candidates=[
+                        api_models.FindingFixCandidateResponse(**record)
+                        for record in lineage_payload.get("fix_candidates", [])
+                    ],
                 )
         except Exception:
             # Rollback the session so the transaction doesn't stay in an
@@ -1159,7 +1335,13 @@ class ScanQueryService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found."
             )
 
-        await self.repo.delete_scan(scan_id)
+        try:
+            await self.repo.delete_scan(scan_id)
+        except PermissionError as exc:
+            await self.repo.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+            ) from exc
         logger.info(
             "scan-query: scan deleted",
             extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
@@ -1188,7 +1370,13 @@ class ScanQueryService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Project not found."
             )
 
-        await self.repo.delete_project(project_id)
+        try:
+            await self.repo.delete_project(project_id)
+        except PermissionError as exc:
+            await self.repo.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+            ) from exc
         logger.info(
             "scan-query: project deleted",
             extra={"actor_user_id": str(user.id), "project_id": str(project_id)},

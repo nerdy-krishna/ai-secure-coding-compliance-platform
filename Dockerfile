@@ -13,6 +13,7 @@
 #                    → adds the tree-sitter AST stack on top of the API deps
 #   api            → base + api venv + source + git binary (GitPython)
 #   worker         → base + worker venv + source (no git)
+#   patch-validator → networkless allowlisted compiler/test sandbox
 #
 # The dep split keeps tree-sitter + tree-sitter-languages off the API
 # image. Non-root (uid 1001) everywhere. BuildKit cache mounts on
@@ -95,20 +96,11 @@ COPY --chown=appuser:appuser pyproject.toml poetry.lock ./
 # `poetry install` skips it by default; `--without dev` just drops the
 # dev tools.
 #
-# `INSTALL_DEV_DEPS` (F15b follow-up): set to `true` at build time to
-# include test + worker deps (pytest, pytest-asyncio, tree-sitter, etc.)
-# in the venv. Useful for CI / local pytest runs inside the API container;
-# the production image stays slim by leaving the default `false`.
 FROM poetry-base AS api-builder
-ARG INSTALL_DEV_DEPS=false
 
 RUN --mount=type=cache,target=/home/appuser/.cache/pypoetry,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/appuser/.cache/pip,uid=1001,gid=1001 \
-    if [ "${INSTALL_DEV_DEPS}" = "true" ]; then \
-        poetry install --no-interaction --no-ansi --no-root --with test,worker ; \
-    else \
-        poetry install --no-interaction --no-ansi --no-root --without dev ; \
-    fi
+    poetry install --no-interaction --no-ansi --no-root --without dev
 
 # ---------- worker-builder -----------------------------------------------
 # Installs core + the worker group (torch, sentence-transformers, tree-sitter).
@@ -193,16 +185,14 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/gitleaks; \
     rm /tmp/gitleaks.tar.gz
 
-# --- Bundled scanner configs ---
-# Pinned by SHA at build time; rebuild required to bump.
+# --- Bundled Gitleaks config ---
+# Pinned by SHA at build time; rebuild required to bump. Semgrep rules are
+# selected from Postgres and materialized per scan; no Semgrep pack is bundled.
 RUN set -eux; \
-    mkdir -p /app/scanners/configs/semgrep; \
+    mkdir -p /app/scanners/configs; \
     curl -fsSL -o /app/scanners/configs/gitleaks.toml \
         "https://raw.githubusercontent.com/gitleaks/gitleaks/v8.21.2/config/gitleaks.toml"; \
-    echo "2ce9d818ed5aac0d9a36638a317284bd733c26d5069c980829335183397430bb  /app/scanners/configs/gitleaks.toml" | sha256sum --check --strict; \
-    curl -fsSL -o /app/scanners/configs/semgrep/security-audit.yml \
-        "https://semgrep.dev/c/p/security-audit"; \
-    echo "fdc7027973176abe71f6b1fc8739ef88a4c411735c380cfce4f731df9644e47a  /app/scanners/configs/semgrep/security-audit.yml" | sha256sum --check --strict
+    echo "2ce9d818ed5aac0d9a36638a317284bd733c26d5069c980829335183397430bb  /app/scanners/configs/gitleaks.toml" | sha256sum --check --strict
 
 # --- Semgrep ---
 # Isolated venv at /opt/semgrep-venv because Semgrep pins rich<13.6 while
@@ -259,17 +249,45 @@ COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 # cache here keeps first-scan latency consistent.
 RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
 
-# Pre-warm the OSV-Scanner vulnerability DB so first-scan latency is
-# consistent and air-gapped deployments don't reach api.osv.dev at
-# runtime. The empty-dir invocation triggers a DB sync; the cache
-# lands at $HOME/.cache/osv-scanner. Failures are tolerated so a
-# transient build-time network hiccup doesn't break the image —
-# runtime will then re-sync on first scan if needed.
-RUN set -eux; \
-    mkdir -p /tmp/osv-warmup; \
-    osv-scanner scan source --recursive /tmp/osv-warmup 2>/dev/null || true; \
-    rmdir /tmp/osv-warmup || true
+# OSV vulnerability matching currently uses the live OSV API. We do not claim
+# an offline snapshot: the earlier empty-directory "warm-up" created no
+# verifiable advisory cache. Per-scan provenance therefore marks OSV advisory
+# coverage degraded until a dated offline database is downloaded, hashed, and
+# invoked explicitly with OSV-Scanner's offline flags.
 
 RUN chmod +x /app/app-entrypoint.sh
 ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["python", "-m", "app.workers.consumer"]
+
+# ---------- patch validator ----------------------------------------------
+# Deliberately contains no SCCAP application, configuration, or credentials.
+# Compose gives it no network namespace and only a bounded shared job spool.
+FROM python:3.12-slim-bookworm AS patch-validator
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        golang-go \
+        nodejs \
+        node-typescript \
+        openjdk-17-jdk-headless \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1001 validationclient \
+    && groupadd --gid 1002 validator \
+    && useradd --uid 1002 --gid 1002 --create-home --shell /usr/sbin/nologin validator \
+    && pip install --no-cache-dir "pytest==8.3.5" \
+    && mkdir -p /opt/sccap-validation /jobs \
+    && chown root:validationclient /jobs \
+    && chmod 0770 /jobs
+
+COPY --chown=root:root src/app/shared/lib/validation_sandbox_runner.py /opt/sccap-validation/runner.py
+
+# The small spool daemon retains uid 0 only so it can keep /jobs private and
+# drop each validation command to uid/gid 1002. Compose grants only the
+# capabilities needed for that drop and cleanup of child-owned temp files.
+USER root
+ENV SCCAP_VALIDATION_JOB_DIR=/jobs \
+    SCCAP_VALIDATION_CHILD_UID=1002 \
+    SCCAP_VALIDATION_CHILD_GID=1002 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+ENTRYPOINT ["python", "-I", "/opt/sccap-validation/runner.py"]

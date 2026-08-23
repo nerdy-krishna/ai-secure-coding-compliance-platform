@@ -10,9 +10,9 @@ Every identity surface SCCAP exposes: password login, OIDC, SAML 2.0, WebAuthn p
 flowchart LR
     subgraph Surfaces["End-user login surfaces"]
       Pwd["Password<br/>POST /auth/login"]:::edge
-      OIDC["OIDC<br/>GET /auth/sso/authorize<br/>GET /auth/sso/callback"]:::edge
-      SAML["SAML 2.0<br/>(same endpoints, protocol auto-detect)"]:::edge
-      Pass["WebAuthn passkey<br/>/auth/webauthn/{begin,finish}-*"]:::edge
+      OIDC["OIDC<br/>GET /auth/sso/{name}/login<br/>GET /auth/sso/{name}/callback"]:::edge
+      SAML["SAML 2.0<br/>GET /auth/sso/{name}/login<br/>POST /auth/sso/{name}/acs"]:::edge
+      Pass["WebAuthn passkey<br/>/auth/webauthn/{register,login}/{begin,finish}"]:::edge
       Refresh["Refresh<br/>POST /auth/refresh"]:::edge
       Logout["Logout<br/>POST /auth/logout"]:::edge
     end
@@ -60,14 +60,14 @@ sequenceDiagram
     participant DB as Postgres
 
     U->>SPA: click "Sign in with <provider>"
-    SPA->>API: GET /auth/sso/authorize?provider_id=<id>
+    SPA->>API: GET /auth/sso/{name}/login
     API->>DB: load sso_providers row (encrypted config)
     API->>API: build PKCE: code_verifier, code_challenge<br/>state, nonce
     API-->>SPA: 302 to IdP authorize URL
     SPA->>IDP: GET /authorize (PKCE-S256)
     U->>IDP: authenticate · consent
-    IDP-->>SPA: 302 to /auth/sso/callback?code=…&state=…
-    SPA->>API: GET /auth/sso/callback (browser follows redirect)
+    IDP-->>SPA: 302 to /auth/sso/{name}/callback?code=…&state=…
+    SPA->>API: GET /auth/sso/{name}/callback (browser follows redirect)
     API->>IDP: POST /token (PKCE verifier, code)
     IDP-->>API: id_token (JWT) + access_token
     API->>API: verify id_token (RS256 via JWKS, iss, aud, exp, nonce)
@@ -97,13 +97,13 @@ sequenceDiagram
 flowchart LR
     subgraph Mint["Mint tokens"]
       A1["POST /auth/login (form)"]:::edge
-      A2["POST /auth/sso/callback"]:::edge
-      A3["POST /auth/webauthn/finish-assertion"]:::edge
+      A2["GET OIDC callback / POST SAML ACS"]:::edge
+      A3["POST /auth/webauthn/login/finish"]:::edge
     end
 
     subgraph Tokens
-      AT["Access JWT<br/>HS/RS256 · exp = ACCESS_TOKEN_LIFETIME_SECONDS (60 min default)<br/>aud=api · claims: sub, tenant_id, is_superuser"]:::secret
-      RT["Refresh JWT<br/>HttpOnly + Secure + SameSite=strict cookie<br/>exp = REFRESH_TOKEN_LIFETIME_SECONDS (7 d default)<br/>absolute cap = SESSION_ABSOLUTE_LIFETIME_SECONDS (24 h)"]:::secret
+      AT["Access JWT<br/>HS256 · exp = ACCESS_TOKEN_LIFETIME_SECONDS (60 min default)<br/>aud=fastapi-users:auth · subject=user id"]:::secret
+      RT["Refresh JWT<br/>HttpOnly + SameSite=strict cookie<br/>Secure except explicit local HTTP profile<br/>exp = REFRESH_TOKEN_LIFETIME_SECONDS (7 d default)<br/>absolute cap = SESSION_ABSOLUTE_LIFETIME_SECONDS (24 h)"]:::secret
       SSE["SSE stream token<br/>aud=sse:scan-stream · 60 s TTL<br/>bound to scan_id"]:::secret
     end
 
@@ -164,7 +164,7 @@ flowchart TB
 sequenceDiagram
     autonumber
     participant IDM as External IAM (Okta / OneLogin / Entra)
-    participant API as FastAPI /api/v1/scim
+    participant API as FastAPI /scim/v2
     participant DB as Postgres
 
     IDM->>API: GET /Users?filter=userName eq "alice@x"<br/>Authorization: Bearer <scim_token>
@@ -203,7 +203,7 @@ The identity surfaces above are **not all present in every install** — they ar
 | `multi_user`   | Self-service registration, `admin_users` router, the admin Users page                        | Install is single-account; the §1 surfaces collapse to password + passkey for that user |
 | `user_groups`  | `admin_groups` router, group CRUD, peer visibility (`get_visible_user_ids` resolves to self) | `get_visible_user_ids()` returns `{current_user.id}` only — no peer scope               |
 | `sso`          | `sso` + `admin_sso` routers, the §2 OIDC/SAML flow, JIT provisioning, SSO audit log           | SSO buttons absent on `LoginPage`; only password / passkey remain                       |
-| `scim`         | `scim` + `admin_scim` routers, the §5 provisioning flow, `scim_tokens`                        | External IAM cannot provision; `/api/v1/scim/*` is unmounted (404)                      |
+| `scim`         | `scim` + `admin_scim` routers, the §5 provisioning flow, `scim_tokens`                        | External IAM cannot provision; `/scim/v2/*` is unmounted (404)                          |
 | `multi_tenant` | `admin_tenants` router, tenant management UI                                                  | All rows resolve to `DEFAULT_TENANT`; §4 tenant filter still runs but is single-valued  |
 
 Gating is enforced **server-side**: `bootstrap_enabled_features_sync()` decides which routers `main.py` mounts at import time, so a disabled surface returns 404 — the hidden nav link (diagram 03) is defence-in-depth, not the boundary. The `vibe_coder` variant ships none of these five (single-user); `developer` adds `multi_user` + `user_groups`; `enterprise` enables all five.
@@ -212,18 +212,21 @@ Gating is enforced **server-side**: `bootstrap_enabled_features_sync()` decides 
 
 | Mechanism            | Library              | Endpoints                                                                                            | Persistence                           |
 |----------------------|----------------------|------------------------------------------------------------------------------------------------------|---------------------------------------|
-| Password             | fastapi-users + passlib bcrypt | `POST /auth/login`, `POST /auth/register`, `POST /auth/forgot-password`, `POST /auth/reset-password` | `user.hashed_password`                |
-| OIDC                 | httpx-oauth          | `GET /auth/sso/authorize`, `GET /auth/sso/callback` (provider auto-detected)                          | `oauth_accounts(provider_id, account_id, account_email)` |
-| SAML 2.0             | python3-saml         | Same callback path (provider's metadata decides)                                                     | `saml_subjects(provider_id, name_id, subject)`           |
-| WebAuthn (FIDO2)     | py_webauthn          | `/auth/webauthn/begin-registration`, `/auth/webauthn/finish-registration`, `/auth/webauthn/begin-assertion`, `/auth/webauthn/finish-assertion` | `webauthn_credentials(credential_id, public_key, sign_count, transports[])` |
-| SCIM 2.0             | (hand-rolled)        | `/api/v1/scim/{Users,Groups,Schemas,…}`                                                              | `scim_tokens(active, last_used)`      |
+| Password             | fastapi-users + passlib bcrypt | `POST /auth/login`, `POST /auth/forgot-password`, `POST /auth/reset-password` | `user.hashed_password`                |
+| OIDC                 | httpx-oauth          | `GET /auth/sso/{name}/login`, `GET /auth/sso/{name}/callback`                                        | `oauth_accounts(provider_id, account_id, account_email)` |
+| SAML 2.0             | python3-saml         | `GET /auth/sso/{name}/login`, `POST /auth/sso/{name}/acs`, `GET /auth/sso/{name}/metadata`            | `saml_subjects(provider_id, name_id, subject)`           |
+| WebAuthn (FIDO2)     | py_webauthn          | `/auth/webauthn/register/{begin,finish}`, `/auth/webauthn/login/{begin,finish}`, `/auth/webauthn/credentials` | `webauthn_credentials(credential_id, public_key, sign_count, transports[])` |
+| SCIM 2.0             | (hand-rolled)        | `/scim/v2/{Users,Groups,Schemas,…}`                                                                   | `scim_tokens(active, last_used)`      |
+
+Public self-registration is not mounted. Initial setup creates the first user;
+superusers create later local users through `/admin/users`.
 
 ### Token shapes
 
 | Token            | Where                                  | TTL                                                                  | Audience            |
 |------------------|----------------------------------------|----------------------------------------------------------------------|---------------------|
-| Access JWT       | `localStorage.accessToken` + `Authorization: Bearer` | `ACCESS_TOKEN_LIFETIME_SECONDS` (default 3600 s)                  | `api`               |
-| Refresh JWT      | HttpOnly + Secure + SameSite cookie    | `REFRESH_TOKEN_LIFETIME_SECONDS` (default 604 800 s) capped by `SESSION_ABSOLUTE_LIFETIME_SECONDS` (default 86 400 s, max 7 d) | `refresh` |
+| Access JWT       | `localStorage.accessToken` + `Authorization: Bearer` | `ACCESS_TOKEN_LIFETIME_SECONDS` (default 3600 s)                  | `fastapi-users:auth` |
+| Refresh JWT      | HttpOnly + SameSite=Strict cookie; Secure except explicit HTTP local development | `REFRESH_TOKEN_LIFETIME_SECONDS` (default 604 800 s) capped by `SESSION_ABSOLUTE_LIFETIME_SECONDS` (default 86 400 s, max 7 d) | `fastapi-users:auth` |
 | SSE stream token | URL query param `?access_token=…`      | 60 seconds                                                           | `sse:scan-stream`   |
 | SCIM bearer      | `Authorization: Bearer <token>`        | No expiry (rotatable; revocable via admin UI)                        | `scim`              |
 | Passkey assertion challenge | Server-issued per attempt    | 60 s                                                                 | n/a                 |

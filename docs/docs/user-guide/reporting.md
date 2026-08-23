@@ -47,6 +47,23 @@ All four are served on demand by
 `GET /api/v1/scans/{scan_id}/report?format=html|csv|pdf|sarif` — see
 [API → Results Endpoints](../api-reference/results-endpoints.md).
 
+## Native scanner reports
+
+The **Scanner JSON** button downloads the validated native output captured during the deterministic
+prescan, including the status and immutable evidence recorded for Bandit, Semgrep, Gitleaks, and
+OSV-Scanner. Evidence includes binary versions/digests, configuration identifiers/digests, exact
+selected Semgrep rule hashes, and resolved rule-source commits. Each execution appends a generation
+and hash-verified historical rule bodies. Each execution appends an encrypted generation to the
+current scan attempt instead of overwriting earlier evidence; the endpoint returns the latest
+authorized generation after exact-version decryption and digest verification. Each scanner
+payload is capped at 5 MiB; a truncation manifest is returned for larger output. Older scans have no
+scanner-report artifact; the UI explains that the artifact was not retained for those legacy scans.
+
+The Results page and generated HTML/PDF/SARIF/CSV reports show the bounded provenance summary.
+**Degraded** means SCCAP cannot prove one or more inputs were immutable. OSV currently shows this
+state because advisory matching uses the live OSV service rather than a dated, hashed offline
+database snapshot; the pinned OSV executable alone does not make the advisory result reproducible.
+
 ## Raw findings (JSON)
 
 For custom integrations, call

@@ -5,6 +5,9 @@ from typing import List, Optional
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMPriceOverrideRepository,
+)
 from app.infrastructure.database.repositories.framework_repo import FrameworkRepository
 from app.infrastructure.database.repositories.agent_repo import AgentRepository
 from app.infrastructure.database.repositories.prompt_template_repo import (
@@ -34,11 +37,13 @@ class AdminService:
     def __init__(
         self,
         llm_repo: LLMConfigRepository,
+        price_override_repo: LLMPriceOverrideRepository,
         framework_repo: FrameworkRepository,
         agent_repo: AgentRepository,
         prompt_template_repo: PromptTemplateRepository,
     ):
         self.llm_repo = llm_repo
+        self.price_override_repo = price_override_repo
         self.framework_repo = framework_repo
         self.agent_repo = agent_repo
         self.prompt_template_repo = prompt_template_repo
@@ -186,6 +191,33 @@ class AdminService:
             )
             raise
         return deleted is not None
+
+    async def append_price_override(
+        self,
+        config_id: uuid.UUID,
+        value: api_models.LLMPriceOverrideCreate,
+        *,
+        actor_user_id: int,
+    ) -> api_models.LLMPriceOverrideRead:
+        try:
+            row = await self.price_override_repo.append(
+                llm_config_id=config_id,
+                rates=value.model_dump(mode="json")["rates"],
+                currency=value.currency,
+                source=value.source,
+                created_by_user_id=actor_user_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return api_models.LLMPriceOverrideRead.model_validate(row)
+
+    async def list_price_overrides(
+        self, config_id: uuid.UUID
+    ) -> List[api_models.LLMPriceOverrideRead]:
+        if await self.llm_repo.get_by_id(config_id) is None:
+            raise HTTPException(status_code=404, detail="LLM Configuration not found")
+        rows = await self.price_override_repo.list_for_config(config_id)
+        return [api_models.LLMPriceOverrideRead.model_validate(row) for row in rows]
 
     # --- Framework Methods ---
     async def create_framework(

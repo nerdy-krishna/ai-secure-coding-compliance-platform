@@ -19,7 +19,8 @@ const AuthLayout: React.FC<AuthLayoutProps> = ({ children }) => {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
+        boxSizing: "border-box",
         background: "var(--bg)",
         position: "relative",
         overflow: "hidden",

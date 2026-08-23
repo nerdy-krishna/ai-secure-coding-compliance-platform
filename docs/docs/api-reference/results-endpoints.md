@@ -58,8 +58,8 @@ history (`scan_events` and `llm_interactions`).
 * Pending-approval statuses are rejected (use existing approval
   endpoints).
 * Authorization matches existing scan lifecycle mutation permissions.
-* The endpoint enqueues the scan through the standard worker queue
-  path and returns `202` on success.
+* The endpoint atomically commits the status claim, lifecycle events, restart cleanup where
+  applicable, and durable worker-queue intent, then returns `202` on success.
 
 ## Downloadable findings report
 
@@ -86,6 +86,21 @@ Scoped by H.2 visibility — the same `404`-not-`403` rule applies.
     HTML / CSV / PDF. SCCAP does not persist a separate SARIF blob or run
     a reporting graph node.
 
+## Download native scanner JSON
+
+```http
+GET /scans/{scan_id}/scanner-reports
+```
+
+Downloads the validated native JSON captured from Bandit, Semgrep, Gitleaks, and OSV-Scanner during
+the deterministic prescan. The response includes per-scanner status plus complete toolchain
+provenance: runtime/config digests, exact Semgrep rule hashes, resolved source commits, and advisory
+database status. Each execution appends an immutable scan-scoped artifact generation; the endpoint
+returns the latest. Each scanner payload is capped at 5 MiB and oversized payloads are represented
+by a truncation manifest. Scans created before this capability return `404` because no artifact
+exists. `GET /scans/{scan_id}/result` exposes a bounded provenance summary without the per-rule
+inventory for operator UI/report rendering.
+
 ## LLM interactions for a scan
 
 ```http
@@ -94,9 +109,9 @@ GET /scans/{scan_id}/llm-interactions
 
 Returns every `llm_interactions` row tied to the scan: agent name,
 prompt template, prompt context (JSONB), full raw response, parsed
-output, cost, token counts, timestamp. Intended for admins debugging
-agent drift — regular users only see interactions for their own
-scans.
+output, cost, token counts, timestamp. Intended for debugging agent
+drift; access follows the same owner/admin/group-peer and tenant scope
+as the scan result.
 
 ## Findings debug (pipeline breakdown)
 
@@ -108,6 +123,8 @@ Returns findings from all three storage buckets (SAST, raw LLM,
 consolidated) plus Sankey-flow nodes/links and grouped counts by
 source, severity, and CWE. Used by the Pipeline & Logs diagnostics
 page and the compact findings panel on the results page.
+Access follows the same detail-read visibility policy as the result,
+reports, lineage, and SSE stream.
 
 ## Delete
 

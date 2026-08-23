@@ -113,7 +113,7 @@ Both observability tiers are **container-backed feature flags** — the only two
 
 | Feature     | Compose profile | Gates                                                                                       | When OFF                                                                            |
 |-------------|-----------------|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| `log_stack` | `log_stack`     | The §1 Fluentd → Loki → Grafana stack **and** the LLM log viewer (`/scans/:id/llm-logs`)     | Containers don't boot; app/worker logs stay on the Docker `json-file` driver only    |
+| `log_stack` | `log_stack`     | The §1 Fluentd → Loki → Grafana stack and runtime log-level controls                         | Containers don't boot; app/worker logs stay on the Docker `json-file` driver only    |
 | `tracing`   | `tracing`       | The optional Langfuse v3 stack (§1 `LF` subgraph); `LLMClient` Langfuse spans                | `LANGFUSE_ENABLED` is effectively a no-op; no per-LLM-call traces; no `:3001` UI      |
 
 Neither flag affects audit logging: `auth_audit_events` and `scan_events` are Postgres tables written regardless — §2 is part of the always-on `scan` floor. Variant defaults: `vibe_coder` / `developer` ship neither; `enterprise` enables `log_stack` but deliberately leaves `tracing` **off** (its profile ships, so an operator can flip it on without a redeploy, but a 6-container Langfuse stack does not boot unasked).
@@ -160,7 +160,7 @@ Neither flag affects audit logging: `auth_audit_events` and `scan_events` are Po
 |--------------------------------------------|----------------------------------------------------------------------|
 | SSO audit page                             | `/admin/sso/audit` (`GET /api/v1/admin/sso/audit?cursor=…&limit=…`)  |
 | Scan timeline                              | `GET /api/v1/scans/{id}/events`                                      |
-| LLM interaction log per scan               | `GET /api/v1/scans/{id}/llm-interactions` → `/scans/:id/llm-logs`    |
+| Scan diagnostics and LLM interactions      | `GET /api/v1/scans/{id}/llm-interactions` → `/scans/:id/diagnostics` |
 | Loki dashboards                            | Grafana, datasource `loki`                                           |
 | Langfuse runs                              | `http://localhost:3001` (admin-only link from AdminSubNav)            |
 

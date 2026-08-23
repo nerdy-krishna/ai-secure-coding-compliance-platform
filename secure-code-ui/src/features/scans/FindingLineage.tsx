@@ -19,6 +19,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import dagre from "dagre";
 import { debugService } from "../../shared/api/debugService";
+import type { FindingFixCandidate } from "../../shared/api/debugService";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ interface LineageData {
   lineage_quality: string;
   warnings: string[];
   available_expansions: Record<string, number>;
+  fix_candidates: FindingFixCandidate[];
 }
 
 // ── Colour map ─────────────────────────────────────────────────────
@@ -274,7 +276,7 @@ export const FindingLineage: React.FC<Props> = ({ scanId }) => {
       if (filterText) filters!["text"] = [filterText];
       if (filterSev) filters!["severity"] = [filterSev];
       const data = await debugService.getFindingLineage(
-        scanId, expandedIds, focusedId, 250,
+        scanId, expandedIds, focusedId, 250, filters,
       );
       setLineage(data);
       setError(null);
@@ -301,6 +303,13 @@ export const FindingLineage: React.FC<Props> = ({ scanId }) => {
   }, [rfData, setNodes, setEdges]);
 
   const nodeTypes = useMemo(() => ({ lineageNode: LineageNodeComponent }), []);
+  const candidateCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const candidate of lineage?.fix_candidates || []) {
+      counts[candidate.disposition] = (counts[candidate.disposition] || 0) + 1;
+    }
+    return counts;
+  }, [lineage]);
 
   const toggleExpand = useCallback((nodeId: string) => {
     const n = new URLSearchParams(searchParams);
@@ -402,6 +411,51 @@ export const FindingLineage: React.FC<Props> = ({ scanId }) => {
           {lineage?.lineage_quality === "exact" ? "✓ exact" : "⚠ inferred"}
         </span>
       </div>
+
+      {lineage?.fix_candidates && lineage.fix_candidates.length > 0 && (
+        <details className="surface" style={{ padding: "10px 14px" }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            Governed fix candidates ({lineage.fix_candidates.length})
+            {Object.entries(candidateCounts).map(([status, count]) => (
+              <span key={status} style={{ marginLeft: 8, color: "var(--fg-muted)", fontWeight: 400 }}>
+                {status}: {count}
+              </span>
+            ))}
+          </summary>
+          <div style={{ overflowX: "auto", marginTop: 10 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "var(--fg-muted)" }}>
+                  <th style={{ padding: 6 }}>Location</th>
+                  <th style={{ padding: 6 }}>Decision</th>
+                  <th style={{ padding: 6 }}>Validation</th>
+                  <th style={{ padding: 6 }}>Applicability</th>
+                  <th style={{ padding: 6 }}>Hunk</th>
+                  <th style={{ padding: 6 }}>Applied</th>
+                  <th style={{ padding: 6 }}>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lineage.fix_candidates.slice(0, 100).map((candidate) => (
+                  <tr key={candidate.candidate_id} style={{ borderTop: "1px solid var(--border)" }}>
+                    <td style={{ padding: 6, whiteSpace: "nowrap" }}>
+                      {candidate.file_path}:{candidate.line_number}
+                    </td>
+                    <td style={{ padding: 6 }}>{candidate.disposition}</td>
+                    <td style={{ padding: 6 }}>{candidate.validation_status}</td>
+                    <td style={{ padding: 6 }}>{candidate.applicability_status}</td>
+                    <td style={{ padding: 6, fontFamily: "var(--font-mono)" }}>
+                      {candidate.patch_hunk_id?.slice(0, 8) || "—"}
+                    </td>
+                    <td style={{ padding: 6 }}>{candidate.is_applied ? "yes" : "no"}</td>
+                    <td style={{ padding: 6 }}>{candidate.decision_reason || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
 
       {/* Graph + side panel */}
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>

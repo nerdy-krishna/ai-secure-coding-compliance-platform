@@ -1,8 +1,6 @@
-"""Scan-submission service: creates Scan + Snapshot + Outbox rows
-and publishes the kickoff message to RabbitMQ.
+"""Scan-submission service: atomically creates the scan aggregate and outbox intent.
 
-Split out of `core/services/scan_service.py` (2026-04-26). Method
-bodies are verbatim copies — no logic change.
+Split out of `core/services/scan_service.py` (2026-04-26).
 
 Submission limits
 -----------------
@@ -43,8 +41,10 @@ from app.infrastructure.database import models as db_models
 from app.infrastructure.database.repositories.scan_outbox_repo import (
     ScanOutboxRepository,
 )
+from app.infrastructure.database.repositories.scan_attempt_repo import (
+    ScanAttemptRepository,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
-from app.infrastructure.messaging.publisher import publish_message
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
 from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.framework_validation import validate_framework_selection
@@ -98,7 +98,7 @@ def _redact_repo_url(url: str) -> str:
 
 
 class ScanSubmissionService:
-    """New-scan creation + initial outbox-publish path.
+    """New-scan creation + durable outbox path.
 
     `__init__` constructs the outbox repo from the SAME session as the
     scan repo so `_process_and_launch_scan` can write Scan +
@@ -141,7 +141,7 @@ class ScanSubmissionService:
     ) -> db_models.Scan:
         """
         A private helper to process submission data, create all necessary DB records,
-        and publish a message to kick off the workflow.
+        and persist dispatch intent for the outbox sweeper.
         """
         # --- Input validation (V02.2.1) --------------------------------------
         if scan_type not in _VALID_SCAN_TYPES:
@@ -222,10 +222,13 @@ class ScanSubmissionService:
                 user_id=user_id,
                 repo_url=repo_url,
                 tenant_id=tenant_id,
+                commit=False,
             )
 
             # 2. Get or create deduplicated source code files
-            file_hashes = await self.repo.get_or_create_source_files(files_data)
+            file_hashes = await self.repo.get_or_create_source_files(
+                files_data, commit=False
+            )
 
             # 3. Create the file map for the snapshot {path: hash}
             file_map = {
@@ -248,49 +251,56 @@ class ScanSubmissionService:
                 source_type=source_type,
                 frameworks=frameworks,
                 tenant_id=tenant_id,
+                commit=False,
+            )
+
+            attempt = await ScanAttemptRepository(self.repo.db).create_initial(
+                scan, actor_user_id=user_id, commit=False
             )
 
             # 5. Create the Code Snapshot linked to the scan
             await self.repo.create_code_snapshot(
-                scan_id=scan.id, file_map=file_map, snapshot_type="ORIGINAL_SUBMISSION"
+                scan_id=scan.id,
+                file_map=file_map,
+                snapshot_type="ORIGINAL_SUBMISSION",
+                commit=False,
             )
 
             # 6. Add "QUEUED" event to the timeline
             await self.repo.create_scan_event(
-                scan_id=scan.id, stage_name="QUEUED", status="COMPLETED"
+                scan_id=scan.id,
+                stage_name="QUEUED",
+                status="COMPLETED",
+                commit=False,
             )
 
-            # 7. Persist an outbox row FIRST, so the sweep task can retry the
-            # publish later if RabbitMQ is down right now.
-            payload = {"scan_id": str(scan.id)}
-            outbox_row = await self.outbox.enqueue(
+            # 7. Persist dispatch intent in the aggregate transaction so the
+            # sweeper can publish whenever RabbitMQ is available.
+            payload = {
+                "scan_id": str(scan.id),
+                "attempt_id": str(attempt.id),
+                "correlation_id": correlation_id,
+            }
+            await self.outbox.enqueue(
                 scan_id=scan.id,
                 queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
                 payload=payload,
+                commit=False,
             )
 
-            # 8. Attempt the publish inline. Best-effort: on failure, the outbox
-            # sweeper will re-publish.
-            published = await publish_message(
-                queue_name=settings.RABBITMQ_SUBMISSION_QUEUE,
-                message_body=payload,
-                correlation_id=correlation_id,
+            # One commit makes Project/SourceCodeFile/Scan/Snapshot/Event/Outbox
+            # visible together. RabbitMQ publication is deliberately outside the
+            # request path and belongs exclusively to the outbox sweeper.
+            await self.repo.db.commit()
+            logger.info(
+                "scan-submission: durable dispatch intent committed",
+                extra={"correlation_id": correlation_id, "scan_id": str(scan.id)},
             )
-            if published:
-                await self.outbox.mark_published(outbox_row.id)
-                logger.info(
-                    "scan-submission: published",
-                    extra={"correlation_id": correlation_id, "scan_id": str(scan.id)},
-                )
-            else:
-                await self.outbox.record_failed_attempt(outbox_row.id)
-                logger.warning(
-                    "scan-submission: publish failed; outbox sweeper will retry",
-                    extra={"correlation_id": correlation_id, "scan_id": str(scan.id)},
-                )
         except HTTPException:
+            await self.repo.db.rollback()
             raise
         except Exception:
+            await self.repo.db.rollback()
             logger.error(
                 "scan-submission: launch chain failed",
                 extra={

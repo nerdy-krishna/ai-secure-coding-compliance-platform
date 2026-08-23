@@ -47,6 +47,25 @@ STATUS_BLOCKED_PRE_LLM: Final[str] = "BLOCKED_PRE_LLM"
 # pay for an LLM scan right now".
 STATUS_BLOCKED_USER_DECLINE: Final[str] = "BLOCKED_USER_DECLINE"
 
+ALL_SCAN_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        STATUS_QUEUED,
+        STATUS_PENDING_PRESCAN_APPROVAL,
+        STATUS_PENDING_PROFILING_APPROVAL,
+        STATUS_PENDING_APPROVAL,
+        STATUS_QUEUED_FOR_SCAN,
+        STATUS_ANALYZING_CONTEXT,
+        STATUS_RUNNING_AGENTS,
+        STATUS_GENERATING_REPORTS,
+        STATUS_COMPLETED,
+        STATUS_REMEDIATION_COMPLETED,
+        STATUS_FAILED,
+        STATUS_CANCELLED,
+        STATUS_BLOCKED_PRE_LLM,
+        STATUS_BLOCKED_USER_DECLINE,
+    }
+)
+
 # Scan statuses that represent a scan still moving toward completion.
 ACTIVE_SCAN_STATUSES: Final[tuple[str, ...]] = (
     STATUS_QUEUED,
@@ -64,3 +83,136 @@ COMPLETED_SCAN_STATUSES: Final[tuple[str, ...]] = (
     STATUS_COMPLETED,
     STATUS_REMEDIATION_COMPLETED,
 )
+
+TERMINAL_SCAN_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        *COMPLETED_SCAN_STATUSES,
+        STATUS_FAILED,
+        STATUS_CANCELLED,
+        STATUS_BLOCKED_PRE_LLM,
+        STATUS_BLOCKED_USER_DECLINE,
+    }
+)
+
+# Declared normal lifecycle graph. Terminal statuses deliberately have no
+# outgoing edges. A same-status write is treated as idempotent by the helper
+# functions below and does not need to be repeated in every edge set.
+SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
+    STATUS_QUEUED: frozenset(
+        {
+            STATUS_ANALYZING_CONTEXT,
+            STATUS_QUEUED_FOR_SCAN,
+            STATUS_PENDING_PRESCAN_APPROVAL,
+            STATUS_PENDING_PROFILING_APPROVAL,
+            STATUS_PENDING_APPROVAL,
+            STATUS_RUNNING_AGENTS,
+            STATUS_GENERATING_REPORTS,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+        }
+    ),
+    STATUS_ANALYZING_CONTEXT: frozenset(
+        {
+            STATUS_QUEUED_FOR_SCAN,
+            STATUS_PENDING_PRESCAN_APPROVAL,
+            STATUS_PENDING_PROFILING_APPROVAL,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+        }
+    ),
+    STATUS_PENDING_PRESCAN_APPROVAL: frozenset(
+        {
+            STATUS_QUEUED_FOR_SCAN,
+            STATUS_BLOCKED_PRE_LLM,
+            STATUS_BLOCKED_USER_DECLINE,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+        }
+    ),
+    STATUS_PENDING_PROFILING_APPROVAL: frozenset(
+        {
+            STATUS_QUEUED_FOR_SCAN,
+            STATUS_BLOCKED_USER_DECLINE,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+        }
+    ),
+    STATUS_PENDING_APPROVAL: frozenset(
+        {
+            STATUS_QUEUED_FOR_SCAN,
+            STATUS_BLOCKED_USER_DECLINE,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+        }
+    ),
+    STATUS_QUEUED_FOR_SCAN: frozenset(
+        {
+            STATUS_ANALYZING_CONTEXT,
+            STATUS_PENDING_APPROVAL,
+            STATUS_RUNNING_AGENTS,
+            STATUS_BLOCKED_PRE_LLM,
+            STATUS_BLOCKED_USER_DECLINE,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+        }
+    ),
+    STATUS_RUNNING_AGENTS: frozenset(
+        {STATUS_GENERATING_REPORTS, STATUS_FAILED, STATUS_CANCELLED}
+    ),
+    STATUS_GENERATING_REPORTS: frozenset(
+        {
+            STATUS_COMPLETED,
+            STATUS_REMEDIATION_COMPLETED,
+            STATUS_FAILED,
+            STATUS_CANCELLED,
+        }
+    ),
+    STATUS_COMPLETED: frozenset(),
+    STATUS_REMEDIATION_COMPLETED: frozenset(),
+    STATUS_FAILED: frozenset(),
+    STATUS_CANCELLED: frozenset(),
+    STATUS_BLOCKED_PRE_LLM: frozenset(),
+    STATUS_BLOCKED_USER_DECLINE: frozenset(),
+}
+
+# Manual run control is intentionally separate from the normal graph. It is
+# the only supported way to leave FAILED/CANCELLED and is applied by the
+# dedicated reset repository method after authorization and cleanup policy.
+MANUAL_SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
+    STATUS_FAILED: frozenset({STATUS_QUEUED}),
+    STATUS_CANCELLED: frozenset({STATUS_QUEUED}),
+}
+
+
+def is_scan_status_transition_allowed(
+    current: str,
+    target: str,
+    *,
+    manual: bool = False,
+) -> bool:
+    """Return whether ``current -> target`` is declared by the lifecycle."""
+    if current not in ALL_SCAN_STATUSES or target not in ALL_SCAN_STATUSES:
+        return False
+    if current == target:
+        return True
+    transitions = MANUAL_SCAN_STATUS_TRANSITIONS if manual else SCAN_STATUS_TRANSITIONS
+    return target in transitions.get(current, frozenset())
+
+
+def scan_status_predecessors(
+    target: str,
+    *,
+    manual: bool = False,
+    include_self: bool = True,
+) -> tuple[str, ...]:
+    """Return deterministic SQL-ready sources allowed to enter ``target``."""
+    if target not in ALL_SCAN_STATUSES:
+        raise ValueError(f"Unknown scan status: {target}")
+    transitions = MANUAL_SCAN_STATUS_TRANSITIONS if manual else SCAN_STATUS_TRANSITIONS
+    sources = {
+        current
+        for current in ALL_SCAN_STATUSES
+        if (include_self and current == target)
+        or target in transitions.get(current, frozenset())
+    }
+    return tuple(sorted(sources))

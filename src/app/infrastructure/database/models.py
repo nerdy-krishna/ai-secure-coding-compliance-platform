@@ -2,6 +2,7 @@
 import uuid
 import sqlalchemy as sa
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy import (
@@ -124,6 +125,17 @@ class Scan(Base):
         nullable=True,
         index=True,
     )
+    current_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey(
+            "scan_attempts.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_scans_current_attempt_id",
+        ),
+        nullable=True,
+        index=True,
+    )
     scan_type: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default=STATUS_QUEUED
@@ -132,7 +144,7 @@ class Scan(Base):
         ForeignKey("llm_configurations.id")
     )
     # Utility (cheap) LLM slot — drives trivial steps (the per-file
-    # profiler and fix-snippet verification). Nullable: scans created
+    # profiler). Nullable: scans created
     # before this column, and submits that omit it, fall back to the
     # reasoning slot at resolution time (see shared.lib.llm_slots).
     utility_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -219,7 +231,65 @@ class Scan(Base):
     tasks: Mapped[List["ScanTask"]] = relationship(
         "ScanTask", back_populates="scan", cascade="all, delete-orphan"
     )
+    approval_gates: Mapped[List["ApprovalGate"]] = relationship(
+        "ApprovalGate", back_populates="scan", cascade="all, delete-orphan"
+    )
+    attempts: Mapped[List["ScanAttempt"]] = relationship(
+        "ScanAttempt",
+        back_populates="scan",
+        cascade="all, delete-orphan",
+        foreign_keys="ScanAttempt.scan_id",
+    )
     risk_score: Mapped[Optional[int]] = mapped_column(Integer)
+
+
+class ScanAttempt(Base):
+    """One immutable execution identity for an initial run or restart."""
+
+    __tablename__ = "scan_attempts"
+    __table_args__ = (
+        UniqueConstraint("scan_id", "sequence", name="uq_scan_attempts_sequence"),
+        sa.CheckConstraint(
+            "trigger IN ('initial', 'restart', 'legacy_backfill')",
+            name="ck_scan_attempts_trigger",
+        ),
+        sa.CheckConstraint(
+            "status IN ('active', 'completed', 'failed', 'cancelled', 'superseded')",
+            name="ck_scan_attempts_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    trigger: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    parent_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("scan_attempts.id", ondelete="SET NULL")
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    graph_thread_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    configuration_digest: Mapped[Optional[str]] = mapped_column(String(64))
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    scan: Mapped["Scan"] = relationship(
+        back_populates="attempts", foreign_keys=[scan_id]
+    )
 
 
 class ScanTask(Base):
@@ -250,6 +320,12 @@ class ScanTask(Base):
     )
     scan_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("scan_attempts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     task_type: Mapped[str] = mapped_column(String(64), nullable=False)
     task_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -312,9 +388,21 @@ class ScanArtifact(Base):
         nullable=False,
         index=True,
     )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        sa.ForeignKey("scan_attempts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    evidence_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        sa.ForeignKey("evidence_objects.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
     artifact_type: Mapped[str] = mapped_column(String(64), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -323,10 +411,192 @@ class ScanArtifact(Base):
     )
 
 
+class EvidenceObject(Base):
+    """Immutable metadata for one encrypted object-store payload."""
+
+    __tablename__ = "evidence_objects"
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id",
+            "artifact_type",
+            "version",
+            name="uq_evidence_objects_attempt_type_version",
+        ),
+        UniqueConstraint(
+            "object_key", "object_version", name="uq_evidence_object_version"
+        ),
+        sa.CheckConstraint(
+            "state IN ('available', 'deletion_pending', 'deleted')",
+            name="ck_evidence_objects_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scans.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), index=True
+    )
+    artifact_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    object_key: Mapped[str] = mapped_column(String(1024), nullable=False)
+    object_version: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="null"
+    )
+    media_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    plaintext_size: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    ciphertext_size: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    plaintext_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    ciphertext_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    producer: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    encryption_algorithm: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    key_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    wrapped_data_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    aad_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    retention_policy: Mapped[str] = mapped_column(String(64), nullable=False)
+    retain_until: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    legal_hold: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="available")
+    legacy_artifact_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_artifacts.id", ondelete="SET NULL"), unique=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class EvidenceManifest(Base):
+    """Append-only, digest-chained manifest generation for one attempt."""
+
+    __tablename__ = "evidence_manifests"
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id", "generation", name="uq_evidence_manifest_generation"
+        ),
+        UniqueConstraint(
+            "attempt_id", "manifest_sha256", name="uq_evidence_manifest_digest"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scans.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_manifest_sha256: Mapped[Optional[str]] = mapped_column(String(64))
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    entries: Mapped[List[Dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    finalized: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class EvidenceGovernanceEvent(Base):
+    """Append-only audit record for evidence retention and access actions."""
+
+    __tablename__ = "evidence_governance_events"
+    id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scans.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    evidence_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("evidence_objects.id", ondelete="SET NULL"), index=True
+    )
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), index=True
+    )
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    correlation_id: Mapped[Optional[str]] = mapped_column(String(255))
+    details: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class EvidenceDeletionOutbox(Base):
+    """Transactional intent for exact-version object deletion."""
+
+    __tablename__ = "evidence_deletion_outbox"
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    evidence_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("evidence_objects.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+
+
 class ScanEvent(Base):
     __tablename__ = "scan_events"
+    __table_args__ = (
+        sa.Index(
+            "uq_scan_events_cancellation_phase",
+            "scan_id",
+            "attempt_id",
+            "status",
+            unique=True,
+            postgresql_where=sa.text("stage_name = 'CANCELLATION'"),
+        ),
+    )
     id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
     scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id"), nullable=False)
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    activity_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="workflow", server_default="workflow"
+    )
     stage_name: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
@@ -340,6 +610,78 @@ class ScanEvent(Base):
     details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     scan: Mapped["Scan"] = relationship(back_populates="events")
+
+
+class ApprovalGate(Base):
+    """Durable identity and one-shot state for one LangGraph HITL pause."""
+
+    __tablename__ = "approval_gates"
+    __table_args__ = (
+        UniqueConstraint("scan_id", "sequence", name="uq_approval_gates_scan_sequence"),
+        UniqueConstraint(
+            "scan_id",
+            "decision_idempotency_key",
+            name="uq_approval_gates_scan_decision_key",
+        ),
+        sa.CheckConstraint(
+            "kind IN ('prescan_approval', 'profiling_approval', 'cost_approval')",
+            name="ck_approval_gates_kind",
+        ),
+        sa.CheckConstraint(
+            "state IN ('pending', 'decided', 'resume_claimed', 'resumed', 'completed', "
+            "'expired', 'cancelled')",
+            name="ck_approval_gates_state",
+        ),
+        sa.CheckConstraint("version > 0", name="ck_approval_gates_version_positive"),
+    )
+
+    gate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    thread_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    checkpoint_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    node_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    decision: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    override_critical_secret: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    decision_idempotency_key: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True
+    )
+    resume_claimed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    resume_lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    decided_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    scan: Mapped["Scan"] = relationship(back_populates="approval_gates")
 
 
 class ScanOutbox(Base):
@@ -358,8 +700,14 @@ class ScanOutbox(Base):
     scan_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("scans.id", ondelete="CASCADE"), nullable=False
     )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     queue_name: Mapped[str] = mapped_column(String(255), nullable=False)
     payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, unique=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -398,6 +746,21 @@ class Finding(Base):
     __tablename__ = "findings"
     id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
     scan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("scans.id"), nullable=False)
+    raw_finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    canonical_finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    contributing_raw_finding_ids: Mapped[Optional[List[uuid.UUID]]] = mapped_column(
+        PG_ARRAY(PG_UUID(as_uuid=True)), nullable=True
+    )
+    source_snapshot_hash: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    fix_selection_status: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True
+    )
     # Tenant scoping (Chunk 8). Nullable; backfilled via scan.tenant_id.
     tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -425,6 +788,9 @@ class Finding(Base):
     cwe: Mapped[Optional[str]] = mapped_column(String(50))
     confidence: Mapped[Optional[str]] = mapped_column(String(50))
     source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    scanner_rule_id: Mapped[Optional[str]] = mapped_column(
+        String(512), nullable=True, index=True
+    )
     cve_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     corroborating_agents: Mapped[Optional[List[str]]] = mapped_column(JSONB)
     # The reasoning LLM(s) that detected this finding (#94 / PRD #91).
@@ -443,9 +809,8 @@ class Finding(Base):
     # Patch verifier (§3.9 / 2026-04-27). NULL = no verification attempted
     # (audit / suggest scans, scans before §3.9 shipped, or fixes that
     # weren't applied). True = re-running Semgrep over the patched code
-    # no longer reports a finding for this rule at this file/line — the
-    # fix worked. False = same Semgrep rule still fires at the same
-    # location — fix didn't close the detection.
+    # no longer reports the same native rule at the resolved patch site —
+    # the fix worked. False = that rule still fires there.
     fix_verified: Mapped[Optional[bool]] = mapped_column(
         sa.Boolean, nullable=True, default=None
     )
@@ -507,6 +872,92 @@ class Finding(Base):
     )
 
     scan: Mapped["Scan"] = relationship(back_populates="findings")
+
+
+class FindingFixCandidate(Base):
+    """Durable governed patch candidate tied to the reviewed source blob."""
+
+    __tablename__ = "finding_fix_candidates"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "disposition IN ('pending', 'selected', 'alternative', 'duplicate', 'conflict', 'rejected')",
+            name="ck_finding_fix_candidates_disposition",
+        ),
+        sa.CheckConstraint(
+            "validation_status IN ('not_run', 'passed', 'failed')",
+            name="ck_finding_fix_candidates_validation_status",
+        ),
+    )
+
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    raw_finding_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    canonical_finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    source_snapshot_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    anchor_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    patch_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    resolved_range: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    context_fingerprint: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
+    patch_hunk_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    applicability_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unresolved"
+    )
+    language: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    required_imports: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    required_dependencies: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    configuration_changes: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    migration_changes: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    manual_steps: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    line_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    suggestion: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    disposition: Mapped[str] = mapped_column(String(20), nullable=False)
+    decision_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    contributing_agents: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    contributing_models: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    validation_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="not_run"
+    )
+    is_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    batch: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 class FindingDispositionEvent(Base):
@@ -610,10 +1061,285 @@ class LLMInteraction(Base):
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    # Compatibility pointer into the immutable request-aware usage ledger.
+    # Legacy rows remain nullable; new writers project flat totals from this event.
+    usage_event_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("llm_usage_events.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
 
     scan: Mapped[Optional["Scan"]] = relationship(back_populates="llm_interactions")
     chat_message: Mapped[Optional["ChatMessage"]] = relationship(
         back_populates="llm_interaction"
+    )
+
+
+class LLMCallReservation(Base):
+    """Durable one-shot claim made before a potentially billable provider call."""
+
+    __tablename__ = "llm_call_reservations"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "status IN ('reserved', 'completed', 'failed')",
+            name="ck_llm_call_reservations_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(512), nullable=False, unique=True
+    )
+    owner_token: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, unique=True
+    )
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scans.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
+    )
+    stage: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="reserved", server_default="reserved"
+    )
+    usage_event_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_usage_events.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class LLMUsageEvent(Base):
+    """Immutable aggregate for one logical model run.
+
+    Request rows retain retry/structured-output detail and are priced before these
+    totals are projected. ``idempotency_key`` is stable across queue redelivery and
+    LangGraph resume.
+    """
+
+    __tablename__ = "llm_usage_events"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "usage_source IN ('provider', 'estimated', 'reconciled')",
+            name="ck_llm_usage_events_source",
+        ),
+        sa.CheckConstraint(
+            "quality_state IN ('exact', 'normalized', 'estimated', 'unknown')",
+            name="ck_llm_usage_events_quality",
+        ),
+        sa.CheckConstraint(
+            "cost_status IN ('exact', 'estimated', 'unknown', 'reconciled')",
+            name="ck_llm_usage_events_cost_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(512), nullable=False, unique=True
+    )
+    operation_kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    operation_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scans.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    chat_session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    rag_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("rag_preprocessing_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    scan_task_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    stage: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    agent_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    group_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False, server_default="{}"
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    resolved_models: Mapped[list[str]] = mapped_column(
+        PG_ARRAY(String(255)), nullable=False, server_default="{}"
+    )
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    tool_call_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    cache_read_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    cache_write_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    reasoning_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    usage_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    quality_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    cost_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    total_cost: Mapped[Optional[Decimal]] = mapped_column(
+        sa.Numeric(30, 12), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class LLMUsageRequest(Base):
+    """Provider response and normalized usage for one request in an agent run."""
+
+    __tablename__ = "llm_usage_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "usage_event_id", "request_index", name="uq_llm_usage_request_index"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    usage_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("llm_usage_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    request_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider_response_id: Mapped[Optional[str]] = mapped_column(
+        String(512), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    resolved_model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    api_flavor: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    service_tier: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    is_batch: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    region: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    cache_read_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    cache_write_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    reasoning_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    input_audio_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    output_audio_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    image_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    image_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    tool_request_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    provider_usage: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    usage_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    quality_state: Mapped[str] = mapped_column(String(20), nullable=False)
+    quality_reasons: Mapped[list[str]] = mapped_column(
+        PG_ARRAY(String(100)), nullable=False, server_default="{}"
+    )
+    price_snapshot: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    cost_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    currency: Mapped[Optional[str]] = mapped_column(String(3), nullable=True)
+    total_cost: Mapped[Optional[Decimal]] = mapped_column(
+        sa.Numeric(30, 12), nullable=True
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class LLMUsageLineItem(Base):
+    """Immutable fixed-precision charge component for one provider request."""
+
+    __tablename__ = "llm_usage_line_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "usage_request_id", "line_index", name="uq_llm_usage_line_item_index"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    usage_request_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("llm_usage_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    line_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(sa.Numeric(30, 6), nullable=False)
+    unit: Mapped[str] = mapped_column(String(50), nullable=False)
+    rate: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
+    modifier: Mapped[Decimal] = mapped_column(sa.Numeric(20, 12), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
+    source: Mapped[str] = mapped_column(String(255), nullable=False)
+    effective_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class LLMPriceOverride(Base):
+    """Effective-dated complete admin price set for one model configuration."""
+
+    __tablename__ = "llm_price_overrides"
+    __table_args__ = (
+        UniqueConstraint(
+            "llm_config_id", "effective_from", name="uq_llm_price_override_version"
+        ),
+        sa.CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="ck_llm_price_override_interval",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    llm_config_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    rates: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    source: Mapped[str] = mapped_column(String(255), nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    effective_to: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 

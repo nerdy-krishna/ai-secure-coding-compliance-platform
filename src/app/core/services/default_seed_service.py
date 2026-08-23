@@ -41,9 +41,7 @@ def _load_prompt(filename: str) -> str:
     """Read a canonical prompt template from `core/services/seed_prompts/`.
 
     Templates are kept in their own files so they're easy to diff and
-    edit in isolation; the `_*_TEMPLATE` constants below preserve the
-    historical import surface (e.g. `scripts/extract_eval_prompts.py`
-    re-imports them by name).
+    edit in isolation.
     """
     return (
         resources.files("app.core.services.seed_prompts")
@@ -2097,10 +2095,8 @@ AGENT_DEFINITIONS: List[Dict[str, Any]] = (
 
 # Prompt templates loaded from `core/services/seed_prompts/*.md` — see
 # the `_load_prompt` helper at the top of this module for the loader.
-# The `_AUDIT_TEMPLATE` / `_REMEDIATION_TEMPLATE` / `_CHAT_TEMPLATE`
-# constants stay bound to the generic templates so historical importers
-# (`scripts/extract_eval_prompts.py`) keep working without touching
-# their import lines.
+# The generic template constants are also used as fallbacks when a
+# framework-specific template is unavailable.
 _AUDIT_TEMPLATE = _load_prompt("audit.md")
 _REMEDIATION_TEMPLATE = _load_prompt("remediation.md")
 _CHAT_TEMPLATE = _load_prompt("chat.md")

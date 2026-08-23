@@ -21,12 +21,18 @@ this module.
 from __future__ import annotations
 
 import logging
+import json
+import uuid
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from app.core.schemas import FileProfile
 from app.infrastructure.llm_client import LLMClient, get_llm_client
+from app.infrastructure.database.repositories.llm_usage_repo import (
+    LLMUsageContext,
+    build_usage_idempotency_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +53,44 @@ _SYSTEM_PROMPT = (
     "the right security analysis agents. You never invent domain names "
     "— you only choose from the domain list you are given."
 )
+
+
+def render_file_profile_prompt(
+    file_path: str,
+    content: str,
+    domain_vocabulary: Dict[str, str],
+    repo_summary: Optional[Any] = None,
+) -> tuple[str, str]:
+    """Render the exact system/user envelope used by profiling and preflight."""
+    snippet = content[:_MAX_CONTENT_CHARS]
+    truncated = len(content) > _MAX_CONTENT_CHARS
+    vocab_block = (
+        "\n".join(
+            f"- {name}: {desc}" for name, desc in sorted(domain_vocabulary.items())
+        )
+        or "(no domains configured)"
+    )
+    structure = _structural_block(repo_summary)
+    structure_section = f"{structure}\n\n" if structure else ""
+    prompt = (
+        f"File path: {file_path}\n\n"
+        f"Available security domains (choose only from these names):\n"
+        f"{vocab_block}\n\n"
+        f"{structure_section}"
+        "Profile this file. Return:\n"
+        "1. summary — 2-4 sentences on what the file does.\n"
+        "2. security_relevant_operations — short phrases for the "
+        "security-sensitive things it does (e.g. 'reads request "
+        "parameters', 'builds SQL queries', 'verifies JWT'). Empty "
+        "list if none.\n"
+        "3. applicable_domains — the domain NAMES from the list "
+        "above that this file is relevant to. Empty list if none "
+        "apply.\n\n"
+        f"--- FILE CONTENT{' (truncated)' if truncated else ''} ---\n"
+        f"{snippet}\n"
+        "--- END FILE CONTENT ---"
+    )
+    return _SYSTEM_PROMPT, prompt
 
 
 def _structural_block(repo_summary: Optional[Any]) -> str:
@@ -90,6 +134,15 @@ class _FileProfileLLMResponse(BaseModel):
     applicable_domains: List[str] = Field(default_factory=list)
 
 
+def file_profile_response_schema_text() -> str:
+    """Canonical structured-output schema included in the provider envelope."""
+    return json.dumps(
+        _FileProfileLLMResponse.model_json_schema(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 class FileProfiler:
     """Profiles individual files using a utility-slot LLM client.
 
@@ -98,8 +151,16 @@ class FileProfiler:
     instance from a `utility_llm_config_id`.
     """
 
-    def __init__(self, client: LLMClient):
+    def __init__(
+        self,
+        client: LLMClient,
+        *,
+        scan_id: uuid.UUID,
+        llm_config_id: uuid.UUID,
+    ):
         self._client = client
+        self._scan_id = scan_id
+        self._llm_config_id = llm_config_id
 
     async def profile_file(
         self,
@@ -118,41 +179,33 @@ class FileProfiler:
         are more stable run to run. On any LLM error a minimal fallback
         profile is returned so a single bad file never aborts the scan.
         """
-        snippet = content[:_MAX_CONTENT_CHARS]
-        truncated = len(content) > _MAX_CONTENT_CHARS
-        vocab_block = (
-            "\n".join(
-                f"- {name}: {desc}" for name, desc in sorted(domain_vocabulary.items())
-            )
-            or "(no domains configured)"
-        )
-        structure = _structural_block(repo_summary)
-        structure_section = f"{structure}\n\n" if structure else ""
-
-        prompt = (
-            f"File path: {file_path}\n\n"
-            f"Available security domains (choose only from these names):\n"
-            f"{vocab_block}\n\n"
-            f"{structure_section}"
-            "Profile this file. Return:\n"
-            "1. summary — 2-4 sentences on what the file does.\n"
-            "2. security_relevant_operations — short phrases for the "
-            "security-sensitive things it does (e.g. 'reads request "
-            "parameters', 'builds SQL queries', 'verifies JWT'). Empty "
-            "list if none.\n"
-            "3. applicable_domains — the domain NAMES from the list "
-            "above that this file is relevant to. Empty list if none "
-            "apply.\n\n"
-            f"--- FILE CONTENT{' (truncated)' if truncated else ''} ---\n"
-            f"{snippet}\n"
-            "--- END FILE CONTENT ---"
+        system_prompt, prompt = render_file_profile_prompt(
+            file_path,
+            content,
+            domain_vocabulary,
+            repo_summary,
         )
 
         try:
             result = await self._client.generate_structured_output(
                 prompt=prompt,
                 response_model=_FileProfileLLMResponse,
-                system_prompt=_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
+                usage_context=LLMUsageContext(
+                    operation_kind="scan",
+                    operation_id=str(self._scan_id),
+                    stage="file_profiling",
+                    agent_name="FileProfiler",
+                    idempotency_key=build_usage_idempotency_key(
+                        operation_kind="scan",
+                        operation_id=self._scan_id,
+                        stage="file_profiling",
+                        agent_name="FileProfiler",
+                        unit_key=file_path,
+                        llm_config_id=self._llm_config_id,
+                    ),
+                    scan_id=self._scan_id,
+                ),
             )
         except Exception as exc:  # noqa: BLE001 — never abort the scan
             logger.warning("file_profiler: profiling raised for %s: %s", file_path, exc)
@@ -198,7 +251,9 @@ def _fallback_profile(file_path: str) -> FileProfile:
 
 
 async def create_file_profiler(
-    utility_llm_config_id, temperature: Optional[float] = None
+    utility_llm_config_id: uuid.UUID,
+    scan_id: uuid.UUID,
+    temperature: Optional[float] = None,
 ) -> FileProfiler:
     """Build a `FileProfiler` backed by the scan's utility LLM slot.
 
@@ -212,4 +267,8 @@ async def create_file_profiler(
             f"Utility LLM config {utility_llm_config_id} could not be loaded "
             "for file profiling."
         )
-    return FileProfiler(client)
+    return FileProfiler(
+        client,
+        scan_id=scan_id,
+        llm_config_id=utility_llm_config_id,
+    )
