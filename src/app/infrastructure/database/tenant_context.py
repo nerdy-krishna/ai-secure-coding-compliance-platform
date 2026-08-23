@@ -28,14 +28,13 @@ principal_id_var: ContextVar[str] = ContextVar(
 )
 system_scope_var: ContextVar[bool] = ContextVar("database_system_scope", default=False)
 
-# Seeded by the tenant-foundation migration. Legacy/direct fixtures may still
-# carry NULL until the Task 17 non-null migration lands; they are confined to
-# this tenant instead of being interpreted as unscoped.
+# Seeded by the tenant-foundation migration. New rows use this value when a
+# caller omits an explicit tenant; it is a real tenant, never an unscoped mode.
 DEFAULT_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 def effective_tenant_id(tenant_id: uuid.UUID | None) -> uuid.UUID:
-    """Map transitional NULL ownership to the seeded default tenant."""
+    """Map omitted ownership to the seeded default tenant."""
 
     return tenant_id or DEFAULT_TENANT_ID
 

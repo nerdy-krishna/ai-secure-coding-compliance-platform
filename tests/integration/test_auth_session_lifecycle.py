@@ -45,6 +45,7 @@ class AuthSessionLifecycleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             db.add(user)
             await db.commit()
             self.user_id = user.id
+            self.original_tenant_id = user.tenant_id
 
     async def asyncTearDown(self) -> None:
         async with AsyncSessionLocal() as db:
@@ -304,7 +305,8 @@ class AuthSessionLifecycleIntegrationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             async with AsyncSessionLocal() as db:
                 user = await db.get(User, self.user_id)
-                user.tenant_id = None
+                user.tenant_id = self.original_tenant_id
+                await db.flush()
                 await db.execute(delete(Tenant).where(Tenant.id == tenant_id))
                 await db.commit()
 
@@ -337,7 +339,8 @@ class AuthSessionLifecycleIntegrationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             async with AsyncSessionLocal() as db:
                 user = await db.get(User, self.user_id)
-                user.tenant_id = None
+                user.tenant_id = self.original_tenant_id
+                await db.flush()
                 await db.execute(delete(Tenant).where(Tenant.id == tenant_id))
                 await db.commit()
 
@@ -379,7 +382,8 @@ class AuthSessionLifecycleIntegrationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             async with AsyncSessionLocal() as db:
                 user = await db.get(User, self.user_id)
-                user.tenant_id = None
+                user.tenant_id = self.original_tenant_id
+                await db.flush()
                 await db.execute(delete(Tenant).where(Tenant.id == tenant_id))
                 await db.commit()
 

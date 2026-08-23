@@ -10,6 +10,7 @@ from app.infrastructure.database.tenant_context import (
     system_scope_var,
     tenant_id_var,
 )
+from app.infrastructure.database.role_posture import DatabaseRolePosture
 
 
 class TenantContextTests(unittest.TestCase):
@@ -33,6 +34,31 @@ class TenantContextTests(unittest.TestCase):
         reset_principal(binding)
         self.assertIsNone(tenant_id_var.get())
         self.assertEqual(principal_kind_var.get(), "anonymous")
+
+    def test_role_posture_rejects_owner_bypass_and_superuser(self) -> None:
+        safe = DatabaseRolePosture(
+            current_user="sccap_app",
+            session_user="sccap_app",
+            current_superuser=False,
+            current_bypassrls=False,
+            session_superuser=False,
+            session_bypassrls=False,
+            owns_forced_rls_table=False,
+        )
+        self.assertEqual(safe.unsafe_reasons(), ())
+        unsafe = DatabaseRolePosture(
+            current_user="postgres",
+            session_user="postgres",
+            current_superuser=True,
+            current_bypassrls=True,
+            session_superuser=True,
+            session_bypassrls=True,
+            owns_forced_rls_table=True,
+        )
+        self.assertEqual(
+            unsafe.unsafe_reasons(),
+            ("superuser", "bypassrls", "owns_forced_rls_table"),
+        )
 
     def test_only_system_principal_can_receive_system_scope(self) -> None:
         with self.assertRaises(ValueError):

@@ -38,14 +38,13 @@ class User(SQLAlchemyBaseUserTable[int], Base):
         String(length=320), unique=True, index=True, nullable=False
     )
 
-    # Tenant scoping (Chunk 7 — foundation only). Nullable; existing
-    # rows backfill to the seeded `default` tenant. No enforcement yet —
-    # `visible_user_ids` is still the only scope check today. Future
-    # phases will widen scope checks to filter by tenant.
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Tenant ownership is mandatory. Existing rows were backfilled to the
+    # seeded default tenant before the non-null constraint was enabled.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
     )
 
     projects: Mapped[List["Project"]] = relationship("Project", back_populates="user")
@@ -90,11 +89,12 @@ class Project(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     repository_url: Mapped[Optional[str]] = mapped_column(Text)
-    # Tenant scoping (Chunk 8). Nullable; backfilled from user.tenant_id.
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Mandatory tenant ownership; repository checks and RLS enforce isolation.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
         index=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -120,12 +120,12 @@ class Scan(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     parent_scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("scans.id"))
-    # Tenant scoping (Chunk 8). Nullable; backfilled from user.tenant_id
-    # (transitively, scan.user_id → user.tenant_id).
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Mandatory tenant ownership, backfilled transitively from scan.user_id.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
         index=True,
     )
     current_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -268,8 +268,12 @@ class ScanAttempt(Base):
     scan_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), index=True
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
+        index=True,
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     trigger: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -445,8 +449,12 @@ class EvidenceObject(Base):
         nullable=True,
         index=True,
     )
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), index=True
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
+        index=True,
     )
     artifact_type: Mapped[str] = mapped_column(String(64), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -539,8 +547,12 @@ class EvidenceGovernanceEvent(Base):
     evidence_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("evidence_objects.id", ondelete="SET NULL"), index=True
     )
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), index=True
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
+        index=True,
     )
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_user_id: Mapped[Optional[int]] = mapped_column(
@@ -764,11 +776,12 @@ class Finding(Base):
     fix_selection_status: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True
     )
-    # Tenant scoping (Chunk 8). Nullable; backfilled via scan.tenant_id.
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Mandatory tenant ownership, backfilled from scan.tenant_id.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
         index=True,
     )
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1184,8 +1197,11 @@ class LLMUsageEvent(Base):
     user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
     )
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
+        index=True,
     )
     group_ids: Mapped[list[uuid.UUID]] = mapped_column(
         PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False, server_default="{}"
@@ -1353,11 +1369,12 @@ class ChatSession(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     project_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("projects.id"))
-    # Tenant scoping (Chunk 8). Nullable; backfilled from user.tenant_id.
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Mandatory tenant ownership, backfilled from user.tenant_id.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
         index=True,
     )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -1589,11 +1606,12 @@ class UserGroup(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     # V02.3.4 — optimistic-locking version counter; bumped on every UPDATE.
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
-    # Tenant scoping foundation (Chunk 7). Nullable; backfilled.
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    # Mandatory tenant ownership, backfilled from the creating user.
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        server_default=sa.text("'00000000-0000-0000-0000-000000000001'::uuid"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

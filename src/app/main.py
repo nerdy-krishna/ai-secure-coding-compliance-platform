@@ -89,9 +89,20 @@ async def lifespan(app: FastAPI):
     from app.infrastructure.database.repositories.system_config_repo import (
         SystemConfigRepository,
     )
+    from app.infrastructure.database.role_posture import verify_database_role_posture
     from app.api.v1.routers.setup import is_setup_completed
     from app.core.features import load_or_seed_enabled_features
     from app.config.logging_config import update_logging_level
+
+    # RLS is ineffective when the running login is a superuser, owns protected
+    # tables, or can BYPASSRLS. Development emits a visible warning so existing
+    # Compose installs remain convenient; production refuses to start.
+    async with AsyncSessionLocal() as session:
+        await verify_database_role_posture(
+            session,
+            enforce=str(getattr(settings, "ENVIRONMENT", "")).lower()
+            == "production",
+        )
 
     # Lifespan-health observability (V14.1.2): announce hydration entry at
     # WARNING so the line survives even when admins set system.log_level to

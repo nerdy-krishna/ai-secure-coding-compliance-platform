@@ -67,6 +67,16 @@ ENCRYPTION_KEY=your-super-secret-generated-key-goes-here
 | `POSTGRES_PORT` | Internal container port | `5432` | Default PostgreSQL port |
 | `POSTGRES_PORT_HOST` | Local port mapped to PostgreSQL | `5432` | For connecting from local tools |
 | `POSTGRES_HOST_ALEMBIC` | Host for Alembic (from CLI) | `localhost` | Always `localhost` for migrations |
+| `ASYNC_DATABASE_URL` | API/worker runtime URL | `postgresql+asyncpg://sccap_app:...@db:5432/securecodedb` | Production login must be `NOSUPERUSER`, `NOBYPASSRLS`, and must not own forced-RLS tables |
+| `ALEMBIC_DATABASE_URL` | Migration-owner URL | `postgresql+asyncpg://sccap_migrator:...@db:5432/securecodedb` | Keep out of the running API/worker environment after entrypoint migrations |
+
+Production must use distinct migration and runtime PostgreSQL logins. The API
+performs a startup preflight and refuses to run when either the active or
+session login is a superuser, has `BYPASSRLS`, or owns a forced-RLS table. The
+runtime login should be granted the migration-created `sccap_runtime` role (or
+equivalent explicit DML privileges). Local Compose can continue deriving both
+URLs from `POSTGRES_*`; it logs an unsafe-development warning because that
+single owner login is not a production isolation boundary.
 
 ---
 
