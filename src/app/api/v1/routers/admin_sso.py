@@ -41,6 +41,9 @@ from app.infrastructure.auth.sso.models import (
 from app.infrastructure.auth.sso.repository import SsoProviderRepository
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -345,6 +348,20 @@ async def delete_provider(
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
     name = row.name
+    revoked = await AuthSessionRepository(db).revoke_all_for_provider(
+        provider_id,
+        reason="provider_deleted",
+    )
+    await audit.record(
+        db,
+        event="session.provider_revoked_all",
+        actor_user_id=user.id,
+        provider_id=provider_id,
+        tenant_id=row.tenant_id,
+        outcome="success",
+        request=request,
+        details={"reason": "provider_deleted", "revoked_count": revoked},
+    )
     await audit.record(
         db,
         event=audit.EVENT_PROVIDER_DELETED,

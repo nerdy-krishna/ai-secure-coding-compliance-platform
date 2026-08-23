@@ -78,6 +78,9 @@ from app.infrastructure.auth.scim.schema import (
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -89,6 +92,37 @@ router = APIRouter(prefix="/scim/v2", tags=["SCIM 2.0"])
 EVENT_SCIM_USER_CREATED = "scim.user.created"
 EVENT_SCIM_USER_UPDATED = "scim.user.updated"
 EVENT_SCIM_USER_DEACTIVATED = "scim.user.deactivated"
+
+
+async def _revoke_user_sessions(
+    db: AsyncSession,
+    user: db_models.User,
+    request: Request,
+    *,
+    reason: str,
+) -> int:
+    revoked = await AuthSessionRepository(db).revoke_all_for_user(
+        user.id,
+        reason=reason,
+    )
+    await audit.record(
+        db,
+        event="session.revoked_all",
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        outcome="success",
+        request=request,
+        details={"reason": reason, "revoked_count": revoked},
+    )
+    return revoked
+
+
+def _is_master_admin(user: db_models.User) -> bool:
+    from app.core.config_cache import SystemConfigCache
+
+    return SystemConfigCache.get_master_admin_user_id() == user.id
+
+
 EVENT_SCIM_USER_DELETED = "scim.user.deleted"
 EVENT_SCIM_GROUP_CREATED = "scim.group.created"
 EVENT_SCIM_GROUP_UPDATED = "scim.group.updated"
@@ -401,8 +435,9 @@ async def create_user(
         db,
         event=EVENT_SCIM_USER_CREATED,
         user_id=user.id,
+        email=norm_email,
         request=request,
-        details={"userName": norm_email, "active": payload.active},
+        details={"active": payload.active},
     )
     await db.commit()
 
@@ -431,10 +466,13 @@ async def replace_user(
     user = result.scalar_one_or_none()
     if user is None:
         return _scim_error(404, "user not found")
+    if not payload.active and _is_master_admin(user):
+        return _scim_error(403, "the master admin cannot be deactivated via SCIM")
 
     # Email change: only if it doesn't collide.
     new_email = payload.userName.strip().lower()
-    if new_email != user.email:
+    identity_changed = new_email != user.email
+    if identity_changed:
         clash = (
             await db.execute(
                 select(db_models.User).where(db_models.User.email == new_email)
@@ -445,14 +483,30 @@ async def replace_user(
         user.email = new_email
 
     # is_superuser is NEVER touched by SCIM.
+    was_active = user.is_active
     user.is_active = payload.active
+    if was_active and not user.is_active:
+        await _revoke_user_sessions(
+            db,
+            user,
+            request,
+            reason="scim_deactivated_user",
+        )
+    elif identity_changed:
+        await _revoke_user_sessions(
+            db,
+            user,
+            request,
+            reason="scim_identity_changed",
+        )
 
     await audit.record(
         db,
         event=EVENT_SCIM_USER_UPDATED,
         user_id=user.id,
+        email=user.email,
         request=request,
-        details={"userName": user.email, "active": user.is_active},
+        details={"active": user.is_active, "identity_changed": identity_changed},
     )
     await db.commit()
     return JSONResponse(
@@ -480,12 +534,18 @@ async def patch_user(
     if user is None:
         return _scim_error(404, "user not found")
 
+    was_active = user.is_active
     handled = False
     for op_obj in payload.Operations:
         op = (op_obj.op or "").lower()
         path = (op_obj.path or "").strip()
         if op == "replace" and path.lower() == "active":
             new_active = bool(op_obj.value)
+            if not new_active and _is_master_admin(user):
+                return _scim_error(
+                    403,
+                    "the master admin cannot be deactivated via SCIM",
+                )
             user.is_active = new_active
             handled = True
         else:
@@ -495,6 +555,14 @@ async def patch_user(
 
     if not handled:
         return _scim_error(400, "no supported PATCH operation in request")
+
+    if was_active and not user.is_active:
+        await _revoke_user_sessions(
+            db,
+            user,
+            request,
+            reason="scim_deactivated_user",
+        )
 
     await audit.record(
         db,
@@ -542,12 +610,19 @@ async def delete_user(
         )
 
     user.is_active = False
+    await _revoke_user_sessions(
+        db,
+        user,
+        request,
+        reason="scim_deactivated_user",
+    )
     await audit.record(
         db,
         event=EVENT_SCIM_USER_DEACTIVATED,
         user_id=user.id,
+        email=user.email,
         request=request,
-        details={"userName": user.email},
+        details={"reason": "scim_deactivated_user"},
     )
     await db.commit()
     # SCIM spec: 204 No Content (no body).

@@ -24,6 +24,7 @@ from app.api.v1.routers.features import router as features_router
 from app.api.v1.routers.admin_features import router as admin_features_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.browser_session import router as browser_session_router
+from app.api.v1.routers.sessions import router as sessions_router
 from app.api.v1.routers.setup import router as setup_router
 from app.api.v1.routers.admin_config import router as admin_config_router
 from app.api.v1.routers.admin_smtp import router as admin_smtp_router
@@ -567,9 +568,7 @@ async def lifespan(app: FastAPI):
 
         _SEMGREP_CONFIG_DEFAULTS = {
             "semgrep_ingestion.global_enabled": {"value": True},
-            "semgrep_ingestion.workdir": {
-                "value": "/tmp/sccap-semgrep-rules"
-            },  # nosec B108 — configurable default, not a tmpfile call
+            "semgrep_ingestion.workdir": {"value": "/tmp/sccap-semgrep-rules"},  # nosec B108 — configurable default, not a tmpfile call
             "semgrep_ingestion.sweep_interval_seconds": {"value": 900},
             "semgrep_ingestion.max_rules_per_scan": {"value": 5000},
             "semgrep_ingestion.allowed_licenses": {
@@ -1076,6 +1075,11 @@ app.include_router(
     browser_session_router,
     prefix="/api/v1",
     tags=["Authentication"],
+)
+app.include_router(
+    sessions_router,
+    prefix="/api/v1",
+    tags=["Sessions"],
 )
 
 # Enterprise SSO — public + admin routers + force-SSO login guard.

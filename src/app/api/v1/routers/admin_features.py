@@ -20,7 +20,7 @@ notes this.
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,10 +29,14 @@ from app.api.v1 import models as api_models
 from app.core.config_cache import SystemConfigCache
 from app.core import features as features_mod
 from app.infrastructure.auth.core import current_superuser
+from app.infrastructure.auth.sso import audit
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.repositories.system_config_repo import (
     SystemConfigRepository,
+)
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,7 +101,11 @@ async def _active_non_superuser_ids(db: AsyncSession) -> List[int]:
 
 
 async def _deactivate_non_superusers(
-    db: AsyncSession, repo: SystemConfigRepository
+    db: AsyncSession,
+    repo: SystemConfigRepository,
+    *,
+    actor: db_models.User,
+    request: Request,
 ) -> List[int]:
     """Deactivate every non-superuser; record the IDs for later restore.
 
@@ -111,6 +119,22 @@ async def _deactivate_non_superusers(
             sa_update(db_models.User)
             .where(db_models.User.id.in_(ids))
             .values(is_active=False)
+        )
+        revoked = await AuthSessionRepository(db).revoke_all_for_user_ids(
+            ids,
+            reason="multi_user_disabled",
+        )
+        await audit.record(
+            db,
+            event="session.bulk_revoked",
+            actor_user_id=actor.id,
+            outcome="success",
+            request=request,
+            details={
+                "reason": "multi_user_disabled",
+                "affected_user_count": len(ids),
+                "revoked_session_count": revoked,
+            },
         )
         await db.commit()
     await repo.set_value(
@@ -155,7 +179,8 @@ async def _reactivate_transition_users(
 @router.put("")
 async def update_features(
     request: FeatureUpdateRequest,
-    _user=Depends(current_superuser),
+    http_request: Request,
+    _user: db_models.User = Depends(current_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Update the app-only feature flags.
@@ -213,7 +238,12 @@ async def update_features(
 
     transition_note = ""
     if disabling_multi_user:
-        deactivated = await _deactivate_non_superusers(db, repo)
+        deactivated = await _deactivate_non_superusers(
+            db,
+            repo,
+            actor=_user,
+            request=http_request,
+        )
         transition_note = f" {len(deactivated)} non-superuser account(s) deactivated."
     elif enabling_multi_user:
         reactivated = await _reactivate_transition_users(db, repo)

@@ -11,8 +11,12 @@ from fastapi_users.password import PasswordHelper
 from sqlalchemy import delete, select
 
 from app.infrastructure.auth.backend import get_custom_cookie_jwt_strategy
+from app.infrastructure.auth.session import (
+    BrowserSessionService,
+    decode_session_credential,
+)
 from app.infrastructure.database.database import AsyncSessionLocal, engine
-from app.infrastructure.database.models import AuthSession, User
+from app.infrastructure.database.models import AuthSession, Tenant, User
 from tests.integration.support import integration_test
 
 
@@ -30,23 +34,69 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         password_hash = PasswordHelper().hash(self.password)
 
         async with AsyncSessionLocal() as db:
+            foreign_tenant = Tenant(
+                slug=f"integration-session-{uuid4()}",
+                display_name="Session Integration Foreign Tenant",
+            )
+            db.add(foreign_tenant)
+            await db.flush()
             user = User(
                 email=self.email,
+                hashed_password=password_hash,
+                is_active=True,
+                is_superuser=True,
+                is_verified=True,
+            )
+            same_tenant_user = User(
+                email=f"integration-session-peer-{uuid4()}@example.com",
                 hashed_password=password_hash,
                 is_active=True,
                 is_superuser=False,
                 is_verified=True,
             )
-            db.add(user)
+            foreign_user = User(
+                email=f"integration-session-foreign-{uuid4()}@example.com",
+                hashed_password=password_hash,
+                is_active=True,
+                is_superuser=False,
+                is_verified=True,
+                tenant_id=foreign_tenant.id,
+            )
+            db.add_all([user, same_tenant_user, foreign_user])
+            await db.flush()
+            same_session = await BrowserSessionService(db).create(
+                same_tenant_user,
+                auth_method="password",
+            )
+            foreign_session = await BrowserSessionService(db).create(
+                foreign_user,
+                auth_method="password",
+            )
             await db.commit()
             self.user_id = user.id
+            self.same_tenant_user_id = same_tenant_user.id
+            self.same_tenant_session_id = same_session.row.id
+            self.foreign_user_id = foreign_user.id
+            self.foreign_session_id = foreign_session.row.id
+            self.foreign_tenant_id = foreign_tenant.id
 
         self.client = httpx.AsyncClient(base_url=self.base_url, timeout=15.0)
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
         async with AsyncSessionLocal() as db:
-            await db.execute(delete(User).where(User.id == self.user_id))
+            await db.execute(
+                delete(User).where(
+                    User.id.in_(
+                        [
+                            self.user_id,
+                            self.same_tenant_user_id,
+                            self.foreign_user_id,
+                        ]
+                    )
+                )
+            )
+            await db.execute(delete(Tenant).where(Tenant.id == self.foreign_tenant_id))
             await db.commit()
         await engine.dispose()
 
@@ -68,6 +118,7 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         initial_session = self.client.cookies.get(session_cookie_name)
         self.assertIsNotNone(initial_session)
+        initial_session_id = decode_session_credential(initial_session).session_id
 
         rejected_refresh = await self.client.post("/api/v1/auth/refresh")
         self.assertEqual(rejected_refresh.status_code, 403, rejected_refresh.text)
@@ -90,7 +141,7 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         async with AsyncSessionLocal() as db:
             session_row = await db.scalar(
-                select(AuthSession).where(AuthSession.user_id == self.user_id)
+                select(AuthSession).where(AuthSession.id == initial_session_id)
             )
             self.assertIsNotNone(session_row)
             self.assertEqual(session_row.credential_generation, 1)
@@ -121,6 +172,78 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(accepted_update.status_code, 200, accepted_update.text)
 
+        # A second device appears in inventory and can be individually revoked.
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=15.0) as second:
+            second_login = await second.post(
+                "/api/v1/auth/login",
+                data={"username": self.email, "password": self.password},
+            )
+            self.assertEqual(second_login.status_code, 200, second_login.text)
+            sessions = await self.client.get("/api/v1/auth/sessions")
+            self.assertEqual(sessions.status_code, 200, sessions.text)
+            session_items = sessions.json()
+            self.assertEqual(sum(item["current"] for item in session_items), 1)
+            second_id = next(
+                item["id"] for item in session_items if not item["current"]
+            )
+
+            revoke_second = await self.client.delete(
+                f"/api/v1/auth/sessions/{second_id}",
+                headers=browser_headers,
+            )
+            self.assertEqual(revoke_second.status_code, 204, revoke_second.text)
+            second_me = await second.get("/api/v1/auth/session/me")
+            self.assertEqual(second_me.status_code, 401, second_me.text)
+
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=15.0) as second:
+            second_login = await second.post(
+                "/api/v1/auth/login",
+                data={"username": self.email, "password": self.password},
+            )
+            self.assertEqual(second_login.status_code, 200, second_login.text)
+            revoke_others = await self.client.post(
+                "/api/v1/auth/sessions/revoke-others",
+                headers=browser_headers,
+            )
+            self.assertEqual(revoke_others.status_code, 200, revoke_others.text)
+            self.assertGreaterEqual(revoke_others.json()["revoked"], 1)
+            second_me = await second.get("/api/v1/auth/session/me")
+            self.assertEqual(second_me.status_code, 401, second_me.text)
+
+        # Self-service IDs cannot be used to revoke another user's session.
+        cross_user = await self.client.delete(
+            f"/api/v1/auth/sessions/{self.same_tenant_session_id}",
+            headers=browser_headers,
+        )
+        self.assertEqual(cross_user.status_code, 404, cross_user.text)
+
+        # Current superusers are tenant-confined until issue 17 adds a distinct
+        # cross-tenant system-admin permission.
+        same_tenant_inventory = await self.client.get(
+            f"/api/v1/admin/users/{self.same_tenant_user_id}/sessions"
+        )
+        self.assertEqual(
+            same_tenant_inventory.status_code, 200, same_tenant_inventory.text
+        )
+        cross_tenant_inventory = await self.client.get(
+            f"/api/v1/admin/users/{self.foreign_user_id}/sessions"
+        )
+        self.assertEqual(
+            cross_tenant_inventory.status_code, 404, cross_tenant_inventory.text
+        )
+        cross_tenant_revoke = await self.client.delete(
+            f"/api/v1/admin/users/{self.foreign_user_id}/sessions/{self.foreign_session_id}",
+            headers=browser_headers,
+        )
+        self.assertEqual(cross_tenant_revoke.status_code, 404, cross_tenant_revoke.text)
+
+        admin_revoke = await self.client.delete(
+            f"/api/v1/admin/users/{self.same_tenant_user_id}/sessions/"
+            f"{self.same_tenant_session_id}",
+            headers=browser_headers,
+        )
+        self.assertEqual(admin_revoke.status_code, 204, admin_revoke.text)
+
         csrf_bootstrap = await self.client.get("/api/v1/auth/session/csrf")
         self.assertEqual(csrf_bootstrap.status_code, 200, csrf_bootstrap.text)
         self.assertEqual(
@@ -138,9 +261,34 @@ class PublicAuthSessionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay.status_code, 401, replay.text)
         async with AsyncSessionLocal() as db:
             replayed_row = await db.scalar(
-                select(AuthSession).where(AuthSession.user_id == self.user_id)
+                select(AuthSession).where(AuthSession.id == initial_session_id)
             )
             self.assertEqual(replayed_row.revocation_reason, "credential_reuse")
+
+    async def test_current_logout_revokes_server_row_and_clears_cookie(self) -> None:
+        login = await self.client.post(
+            "/api/v1/auth/login",
+            data={"username": self.email, "password": self.password},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        csrf_token = login.headers["x-csrf-token"]
+        strategy = get_custom_cookie_jwt_strategy()
+        credential = self.client.cookies.get(strategy.browser_session_cookie_name)
+        session_id = decode_session_credential(credential).session_id
+
+        logout = await self.client.post(
+            "/api/v1/auth/session/logout",
+            headers={"Origin": self.base_url, "X-CSRF-Token": csrf_token},
+        )
+        self.assertEqual(logout.status_code, 204, logout.text)
+        self.assertIsNone(self.client.cookies.get(strategy.browser_session_cookie_name))
+        self.assertIsNone(self.client.cookies.get("SecureCodePlatformRefresh"))
+        rejected = await self.client.get("/api/v1/auth/session/me")
+        self.assertEqual(rejected.status_code, 401, rejected.text)
+
+        async with AsyncSessionLocal() as db:
+            row = await db.get(AuthSession, session_id)
+            self.assertEqual(row.revocation_reason, "user_logout")
 
 
 if __name__ == "__main__":

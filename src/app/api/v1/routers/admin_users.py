@@ -3,7 +3,7 @@ import secrets
 import string
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr
 import sqlalchemy as sa
 from sqlalchemy import select
@@ -13,6 +13,10 @@ from app.infrastructure.auth.core import current_superuser
 from app.infrastructure.auth.manager import UserManager, get_user_manager
 from app.infrastructure.database.models import User
 from app.infrastructure.auth.schemas import UserRead
+from app.infrastructure.auth.sso import audit
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +203,7 @@ async def admin_list_users(
     dependencies=[Depends(current_superuser)],
 )
 async def admin_update_user(
+    request: Request,
     user_id: int,
     update: AdminUserUpdate,
     acting_user: User = Depends(current_superuser),
@@ -222,12 +227,32 @@ async def admin_update_user(
             detail="You cannot remove your own superuser status.",
         )
 
+    was_active = target.is_active
     if update.is_active is not None:
         target.is_active = update.is_active
     if update.is_superuser is not None:
         target.is_superuser = update.is_superuser
     if update.is_verified is not None:
         target.is_verified = update.is_verified
+
+    if was_active and update.is_active is False:
+        revoked = await AuthSessionRepository(session).revoke_all_for_user(
+            target.id,
+            reason="admin_deactivated_user",
+        )
+        await audit.record(
+            session,
+            event="session.revoked_all",
+            user_id=target.id,
+            actor_user_id=acting_user.id,
+            tenant_id=target.tenant_id,
+            outcome="success",
+            request=request,
+            details={
+                "reason": "admin_deactivated_user",
+                "revoked_count": revoked,
+            },
+        )
 
     await session.commit()
     await session.refresh(target)
@@ -249,6 +274,7 @@ async def admin_update_user(
     dependencies=[Depends(current_superuser)],
 )
 async def admin_delete_user(
+    request: Request,
     user_id: int,
     acting_user: User = Depends(current_superuser),
     user_manager: UserManager = Depends(get_user_manager),
@@ -279,6 +305,20 @@ async def admin_delete_user(
             detail="The master admin account cannot be deleted.",
         )
 
+    revoked = await AuthSessionRepository(session).revoke_all_for_user(
+        target.id,
+        reason="admin_deleted_user",
+    )
+    await audit.record(
+        session,
+        event="session.revoked_all",
+        user_id=target.id,
+        actor_user_id=acting_user.id,
+        tenant_id=target.tenant_id,
+        outcome="success",
+        request=request,
+        details={"reason": "admin_deleted_user", "revoked_count": revoked},
+    )
     await session.delete(target)
     await session.commit()
 

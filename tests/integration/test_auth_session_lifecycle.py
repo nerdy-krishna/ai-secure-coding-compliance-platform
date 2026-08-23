@@ -17,8 +17,13 @@ from app.infrastructure.auth.session import (
     SessionPolicy,
     SessionReuseDetected,
 )
+from app.infrastructure.auth.db import get_user_db
+from app.infrastructure.auth.manager import UserManager
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import AuthSession, User
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
+)
 from tests.integration.support import integration_test
 
 
@@ -143,6 +148,73 @@ class AuthSessionLifecycleIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncSessionLocal() as db:
             row = await db.get(AuthSession, session_id)
             self.assertEqual(row.revocation_reason, "absolute_timeout")
+
+    async def test_revoke_all_is_idempotent_and_does_not_touch_other_users(
+        self,
+    ) -> None:
+        await self._issue()
+        await self._issue()
+        other_email = f"integration-browser-session-other-{uuid4()}@example.com"
+        async with AsyncSessionLocal() as db:
+            other = User(
+                email=other_email,
+                hashed_password=PasswordHelper().hash(f"A7!{uuid4()}z"),
+                is_active=True,
+                is_superuser=False,
+                is_verified=True,
+            )
+            db.add(other)
+            await db.flush()
+            unrelated = await BrowserSessionService(db).create(
+                other,
+                auth_method="password",
+            )
+            other_id = other.id
+            await db.commit()
+
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = AuthSessionRepository(db)
+                first = await repo.revoke_all_for_user(
+                    self.user_id,
+                    reason="test_revoke_all",
+                )
+                second = await repo.revoke_all_for_user(
+                    self.user_id,
+                    reason="test_revoke_all",
+                )
+                await db.commit()
+            self.assertEqual(first, 2)
+            self.assertEqual(second, 0)
+
+            async with AsyncSessionLocal() as db:
+                row = await BrowserSessionService(db).authenticate(unrelated.credential)
+                self.assertEqual(row.user_id, other_id)
+        finally:
+            async with AsyncSessionLocal() as db:
+                await db.execute(delete(User).where(User.id == other_id))
+                await db.commit()
+
+    async def test_confirmed_password_reset_revokes_every_browser_session(
+        self,
+    ) -> None:
+        first_id, _ = await self._issue()
+        second_id, _ = await self._issue()
+
+        async with AsyncSessionLocal() as db:
+            user = await db.get(User, self.user_id)
+            user_db_gen = get_user_db(db)
+            user_db = await user_db_gen.__anext__()
+            try:
+                await UserManager(user_db).on_after_reset_password(user)
+            finally:
+                await user_db_gen.aclose()
+
+        async with AsyncSessionLocal() as db:
+            first = await db.get(AuthSession, first_id)
+            second = await db.get(AuthSession, second_id)
+            self.assertEqual(first.revocation_reason, "password_reset")
+            self.assertEqual(second.revocation_reason, "password_reset")
 
 
 if __name__ == "__main__":

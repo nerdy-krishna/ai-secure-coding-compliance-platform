@@ -39,11 +39,16 @@ class AuthSessionRepository:
         *,
         include_revoked: bool = False,
     ) -> list[db_models.AuthSession]:
+        now = datetime.now(timezone.utc)
         query = select(db_models.AuthSession).where(
             db_models.AuthSession.user_id == user_id
         )
         if not include_revoked:
-            query = query.where(db_models.AuthSession.revoked_at.is_(None))
+            query = query.where(
+                db_models.AuthSession.revoked_at.is_(None),
+                db_models.AuthSession.idle_expires_at > now,
+                db_models.AuthSession.absolute_expires_at > now,
+            )
         result = await self.db.scalars(
             query.order_by(db_models.AuthSession.last_seen_at.desc())
         )
@@ -80,6 +85,50 @@ class AuthSessionRepository:
         result = await self.db.execute(
             update(db_models.AuthSession)
             .where(*conditions)
+            .values(
+                revoked_at=now or datetime.now(timezone.utc),
+                revocation_reason=reason[:64],
+            )
+        )
+        await self.db.flush()
+        return int(result.rowcount or 0)
+
+    async def revoke_all_for_user_ids(
+        self,
+        user_ids: list[int],
+        *,
+        reason: str,
+        now: datetime | None = None,
+    ) -> int:
+        if not user_ids:
+            return 0
+        result = await self.db.execute(
+            update(db_models.AuthSession)
+            .where(
+                db_models.AuthSession.user_id.in_(user_ids),
+                db_models.AuthSession.revoked_at.is_(None),
+            )
+            .values(
+                revoked_at=now or datetime.now(timezone.utc),
+                revocation_reason=reason[:64],
+            )
+        )
+        await self.db.flush()
+        return int(result.rowcount or 0)
+
+    async def revoke_all_for_provider(
+        self,
+        provider_id: uuid.UUID,
+        *,
+        reason: str,
+        now: datetime | None = None,
+    ) -> int:
+        result = await self.db.execute(
+            update(db_models.AuthSession)
+            .where(
+                db_models.AuthSession.provider_id == provider_id,
+                db_models.AuthSession.revoked_at.is_(None),
+            )
             .values(
                 revoked_at=now or datetime.now(timezone.utc),
                 revocation_reason=reason[:64],

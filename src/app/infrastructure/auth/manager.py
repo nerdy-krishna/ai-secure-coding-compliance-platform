@@ -162,6 +162,77 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         )
         pass
 
+    async def _revoke_browser_sessions(
+        self,
+        user: User,
+        *,
+        reason: str,
+        request: Optional[Request],
+    ) -> None:
+        from app.infrastructure.auth.sso import audit
+        from app.infrastructure.database.repositories.auth_session_repo import (
+            AuthSessionRepository,
+        )
+
+        session = self.user_db.session
+        revoked = await AuthSessionRepository(session).revoke_all_for_user(
+            user.id,
+            reason=reason,
+        )
+        await audit.record(
+            session,
+            event="session.revoked_all",
+            user_id=user.id,
+            actor_user_id=user.id,
+            tenant_id=user.tenant_id,
+            outcome="success",
+            request=request,
+            details={"reason": reason, "revoked_count": revoked},
+        )
+        await session.commit()
+
+    async def on_after_reset_password(
+        self,
+        user: User,
+        request: Optional[Request] = None,
+    ) -> None:
+        await self._revoke_browser_sessions(
+            user,
+            reason="password_reset",
+            request=request,
+        )
+        logger.info(
+            "password.reset.sessions_revoked",
+            extra={"event": "password.reset.sessions_revoked", "user_id": user.id},
+        )
+
+    async def on_after_update(
+        self,
+        user: User,
+        update_dict: dict[str, Any],
+        request: Optional[Request] = None,
+    ) -> None:
+        identity_fields = {
+            field
+            for field in ("email", "password")
+            if update_dict.get(field) is not None
+        }
+        if not identity_fields:
+            return
+        await self._revoke_browser_sessions(
+            user,
+            reason="identity_changed",
+            request=request,
+        )
+        logger.info(
+            "identity.changed.sessions_revoked",
+            extra={
+                "event": "identity.changed.sessions_revoked",
+                "user_id": user.id,
+                "fields": sorted(identity_fields),
+            },
+        )
+
 
 async def get_user_manager(user_db=Depends(get_user_db)):
     """

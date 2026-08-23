@@ -37,6 +37,9 @@ from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -122,6 +125,11 @@ async def update_user_tenant(
 
     target.tenant_id = new_tenant_id
 
+    revoked = await AuthSessionRepository(db).revoke_all_for_user(
+        target.id,
+        reason="tenant_changed",
+    )
+
     await audit.record(
         db,
         event="auth.privilege.user_tenant_changed",
@@ -132,6 +140,7 @@ async def update_user_tenant(
             "target_email": target.email,
             "old_tenant_id": (str(old_tenant_id) if old_tenant_id else None),
             "new_tenant_id": (str(new_tenant_id) if new_tenant_id else None),
+            "revoked_session_count": revoked,
         },
     )
     await db.commit()
