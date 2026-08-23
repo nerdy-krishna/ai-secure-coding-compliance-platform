@@ -21,7 +21,19 @@ from app.infrastructure.auth.backend import (
     get_custom_cookie_jwt_strategy,
     mark_auth_response_no_store,
 )
+from app.infrastructure.auth.session import (
+    BrowserSessionService,
+    InvalidCsrfRequest,
+    SessionError,
+    decode_session_credential,
+    enforce_cookie_csrf,
+)
 from app.infrastructure.auth.manager import get_user_manager, UserManager
+from app.infrastructure.auth.sso import audit
+from app.infrastructure.database.database import AsyncSessionLocal
+from app.infrastructure.database.repositories.auth_session_repo import (
+    AuthSessionRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +189,6 @@ async def refresh_access_token(
 
         from app.infrastructure.auth.sso.encryption import decrypt_provider_config
         from app.infrastructure.auth.sso.models import OidcConfig
-        from app.infrastructure.database.database import AsyncSessionLocal
         from app.infrastructure.database.models import OAuthAccount, SsoProvider
 
         async with AsyncSessionLocal() as _check_session:
@@ -243,6 +254,101 @@ async def refresh_access_token(
             extra={"user_id": user.id},
             exc_info=True,
         )
+
+    # Dual-read migration: password/SSO/WebAuthn logins now also issue a
+    # stateful browser-session credential. Rotate it atomically when present;
+    # legacy clients that carry only the refresh JWT continue through the old
+    # path until browser parity is complete.
+    browser_credential = request.cookies.get(strategy.browser_session_cookie_name)
+    if browser_credential:
+        try:
+            browser_claims = decode_session_credential(browser_credential)
+            enforce_cookie_csrf(request, browser_claims.session_id)
+        except InvalidCsrfRequest as exc:
+            logger.warning(
+                "auth.refresh.csrf_rejected",
+                extra={"reason": str(exc)},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CSRF validation failed.",
+            ) from exc
+        except SessionError:
+            # Let the lifecycle service below produce the uniform invalid-session
+            # response and, for valid replay, persist family revocation.
+            pass
+        async with AsyncSessionLocal() as session_db:
+            session_service = BrowserSessionService(session_db)
+            try:
+                issued = await session_service.rotate(browser_credential)
+                if issued.row.user_id != user.id:
+                    await AuthSessionRepository(session_db).revoke(
+                        issued.row,
+                        reason="credential_subject_mismatch",
+                    )
+                    await audit.record(
+                        session_db,
+                        event="session.rotation.failure",
+                        user_id=issued.row.user_id,
+                        session_id=issued.row.id,
+                        provider_id=issued.row.provider_id,
+                        tenant_id=issued.row.tenant_id,
+                        outcome="failure",
+                        request=request,
+                        details={"reason": "credential_subject_mismatch"},
+                    )
+                    await session_db.commit()
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Session credential subject mismatch.",
+                    )
+                await audit.record(
+                    session_db,
+                    event="session.rotated",
+                    user_id=issued.row.user_id,
+                    actor_user_id=issued.row.user_id,
+                    session_id=issued.row.id,
+                    provider_id=issued.row.provider_id,
+                    tenant_id=issued.row.tenant_id,
+                    outcome="success",
+                    request=request,
+                    details={"generation": issued.row.credential_generation},
+                )
+                await session_db.commit()
+            except HTTPException:
+                raise
+            except SessionError as exc:
+                # A valid replay may have revoked the family. Persist that
+                # transition and correlate it when the credential MAC is valid.
+                try:
+                    claims = decode_session_credential(browser_credential)
+                    failed_row = await AuthSessionRepository(session_db).get(
+                        claims.session_id
+                    )
+                    if failed_row is not None:
+                        await audit.record(
+                            session_db,
+                            event="session.rotation.failure",
+                            user_id=failed_row.user_id,
+                            session_id=failed_row.id,
+                            provider_id=failed_row.provider_id,
+                            tenant_id=failed_row.tenant_id,
+                            outcome="failure",
+                            request=request,
+                            details={"reason": type(exc).__name__},
+                        )
+                except SessionError:
+                    pass
+                await session_db.commit()
+                logger.warning(
+                    "auth.refresh.browser_session_rejected",
+                    extra={"reason": type(exc).__name__},
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Browser session is invalid or expired.",
+                ) from exc
+        await strategy.write_browser_session(response, issued.credential)
 
     # Rotate the refresh token by generating a new one and setting the cookie.
     # Include typ=REFRESH_TOKEN_TYPE to prevent access-token-as-refresh-token

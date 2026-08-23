@@ -1,6 +1,7 @@
 # src/app/infrastructure/auth/backend.py
 import logging
 import time
+import uuid
 from typing import Optional, Literal
 
 import jwt
@@ -11,9 +12,15 @@ from fastapi_users.authentication import (
     JWTStrategy,
 )
 from fastapi_users import models as fastapi_users_typing_models
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Import the centralized settings object
 from app.config.config import settings
+from app.infrastructure.auth.session import (
+    BrowserSessionService,
+    IssuedSession,
+    issue_csrf_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +61,11 @@ class CustomCookieJWTStrategy(
         self.cookie_secure = not settings.ALLOW_INSECURE_COOKIES
         self.cookie_httponly = True
         self.cookie_samesite: Literal["lax", "strict", "none"] = "strict"
+        # The __Host- prefix is accepted only for Secure cookies on `/` with
+        # no Domain attribute. Local HTTP uses an unmistakably separate name.
+        self.browser_session_cookie_name = (
+            "__Host-SCCAPSession" if self.cookie_secure else "SCCAPSessionDev"
+        )
 
         logger.info(
             "CustomCookieJWTStrategy initialized.",
@@ -78,6 +90,74 @@ class CustomCookieJWTStrategy(
             samesite=self.cookie_samesite,  # This will now pass type checking
         )
 
+    async def write_browser_session(self, response: Response, credential: str) -> None:
+        response.set_cookie(
+            key=self.browser_session_cookie_name,
+            value=credential,
+            max_age=settings.SESSION_ABSOLUTE_LIFETIME_SECONDS,
+            path="/",
+            secure=self.cookie_secure,
+            httponly=True,
+            samesite="strict",
+        )
+
+    async def issue_stateful_browser_session(
+        self,
+        response: Response,
+        user,
+        *,
+        auth_method: str,
+        assurance_level: str = "aal1",
+        provider_id: uuid.UUID | None = None,
+        provider_session_id: str | None = None,
+        request: Request | None = None,
+        db: AsyncSession | None = None,
+    ) -> IssuedSession:
+        """Create, audit, and set one stateful browser-session credential."""
+        from app.infrastructure.auth.sso.audit import record
+        from app.infrastructure.database.database import AsyncSessionLocal
+        from app.infrastructure.database.models import User
+
+        async def _create(active_db: AsyncSession, db_user) -> IssuedSession:
+            issued = await BrowserSessionService(active_db).create(
+                db_user,
+                auth_method=auth_method,
+                assurance_level=assurance_level,
+                provider_id=provider_id,
+                provider_session_id=provider_session_id,
+                request=request,
+            )
+            await record(
+                active_db,
+                event="session.created",
+                user_id=db_user.id,
+                actor_user_id=db_user.id,
+                session_id=issued.row.id,
+                provider_id=provider_id,
+                tenant_id=db_user.tenant_id,
+                outcome="success",
+                request=request,
+                details={
+                    "auth_method": auth_method,
+                    "assurance_level": assurance_level,
+                },
+            )
+            return issued
+
+        if db is not None:
+            issued = await _create(db, user)
+        else:
+            async with AsyncSessionLocal() as owned_db:
+                db_user = await owned_db.get(User, user.id)
+                if db_user is None or not db_user.is_active:
+                    raise RuntimeError("Cannot create a session for an inactive user.")
+                issued = await _create(owned_db, db_user)
+                await owned_db.commit()
+        await self.write_browser_session(response, issued.credential)
+        response.headers["X-CSRF-Token"] = issue_csrf_token(issued.row.id)
+        response.headers["Access-Control-Expose-Headers"] = "X-CSRF-Token"
+        return issued
+
     async def issue_refresh_token(self, response: Response, user) -> None:
         """Mint the browser refresh credential for a newly authenticated user."""
         now_ts = int(time.time())
@@ -94,10 +174,31 @@ class CustomCookieJWTStrategy(
         )
         await self.write_refresh_token(response, refresh_token)
 
-    async def issue_session(self, response: Response, user) -> str:
+    async def issue_session(
+        self,
+        response: Response,
+        user,
+        *,
+        auth_method: str,
+        assurance_level: str = "aal1",
+        provider_id: uuid.UUID | None = None,
+        provider_session_id: str | None = None,
+        request: Request | None = None,
+        db: AsyncSession | None = None,
+    ) -> str:
         """Issue the access token and matching rotating refresh cookie."""
         access_token = await self.write_token(user)
         await self.issue_refresh_token(response, user)
+        await self.issue_stateful_browser_session(
+            response,
+            user,
+            auth_method=auth_method,
+            assurance_level=assurance_level,
+            provider_id=provider_id,
+            provider_session_id=provider_session_id,
+            request=request,
+            db=db,
+        )
         mark_auth_response_no_store(response)
         logger.info(
             "auth: refresh token issued",
@@ -138,6 +239,17 @@ class CustomCookieJWTStrategy(
             samesite=self.cookie_samesite,
         )
 
+    async def destroy_browser_session(self, response: Response) -> None:
+        response.set_cookie(
+            key=self.browser_session_cookie_name,
+            value="",
+            max_age=0,
+            path="/",
+            secure=self.cookie_secure,
+            httponly=True,
+            samesite="strict",
+        )
+
 
 class RefreshCookieAuthenticationBackend(AuthenticationBackend):
     """FastAPI Users backend that completes the browser-session contract.
@@ -151,12 +263,18 @@ class RefreshCookieAuthenticationBackend(AuthenticationBackend):
     async def login(self, strategy, user) -> Response:
         response = await super().login(strategy, user)
         await strategy.issue_refresh_token(response, user)
+        await strategy.issue_stateful_browser_session(
+            response,
+            user,
+            auth_method="password",
+        )
         mark_auth_response_no_store(response)
         return response
 
     async def logout(self, strategy, user, token: str) -> Response:
         response = await super().logout(strategy, user, token)
         await strategy.destroy_refresh_token(response)
+        await strategy.destroy_browser_session(response)
         response.headers["Clear-Site-Data"] = '"cache", "cookies", "storage"'
         mark_auth_response_no_store(response)
         logger.info(

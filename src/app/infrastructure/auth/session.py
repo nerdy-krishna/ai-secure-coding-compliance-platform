@@ -14,6 +14,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,8 @@ SECRET_BYTES = 32
 _MAC_DOMAIN = b"sccap/browser-session/credential/v1\0"
 _SECRET_DOMAIN = b"sccap/browser-session/secret/v1\0"
 _METADATA_DOMAIN = b"sccap/browser-session/metadata/v1\0"
+_CSRF_DOMAIN = b"sccap/browser-session/csrf/v1\0"
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 class SessionError(Exception):
@@ -49,6 +52,10 @@ class SessionRevoked(SessionError):
 
 
 class SessionReuseDetected(SessionError):
+    pass
+
+
+class InvalidCsrfRequest(SessionError):
     pass
 
 
@@ -73,9 +80,16 @@ class SessionPolicy:
 
     @classmethod
     def from_settings(cls) -> "SessionPolicy":
+        from app.core.config_cache import SystemConfigCache
+
+        configured_hours = SystemConfigCache.get_session_lifetime_hours()
         return cls(
             idle_seconds=settings.SESSION_IDLE_LIFETIME_SECONDS,
-            absolute_seconds=settings.SESSION_ABSOLUTE_LIFETIME_SECONDS,
+            absolute_seconds=(
+                configured_hours * 3600
+                if configured_hours is not None
+                else settings.SESSION_ABSOLUTE_LIFETIME_SECONDS
+            ),
             touch_interval_seconds=settings.SESSION_TOUCH_INTERVAL_SECONDS,
         )
 
@@ -138,6 +152,81 @@ def decode_session_credential(value: str) -> SessionTokenClaims:
     return SessionTokenClaims(
         session_id=session_id, generation=generation, secret=secret
     )
+
+
+def issue_csrf_token(session_id: uuid.UUID) -> str:
+    """Return an unguessable, session-bound double-submit header value."""
+    nonce = _b64url(secrets.token_bytes(SECRET_BYTES))
+    body = f"{TOKEN_VERSION}.{session_id.hex}.{nonce}"
+    mac = hmac.new(_signing_key(), _CSRF_DOMAIN + body.encode(), hashlib.sha256)
+    return f"{body}.{_b64url(mac.digest())}"
+
+
+def verify_csrf_token(value: str, session_id: uuid.UUID) -> None:
+    try:
+        version, session_hex, nonce, supplied_mac = value.split(".")
+        token_session_id = uuid.UUID(hex=session_hex)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise InvalidCsrfRequest("Malformed CSRF token.") from exc
+    if version != TOKEN_VERSION or token_session_id != session_id or len(nonce) < 40:
+        raise InvalidCsrfRequest("Invalid CSRF token.")
+    body = f"{version}.{session_hex}.{nonce}"
+    expected = _b64url(
+        hmac.new(_signing_key(), _CSRF_DOMAIN + body.encode(), hashlib.sha256).digest()
+    )
+    if not hmac.compare_digest(expected, supplied_mac):
+        raise InvalidCsrfRequest("Invalid CSRF token.")
+
+
+def _normalized_origin(value: str) -> str | None:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username or parsed.password or parsed.path not in {"", "/"}:
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    default_port = (parsed.scheme == "http" and port == 80) or (
+        parsed.scheme == "https" and port == 443
+    )
+    authority = parsed.hostname.lower()
+    if port is not None and not default_port:
+        authority = f"{authority}:{port}"
+    return f"{parsed.scheme}://{authority}"
+
+
+def allowed_browser_origins(request: Request) -> set[str]:
+    """Resolve the exact origins trusted for credentialed browser requests."""
+    from app.core.config_cache import SystemConfigCache
+
+    candidates = set(settings.ALLOWED_ORIGINS)
+    candidates.add(settings.frontend_base_url)
+    if SystemConfigCache.is_cors_enabled():
+        candidates.update(SystemConfigCache.get_allowed_origins())
+    candidates.add(str(request.base_url).rstrip("/"))
+    return {
+        normalized
+        for value in candidates
+        if value and (normalized := _normalized_origin(value)) is not None
+    }
+
+
+def enforce_cookie_csrf(request: Request, session_id: uuid.UUID) -> None:
+    """Require exact-origin and session-bound CSRF proof on unsafe methods."""
+    if request.method.upper() in _SAFE_METHODS:
+        return
+    origin = _normalized_origin(request.headers.get("origin", ""))
+    if origin is None or origin not in allowed_browser_origins(request):
+        raise InvalidCsrfRequest("Request origin is not allowed.")
+    token = request.headers.get("x-csrf-token", "")
+    verify_csrf_token(token, session_id)
 
 
 def _utc(value: datetime | None = None) -> datetime:

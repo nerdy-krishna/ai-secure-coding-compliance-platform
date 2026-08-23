@@ -2161,16 +2161,15 @@ class AuthAuditEvent(Base):
     # "auth.password_login.blocked_by_force_sso",
     # "auth.provider.created", "auth.provider.updated", "auth.provider.deleted".
     event: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    # FK with ON DELETE SET NULL so audit history survives user/provider deletes.
-    user_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
-    )
+    # Deliberately denormalized identifiers: a FK's ON DELETE action would
+    # mutate this append-only row and be rejected by the immutability trigger.
+    # Keeping the original ID also preserves stronger historical evidence.
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     actor_user_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("user.id", ondelete="SET NULL"), nullable=True, index=True
+        Integer, nullable=True, index=True
     )
     session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("auth_sessions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -2178,7 +2177,7 @@ class AuthAuditEvent(Base):
         String(16), nullable=False, server_default="unknown"
     )
     provider_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("sso_providers.id", ondelete="SET NULL"),
+        PG_UUID(as_uuid=True),
         nullable=True,
         index=True,
     )
@@ -2192,7 +2191,6 @@ class AuthAuditEvent(Base):
     # Tenant scoping foundation (Chunk 7). Nullable; backfilled.
     tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="SET NULL"),
         nullable=True,
     )
 

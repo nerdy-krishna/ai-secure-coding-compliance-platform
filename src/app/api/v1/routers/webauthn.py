@@ -114,10 +114,23 @@ def _options_to_dict(options: Any) -> dict:
     return json.loads(options_to_json(options))
 
 
-async def _issue_session_for_user(response: Response, user: db_models.User) -> str:
+async def _issue_session_for_user(
+    response: Response,
+    user: db_models.User,
+    *,
+    request: Request,
+    db: AsyncSession,
+) -> str:
     """Mint the same access/refresh session used by password and SSO login."""
     strategy = get_custom_cookie_jwt_strategy()
-    return await strategy.issue_session(response, user)
+    return await strategy.issue_session(
+        response,
+        user,
+        auth_method="webauthn",
+        assurance_level="aal2",
+        request=request,
+        db=db,
+    )
 
 
 async def _audit_safe(
@@ -418,7 +431,12 @@ async def login_finish(
         await db.commit()
         raise HTTPException(status_code=400, detail="user not found or inactive")
 
-    access_token = await _issue_session_for_user(response, user)
+    access_token = await _issue_session_for_user(
+        response,
+        user,
+        request=request,
+        db=db,
+    )
     await audit.record(
         db,
         event=EVENT_PASSKEY_LOGIN_SUCCESS,

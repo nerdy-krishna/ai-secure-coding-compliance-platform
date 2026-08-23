@@ -129,14 +129,34 @@ def _redirect_to_frontend_with_error(error_code: str) -> RedirectResponse:
     return resp
 
 
-async def _issue_session(response: Response, user) -> str:
+async def _issue_session(
+    response: Response,
+    user,
+    *,
+    auth_method: str,
+    provider_id,
+    provider_session_id: str | None,
+    request: Request,
+    db: AsyncSession,
+) -> str:
     """Mint an access token + set the refresh cookie. Returns the access token.
 
     The refresh cookie carries ``typ=refresh`` and ``original_iat=now`` so the
     session-lifetime ceiling check in ``/auth/refresh`` works correctly.
     """
     strategy = get_custom_cookie_jwt_strategy()
-    return await strategy.issue_session(response, user)
+    return await strategy.issue_session(
+        response,
+        user,
+        auth_method=auth_method,
+        # The provider assertion is verified, but SCCAP cannot infer the IdP's
+        # authenticator assurance without an explicitly mapped acr/AuthnContext.
+        assurance_level="unverified",
+        provider_id=provider_id,
+        provider_session_id=provider_session_id,
+        request=request,
+        db=db,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +376,16 @@ async def oidc_callback(
 
     # All checks pass — mint session.
     extras = Response()
-    access_token = await _issue_session(extras, identity.user)
+    oidc_sid = userinfo.full_claims.get("sid")
+    access_token = await _issue_session(
+        extras,
+        identity.user,
+        auth_method="oidc",
+        provider_id=provider.id,
+        provider_session_id=oidc_sid if isinstance(oidc_sid, str) else None,
+        request=request,
+        db=db,
+    )
     await audit.record(
         db,
         event=audit.EVENT_SSO_LOGIN_SUCCESS,
@@ -482,7 +511,15 @@ async def saml_acs(
         return _redirect_to_frontend_with_error("provisioning_failed")
 
     extras = Response()
-    access_token = await _issue_session(extras, identity.user)
+    access_token = await _issue_session(
+        extras,
+        identity.user,
+        auth_method="saml",
+        provider_id=provider.id,
+        provider_session_id=identity_attrs.session_index,
+        request=request,
+        db=db,
+    )
     await audit.record(
         db,
         event=audit.EVENT_SSO_LOGIN_SUCCESS,

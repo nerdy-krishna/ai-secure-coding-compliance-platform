@@ -23,6 +23,7 @@ from app.api.v1.routers.compliance import router as compliance_router
 from app.api.v1.routers.features import router as features_router
 from app.api.v1.routers.admin_features import router as admin_features_router
 from app.api.v1.routers.refresh import router as refresh_router
+from app.api.v1.routers.browser_session import router as browser_session_router
 from app.api.v1.routers.setup import router as setup_router
 from app.api.v1.routers.admin_config import router as admin_config_router
 from app.api.v1.routers.admin_smtp import router as admin_smtp_router
@@ -811,7 +812,8 @@ from app.core.config_cache import SystemConfigCache  # noqa: E402
 from fastapi.responses import PlainTextResponse  # noqa: E402
 
 _CORS_ALLOWED_HEADERS = (
-    "Content-Type, Authorization, X-Correlation-ID, Accept, Origin, X-Requested-With"
+    "Content-Type, Authorization, X-Correlation-ID, X-CSRF-Token, Accept, Origin, "
+    "X-Requested-With"
 )
 
 
@@ -1068,6 +1070,11 @@ app.include_router(
 app.include_router(
     refresh_router,
     prefix="/api/v1/auth",
+    tags=["Authentication"],
+)
+app.include_router(
+    browser_session_router,
+    prefix="/api/v1",
     tags=["Authentication"],
 )
 

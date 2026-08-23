@@ -5,8 +5,10 @@ from __future__ import annotations
 import unittest
 from http.cookies import SimpleCookie
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import jwt
+from fastapi import Response
 
 from app.infrastructure.auth.backend import (
     auth_backend,
@@ -19,7 +21,13 @@ class PasswordSessionTests(unittest.IsolatedAsyncioTestCase):
         strategy = get_custom_cookie_jwt_strategy()
         user = SimpleNamespace(id=42)
 
-        response = await auth_backend.login(strategy, user)
+        with patch.object(
+            strategy,
+            "issue_stateful_browser_session",
+            new=AsyncMock(),
+        ) as issue_stateful:
+            response = await auth_backend.login(strategy, user)
+        issue_stateful.assert_awaited_once()
 
         cookie = SimpleCookie()
         cookie.load(response.headers.get("set-cookie", ""))
@@ -40,6 +48,27 @@ class PasswordSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(payload["original_iat"], int)
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(response.headers["pragma"], "no-cache")
+
+    async def test_stateful_browser_cookie_uses_host_prefix_only_when_secure(
+        self,
+    ) -> None:
+        strategy = get_custom_cookie_jwt_strategy()
+        response = Response()
+
+        await strategy.write_browser_session(response, "opaque-credential")
+
+        cookie = SimpleCookie()
+        for value in response.headers.getlist("set-cookie"):
+            cookie.load(value)
+        self.assertIn(strategy.browser_session_cookie_name, cookie)
+        morsel = cookie[strategy.browser_session_cookie_name]
+        self.assertTrue(morsel["httponly"])
+        self.assertEqual(morsel["path"], "/")
+        self.assertEqual(bool(morsel["secure"]), strategy.cookie_secure)
+        if strategy.cookie_secure:
+            self.assertTrue(strategy.browser_session_cookie_name.startswith("__Host-"))
+        else:
+            self.assertFalse(strategy.browser_session_cookie_name.startswith("__Host-"))
 
     async def test_logout_expires_refresh_cookie(self) -> None:
         strategy = get_custom_cookie_jwt_strategy()

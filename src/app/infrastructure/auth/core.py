@@ -5,13 +5,22 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi_users import FastAPIUsers
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.auth.backend import (
     auth_backend,
     get_custom_cookie_jwt_strategy,
 )
 from app.infrastructure.auth.manager import UserManager, get_user_manager
+from app.infrastructure.auth.session import (
+    BrowserSessionService,
+    InvalidCsrfRequest,
+    SessionError,
+    decode_session_credential,
+    enforce_cookie_csrf,
+)
 from app.infrastructure.auth.sse_token import verify_scan_stream_token
+from app.infrastructure.database.database import get_db
 from app.infrastructure.database.models import User
 
 logger = logging.getLogger(__name__)
@@ -24,9 +33,80 @@ fastapi_users = FastAPIUsers[User, int](
     [auth_backend],
 )
 
-# These dependencies are now correctly configured and can be used in API endpoints.
-current_active_user = fastapi_users.current_user(active=True)
-current_superuser = fastapi_users.current_user(active=True, superuser=True)
+# Explicit bearer credentials remain supported for API clients. Browser calls may
+# instead authenticate with the stateful HttpOnly session cookie below.
+_optional_active_bearer_user = fastapi_users.current_user(
+    optional=True,
+    active=True,
+)
+
+
+async def current_active_user(
+    request: Request,
+    bearer_user: User | None = Depends(_optional_active_bearer_user),
+    db: AsyncSession = Depends(get_db),
+    strategy=Depends(get_custom_cookie_jwt_strategy),
+) -> User:
+    """Authenticate an active user via bearer token or browser session cookie.
+
+    Bearer requests preserve the programmatic API contract. Cookie-authenticated
+    unsafe requests additionally require an exact allowed Origin and a CSRF
+    header bound to the server-side session family.
+    """
+    if bearer_user is not None:
+        return bearer_user
+
+    credential = request.cookies.get(strategy.browser_session_cookie_name)
+    if not credential:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        claims = decode_session_credential(credential)
+        enforce_cookie_csrf(request, claims.session_id)
+        session_row = await BrowserSessionService(db).authenticate(credential)
+    except InvalidCsrfRequest as exc:
+        logger.warning(
+            "auth.browser_session.csrf_rejected",
+            extra={"path": request.url.path, "reason": str(exc)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSRF validation failed.",
+        ) from exc
+    except SessionError as exc:
+        # Persist expiry-triggered revocation while malformed credentials remain
+        # side-effect free.
+        await db.commit()
+        logger.warning(
+            "auth.browser_session.rejected",
+            extra={"path": request.url.path, "reason": type(exc).__name__},
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED) from exc
+
+    user = await db.get(User, session_row.user_id)
+    tenant_matches = user is not None and user.tenant_id == session_row.tenant_id
+    if user is None or not user.is_active or not tenant_matches:
+        await BrowserSessionService(db).repo.revoke(
+            session_row,
+            reason=(
+                "user_inactive"
+                if user is None or not user.is_active
+                else "tenant_changed"
+            ),
+        )
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+    await db.commit()
+    return user
+
+
+async def current_superuser(
+    user: User = Depends(current_active_user),
+) -> User:
+    if not user.is_superuser:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+    return user
 
 
 async def current_active_user_sse(
