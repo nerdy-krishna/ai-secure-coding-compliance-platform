@@ -43,10 +43,16 @@ class ScanDetailVisibilityTests(unittest.TestCase):
         self.assertFalse(can_view_scan(peer_scan, self.user))
         self.assertTrue(can_view_scan(own_scan, self.user))
 
-    def test_superuser_can_read_across_tenants(self) -> None:
+    def test_platform_owner_has_no_cross_tenant_bypass(self) -> None:
         admin = SimpleNamespace(id=1, is_superuser=True)
         scan = SimpleNamespace(user_id=20, tenant_id=self.other_tenant_id)
-        self.assertTrue(can_view_scan(scan, admin, tenant_id=self.tenant_id))
+        self.assertFalse(can_view_scan(scan, admin, tenant_id=self.tenant_id))
+
+    def test_tenant_wide_scope_reads_any_owner_only_in_selected_tenant(self) -> None:
+        same_tenant = SimpleNamespace(user_id=20, tenant_id=self.tenant_id)
+        other_tenant = SimpleNamespace(user_id=20, tenant_id=self.other_tenant_id)
+        self.assertTrue(can_view_scan(same_tenant, self.user, tenant_id=self.tenant_id))
+        self.assertFalse(can_view_scan(other_tenant, self.user, tenant_id=self.tenant_id))
 
 
 if __name__ == "__main__":

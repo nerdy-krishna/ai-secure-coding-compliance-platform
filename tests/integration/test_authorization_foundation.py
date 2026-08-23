@@ -33,6 +33,8 @@ from app.infrastructure.database.repositories.authorization_repo import (
     payload_digest,
     target_fingerprint,
 )
+from app.infrastructure.auth.manager import UserManager
+from app.infrastructure.auth.db import get_user_db
 from app.infrastructure.database.repositories.scan_outbox_repo import (
     ScanOutboxRepository,
 )
@@ -159,6 +161,45 @@ class AuthorizationFoundationIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(WAIVER_REQUEST, requester_permissions)
         self.assertNotIn(WAIVER_APPROVE, requester_permissions)
         self.assertIn(WAIVER_APPROVE, platform_permissions)
+
+    async def test_registration_hook_assigns_default_role_idempotently(self) -> None:
+        suffix = uuid4().hex[:12]
+        async with AsyncSessionLocal() as db:
+            user = User(
+                email=f"authz-registration-{suffix}@example.com",
+                hashed_password=PasswordHelper().hash(f"A7!{uuid4()}z"),
+                is_active=True,
+                is_superuser=False,
+                is_verified=True,
+                tenant_id=self.tenant_id,
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            self.user_ids.append(user.id)
+
+            user_db_gen = get_user_db(db)
+            user_db = await user_db_gen.__anext__()
+            try:
+                manager = UserManager(user_db)
+                await manager.on_after_register(user)
+                await manager.on_after_register(user)
+            finally:
+                await user_db_gen.aclose()
+
+            assignments = list(
+                (
+                    await db.scalars(
+                        select(RoleAssignment).where(
+                            RoleAssignment.user_id == user.id,
+                            RoleAssignment.tenant_id == self.tenant_id,
+                        )
+                    )
+                ).all()
+            )
+
+        self.assertEqual(len(assignments), 1)
+        self.assertEqual(assignments[0].role_key, ANALYST)
 
     async def test_tenant_context_is_reapplied_after_commit(self) -> None:
         binding = bind_principal(

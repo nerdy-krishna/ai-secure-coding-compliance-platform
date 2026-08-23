@@ -1,7 +1,8 @@
 import uuid
+from collections.abc import Callable
 from typing import List, Optional
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.auth.core import current_active_user, current_active_user_sse
 from app.infrastructure.database import models as db_models
@@ -21,6 +22,10 @@ from app.infrastructure.database.repositories.rag_job_repo import RAGJobReposito
 from app.infrastructure.database.repositories.user_group_repo import (
     UserGroupRepository,
 )
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+)
+from app.infrastructure.database.tenant_context import effective_tenant_id
 from app.core.services.admin_service import AdminService
 from app.core.services.scan import (
     ScanLifecycleService,
@@ -31,6 +36,7 @@ from app.core.services.chat_service import ChatService
 from app.core.services.rag_preprocessor_service import RAGPreprocessorService
 from app.core.services.security_standards_service import SecurityStandardsService
 from app.shared.lib import scan_scope
+from app.shared.lib.permissions import SCAN_READ_TENANT
 
 
 def get_llm_config_repository(
@@ -140,66 +146,87 @@ def get_user_group_repository(
     return UserGroupRepository(db)
 
 
+def get_authorization_repository(
+    db: AsyncSession = Depends(get_db),
+) -> AuthorizationRepository:
+    return AuthorizationRepository(db)
+
+
+async def get_current_permissions(
+    user: db_models.User = Depends(current_active_user),
+    repo: AuthorizationRepository = Depends(get_authorization_repository),
+) -> frozenset[str]:
+    return await repo.permissions_for_user(
+        user=user,
+        tenant_id=effective_tenant_id(user.tenant_id),
+    )
+
+
+async def get_current_permissions_sse(
+    user: db_models.User = Depends(current_active_user_sse),
+    repo: AuthorizationRepository = Depends(get_authorization_repository),
+) -> frozenset[str]:
+    return await repo.permissions_for_user(
+        user=user,
+        tenant_id=effective_tenant_id(user.tenant_id),
+    )
+
+
+def require_permission(permission: str) -> Callable:
+    """Build a FastAPI dependency that fails closed on a missing permission."""
+
+    async def require(
+        permissions: frozenset[str] = Depends(get_current_permissions),
+    ) -> frozenset[str]:
+        if permission not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied.",
+            )
+        return permissions
+
+    return require
+
+
 async def get_visible_user_ids(
     user: db_models.User = Depends(current_active_user),
     repo: UserGroupRepository = Depends(get_user_group_repository),
+    permissions: frozenset[str] = Depends(get_current_permissions),
 ) -> Optional[List[int]]:
     """Compute the scan-scope filter for the caller.
 
-    Returns `None` for admins (no filter) and `[user.id, ...peers]` for
-    regular users. Used by routers to pass through to scan_service /
-    scan_repo methods that support scoped listing.
+    Returns ``None`` only for callers with tenant-wide scan read permission;
+    repositories still apply the mandatory tenant filter. Other callers get
+    their owner/group resource scope.
     """
-    return await scan_scope.visible_user_ids(user, repo)
+    return await scan_scope.visible_user_ids(
+        user,
+        repo,
+        tenant_wide=SCAN_READ_TENANT in permissions,
+    )
 
 
 async def get_current_user_tenant_id(
     user: db_models.User = Depends(current_active_user),
-) -> Optional[uuid.UUID]:
-    """Compute the tenant scope for the caller (Chunk 9).
+) -> uuid.UUID:
+    """Return the caller's explicit active tenant; never an unscoped sentinel."""
 
-    Mirrors :func:`get_visible_user_ids`'s admin-passthrough convention:
-
-    - ``None``     → caller is a superuser; queries skip the tenant filter
-                     (and therefore see every tenant).
-    - ``UUID``     → caller's tenant id; queries restrict to rows whose
-                     ``tenant_id`` matches OR is NULL.
-    - Edge case: a non-admin user with no tenant_id (NULL on the user
-      row) gets the seeded default tenant treatment — they only see
-      rows in the default tenant. We guard against the orphan case
-      explicitly so a misconfigured row can't leak across tenants.
-    """
-    if user.is_superuser:
-        return None
-    user_tenant = getattr(user, "tenant_id", None)
-    if user_tenant is None:
-        # Orphan user → treat as default tenant. The single-tenant
-        # bootstrap path also lands here.
-        from app.api.v1.routers.admin_tenants import DEFAULT_TENANT_ID
-
-        return DEFAULT_TENANT_ID
-    return user_tenant
+    return effective_tenant_id(user.tenant_id)
 
 
 async def get_current_user_tenant_id_sse(
     user: db_models.User = Depends(current_active_user_sse),
-) -> Optional[uuid.UUID]:
+) -> uuid.UUID:
     """SSE variant — same logic as :func:`get_current_user_tenant_id`
     against the SSE-aware auth dep so both share FastAPI's per-request
     cache."""
-    if user.is_superuser:
-        return None
-    user_tenant = getattr(user, "tenant_id", None)
-    if user_tenant is None:
-        from app.api.v1.routers.admin_tenants import DEFAULT_TENANT_ID
-
-        return DEFAULT_TENANT_ID
-    return user_tenant
+    return effective_tenant_id(user.tenant_id)
 
 
 async def get_visible_user_ids_sse(
     user: db_models.User = Depends(current_active_user_sse),
     repo: UserGroupRepository = Depends(get_user_group_repository),
+    permissions: frozenset[str] = Depends(get_current_permissions_sse),
 ) -> Optional[List[int]]:
     """SSE variant of `get_visible_user_ids`.
 
@@ -211,7 +238,11 @@ async def get_visible_user_ids_sse(
     for every scan. This variant resolves the user via the SSE-aware
     auth dep so both share FastAPI's per-request dep cache.
     """
-    return await scan_scope.visible_user_ids(user, repo)
+    return await scan_scope.visible_user_ids(
+        user,
+        repo,
+        tenant_wide=SCAN_READ_TENANT in permissions,
+    )
 
 
 def get_security_standards_service(

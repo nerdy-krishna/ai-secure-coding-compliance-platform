@@ -1,8 +1,9 @@
 # src/app/shared/lib/scan_scope.py
 """Helpers for computing which users' data a caller is allowed to see.
 
-A regular user sees scans owned by themselves **plus** scans owned by
-anyone in a group they also belong to. Admins see everything.
+A resource-scoped user sees scans owned by themselves **plus** scans owned by
+anyone in a group they also belong to. Tenant-wide readers see all owners in
+their active tenant; the separate tenant predicate remains mandatory.
 
 Consumers use the return value as a SQL filter argument:
 
@@ -10,8 +11,8 @@ Consumers use the return value as a SQL filter argument:
     if visible is not None:
         stmt = stmt.where(Project.user_id.in_(visible))
 
-The sentinel (`None`) means "no filter" — the admin path — not "no
-access."
+The sentinel (`None`) means "no user filter inside the already-selected
+tenant" — never cross-tenant access.
 """
 
 from __future__ import annotations
@@ -27,14 +28,16 @@ from app.infrastructure.database.repositories.user_group_repo import (
 async def visible_user_ids(
     user: db_models.User,
     repo: UserGroupRepository,
+    *,
+    tenant_wide: bool = False,
 ) -> Optional[List[int]]:
-    """Return the list of user_ids visible to `user`, or None for admins.
+    """Return resource-visible user IDs, or ``None`` for tenant-wide read.
 
-    Regular users always include their own id plus peers from all
-    groups they belong to. Admins get `None` so callers skip the
-    filter entirely.
+    Resource-scoped users always include their own id plus peers from all
+    groups they belong to. Tenant-wide readers skip only the owner/group
+    filter; repositories still require the active tenant predicate.
     """
-    if user.is_superuser:
+    if tenant_wide:
         return None
     peers = await repo.get_peer_user_ids(user.id)
     return [user.id, *sorted(peers)]

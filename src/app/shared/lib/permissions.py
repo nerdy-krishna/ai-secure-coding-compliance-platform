@@ -104,6 +104,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             SCAN_SUBMIT,
             SCAN_READ,
             SCAN_CONTROL,
+            SCAN_APPROVE_SELF,
             FINDING_TRIAGE,
             WAIVER_REQUEST,
             RULE_CANDIDATE_CREATE,

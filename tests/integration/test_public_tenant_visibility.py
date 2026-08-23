@@ -13,6 +13,7 @@ from sqlalchemy import delete
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import (
     Project,
+    RoleAssignment,
     Scan,
     Tenant,
     User,
@@ -21,6 +22,7 @@ from app.infrastructure.database.models import (
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.shared.lib.scan_status import STATUS_COMPLETED
+from app.shared.lib.permissions import ANALYST, PLATFORM_OWNER
 from tests.integration.support import integration_test
 
 
@@ -72,6 +74,25 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             db.add_all([owner, foreign_user, superuser])
             await db.flush()
+            db.add_all(
+                [
+                    RoleAssignment(
+                        user_id=owner.id,
+                        tenant_id=owner_tenant.id,
+                        role_key=ANALYST,
+                    ),
+                    RoleAssignment(
+                        user_id=foreign_user.id,
+                        tenant_id=foreign_tenant.id,
+                        role_key=ANALYST,
+                    ),
+                    RoleAssignment(
+                        user_id=superuser.id,
+                        tenant_id=None,
+                        role_key=PLATFORM_OWNER,
+                    ),
+                ]
+            )
 
             # Deliberately put the two regular users in one group. This makes
             # the owner visible through the legacy group scope and proves the
@@ -128,6 +149,9 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await db.execute(delete(UserGroup).where(UserGroup.id == self.group_id))
+            await db.execute(
+                delete(RoleAssignment).where(RoleAssignment.user_id.in_(self.user_ids))
+            )
             await db.commit()
             await ScanRepository(db).delete_project(self.project_id)
             await db.execute(delete(User).where(User.id.in_(self.user_ids)))
@@ -143,7 +167,7 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
-    async def test_result_is_tenant_scoped_with_superuser_passthrough(self) -> None:
+    async def test_result_is_tenant_scoped_without_superuser_bypass(self) -> None:
         endpoint = f"/api/v1/scans/{self.scan_id}/result"
 
         owner = await self.client.get(
@@ -159,7 +183,7 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
         superuser = await self.client.get(
             endpoint, headers=await self._authorization(self.superuser_email)
         )
-        self.assertEqual(superuser.status_code, 200, superuser.text)
+        self.assertEqual(superuser.status_code, 404, superuser.text)
 
 
 if __name__ == "__main__":

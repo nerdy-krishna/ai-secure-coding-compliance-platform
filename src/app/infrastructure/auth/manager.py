@@ -36,6 +36,45 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
     )
 
     async def on_after_register(self, user: User, request: Optional[Request] = None):
+        from sqlalchemy import select
+
+        from app.infrastructure.database.models import RoleAssignment
+        from app.infrastructure.database.tenant_context import (
+            apply_session_context,
+            effective_tenant_id,
+            principal_scope,
+        )
+        from app.shared.lib.permissions import ANALYST, PLATFORM_OWNER
+
+        role_key = PLATFORM_OWNER if user.is_superuser else ANALYST
+        role_tenant_id = None if user.is_superuser else effective_tenant_id(user.tenant_id)
+        session = self.user_db.session
+        with principal_scope(
+            tenant_id=None,
+            principal_kind="system",
+            principal_id="registration-role-provisioner",
+            system_scope=True,
+        ):
+            await apply_session_context(session)
+            existing = await session.scalar(
+                select(RoleAssignment.id).where(
+                    RoleAssignment.user_id == user.id,
+                    RoleAssignment.tenant_id.is_(None)
+                    if role_tenant_id is None
+                    else RoleAssignment.tenant_id == role_tenant_id,
+                    RoleAssignment.role_key == role_key,
+                )
+            )
+            if existing is None:
+                session.add(
+                    RoleAssignment(
+                        user_id=user.id,
+                        tenant_id=role_tenant_id,
+                        role_key=role_key,
+                    )
+                )
+                await session.commit()
+
         # V16.2.5/V16.4.1: omit raw email; use hashed form for correlation
         email_hash = hashlib.sha256(user.email.lower().encode()).hexdigest()[:12]
         logger.info(

@@ -1557,16 +1557,13 @@ class ScanRepository:
     ) -> Any:
         """Build a WHERE clause for a user_id-owned column.
 
-        `visible_user_ids=None` means "no filter at all" — reserved for
-        the admin path where `scan_scope.visible_user_ids()` returned
-        None. A list means "exactly these users" (always includes the
-        requester; peers come from user_group memberships). Callers
-        that haven't been migrated to pass the list still work — they
-        fall back to the requester's own user_id.
+        `visible_user_ids=None` means no owner filter inside the separately
+        required tenant scope. A list means "exactly these users" (always
+        includes the requester; peers come from user-group memberships).
         """
         if visible_user_ids is None:
-            # Admin — no filter. Pass a tautology so the caller can
-            # still `.where()` it unconditionally.
+            # Tenant-wide reader — no owner filter. The caller must also
+            # apply `_scope_tenant` with an explicit tenant.
             return sa.true()
         if not visible_user_ids:
             return column == user_id
@@ -1579,16 +1576,13 @@ class ScanRepository:
     ) -> Any:
         """Build a WHERE clause for a tenant_id-scoped column (Chunk 9).
 
-        ``tenant_id is None`` → admin / no scope; returns ``sa.true()``
-        so callers can ``.where()`` it unconditionally.
-
-        ``tenant_id is set`` → restrict to rows whose tenant matches
-        OR whose tenant is NULL. The NULL allowance keeps legacy /
-        orphaned rows visible during tenant migration.
+        ``tenant_id is None`` is reserved for explicitly scoped system jobs;
+        normal request dependencies always provide a tenant. Otherwise rows
+        must match the active tenant exactly.
         """
         if tenant_id is None:
             return sa.true()
-        return sa.or_(tenant_column == tenant_id, tenant_column.is_(None))
+        return tenant_column == tenant_id
 
     async def search_projects_by_name(
         self,

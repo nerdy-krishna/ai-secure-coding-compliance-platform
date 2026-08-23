@@ -13,7 +13,6 @@ class _ScanLike(Protocol):
 
 class _UserLike(Protocol):
     id: int
-    is_superuser: bool
 
 
 def can_view_scan(
@@ -25,14 +24,12 @@ def can_view_scan(
 ) -> bool:
     """Apply the same owner/group/tenant policy to every scan detail read.
 
-    ``visible_user_ids=None`` keeps non-router/internal callers conservative:
-    regular users may see only their own scan unless the caller explicitly
-    supplies the group-visibility dependency. Legacy NULL scan tenants are
-    accepted inside the caller's scope, matching repository list queries.
+    ``visible_user_ids=None`` means tenant-wide visibility only when an explicit
+    tenant is also supplied. Without a tenant, internal callers remain
+    conservative and can read only the caller's own scan.
     """
-    if user.is_superuser:
-        return True
-    allowed_owners = visible_user_ids if visible_user_ids is not None else [user.id]
-    if scan.user_id not in allowed_owners:
+    if tenant_id is not None and scan.tenant_id != tenant_id:
         return False
-    return tenant_id is None or scan.tenant_id is None or scan.tenant_id == tenant_id
+    if visible_user_ids is None:
+        return tenant_id is not None or scan.user_id == user.id
+    return scan.user_id in visible_user_ids
