@@ -1146,10 +1146,14 @@ from app.api.v1.routers.admin_tenants import (  # noqa: E402
 from app.api.v1.routers.admin_users_tenant import (  # noqa: E402
     router as admin_users_tenant_router,
 )
+from app.api.v1.routers.authorization import (  # noqa: E402
+    router as authorization_router,
+)
 
 # Tenant management — gated by `multi_tenant`.
 _include_if_enabled("multi_tenant", admin_tenants_router, prefix="/api/v1")
 _include_if_enabled("multi_tenant", admin_users_tenant_router, prefix="/api/v1")
+_include_if_enabled("multi_tenant", authorization_router, prefix="/api/v1")
 
 # Password-reset — gated by `email` (reset relies on SMTP delivery).
 _include_if_enabled(

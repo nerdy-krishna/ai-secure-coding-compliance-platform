@@ -92,6 +92,32 @@ class AuthorizationRepository:
             await self.role_keys_for_user(user=user, tenant_id=tenant_id)
         )
 
+    async def permissions_for_user_id(
+        self, *, user_id: int, tenant_id: uuid.UUID
+    ) -> frozenset[str]:
+        """Resolve durable grants without requiring a tenant-visible user row."""
+
+        rows = await self.db.scalars(
+            select(db_models.RoleAssignment.role_key).where(
+                db_models.RoleAssignment.user_id == user_id,
+                (
+                    (db_models.RoleAssignment.tenant_id == tenant_id)
+                    | (db_models.RoleAssignment.tenant_id.is_(None))
+                ),
+            )
+        )
+        return permissions_for_roles(set(rows.all()))
+
+    async def get_action_request(
+        self, *, request_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> db_models.AuthorizationActionRequest | None:
+        return await self.db.scalar(
+            select(db_models.AuthorizationActionRequest).where(
+                db_models.AuthorizationActionRequest.id == request_id,
+                db_models.AuthorizationActionRequest.tenant_id == tenant_id,
+            )
+        )
+
     async def separation_of_duties_mode(self, *, tenant_id: uuid.UUID) -> str:
         """Return the tenant's fail-closed high-risk approval mode."""
 
