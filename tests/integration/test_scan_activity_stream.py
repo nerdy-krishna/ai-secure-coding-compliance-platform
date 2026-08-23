@@ -13,9 +13,16 @@ from fastapi_users.password import PasswordHelper
 from sqlalchemy import delete, select
 
 from app.infrastructure.database.database import AsyncSessionLocal, engine
-from app.infrastructure.database.models import Project, Scan, ScanEvent, User
+from app.infrastructure.database.models import (
+    Project,
+    RoleAssignment,
+    Scan,
+    ScanEvent,
+    User,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.shared.lib.scan_status import STATUS_COMPLETED
+from app.shared.lib.permissions import ANALYST
 from tests.integration.support import integration_test
 
 
@@ -37,6 +44,13 @@ class ScanActivityStreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             db.add(user)
             await db.flush()
+            db.add(
+                RoleAssignment(
+                    user_id=user.id,
+                    tenant_id=user.tenant_id,
+                    role_key=ANALYST,
+                )
+            )
             project = Project(user_id=user.id, name=f"activity-{uuid4()}")
             scan = Scan(
                 project=project,
@@ -75,6 +89,9 @@ class ScanActivityStreamIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         async with AsyncSessionLocal() as db:
             await ScanRepository(db).delete_project(self.project_id)
+            await db.execute(
+                delete(RoleAssignment).where(RoleAssignment.user_id == self.user_id)
+            )
             await db.execute(delete(User).where(User.id == self.user_id))
             await db.commit()
         await engine.dispose()

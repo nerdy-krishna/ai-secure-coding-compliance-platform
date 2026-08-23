@@ -92,6 +92,18 @@ class AuthorizationRepository:
             await self.role_keys_for_user(user=user, tenant_id=tenant_id)
         )
 
+    async def separation_of_duties_mode(self, *, tenant_id: uuid.UUID) -> str:
+        """Return the tenant's fail-closed high-risk approval mode."""
+
+        mode = await self.db.scalar(
+            select(db_models.Tenant.separation_of_duties_mode).where(
+                db_models.Tenant.id == tenant_id
+            )
+        )
+        if mode not in {"off", "critical"}:
+            raise AuthorizationDeniedError("tenant authorization policy unavailable")
+        return mode
+
     async def create_action_request(
         self,
         *,

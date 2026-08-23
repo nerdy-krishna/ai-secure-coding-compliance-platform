@@ -188,6 +188,22 @@ def require_permission(permission: str) -> Callable:
     return require
 
 
+def require_permission_sse(permission: str) -> Callable:
+    """SSE-token variant of :func:`require_permission`."""
+
+    async def require(
+        permissions: frozenset[str] = Depends(get_current_permissions_sse),
+    ) -> frozenset[str]:
+        if permission not in permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied.",
+            )
+        return permissions
+
+    return require
+
+
 async def get_visible_user_ids(
     user: db_models.User = Depends(current_active_user),
     repo: UserGroupRepository = Depends(get_user_group_repository),

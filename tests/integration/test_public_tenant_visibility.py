@@ -133,6 +133,7 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.foreign_email = foreign_user.email
             self.superuser_email = superuser.email
             self.user_ids = [owner.id, foreign_user.id, superuser.id]
+            self.owner_id = owner.id
             self.tenant_ids = [owner_tenant.id, foreign_tenant.id]
             self.group_id = group.id
             self.project_id = project.id
@@ -169,9 +170,11 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_result_is_tenant_scoped_without_superuser_bypass(self) -> None:
         endpoint = f"/api/v1/scans/{self.scan_id}/result"
+        owner_headers = await self._authorization(self.owner_email)
 
         owner = await self.client.get(
-            endpoint, headers=await self._authorization(self.owner_email)
+            endpoint,
+            headers=owner_headers,
         )
         self.assertEqual(owner.status_code, 200, owner.text)
 
@@ -184,6 +187,18 @@ class PublicTenantVisibilityIntegrationTests(unittest.IsolatedAsyncioTestCase):
             endpoint, headers=await self._authorization(self.superuser_email)
         )
         self.assertEqual(superuser.status_code, 404, superuser.text)
+
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                delete(RoleAssignment).where(
+                    RoleAssignment.user_id == self.owner_id,
+                    RoleAssignment.role_key == ANALYST,
+                )
+            )
+            await db.commit()
+
+        stale_role = await self.client.get(endpoint, headers=owner_headers)
+        self.assertEqual(stale_role.status_code, 403, stale_role.text)
 
 
 if __name__ == "__main__":

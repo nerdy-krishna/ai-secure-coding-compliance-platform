@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 import posixpath
 import uuid
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from fastmcp import FastMCP
@@ -44,7 +46,25 @@ from app.infrastructure.auth.manager import UserManager
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.chat_repo import ChatRepository
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.user_group_repo import (
+    UserGroupRepository,
+)
+from app.infrastructure.database.tenant_context import (
+    apply_session_context,
+    effective_tenant_id,
+    principal_scope,
+)
+from app.shared.lib.permissions import (
+    SCAN_APPROVE,
+    SCAN_APPROVE_SELF,
+    SCAN_READ,
+    SCAN_READ_TENANT,
+    SCAN_SUBMIT,
+)
 
 # Submission size limits — enforced at the MCP boundary (V02.2.1, V05.1.1, V05.2.1).
 MAX_FILES_PER_SUBMISSION = 1_000
@@ -237,6 +257,63 @@ async def _current_user(session: AsyncSession) -> db_models.User:
     return user
 
 
+@dataclass(frozen=True, slots=True)
+class _McpAuthorizationContext:
+    user: db_models.User
+    tenant_id: uuid.UUID
+    permissions: frozenset[str]
+    visible_user_ids: Optional[list[int]]
+
+
+@asynccontextmanager
+async def _authorized_user(
+    session: AsyncSession,
+    *,
+    any_permission: frozenset[str] = frozenset(),
+):
+    """Bind one MCP tool invocation to the same tenant/RBAC context as REST."""
+
+    user = await _current_user(session)
+    tenant_id = effective_tenant_id(user.tenant_id)
+    with principal_scope(
+        tenant_id=tenant_id,
+        principal_kind="human",
+        principal_id=str(user.id),
+    ):
+        await apply_session_context(session)
+        permissions = await AuthorizationRepository(session).permissions_for_user(
+            user=user,
+            tenant_id=tenant_id,
+        )
+        if any_permission and not (permissions & any_permission):
+            raise PermissionError("Permission denied.")
+        visible_user_ids: Optional[list[int]]
+        if SCAN_READ_TENANT in permissions:
+            visible_user_ids = None
+        else:
+            peers = await UserGroupRepository(session).get_peer_user_ids(user.id)
+            visible_user_ids = [user.id, *sorted(peers)]
+        yield _McpAuthorizationContext(
+            user=user,
+            tenant_id=tenant_id,
+            permissions=permissions,
+            visible_user_ids=visible_user_ids,
+        )
+
+
+@asynccontextmanager
+async def _authorized_session(
+    *,
+    any_permission: frozenset[str] = frozenset(),
+):
+    async with AsyncSessionLocal() as session:
+        async with _authorized_user(
+            session,
+            any_permission=any_permission,
+        ) as authorization:
+            yield session, authorization
+
+
 def _build_submission_service(repo: ScanRepository) -> ScanSubmissionService:
     return ScanSubmissionService(repo)
 
@@ -312,8 +389,10 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
         if bool(payload.files) == bool(payload.repo_url):
             raise ValueError("Provide exactly one of `files` or `repo_url`.")
 
-        async with AsyncSessionLocal() as session:
-            user = await _current_user(session)
+        async with _authorized_session(
+            any_permission=frozenset({SCAN_SUBMIT})
+        ) as (session, authorization):
+            user = authorization.user
             logger.info(
                 "mcp.tool.invoke",
                 extra={
@@ -416,8 +495,10 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
 async def sccap_get_scan_status(scan_id: str) -> Dict[str, Any]:
     """Get the current status of a scan."""
     try:
-        async with AsyncSessionLocal() as session:
-            user = await _current_user(session)
+        async with _authorized_session(
+            any_permission=frozenset({SCAN_READ})
+        ) as (session, authorization):
+            user = authorization.user
             logger.info(
                 "mcp.tool.invoke",
                 extra={
@@ -428,17 +509,12 @@ async def sccap_get_scan_status(scan_id: str) -> Dict[str, Any]:
                 },
             )
             scan_service = _build_query_service(ScanRepository(session))
-            scan = await scan_service.get_scan_status(uuid.UUID(scan_id), user)
-            if scan.user_id != user.id and not user.is_superuser:
-                logger.warning(
-                    "mcp.authz.denied",
-                    extra={
-                        "tool": "sccap_get_scan_status",
-                        "user_id": str(user.id),
-                        "resource_id": scan_id,
-                    },
-                )
-                raise PermissionError("Not authorized to view this scan.")
+            scan = await scan_service.get_scan_status(
+                uuid.UUID(scan_id),
+                user,
+                visible_user_ids=authorization.visible_user_ids,
+                tenant_id=authorization.tenant_id,
+            )
             return {
                 "scan_id": str(scan.id),
                 "project_id": str(scan.project_id),
@@ -464,8 +540,10 @@ async def sccap_get_scan_result(scan_id: str) -> Dict[str, Any]:
     """Fetch the final findings + summary for a completed scan. Returns
     an error dict if the scan is still running."""
     try:
-        async with AsyncSessionLocal() as session:
-            user = await _current_user(session)
+        async with _authorized_session(
+            any_permission=frozenset({SCAN_READ})
+        ) as (session, authorization):
+            user = authorization.user
             logger.info(
                 "mcp.tool.invoke",
                 extra={
@@ -476,24 +554,20 @@ async def sccap_get_scan_result(scan_id: str) -> Dict[str, Any]:
                 },
             )
             scan_service = _build_query_service(ScanRepository(session))
-            scan = await scan_service.get_scan_status(uuid.UUID(scan_id), user)
-            if scan.user_id != user.id and not user.is_superuser:
-                logger.warning(
-                    "mcp.authz.denied",
-                    extra={
-                        "tool": "sccap_get_scan_result",
-                        "user_id": str(user.id),
-                        "resource_id": scan_id,
-                    },
-                )
-                raise PermissionError("Not authorized to view this scan.")
-            # `get_scan_result` requires a `user` positional arg for the
-            # ownership check. The pre-split MCP code omitted it (latent
-            # crash) — we restore the correct call signature here as part
-            # of the split. The auth check at line above already gates this
-            # tool to the scan owner / superuser, so the inline check
-            # inside `get_scan_result` is defense-in-depth.
-            result = await scan_service.get_scan_result(uuid.UUID(scan_id), user)
+            await scan_service.get_scan_status(
+                uuid.UUID(scan_id),
+                user,
+                visible_user_ids=authorization.visible_user_ids,
+                tenant_id=authorization.tenant_id,
+            )
+            # Query services re-check explicit tenant and owner/group scope;
+            # the MCP permission gate is not the only authorization boundary.
+            result = await scan_service.get_scan_result(
+                uuid.UUID(scan_id),
+                user,
+                visible_user_ids=authorization.visible_user_ids,
+                tenant_id=authorization.tenant_id,
+            )
             # get_scan_result returns a pydantic model; expose as plain dict.
             return (
                 result.model_dump(mode="json")
@@ -514,8 +588,10 @@ async def sccap_approve_scan(scan_id: str) -> Dict[str, Any]:
     """Approve a PENDING_COST_APPROVAL scan. Releases the full analysis
     via the Phase I.1 `interrupt() / Command(resume=...)` path."""
     try:
-        async with AsyncSessionLocal() as session:
-            user = await _current_user(session)
+        async with _authorized_session(
+            any_permission=frozenset({SCAN_APPROVE, SCAN_APPROVE_SELF})
+        ) as (session, authorization):
+            user = authorization.user
             logger.info(
                 "mcp.tool.invoke",
                 extra={
@@ -526,21 +602,14 @@ async def sccap_approve_scan(scan_id: str) -> Dict[str, Any]:
                 },
             )
             repo = ScanRepository(session)
-            # V08.2.2 / V08.4.1 — explicit ownership check at MCP boundary.
-            query = _build_query_service(repo)
-            scan = await query.get_scan_status(uuid.UUID(scan_id), user)
-            if scan.user_id != user.id and not user.is_superuser:
-                logger.warning(
-                    "mcp.authz.denied",
-                    extra={
-                        "tool": "sccap_approve_scan",
-                        "user_id": str(user.id),
-                        "resource_id": scan_id,
-                    },
-                )
-                raise PermissionError("Not authorized to approve this scan.")
             scan_service = _build_lifecycle_service(repo)
-            await scan_service.approve_scan(uuid.UUID(scan_id), user=user)
+            await scan_service.approve_scan(
+                uuid.UUID(scan_id),
+                user=user,
+                permissions=authorization.permissions,
+                visible_user_ids=authorization.visible_user_ids,
+                tenant_id=authorization.tenant_id,
+            )
             return {"scan_id": scan_id, "approved": True}
     except (ValueError, PermissionError):
         raise
@@ -556,8 +625,8 @@ async def sccap_ask_advisor(payload: AskAdvisorInput) -> Dict[str, Any]:
     """One-shot advisor query — skips session persistence. Returns the
     agent's answer + cost/tokens for tracking."""
     try:
-        async with AsyncSessionLocal() as session:
-            user = await _current_user(session)
+        async with _authorized_session() as (session, authorization):
+            user = authorization.user
             logger.info(
                 "mcp.tool.invoke",
                 extra={

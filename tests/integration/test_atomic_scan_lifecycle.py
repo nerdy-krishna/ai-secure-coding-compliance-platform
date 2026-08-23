@@ -31,6 +31,7 @@ from app.shared.lib.scan_status import (
     STATUS_QUEUED_FOR_SCAN,
 )
 from app.shared.lib.scan_task_status import STATUS_SCAN_TASK_COMPLETED
+from app.shared.lib.permissions import SCAN_APPROVE, SCAN_APPROVE_SELF
 from tests.integration.support import integration_test
 
 
@@ -64,6 +65,20 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
             expire_on_commit=False,
             join_transaction_mode="create_savepoint",
         )
+
+    @staticmethod
+    def _scan_scope(user: db_models.User) -> dict:
+        return {
+            "visible_user_ids": [user.id],
+            "tenant_id": user.tenant_id,
+        }
+
+    @classmethod
+    def _approval_scope(cls, user: db_models.User) -> dict:
+        return {
+            **cls._scan_scope(user),
+            "permissions": frozenset({SCAN_APPROVE_SELF}),
+        }
 
     async def _create_scan(
         self,
@@ -164,10 +179,18 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=True),
             ) as publisher:
                 first = await service.approve_scan(
-                    scan.id, user, request, idempotency_key="same-decision"
+                    scan.id,
+                    user,
+                    request,
+                    idempotency_key="same-decision",
+                    **self._approval_scope(user),
                 )
                 duplicate = await service.approve_scan(
-                    scan.id, user, request, idempotency_key="same-decision"
+                    scan.id,
+                    user,
+                    request,
+                    idempotency_key="same-decision",
+                    **self._approval_scope(user),
                 )
 
             self.assertEqual(first.gate_id, duplicate.gate_id)
@@ -197,6 +220,7 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         gate_id=first.gate_id,
                     ),
                     idempotency_key="conflicting-decision",
+                    **self._approval_scope(user),
                 )
             self.assertEqual(conflict.exception.status_code, 409)
             self.assertEqual(
@@ -210,6 +234,52 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
             ]
             self.assertEqual(len(rejected_calls), 1)
 
+    async def test_critical_gate_requires_distinct_tenant_approver(self) -> None:
+        async with self._session() as db:
+            owner, scan = await self._create_scan(
+                db,
+                scan_status=STATUS_PENDING_APPROVAL,
+            )
+            await db.execute(
+                update(db_models.Tenant)
+                .where(db_models.Tenant.id == owner.tenant_id)
+                .values(separation_of_duties_mode="critical")
+            )
+            approver = db_models.User(
+                email=f"atomic-approver-{uuid4()}@example.invalid",
+                hashed_password="not-a-real-password-hash",
+                is_active=True,
+                is_superuser=False,
+                is_verified=True,
+                tenant_id=owner.tenant_id,
+            )
+            db.add(approver)
+            await db.commit()
+            service = ScanLifecycleService(ScanRepository(db))
+
+            with self.assertRaises(HTTPException) as self_decision:
+                await service.approve_scan(
+                    scan.id,
+                    owner,
+                    ApprovalRequest(kind="cost_approval", approved=True),
+                    permissions=frozenset({SCAN_APPROVE_SELF}),
+                    visible_user_ids=[owner.id],
+                    tenant_id=owner.tenant_id,
+                )
+            self.assertEqual(self_decision.exception.status_code, 403)
+
+            gate = await service.approve_scan(
+                scan.id,
+                approver,
+                ApprovalRequest(kind="cost_approval", approved=True),
+                permissions=frozenset({SCAN_APPROVE}),
+                visible_user_ids=None,
+                tenant_id=owner.tenant_id,
+            )
+
+            self.assertTrue(gate.decision)
+            self.assertEqual(gate.actor_user_id, approver.id)
+
     async def test_decline_commits_auditable_event_and_outbox_intent(self) -> None:
         async with self._session() as db:
             user, scan = await self._create_scan(
@@ -221,6 +291,7 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 scan.id,
                 user,
                 ApprovalRequest(kind="profiling_approval", approved=False),
+                **self._approval_scope(user),
             )
 
             stages = set(
@@ -258,6 +329,7 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     approved=True,
                     override_critical_secret=True,
                 ),
+                **self._approval_scope(user),
             )
 
             stages = set(
@@ -295,6 +367,7 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         scan_id,
                         user,
                         ApprovalRequest(kind="cost_approval", approved=True),
+                        **self._approval_scope(user),
                     )
 
             self.assertEqual(
@@ -325,7 +398,10 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
             service = ScanLifecycleService(ScanRepository(db))
 
             result = await service.resume_or_restart_scan(
-                scan.id, user, ScanRunControlRequest(mode="resume")
+                scan.id,
+                user,
+                ScanRunControlRequest(mode="resume"),
+                **self._scan_scope(user),
             )
 
             rows = await self._outbox_rows(db, scan.id)
@@ -351,7 +427,10 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
             service = ScanLifecycleService(ScanRepository(db))
 
             result = await service.resume_or_restart_scan(
-                scan.id, user, ScanRunControlRequest(mode="restart")
+                scan.id,
+                user,
+                ScanRunControlRequest(mode="restart"),
+                **self._scan_scope(user),
             )
 
             finding_buckets = list(
@@ -411,7 +490,10 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
             with patch("app.core.services.scan.lifecycle.logger"):
                 with self.assertRaisesRegex(RuntimeError, "injected restart failure"):
                     await service.resume_or_restart_scan(
-                        scan_id, user, ScanRunControlRequest(mode="restart")
+                        scan_id,
+                        user,
+                        ScanRunControlRequest(mode="restart"),
+                        **self._scan_scope(user),
                     )
 
             self.assertEqual(
@@ -459,7 +541,11 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(
                     RuntimeError, "injected cancellation failure"
                 ):
-                    await service.cancel_scan(scan_id, user)
+                    await service.cancel_scan(
+                        scan_id,
+                        user,
+                        **self._scan_scope(user),
+                    )
 
             self.assertEqual(
                 await db.scalar(
@@ -482,7 +568,11 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 evidence={"upper_bound_estimated_cost": 0.25},
             )
 
-            await ScanLifecycleService(ScanRepository(db)).cancel_scan(scan.id, user)
+            await ScanLifecycleService(ScanRepository(db)).cancel_scan(
+                scan.id,
+                user,
+                **self._scan_scope(user),
+            )
 
             await db.refresh(gate)
             self.assertEqual(gate.state, "cancelled")

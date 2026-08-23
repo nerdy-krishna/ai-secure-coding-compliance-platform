@@ -47,7 +47,6 @@ from app.config.config import settings
 from app.infrastructure.auth.core import (
     current_active_user,
     current_active_user_sse,
-    current_superuser,
 )
 from app.config.logging_config import correlation_id_var
 from app.core.services.scan import (
@@ -59,6 +58,7 @@ from app.core.services.report import SUPPORTED_FORMATS, generate_report
 from app.api.v1.dependencies import (
     get_current_user_tenant_id,
     get_current_user_tenant_id_sse,
+    get_current_permissions,
     get_db,
     get_scan_lifecycle_service,
     get_scan_query_service,
@@ -66,10 +66,20 @@ from app.api.v1.dependencies import (
     get_llm_config_repository,
     get_visible_user_ids,
     get_visible_user_ids_sse,
+    require_permission,
+    require_permission_sse,
 )
 from app.infrastructure.database.repositories.llm_config_repo import LLMConfigRepository
 from app.shared.lib.git import list_repo_files
 from app.shared.lib.archive import is_archive_filename, list_archive_files
+from app.shared.lib.permissions import (
+    FINDING_TRIAGE,
+    SCAN_APPROVE,
+    SCAN_APPROVE_SELF,
+    SCAN_CONTROL,
+    SCAN_READ,
+    SCAN_SUBMIT,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -126,7 +136,11 @@ def _validate_repo_url(repo_url: str) -> None:
         )
 
 
-@router.get("/projects", response_model=api_models.PaginatedProjectHistoryResponse)
+@router.get(
+    "/projects",
+    response_model=api_models.PaginatedProjectHistoryResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
 async def get_all_projects(
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
@@ -154,6 +168,7 @@ class CreateProjectRequest(BaseModel):
     "/projects",
     response_model=api_models.ProjectHistoryItem,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission(SCAN_SUBMIT))],
 )
 async def create_project(
     request: CreateProjectRequest,
@@ -174,7 +189,11 @@ async def create_project(
     )
 
 
-@router.get("/projects/search", response_model=List[str])
+@router.get(
+    "/projects/search",
+    response_model=List[str],
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
 async def search_projects_for_user(
     q: str = Query(..., min_length=1, max_length=100),
     user: db_models.User = Depends(current_active_user),
@@ -191,7 +210,11 @@ async def search_projects_for_user(
     )
 
 
-@router.get("/scans/history", response_model=api_models.PaginatedScanHistoryResponse)
+@router.get(
+    "/scans/history",
+    response_model=api_models.PaginatedScanHistoryResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
 async def get_user_scan_history(
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
@@ -216,7 +239,11 @@ async def get_user_scan_history(
     )
 
 
-@router.post("/scans/preview-archive", response_model=dict)
+@router.post(
+    "/scans/preview-archive",
+    response_model=dict,
+    dependencies=[Depends(require_permission(SCAN_SUBMIT))],
+)
 async def preview_archive_files(
     archive_file: UploadFile = File(...),
     _user: db_models.User = Depends(current_active_user),
@@ -235,7 +262,11 @@ async def preview_archive_files(
     return {"files": files_data}
 
 
-@router.post("/scans/preview-git", response_model=dict)
+@router.post(
+    "/scans/preview-git",
+    response_model=dict,
+    dependencies=[Depends(require_permission(SCAN_SUBMIT))],
+)
 async def preview_git_files(
     request: api_models.GitRepoPreviewRequest,
     _user: db_models.User = Depends(current_active_user),
@@ -250,7 +281,11 @@ async def preview_git_files(
     return {"files": files}
 
 
-@router.post("/scans", response_model=api_models.ScanResponse)
+@router.post(
+    "/scans",
+    response_model=api_models.ScanResponse,
+    dependencies=[Depends(require_permission(SCAN_SUBMIT))],
+)
 async def create_scan(
     service: ScanSubmissionService = Depends(get_scan_submission_service),
     llm_repo: LLMConfigRepository = Depends(get_llm_config_repository),
@@ -442,6 +477,9 @@ async def approve_scan_analysis(
     ),
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    permissions: frozenset[str] = Depends(get_current_permissions),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Resume a scan paused at a worker-graph interrupt.
 
@@ -452,8 +490,19 @@ async def approve_scan_analysis(
     discriminates. Body is optional; missing body defaults to
     ``kind="cost_approval", approved=True`` for backward compat.
     """
+    if not ({SCAN_APPROVE, SCAN_APPROVE_SELF} & permissions):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied.",
+        )
     gate = await service.approve_scan(
-        scan_id, user, request, idempotency_key=idempotency_key
+        scan_id,
+        user,
+        request,
+        idempotency_key=idempotency_key,
+        permissions=permissions,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
     logger.info(
         "scans.approved",
@@ -479,11 +528,14 @@ async def approve_scan_analysis(
 @router.get(
     "/scans/{scan_id}/prescan-findings",
     response_model=api_models.PrescanReviewResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
 )
 async def get_prescan_review(
     scan_id: uuid.UUID,
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Deterministic-scanner findings to render on the prescan-approval card.
 
@@ -491,22 +543,36 @@ async def get_prescan_review(
     gate) or has landed in one of the two prescan-terminal states
     (``BLOCKED_PRE_LLM`` / ``BLOCKED_USER_DECLINE``).
     """
-    return await service.get_prescan_review(scan_id, user)
+    return await service.get_prescan_review(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
 
 
 @router.post(
     "/scans/{scan_id}/run-control",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=dict,
+    dependencies=[Depends(require_permission(SCAN_CONTROL))],
 )
 async def run_control_scan_analysis(
     scan_id: uuid.UUID,
     request: api_models.ScanRunControlRequest,
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Manually resume or restart an eligible failed/cancelled scan."""
-    result = await service.resume_or_restart_scan(scan_id, user, request)
+    result = await service.resume_or_restart_scan(
+        scan_id,
+        user,
+        request,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
     logger.info(
         "scans.run_control_queued",
         extra={"actor_id": user.id, "scan_id": str(scan_id), "mode": request.mode},
@@ -515,15 +581,25 @@ async def run_control_scan_analysis(
 
 
 @router.post(
-    "/scans/{scan_id}/cancel", status_code=status.HTTP_200_OK, response_model=dict
+    "/scans/{scan_id}/cancel",
+    status_code=status.HTTP_200_OK,
+    response_model=dict,
+    dependencies=[Depends(require_permission(SCAN_CONTROL))],
 )
 async def cancel_scan_analysis(
     scan_id: uuid.UUID,
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Cancels a scan, typically one that is pending cost approval."""
-    await service.cancel_scan(scan_id, user)
+    await service.cancel_scan(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
     logger.info(
         "scans.cancelled",
         extra={"actor_id": user.id, "scan_id": str(scan_id)},
@@ -531,7 +607,11 @@ async def cancel_scan_analysis(
     return {"message": "Scan has been cancelled successfully."}
 
 
-@router.post("/scans/{scan_id}/stream-token", response_model=dict)
+@router.post(
+    "/scans/{scan_id}/stream-token",
+    response_model=dict,
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
 async def issue_scan_stream_token(
     scan_id: uuid.UUID,
     user: db_models.User = Depends(current_active_user),
@@ -565,7 +645,10 @@ async def issue_scan_stream_token(
     return {"access_token": token, "expires_in": expires_in}
 
 
-@router.get("/scans/{scan_id}/stream")
+@router.get(
+    "/scans/{scan_id}/stream",
+    dependencies=[Depends(require_permission_sse(SCAN_READ))],
+)
 async def stream_scan_progress(
     scan_id: uuid.UUID,
     request: Request,
@@ -845,7 +928,9 @@ async def stream_scan_progress(
 
 
 @router.get(
-    "/scans/{scan_id}/result", response_model=api_models.AnalysisResultDetailResponse
+    "/scans/{scan_id}/result",
+    response_model=api_models.AnalysisResultDetailResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
 )
 async def get_scan_result_details(
     scan_id: uuid.UUID,
@@ -867,7 +952,10 @@ async def get_scan_result_details(
     return result
 
 
-@router.get("/scans/{scan_id}/report")
+@router.get(
+    "/scans/{scan_id}/report",
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
 async def download_scan_report(
     scan_id: uuid.UUID,
     format: str = Query("html"),
@@ -903,7 +991,10 @@ async def download_scan_report(
     )
 
 
-@router.get("/scans/{scan_id}/scanner-reports")
+@router.get(
+    "/scans/{scan_id}/scanner-reports",
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
 async def download_scanner_reports(
     scan_id: uuid.UUID,
     user: db_models.User = Depends(current_active_user),
@@ -929,7 +1020,10 @@ async def download_scanner_reports(
     )
 
 
-@router.get("/scans/{scan_id}/patch-plan")
+@router.get(
+    "/scans/{scan_id}/patch-plan",
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
 async def download_patch_plan(
     scan_id: uuid.UUID,
     user: db_models.User = Depends(current_active_user),
@@ -956,6 +1050,7 @@ async def download_patch_plan(
 @router.get(
     "/projects/{project_id}/scans",
     response_model=api_models.PaginatedScanHistoryResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
 )
 async def get_scan_history_for_project(
     project_id: uuid.UUID,
@@ -979,6 +1074,7 @@ async def get_scan_history_for_project(
 @router.get(
     "/scans/{scan_id}/llm-interactions",
     response_model=List[api_models.LLMInteractionResponse],
+    dependencies=[Depends(require_permission(SCAN_READ))],
 )
 async def get_llm_interactions_for_scan(
     scan_id: uuid.UUID,
@@ -999,6 +1095,7 @@ async def get_llm_interactions_for_scan(
 @router.get(
     "/scans/{scan_id}/findings/debug",
     response_model=api_models.ScanFindingsDebugResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
 )
 async def get_scan_findings_debug(
     scan_id: uuid.UUID,
@@ -1022,6 +1119,7 @@ async def get_scan_findings_debug(
 @router.post(
     "/scans/{scan_id}/finding-lineage",
     response_model=api_models.FindingLineageResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
 )
 async def get_finding_lineage(
     scan_id: uuid.UUID,
@@ -1050,6 +1148,7 @@ async def get_finding_lineage(
 @router.patch(
     "/scans/{scan_id}/findings/{finding_id}/disposition",
     response_model=api_models.FindingDispositionResponse,
+    dependencies=[Depends(require_permission(FINDING_TRIAGE))],
 )
 async def set_finding_disposition(
     scan_id: uuid.UUID,
@@ -1058,6 +1157,7 @@ async def set_finding_disposition(
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Set a finding's operator triage disposition (PRD #96 / #97).
 
@@ -1065,13 +1165,19 @@ async def set_finding_disposition(
     justification note is required for `false_positive` / `risk_accepted`.
     """
     return await service.set_finding_disposition(
-        scan_id, finding_id, user, request, visible_user_ids=visible_user_ids
+        scan_id,
+        finding_id,
+        user,
+        request,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 
 @router.patch(
     "/scans/{scan_id}/findings/disposition",
     response_model=api_models.BulkFindingDispositionResponse,
+    dependencies=[Depends(require_permission(FINDING_TRIAGE))],
 )
 async def set_finding_dispositions_bulk(
     scan_id: uuid.UUID,
@@ -1079,19 +1185,25 @@ async def set_finding_dispositions_bulk(
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """Apply one triage disposition to many of a scan's findings at once
     (PRD #96 / #100). All-or-nothing: every finding id must belong to
     the scan, and the note requirement is enforced once for the batch.
     """
     return await service.set_finding_dispositions_bulk(
-        scan_id, user, request, visible_user_ids=visible_user_ids
+        scan_id,
+        user,
+        request,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 
 @router.get(
     "/scans/{scan_id}/findings/{finding_id}/disposition-events",
     response_model=List[api_models.FindingDispositionEventResponse],
+    dependencies=[Depends(require_permission(SCAN_READ))],
 )
 async def get_finding_disposition_events(
     scan_id: uuid.UUID,
@@ -1099,54 +1211,83 @@ async def get_finding_disposition_events(
     user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
     """The disposition-change history for a finding, oldest first."""
     return await service.get_finding_disposition_history(
-        scan_id, finding_id, user, visible_user_ids=visible_user_ids
+        scan_id,
+        finding_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 
 @router.delete(
     "/scans/{scan_id}/findings/{finding_id}/disposition",
     response_model=api_models.FindingDispositionResponse,
+    dependencies=[Depends(require_permission(FINDING_TRIAGE))],
 )
 async def delete_finding_disposition(
     scan_id: uuid.UUID,
     finding_id: int,
-    user: db_models.User = Depends(current_superuser),
+    user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
-    """Delete a finding's triage disposition — reset it to untriaged
-    and wipe its history (PRD #96). Superuser-only: regular users can
-    add and change dispositions but cannot delete them."""
-    return await service.clear_finding_disposition(scan_id, finding_id, user)
+    """Reset a finding's triage disposition to the untriaged state."""
+    return await service.clear_finding_disposition(
+        scan_id,
+        finding_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
 
 
 @router.delete(
     "/scans/{scan_id}/findings/disposition",
     response_model=api_models.BulkFindingDispositionResponse,
+    dependencies=[Depends(require_permission(FINDING_TRIAGE))],
 )
 async def delete_finding_dispositions_bulk(
     scan_id: uuid.UUID,
     request: api_models.BulkFindingDispositionClearRequest,
-    user: db_models.User = Depends(current_superuser),
+    user: db_models.User = Depends(current_active_user),
     service: ScanLifecycleService = Depends(get_scan_lifecycle_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
-    """Bulk-delete triage dispositions for many of a scan's findings
-    (PRD #96). Superuser-only. All-or-nothing on finding ids."""
+    """Bulk-reset triage dispositions; all finding ids must match."""
     return await service.clear_finding_dispositions_bulk(
-        scan_id, request.finding_ids, user
+        scan_id,
+        request.finding_ids,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 
-@router.delete("/scans/{scan_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/scans/{scan_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(SCAN_CONTROL))],
+)
 async def delete_scan(
     scan_id: uuid.UUID,
-    user: db_models.User = Depends(current_superuser),
+    user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
-    """Deletes a single scan (superuser only)."""
-    await service.delete_scan_by_id(scan_id, user)
+    """Delete a scan inside the caller's control scope."""
+    await service.delete_scan_by_id(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
     logger.info(
         "scans.delete",
         extra={"actor_id": user.id, "scan_id": str(scan_id)},
@@ -1154,14 +1295,25 @@ async def delete_scan(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/projects/{project_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(SCAN_CONTROL))],
+)
 async def delete_project(
     project_id: uuid.UUID,
-    user: db_models.User = Depends(current_superuser),
+    user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
 ):
-    """Delets a project and all its scans (superuser only)."""
-    await service.delete_project_by_id(project_id, user)
+    """Delete a project inside the caller's control scope."""
+    await service.delete_project_by_id(
+        project_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
     logger.info(
         "projects.delete",
         extra={"actor_id": user.id, "project_id": str(project_id)},

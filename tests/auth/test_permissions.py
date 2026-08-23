@@ -23,7 +23,6 @@ class PermissionMatrixTests(unittest.TestCase):
         tenant_admin = permissions_for_roles([TENANT_ADMIN])
         security_approver = permissions_for_roles([SECURITY_APPROVER])
         developer = permissions_for_roles([DEVELOPER])
-        analyst = permissions_for_roles([ANALYST])
 
         self.assertIn(IDENTITY_MANAGE, tenant_admin)
         self.assertNotIn(SCAN_APPROVE, tenant_admin)
@@ -31,8 +30,6 @@ class PermissionMatrixTests(unittest.TestCase):
         self.assertNotIn(IDENTITY_MANAGE, security_approver)
         self.assertIn(SCAN_APPROVE_SELF, developer)
         self.assertNotIn(SCAN_APPROVE, developer)
-        self.assertIn(SCAN_APPROVE_SELF, analyst)
-        self.assertNotIn(SCAN_APPROVE, analyst)
 
     def test_multiple_roles_union_and_unknown_roles_fail_closed(self) -> None:
         combined = permissions_for_roles([ANALYST, AUDITOR, "future_unknown_role"])

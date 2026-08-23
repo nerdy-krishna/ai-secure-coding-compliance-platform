@@ -32,6 +32,11 @@ from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.database.repositories.scan_attempt_repo import (
     ScanAttemptRepository,
 )
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+)
+from app.shared.lib.permissions import SCAN_APPROVE, SCAN_APPROVE_SELF
+from app.shared.lib.scan_visibility import can_view_scan
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     STATUS_CANCELLED,
@@ -89,6 +94,9 @@ class ScanLifecycleService:
         request: Optional[Any] = None,
         *,
         idempotency_key: Optional[str] = None,
+        permissions: frozenset[str],
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> db_models.ApprovalGate:
         """Approve / decline a scan paused at a worker-graph interrupt.
 
@@ -126,7 +134,12 @@ class ScanLifecycleService:
             },
         )
         scan = await self._get_scan_or_404(scan_id)
-        if scan.user_id != user.id and not user.is_superuser:
+        if not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan: authorization denied",
                 extra={
@@ -136,7 +149,27 @@ class ScanLifecycleService:
                 },
             )
             raise HTTPException(
-                status_code=403, detail="Not authorized to approve this scan"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan not found or not authorized.",
+            )
+
+        sod_mode = await AuthorizationRepository(
+            self.repo.db
+        ).separation_of_duties_mode(tenant_id=tenant_id)
+        has_tenant_approval = SCAN_APPROVE in permissions
+        has_self_approval = SCAN_APPROVE_SELF in permissions
+        if has_tenant_approval:
+            if sod_mode == "critical" and scan.user_id == user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="A distinct authorized approver is required.",
+                )
+        elif not (
+            has_self_approval and sod_mode == "off" and scan.user_id == user.id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to decide this scan gate.",
             )
 
         conflict_audit_committed = False
@@ -379,6 +412,9 @@ class ScanLifecycleService:
         scan_id: uuid.UUID,
         user: db_models.User,
         request: "api_models.ScanRunControlRequest",
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> dict[str, Any]:
         """Manually requeue a failed/cancelled scan.
 
@@ -393,7 +429,12 @@ class ScanLifecycleService:
             extra={"scan_id": str(scan_id), "actor_user_id": user.id, "mode": mode},
         )
         scan = await self._get_scan_or_404(scan_id)
-        if scan.user_id != user.id and not user.is_superuser:
+        if not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan: authorization denied",
                 extra={
@@ -403,8 +444,8 @@ class ScanLifecycleService:
                 },
             )
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Not authorized to {mode} this scan",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan not found or not authorized.",
             )
 
         pending_statuses = {
@@ -560,7 +601,12 @@ class ScanLifecycleService:
         }
 
     async def get_prescan_review(
-        self, scan_id: uuid.UUID, user: db_models.User
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> "api_models.PrescanReviewResponse":
         """Findings + override-flag for the prescan-approval card (G6).
 
@@ -585,7 +631,12 @@ class ScanLifecycleService:
         )
 
         scan = await self.repo.get_scan(scan_id)
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
+        if not scan or not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             raise not_found
 
         review_statuses = {
@@ -617,14 +668,26 @@ class ScanLifecycleService:
             has_critical_secret=has_critical_secret,
         )
 
-    async def cancel_scan(self, scan_id: uuid.UUID, user: db_models.User) -> None:
+    async def cancel_scan(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
+    ) -> None:
         """Cancels a scan, typically one that is pending approval."""
         logger.info(
             "scan: cancel attempt",
             extra={"actor_user_id": user.id, "scan_id": str(scan_id)},
         )
         scan = await self.repo.get_scan(scan_id)
-        if not scan or (scan.user_id != user.id and not user.is_superuser):
+        if not scan or not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan: authorization denied",
                 extra={
@@ -732,7 +795,9 @@ class ScanLifecycleService:
         finding_id: int,
         user: db_models.User,
         request: "api_models.FindingDispositionUpdateRequest",
-        visible_user_ids: Optional[list[int]] = None,
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> "api_models.FindingDispositionResponse":
         """Set a finding's triage disposition (PRD #96 / #97).
 
@@ -744,16 +809,12 @@ class ScanLifecycleService:
         """
         from app.shared.lib import finding_disposition as fd
 
-        await self._get_triageable_scan_or_404(scan_id, user, visible_user_ids)
-
-        # Reverting a finding to the untriaged `open` state is a delete,
-        # not an add — restricted to superusers (PRD #96). Regular users
-        # add and change dispositions; only admins clear them.
-        if request.disposition == fd.OPEN and not user.is_superuser:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=("Only an administrator can clear a finding's disposition."),
-            )
+        await self._get_triageable_scan_or_404(
+            scan_id,
+            user,
+            visible_user_ids,
+            tenant_id=tenant_id,
+        )
 
         finding = await self.repo.get_finding(finding_id)
         if finding is None or finding.scan_id != scan_id:
@@ -801,6 +862,8 @@ class ScanLifecycleService:
         scan_id: uuid.UUID,
         user: db_models.User,
         visible_user_ids: Optional[list[int]],
+        *,
+        tenant_id: uuid.UUID,
     ) -> db_models.Scan:
         """Fetch a scan the caller is allowed to triage (PRD #96).
 
@@ -811,7 +874,12 @@ class ScanLifecycleService:
         probe for scan existence.
         """
         scan = await self._get_scan_or_404(scan_id)
-        if visible_user_ids is not None and scan.user_id not in visible_user_ids:
+        if not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan: authorization denied",
                 extra={
@@ -831,7 +899,9 @@ class ScanLifecycleService:
         scan_id: uuid.UUID,
         user: db_models.User,
         request: "api_models.BulkFindingDispositionUpdateRequest",
-        visible_user_ids: Optional[list[int]] = None,
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> "api_models.BulkFindingDispositionResponse":
         """Apply one disposition (and one note) to many findings of a
         scan in a single transaction (PRD #96 / #100).
@@ -845,17 +915,17 @@ class ScanLifecycleService:
         """
         from app.shared.lib import finding_disposition as fd
 
-        await self._get_triageable_scan_or_404(scan_id, user, visible_user_ids)
+        await self._get_triageable_scan_or_404(
+            scan_id,
+            user,
+            visible_user_ids,
+            tenant_id=tenant_id,
+        )
 
         if not fd.is_valid_disposition(request.disposition):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unknown disposition {request.disposition!r}.",
-            )
-        if request.disposition == fd.OPEN and not user.is_superuser:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=("Only an administrator can clear a finding's disposition."),
             )
         if fd.note_required(request.disposition) and not (
             request.note and request.note.strip()
@@ -919,11 +989,18 @@ class ScanLifecycleService:
         scan_id: uuid.UUID,
         finding_id: int,
         user: db_models.User,
-        visible_user_ids: Optional[list[int]] = None,
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> "list[api_models.FindingDispositionEventResponse]":
         """The disposition-change history for a finding, oldest first
         (PRD #96 / #100). Same H.2 scope as the triage write paths."""
-        await self._get_triageable_scan_or_404(scan_id, user, visible_user_ids)
+        await self._get_triageable_scan_or_404(
+            scan_id,
+            user,
+            visible_user_ids,
+            tenant_id=tenant_id,
+        )
         finding = await self.repo.get_finding(finding_id)
         if finding is None or finding.scan_id != scan_id:
             raise HTTPException(
@@ -940,13 +1017,17 @@ class ScanLifecycleService:
         scan_id: uuid.UUID,
         finding_id: int,
         user: db_models.User,
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> "api_models.FindingDispositionResponse":
-        """Delete a finding's triage disposition — reset it to the
-        untriaged `open` state and wipe its disposition-event history
-        (PRD #96). Superuser-only; the router enforces that via the
-        `current_superuser` dependency, so no H.2 scope check is needed
-        here (admins see every scan)."""
-        await self._get_scan_or_404(scan_id)
+        """Reset a finding disposition inside the caller's scan scope."""
+        await self._get_triageable_scan_or_404(
+            scan_id,
+            user,
+            visible_user_ids,
+            tenant_id=tenant_id,
+        )
         finding = await self.repo.get_finding(finding_id)
         if finding is None or finding.scan_id != scan_id:
             raise HTTPException(
@@ -976,13 +1057,17 @@ class ScanLifecycleService:
         scan_id: uuid.UUID,
         finding_ids: list[int],
         user: db_models.User,
+        *,
+        visible_user_ids: Optional[list[int]],
+        tenant_id: uuid.UUID,
     ) -> "api_models.BulkFindingDispositionResponse":
-        """Bulk-delete triage dispositions — reset many findings of a
-        scan to untriaged and wipe their history (PRD #96). Superuser-
-        only; the router enforces that. All-or-nothing: every requested
-        id must belong to the scan. Findings already untriaged are
-        skipped (nothing to delete) but are not an error."""
-        await self._get_scan_or_404(scan_id)
+        """Bulk-reset dispositions inside the caller's scan scope."""
+        await self._get_triageable_scan_or_404(
+            scan_id,
+            user,
+            visible_user_ids,
+            tenant_id=tenant_id,
+        )
 
         requested_ids = list(dict.fromkeys(finding_ids))
         findings = await self.repo.get_findings_by_ids(scan_id, requested_ids)

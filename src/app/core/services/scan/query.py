@@ -3,11 +3,8 @@
 Split out of `core/services/scan_service.py` (2026-04-26). Method
 bodies are verbatim copies — no logic change.
 
-Note: the two delete methods live here (rather than in lifecycle)
-because they share the read-side authorization model
-(superuser-only) and the discovery groups them with the query
-service. The superuser guards remain the FIRST statements of each
-method (M6 / G-split-6).
+The delete methods live here because they share the same explicit tenant plus
+owner/group resource scope as query operations.
 """
 
 from __future__ import annotations
@@ -85,10 +82,7 @@ def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
 class ScanQueryService:
     """Read-side scan service.
 
-    No outbox dep; only reads from `ScanRepository`. Two superuser-only
-    delete methods live here because their authorization model matches
-    the read-side scope (admin-only) and the discovery groups them
-    with the query surface.
+    No outbox dependency; reads and scoped deletes use `ScanRepository`.
     """
 
     def __init__(self, repo: ScanRepository):
@@ -533,27 +527,24 @@ class ScanQueryService:
     ) -> api_models.PaginatedScanHistoryResponse:
         """Retrieves a paginated list of scan history for a project.
 
-        Authorization mirrors the rest of this service: superusers see
-        every project; regular users see projects they own or projects
-        owned by peers in a shared group (per the H.2 visibility scope).
+        Authorization mirrors the rest of this service: tenant-wide readers
+        may read any project in the active tenant; other callers require
+        owner/group resource scope.
         """
         skip = max(int(skip), 0)
         limit = min(max(int(limit), 1), MAX_PAGE_SIZE)
         project = await self.repo.get_project_by_id(project_id)
-        is_owner = bool(project) and project.user_id == user.id
-        is_admin = user.is_superuser
-        is_peer = (
-            bool(project)
-            and visible_user_ids is not None
-            and project.user_id in visible_user_ids
-        )
-        if not project or not (is_owner or is_admin or is_peer):
+        if not project or not can_view_scan(
+            project,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             logger.warning(
                 "scan-query: authorization denied",
                 extra={
                     "project_id": str(project_id),
                     "actor_user_id": str(user.id),
-                    "is_superuser": user.is_superuser,
                     "action": "get_project_scans",
                 },
             )
@@ -1312,27 +1303,25 @@ class ScanQueryService:
             )
         return result
 
-    async def delete_scan_by_id(self, scan_id: uuid.UUID, user: db_models.User):
-        """Deletes a single scan, checking for superuser privileges."""
-        if not user.is_superuser:
-            logger.warning(
-                "scan-query: authorization denied",
-                extra={
-                    "scan_id": str(scan_id),
-                    "actor_user_id": str(user.id),
-                    "is_superuser": user.is_superuser,
-                    "action": "delete_scan",
-                },
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only superusers can delete scans.",
-            )
-
+    async def delete_scan_by_id(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]],
+        tenant_id: uuid.UUID,
+    ):
+        """Delete a scan inside the caller's active tenant/resource scope."""
         scan = await self.repo.get_scan(scan_id)
-        if not scan:
+        if not scan or not can_view_scan(
+            scan,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Scan not found."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scan not found or not authorized.",
             )
 
         try:
@@ -1347,27 +1336,25 @@ class ScanQueryService:
             extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
         )
 
-    async def delete_project_by_id(self, project_id: uuid.UUID, user: db_models.User):
-        """Deletes a project and all its associated scans, for superusers only."""
-        if not user.is_superuser:
-            logger.warning(
-                "scan-query: authorization denied",
-                extra={
-                    "actor_user_id": str(user.id),
-                    "is_superuser": user.is_superuser,
-                    "action": "delete_project",
-                    "project_id": str(project_id),
-                },
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only superusers can delete projects.",
-            )
-
+    async def delete_project_by_id(
+        self,
+        project_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]],
+        tenant_id: uuid.UUID,
+    ):
+        """Delete a project inside the caller's active tenant/resource scope."""
         project = await self.repo.get_project_by_id(project_id)
-        if not project:
+        if not project or not can_view_scan(
+            project,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        ):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Project not found."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found or not authorized.",
             )
 
         try:
