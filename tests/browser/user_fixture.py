@@ -290,6 +290,7 @@ async def _setup() -> None:
                     "replay_attempt_id": str(replay_attempt.id),
                     "first_event_id": first_event.id,
                     "second_event_id": second_event.id,
+                    "result_project_id": str(result_project.id),
                     "result_scan_id": str(result_scan.id),
                 },
                 sort_keys=True,

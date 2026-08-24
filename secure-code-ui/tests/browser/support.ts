@@ -16,6 +16,7 @@ export interface BrowserFixture {
   replay_attempt_id: string;
   first_event_id: number;
   second_event_id: number;
+  result_project_id: string;
   result_scan_id: string;
 }
 

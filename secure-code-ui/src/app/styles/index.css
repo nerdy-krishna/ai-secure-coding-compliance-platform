@@ -1,89 +1,53 @@
-/* secure-code-ui/src/app/styles/index.css */
+/* Minimal global reset. Product colour and spacing come from tokens.css. */
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans, system-ui, sans-serif);
   line-height: 1.5;
   font-weight: 400;
-
-  /* Default to dark theme variables, can be overridden by @media query */
-  --text-color: rgba(255, 255, 255, 0.87);
-  --background-color: #242424;
-
-  color-scheme: light dark; /* Allows browser to adapt scrollbars etc. */
-  color: var(--text-color);
-  background-color: var(--background-color);
-
+  color-scheme: light dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Ensure html, body, and #root take full height and have no default margins/paddings */
 html,
 body,
 #root {
-  height: 100%;
+  min-height: 100%;
   margin: 0;
   padding: 0;
 }
 
 body {
-  /* REMOVED: display: flex; */
-  /* REMOVED: place-items: center; */
-  /* min-width: 320px; */ /* This is fine but less critical if #root is 100% width */
-  min-height: 100vh; /* Ensures body is at least full viewport height */
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
 }
 
-/* Ensure #root takes full width of its parent (body) */
-#root {
-  width: 100%;
+#root { width: 100%; }
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+button,
+input,
+select,
+textarea { font: inherit; }
+
+:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    /* Update CSS variables for light mode */
-    --text-color: #213547;
-    --background-color: #ffffff;
-  }
-  /* body will automatically pick up these new variable values */
-
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -71,7 +71,8 @@ export const AdminSubNav: React.FC = () => {
     boxShadow: active ? "var(--shadow-xs)" : "none",
   });
   return (
-    <div
+    <nav
+      aria-label="Administration"
       style={{
         display: "flex",
         gap: 4,
@@ -86,7 +87,12 @@ export const AdminSubNav: React.FC = () => {
       {adminLinks.map((l) => {
         const active = pathname === l.to || pathname.startsWith(l.to + "/");
         return (
-          <Link key={l.to} to={l.to} style={itemStyle(active)}>
+          <Link
+            key={l.to}
+            to={l.to}
+            style={itemStyle(active)}
+            aria-current={active ? "page" : undefined}
+          >
             {l.label}
           </Link>
         );
@@ -103,7 +109,7 @@ export const AdminSubNav: React.FC = () => {
           Langfuse ↗
         </a>
       ) : null}
-    </div>
+    </nav>
   );
 };
 

@@ -67,6 +67,7 @@ export const TopNav: React.FC = () => {
 
   return (
     <header
+      className="top-nav-shell"
       style={{
         position: "sticky",
         top: 0,
@@ -79,6 +80,7 @@ export const TopNav: React.FC = () => {
       }}
     >
       <div
+        className="top-nav-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "1fr auto 1fr",
@@ -93,6 +95,7 @@ export const TopNav: React.FC = () => {
 
         <nav
           aria-label="Primary"
+          className="top-nav-primary"
           style={{
             display: "flex",
             gap: 2,
@@ -108,6 +111,7 @@ export const TopNav: React.FC = () => {
               <Link
                 key={it.id}
                 to={it.to}
+                aria-current={isActive ? "page" : undefined}
                 style={{
                   padding: "6px 14px",
                   borderRadius: 999,
@@ -130,6 +134,7 @@ export const TopNav: React.FC = () => {
         </nav>
 
         <div
+          className="top-nav-actions"
           style={{
             display: "flex",
             alignItems: "center",
@@ -143,7 +148,8 @@ export const TopNav: React.FC = () => {
             className="sccap-btn sccap-btn-icon sccap-btn-ghost"
             onClick={toggleTheme}
             title={theme === "light" ? "Switch to dark" : "Switch to light"}
-            aria-label="Toggle theme"
+            aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+            aria-pressed={theme === "dark"}
           >
             {theme === "light" ? <Icon.Moon size={16} /> : <Icon.Sun size={16} />}
           </button>
@@ -157,6 +163,8 @@ export const TopNav: React.FC = () => {
 const Brand: React.FC = () => (
   <Link
     to="/account/dashboard"
+    className="top-nav-brand"
+    aria-label="SCCAP dashboard"
     style={{
       display: "flex",
       alignItems: "center",
@@ -224,6 +232,17 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
     return () => document.removeEventListener("click", handler);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   const handleSignOut = async () => {
     setOpen(false);
     try {
@@ -255,6 +274,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
         style={{ padding: "4px 10px 4px 4px", gap: 8 }}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`${label} account menu`}
       >
         <div
           style={{
@@ -285,6 +305,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
         <div
           className="surface fade-in"
           role="menu"
+          aria-label="Account"
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",

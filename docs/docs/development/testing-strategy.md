@@ -53,6 +53,7 @@ docker compose exec app python -m black --check src tests
 npm --prefix secure-code-ui run lint
 npm --prefix secure-code-ui test
 npm --prefix secure-code-ui run build
+npm --prefix secure-code-ui run check:bundle
 
 # With the Compose API running on :8000. This regenerates the committed
 # contract and fails if the working tree differs afterward.
@@ -71,6 +72,12 @@ npm --prefix secure-code-ui run test:browser
 
 cd docs && mkdocs build --strict
 ```
+
+The browser suite includes a route inventory at desktop and mobile widths,
+serious/critical Axe WCAG A/AA checks for representative critical workflows,
+and keyboard regressions for bypass navigation and application menus. See
+[Frontend Quality Gates](frontend-quality-gates.md) for the exact bundle and
+responsive contracts.
 
 The worker-image scanner smoke is container-specific because host binaries are irrelevant:
 

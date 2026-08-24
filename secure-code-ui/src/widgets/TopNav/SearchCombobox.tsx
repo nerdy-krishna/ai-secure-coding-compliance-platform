@@ -56,7 +56,7 @@ export const SearchCombobox: React.FC = () => {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const debounced = useDebounced(q.trim(), 250);
 
-  const { data, isFetching } = useQuery<SearchResults>({
+  const { data, isFetching, isError } = useQuery<SearchResults>({
     queryKey: ["search", debounced],
     queryFn: () => searchService.search(debounced),
     enabled: debounced.length >= 2,
@@ -132,7 +132,7 @@ export const SearchCombobox: React.FC = () => {
   };
 
   const showDropdown =
-    open && debounced.length >= 2 && (isFetching || rows.length > 0);
+    open && debounced.length >= 2 && (isFetching || data !== undefined || isError);
 
   return (
     <div
@@ -160,6 +160,9 @@ export const SearchCombobox: React.FC = () => {
           aria-label="Global search"
           aria-expanded={showDropdown}
           aria-controls="search-results"
+          aria-activedescendant={
+            showDropdown && activeIdx >= 0 ? `search-result-${activeIdx}` : undefined
+          }
           role="combobox"
           aria-autocomplete="list"
         />
@@ -168,6 +171,8 @@ export const SearchCombobox: React.FC = () => {
         <div
           id="search-results"
           role="listbox"
+          aria-label="Search results"
+          aria-busy={isFetching}
           className="surface fade-in"
           style={{
             position: "absolute",
@@ -183,6 +188,7 @@ export const SearchCombobox: React.FC = () => {
         >
           {isFetching && rows.length === 0 ? (
             <div
+              role="status"
               style={{
                 padding: 12,
                 fontSize: 12.5,
@@ -192,8 +198,13 @@ export const SearchCombobox: React.FC = () => {
             >
               Searching…
             </div>
+          ) : isError ? (
+            <div role="alert" style={{ padding: 12, fontSize: 12.5, color: "var(--critical)" }}>
+              Search is unavailable. Try again when the connection recovers.
+            </div>
           ) : rows.length === 0 ? (
             <div
+              role="status"
               style={{
                 padding: 12,
                 fontSize: 12.5,
@@ -212,6 +223,7 @@ export const SearchCombobox: React.FC = () => {
                     return (
                       <ResultRow
                         key={`p-${hit.id}`}
+                        id={`search-result-${idx}`}
                         active={activeIdx === idx}
                         onClick={() =>
                           goTo({ kind: "project", hit })
@@ -232,6 +244,7 @@ export const SearchCombobox: React.FC = () => {
                     return (
                       <ResultRow
                         key={`s-${hit.id}`}
+                        id={`search-result-${idx}`}
                         active={activeIdx === idx}
                         onClick={() => goTo({ kind: "scan", hit })}
                         icon={<Icon.Zap size={14} />}
@@ -254,6 +267,7 @@ export const SearchCombobox: React.FC = () => {
                     return (
                       <ResultRow
                         key={`f-${hit.id}`}
+                        id={`search-result-${idx}`}
                         active={activeIdx === idx}
                         onClick={() => goTo({ kind: "finding", hit })}
                         icon={
@@ -303,14 +317,16 @@ const Section: React.FC<{
 );
 
 const ResultRow: React.FC<{
+  id: string;
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   title: string;
   titleMono?: boolean;
   subtitle: string;
-}> = ({ active, onClick, icon, title, titleMono, subtitle }) => (
+}> = ({ id, active, onClick, icon, title, titleMono, subtitle }) => (
   <button
+    id={id}
     role="option"
     aria-selected={active}
     onMouseDown={(e) => {

@@ -221,7 +221,17 @@ const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) =>
                   <tr onClick={() => setExpandedId(open ? null : (f.id ?? i))}
                     style={{ cursor: "pointer", background: i % 2 === 0 ? "var(--bg-soft)" : "transparent", fontSize: 12 }}>
                     <td style={{ padding: "5px 8px", textAlign: "center" }}>
-                      {open ? <Icon.ChevronU size={10} /> : <Icon.ChevronD size={10} />}
+                      <button
+                        className="sccap-btn sccap-btn-icon sccap-btn-ghost"
+                        aria-label={`${open ? "Collapse" : "Expand"} finding ${f.title}`}
+                        aria-expanded={open}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExpandedId(open ? null : (f.id ?? i));
+                        }}
+                      >
+                        {open ? <Icon.ChevronU size={10} /> : <Icon.ChevronD size={10} />}
+                      </button>
                     </td>
                     <td style={{ padding: "5px 8px", fontWeight: 600, color: (f.severity === "Critical" || f.severity === "CRITICAL") ? "var(--critical)" : (f.severity === "High" || f.severity === "HIGH") ? "var(--high)" : "var(--fg-muted)" }}>
                       {(f.severity ?? "").slice(0, 4)}
@@ -431,7 +441,19 @@ const LLMTab: React.FC<{ interactions: LLMInteractionResponse[]; scanId: string 
                             <div style={{ fontWeight: 600 }}>{(r.total_tokens ?? 0).toLocaleString()}</div>
                           </td>
                           <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.cost ? `$${r.cost.toFixed(6)}` : "—"}</td>
-                          <td style={{ textAlign: "center" }}>{open ? <Icon.ChevronU size={12} /> : <Icon.ChevronD size={12} />}</td>
+                          <td style={{ textAlign: "center" }}>
+                            <button
+                              className="sccap-btn sccap-btn-icon sccap-btn-ghost"
+                              aria-label={`${open ? "Collapse" : "Expand"} interaction from ${r.agent_name}`}
+                              aria-expanded={open}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setExpandedId(open ? null : r.id);
+                              }}
+                            >
+                              {open ? <Icon.ChevronU size={12} /> : <Icon.ChevronD size={12} />}
+                            </button>
+                          </td>
                         </tr>
                         {open && (
                           <tr>

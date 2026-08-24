@@ -13,6 +13,7 @@ import React from "react";
 import { useLocation } from "react-router-dom";
 import AdminSubNav from "./AdminSubNav";
 import { TopNav } from "./TopNav/TopNav";
+import { ConnectivityStatus } from "../shared/ui/ConnectivityStatus";
 
 const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
   children,
@@ -30,13 +31,15 @@ const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
         fontFamily: "var(--font-sans)",
       }}
     >
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       <TopNav />
+      <ConnectivityStatus />
       <main
-        style={{
-          padding: "24px 28px 80px",
-          maxWidth: 1440,
-          margin: "0 auto",
-        }}
+        id="main-content"
+        className="dashboard-main"
+        tabIndex={-1}
       >
         {isAdminArea && <AdminSubNav />}
         {children}

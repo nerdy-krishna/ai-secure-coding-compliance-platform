@@ -171,6 +171,7 @@ nav:
       - Contributing: development/contributing.md
       - Coding Standards: development/coding-standards.md
       - Testing Strategy: development/testing-strategy.md
+      - Frontend Quality Gates: development/frontend-quality-gates.md
       - Adding New Agents: development/adding-new-agents.md
       - Updating Framework Knowledge: development/updating-framework-knowledge.md
       - Semgrep Rule Ingestion: development/rule-source-ingestion.md

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "../hooks/useNotifications";
 import { Icon } from "./Icon";
+import { EmptyState } from "./AsyncState";
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -35,6 +36,15 @@ export const NotificationCenter: React.FC = () => {
     return () => document.removeEventListener("click", handler);
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   const handleOpen = () => {
     setOpen((o) => !o);
   };
@@ -53,12 +63,15 @@ export const NotificationCenter: React.FC = () => {
         className="sccap-btn sccap-btn-icon sccap-btn-ghost"
         onClick={handleOpen}
         title="Notifications"
-        aria-label="Notifications"
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         style={{ position: "relative" }}
       >
         <Icon.Bell size={16} />
         {unreadCount > 0 && (
           <span
+            aria-hidden="true"
             style={{
               position: "absolute",
               top: 2,
@@ -86,6 +99,8 @@ export const NotificationCenter: React.FC = () => {
       {open && (
         <div
           className="surface fade-in"
+          role="dialog"
+          aria-label="Notifications"
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
@@ -133,38 +148,37 @@ export const NotificationCenter: React.FC = () => {
           </div>
 
           {notifications.length === 0 ? (
-            <div
-              style={{
-                padding: "32px 16px",
-                textAlign: "center",
-                color: "var(--fg-subtle)",
-                fontSize: 13,
-              }}
-            >
-              No notifications yet
-            </div>
+            <EmptyState
+              title="No notifications yet"
+              detail="Scan and budget activity will appear here."
+              compact
+            />
           ) : (
             <div>
               {notifications.map((n) => (
-                <div
+                <button
                   key={n.id}
                   onClick={() => handleClick(n.id, n.href)}
+                  className="notification-row"
                   style={{
                     display: "flex",
+                    width: "100%",
+                    textAlign: "left",
                     gap: 10,
                     padding: "10px 14px",
+                    border: "none",
                     borderBottom: "1px solid var(--border)",
+                    borderRadius: 0,
                     cursor: n.href ? "pointer" : "default",
                     background: n.read ? "transparent" : "var(--primary-weak)",
                     transition: "background .1s",
                   }}
                   onMouseEnter={(e) => {
                     if (n.href)
-                      (e.currentTarget as HTMLDivElement).style.background =
-                        "var(--bg-soft)";
+                      e.currentTarget.style.background = "var(--bg-soft)";
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.background = n.read
+                    e.currentTarget.style.background = n.read
                       ? "transparent"
                       : "var(--primary-weak)";
                   }}
@@ -205,7 +219,7 @@ export const NotificationCenter: React.FC = () => {
                       {relativeTime(n.timestamp)}
                     </div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}

@@ -1,12 +1,10 @@
 // secure-code-ui/src/shared/ui/Modal.tsx
 //
-// Minimal modal primitive used by the SCCAP admin/settings pages in
-// place of antd's Modal. Focus-trap is deliberately skipped — these
-// modals are always invoked by the user and their content is small.
-// If keyboard trap requirements come up later, wrap with a
-// focus-trap-react or hand-roll a small implementation.
+// Modal primitive used by SCCAP admin/settings pages. It owns initial focus,
+// traps Tab within the active dialog, closes on Escape, and restores focus to
+// the invoker so every consumer gets the same keyboard contract.
 
-import React, { useEffect } from "react";
+import React, { useEffect, useId, useRef } from "react";
 import { Icon } from "./Icon";
 
 export interface ModalProps {
@@ -26,13 +24,45 @@ export const Modal: React.FC<ModalProps> = ({
   footer,
   width = 520,
 }) => {
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusable = () =>
+      Array.from(
+        panel?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => !element.hasAttribute("hidden"));
+    window.requestAnimationFrame(() => (focusable()[0] ?? panel)?.focus());
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key !== "Tab") return;
+      const elements = focusable();
+      if (elements.length === 0) {
+        e.preventDefault();
+        panel?.focus();
+        return;
+      }
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      returnFocusRef.current?.focus();
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -41,6 +71,8 @@ export const Modal: React.FC<ModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby={title !== undefined ? titleId : undefined}
+      aria-label={title === undefined ? "Dialog" : undefined}
       onClick={onClose}
       style={{
         position: "fixed",
@@ -54,6 +86,8 @@ export const Modal: React.FC<ModalProps> = ({
       }}
     >
       <div
+        ref={panelRef}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
         className="surface"
         style={{
@@ -75,7 +109,7 @@ export const Modal: React.FC<ModalProps> = ({
               borderBottom: "1px solid var(--border)",
             }}
           >
-            <div style={{ fontWeight: 600, color: "var(--fg)", fontSize: 15 }}>
+            <div id={titleId} style={{ fontWeight: 600, color: "var(--fg)", fontSize: 15 }}>
               {title}
             </div>
             <button

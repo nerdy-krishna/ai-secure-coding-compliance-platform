@@ -63,6 +63,13 @@ Every guard redirects to `/setup` when
 `isSetupCompleted === false`, so first-run deployments can't bypass
 the wizard even by deep-linking.
 
+All top-level pages are route-level lazy chunks. The shared shell,
+`ScanWatcher`, route guards, and providers remain eager; downloading a large
+results or diagnostics chunk cannot disconnect the live scan watcher. Suspense
+and route failures render the shared loading/error states inside the existing
+shell. Production builds emit a manifest and enforce the deterministic byte
+ceilings documented in [Frontend Quality Gates](../development/frontend-quality-gates.md).
+
 ## Layouts
 
 ### `DashboardLayout`
@@ -76,6 +83,10 @@ Wraps every authenticated route with:
 - A conditional `AdminSubNav` strip rendered when the path starts
   with `/admin` or `/account/settings/llm` — gives admins one-click
   navigation between every admin surface.
+- A keyboard skip link, focusable main landmark, and responsive navigation
+  that wraps or scrolls without hiding required actions.
+- A shell-level offline/reconnected announcement. It does not reload the page,
+  leaving cursor-aware SSE recovery to the active scan consumers.
 
 ### `AuthLayout`
 

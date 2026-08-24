@@ -63,6 +63,8 @@ jobs:
         run: npm run lint
       - name: Vite build
         run: npm run build
+      - name: Deterministic bundle budgets
+        run: npm run check:bundle
 
   browser:
     name: Browser (authenticated lifecycle)

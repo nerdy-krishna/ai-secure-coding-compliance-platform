@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run check:bundle",
+    "check:bundle": "node scripts/check-bundle-budget.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "test:browser": "playwright test",
@@ -15,6 +16,7 @@
     "check:api": "npm run generate:api && git diff --exit-code -- src/shared/types/api-generated.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@eslint/js": "^9.25.0",
     "@playwright/test": "^1.62.1",
     "@types/dagre": "^0.7.54",
