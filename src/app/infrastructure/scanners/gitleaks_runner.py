@@ -79,6 +79,11 @@ GITLEAKS_CONFIG_PATH = "/app/scanners/configs/gitleaks.toml"
 DESCRIPTION_MAX_CHARS = 2000
 
 
+def _gitleaks_config_path() -> str:
+    """Resolve the verified offline config lazily after worker bootstrap."""
+    return os.getenv("GITLEAKS_CONFIG_PATH", GITLEAKS_CONFIG_PATH)
+
+
 class _GitleaksResult(BaseModel):
     """Strict allowlist of a single Gitleaks finding.
 
@@ -139,7 +144,7 @@ def _gitleaks_finding_to_vulnerability(
 
 
 def _invoke_gitleaks_sync(
-    staged_dir: Path, report_path: Path, config_path: str | Path = GITLEAKS_CONFIG_PATH
+    staged_dir: Path, report_path: Path, config_path: str | Path | None = None
 ) -> "subprocess.CompletedProcess[str]":
     """Run Gitleaks via ``subprocess.run``. Pure sync; called from
     ``asyncio.to_thread``.
@@ -160,7 +165,7 @@ def _invoke_gitleaks_sync(
             "detect",
             "--no-git",
             "--config",
-            str(config_path),
+            str(config_path or _gitleaks_config_path()),
             "--source",
             str(staged_dir),
             "--redact",
@@ -213,7 +218,7 @@ async def run_gitleaks(
     staged_dir: Path,
     original_paths: Dict[Path, str],
     report_collector: Optional[Callable[[Any], None]] = None,
-    config_path: str | Path = GITLEAKS_CONFIG_PATH,
+    config_path: str | Path | None = None,
 ) -> List[VulnerabilityFinding]:
     """Run Gitleaks against ``staged_dir`` and return findings.
 

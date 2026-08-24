@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -17,8 +18,8 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from app.infrastructure.scanners.bandit_runner import _bandit_binary
 from app.infrastructure.scanners.gitleaks_runner import (
-    GITLEAKS_CONFIG_PATH,
     _gitleaks_binary,
+    _gitleaks_config_path,
 )
 from app.infrastructure.scanners.osv_runner import _osv_binary
 from app.infrastructure.scanners.semgrep_runner import _semgrep_binary
@@ -57,7 +58,7 @@ _SCANNER_SPECS: Mapping[str, Mapping[str, Any]] = {
         "version_args": ("version",),
         "version": "8.21.2",
         "sha256": "50b742abd7daad8bbddb6301f3017efb680632d9a5b3b4d8f137b3aac250e359",
-        "config": GITLEAKS_CONFIG_PATH,
+        "config": _gitleaks_config_path,
         "config_sha256": "2ce9d818ed5aac0d9a36638a317284bd733c26d5069c980829335183397430bb",
     },
     "osv": {
@@ -169,6 +170,9 @@ def collect_runtime_provenance() -> dict[str, dict[str, Any]]:
     records: dict[str, dict[str, Any]] = {}
     for scanner, spec in _SCANNER_SPECS.items():
         binary = Path(spec["binary"]()).resolve()
+        config = spec.get("config")
+        if callable(config):
+            config = config()
         advisory_database = spec.get("advisory_database")
         if scanner == "osv":
             # Local import avoids a module cycle: the strict offline adapter
@@ -183,10 +187,20 @@ def collect_runtime_provenance() -> dict[str, dict[str, Any]]:
             binary_path=binary,
             detected_version=_detect_version(binary, spec["version_args"]),
             expected_version=spec["version"],
-            expected_binary_sha256=spec["sha256"],
-            config_path=Path(spec["config"]) if spec.get("config") else None,
-            expected_config_sha256=spec.get("config_sha256"),
-            configuration_identifier=spec.get("configuration_identifier"),
+            expected_binary_sha256=os.getenv(
+                f"SCCAP_{scanner.upper()}_BINARY_SHA256", spec["sha256"]
+            ),
+            config_path=Path(config) if config else None,
+            expected_config_sha256=os.getenv(
+                "SCCAP_GITLEAKS_CONFIG_SHA256", str(spec.get("config_sha256") or "")
+            )
+            or None,
+            configuration_identifier=(
+                f"signed-offline-release:{os.environ['SCCAP_OFFLINE_VERIFIED_RELEASE_SHA256']}"
+                if scanner in {"semgrep", "gitleaks", "osv"}
+                and os.getenv("SCCAP_OFFLINE_VERIFIED_RELEASE_SHA256")
+                else spec.get("configuration_identifier")
+            ),
             advisory_database=advisory_database,
         )
     return records

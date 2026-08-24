@@ -30,6 +30,7 @@ import asyncio
 import html
 import json
 import logging
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -250,6 +251,8 @@ async def run_semgrep(
     parse. On timeout, returns a single Low-severity placeholder so
     the caller has at least one observable signal. Never raises.
     """
+    if os.getenv("SEMGREP_OFFLINE_RULE_ROOT", "").strip():
+        config_path = Path(os.environ["SEMGREP_OFFLINE_RULE_ROOT"])
     if config_path is None:
         logger.info("scanner=semgrep skipped — no config_path (0 ingested rules)")
         return []

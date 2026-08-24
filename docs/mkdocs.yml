@@ -184,6 +184,8 @@ nav:
       - Governed AI Rule Foundry: operations/ai-rule-foundry.md
       - Provider Cost Reconciliation: operations/provider-cost-reconciliation.md
       - Enterprise Integrations: operations/enterprise-integrations.md
+      - Supply-chain and Evidence Governance: operations/supply-chain-and-evidence-governance.md
+      - Resilience and Recovery: operations/resilience-and-recovery.md
       - Evidence-first Findings: operations/evidence-first-findings.md
       - Kubernetes Worker Pools: operations/kubernetes-worker-pools.md
       - Observability and SLOs: operations/observability-slos.md

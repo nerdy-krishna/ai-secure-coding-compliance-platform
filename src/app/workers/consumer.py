@@ -1378,6 +1378,20 @@ async def _async_main() -> None:
             logger.warning("WORKER: Could not clear stale drain marker.")
     configure_otel(settings.OTEL_SERVICE_NAME)
 
+    # Restricted-egress mode is an explicit, fail-closed opt-in. Verify the
+    # signed deployment state and every installed byte before scanner modules
+    # resolve their lazy binary/config/advisory paths.
+    from app.infrastructure.governance.offline_runtime import (
+        configure_offline_runtime_from_environment,
+    )
+
+    offline_paths = await configure_offline_runtime_from_environment()
+    if offline_paths is not None:
+        logger.info(
+            "WORKER: verified offline runtime release=%s",
+            offline_paths.release_sha256,
+        )
+
     # Initialise the per-provider LLM rate limiters BEFORE we start
     # consuming. The agent code calls `get_rate_limiter_for_provider`
     # which raises RuntimeError if the registry hasn't been built —
