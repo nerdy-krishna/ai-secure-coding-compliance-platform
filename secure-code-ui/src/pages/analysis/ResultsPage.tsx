@@ -114,6 +114,8 @@ const ScanInfoModal: React.FC<{
           </>
         ) : data.source_type === "archive" ? (
           "Archive upload (zip / rar)"
+        ) : data.source_type === "paste" ? (
+          "Pasted code"
         ) : (
           "Direct file upload"
         ),

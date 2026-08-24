@@ -12,9 +12,9 @@ Submission limits
 Allowed values for ``scan_type`` and ``frameworks`` are enforced at the
 service layer; see ``_VALID_SCAN_TYPES`` and ``_VALID_FRAMEWORKS``.
 
-Uploaded filenames are validated for path-traversal characters before
-being stored.  Git ``repo_url`` values are restricted to HTTPS URLs on
-known public hosting domains.
+Uploaded and pasted-code filenames are validated for path-traversal
+characters before being stored. Git ``repo_url`` values are restricted
+to HTTPS URLs on known public hosting domains.
 
 Files whose first bytes match common executable magic numbers are
 rejected immediately after reading to prevent binary blobs being stored
@@ -435,6 +435,63 @@ class ScanSubmissionService:
 
         return await self._process_and_launch_scan(
             files_data=files_data, source_type="upload", **kwargs
+        )
+
+    async def create_scan_from_pasted_code(
+        self, *, code: str, filename: str, **kwargs
+    ) -> db_models.Scan:
+        """Handles one source file entered directly in the submission form."""
+        normalized_filename = filename.strip()
+        if (
+            not normalized_filename
+            or "\x00" in normalized_filename
+            or normalized_filename.startswith(("/", "\\"))
+            or "\\" in normalized_filename
+            or ".." in normalized_filename.split("/")
+            or len(normalized_filename) > MAX_PATH_LEN
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="pasted_filename must be a safe relative source-file path.",
+            )
+
+        if "\x00" in code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pasted code must not contain NUL characters.",
+            )
+        if not code.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pasted code must not be empty.",
+            )
+
+        code_size = len(code.encode("utf-8"))
+        if code_size > MAX_FILE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=(
+                    "Pasted code exceeds the maximum allowed size of "
+                    f"{MAX_FILE_BYTES // (1024 * 1024)} MB."
+                ),
+            )
+
+        logger.info(
+            "scan-submission: from pasted code",
+            extra={"filename": normalized_filename, "content_bytes": code_size},
+        )
+        return await self._process_and_launch_scan(
+            files_data=[
+                {
+                    "path": normalized_filename,
+                    "content": code,
+                    "language": (
+                        get_language_from_filename(normalized_filename) or "unknown"
+                    ),
+                }
+            ],
+            source_type="paste",
+            **kwargs,
         )
 
     async def create_scan_from_git(self, *, repo_url: str, **kwargs) -> db_models.Scan:

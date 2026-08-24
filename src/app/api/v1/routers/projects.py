@@ -8,6 +8,8 @@ Upload policy (V05.1.1):
     - Per-file size: enforced by downstream service / archive extractor.
     - Maximum number of files: 5000 per submission (router cap).
     - Maximum number of selected_files entries: 5000.
+    - Pasted code is accepted as one UTF-8 source file, capped at 10 MiB;
+      ``pasted_filename`` must be a safe relative path.
     - Maximum uncompressed archive size: ``MAX_UNCOMPRESSED_SIZE_BYTES``
       (100 MB) and ``MAX_FILES_IN_ARCHIVE`` (10000), both enforced by
       ``app.shared.lib.archive``.
@@ -317,6 +319,8 @@ async def create_scan(
     repo_url: Optional[str] = Form(None, max_length=2048, pattern=r"^https?://.+"),
     files: Optional[List[UploadFile]] = File(None),
     archive_file: Optional[UploadFile] = File(None),
+    pasted_code: Optional[str] = Form(None, max_length=10 * 1024 * 1024),
+    pasted_filename: Optional[str] = Form(None, min_length=1, max_length=1024),
     selected_files: Optional[str] = Form(None, max_length=200000),
 ):
     # V05.3.2: reject selected_files entries containing traversal/null/backslash.
@@ -430,12 +434,26 @@ async def create_scan(
     }
 
     submission_methods_count = sum(
-        1 for method in [files, repo_url, archive_file] if method
+        1 for method in [files, repo_url, archive_file, pasted_code] if method
     )
     if submission_methods_count != 1:
         raise HTTPException(
             status_code=400,
-            detail="Exactly one submission method (files, repo_url, or archive_file) must be provided.",
+            detail=(
+                "Exactly one submission method (files, repo_url, archive_file, "
+                "or pasted_code) must be provided."
+            ),
+        )
+
+    if pasted_filename and not pasted_code:
+        raise HTTPException(
+            status_code=400,
+            detail="pasted_filename can only be used with pasted_code.",
+        )
+    if pasted_code and not pasted_filename:
+        raise HTTPException(
+            status_code=400,
+            detail="pasted_filename is required with pasted_code.",
         )
 
     if files:
@@ -449,6 +467,14 @@ async def create_scan(
             archive_file=archive_file, **common_args
         )
         submission_method = "archive"
+    elif pasted_code:
+        assert pasted_filename is not None
+        scan = await service.create_scan_from_pasted_code(
+            code=pasted_code,
+            filename=pasted_filename,
+            **common_args,
+        )
+        submission_method = "pasted_code"
     else:
         raise HTTPException(status_code=400, detail="No submission data provided.")
 

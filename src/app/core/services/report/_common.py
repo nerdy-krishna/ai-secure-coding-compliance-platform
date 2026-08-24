@@ -205,6 +205,8 @@ def _source_label(result: AnalysisResultDetailResponse) -> str:
         return "Archive upload (zip / rar)"
     if source_type == "upload":
         return "Direct file upload"
+    if source_type == "paste":
+        return "Pasted code"
     # Pre-`source_type` scans: fall back to the project's repo URL.
     return f"Git repository ({url})" if url else "Uploaded files"
 

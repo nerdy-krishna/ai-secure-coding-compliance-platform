@@ -70,6 +70,9 @@ Exactly one submission method:
   to confirm the repo is readable.
 - `archive_file`: `.zip` or `.tar.gz`. Use `POST /scans/preview-archive`
   first to list contents.
+- `pasted_code`: source text entered directly. Send `pasted_filename` with a
+  safe relative filename such as `snippet.py`; the extension selects the
+  language-specific scanners. Pasted code is limited to one 10 MiB file.
 
 Optional: `selected_files` is a comma-separated list of paths —
 submitted files outside this list are excluded from the scan.

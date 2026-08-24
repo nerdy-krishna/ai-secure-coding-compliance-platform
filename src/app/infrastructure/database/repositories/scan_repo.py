@@ -120,7 +120,7 @@ class ScanRepository:
         """Creates a new Scan record. ``tenant_id`` is stamped from the
         submitter so the per-tenant scope filter (Chunk 9) is correct
         for newly-created scans. ``source_type`` records how the code
-        was submitted (upload / archive / git)."""
+        was submitted (upload / archive / git / paste)."""
         logger.info(
             "scan_repo.scan.created",
             extra={"project_id": str(project_id), "scan_type": scan_type},

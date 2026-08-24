@@ -35,7 +35,7 @@ interface SubmitNavState {
   repoUrl?: string | null;
 }
 
-type SubmissionMode = "upload" | "git" | "archive";
+type SubmissionMode = "upload" | "paste" | "git" | "archive";
 type ScanType = "AUDIT" | "SUGGEST" | "REMEDIATE";
 
 interface ScanTypeOption {
@@ -66,6 +66,7 @@ const SCAN_TYPES: ScanTypeOption[] = [
 
 const TAB_DEFS: { id: SubmissionMode; icon: React.ReactNode; label: string }[] = [
   { id: "upload", icon: <Icon.Upload size={14} />, label: "Upload files" },
+  { id: "paste", icon: <Icon.Code size={14} />, label: "Paste code" },
   { id: "git", icon: <Icon.Github size={14} />, label: "Connect git" },
   { id: "archive", icon: <Icon.Folder size={14} />, label: "Upload archive" },
 ];
@@ -76,6 +77,7 @@ const ARCHIVE_ACCEPT = ".zip,.tar,.tar.gz,.tgz";
 const MAX_FILE_BYTES = 50_000_000;     // 50 MB per file
 const MAX_TOTAL_BYTES = 200_000_000;   // 200 MB aggregate upload
 const MAX_ARCHIVE_BYTES = 500_000_000; // 500 MB compressed archive
+const MAX_PASTED_CODE_BYTES = 10 * 1024 * 1024; // backend per-file cap
 
 // V05.2.2 allowed source-code extensions for upload mode
 const ALLOWED_UPLOAD_EXTENSIONS = new Set([
@@ -297,6 +299,8 @@ const SubmitPage: React.FC = () => {
   const [deepVendorScan, setDeepVendorScan] = useState(false);
   const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
+  const [pastedCode, setPastedCode] = useState("");
+  const [pastedFilename, setPastedFilename] = useState("snippet.py");
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
   const [repoUrl, setRepoUrl] = useState<string>(navState.repoUrl ?? "");
   const [submitting, setSubmitting] = useState(false);
@@ -476,6 +480,23 @@ const SubmitPage: React.FC = () => {
         message: "Select at least one file from the repository tree.",
         fieldId: "field-source",
       });
+    } else if (mode === "paste") {
+      const normalizedPath = pastedFilename.trim();
+      const pathSegments = normalizedPath.split("/");
+      checks.push({
+        ok: !!pastedCode.trim(),
+        message: "Paste some code to scan.",
+        fieldId: "field-pasted-code",
+      });
+      checks.push({
+        ok:
+          !!normalizedPath &&
+          !normalizedPath.startsWith("/") &&
+          !normalizedPath.includes("\\") &&
+          !pathSegments.includes(".."),
+        message: "Enter a safe relative filename, such as snippet.py.",
+        fieldId: "field-pasted-filename",
+      });
     } else if (mode === "archive") {
       checks.push({
         ok: !!archiveFile,
@@ -498,6 +519,8 @@ const SubmitPage: React.FC = () => {
     selectedFrameworks,
     mode,
     files,
+    pastedCode,
+    pastedFilename,
     repoUrl,
     archiveFile,
     previewFiles,
@@ -553,11 +576,13 @@ const SubmitPage: React.FC = () => {
     const fileNames =
       mode === "upload"
         ? files.map((f) => f.name)
+        : mode === "paste" && pastedCode.trim()
+          ? [pastedFilename.trim()]
         : (mode === "archive" || mode === "git") && previewFiles
           ? previewFiles.map((f) => f.path)
           : [];
     return detectLanguages(fileNames);
-  }, [mode, files, previewFiles]);
+  }, [mode, files, pastedCode, pastedFilename, previewFiles]);
 
   // The framework to nudge toward, or null. A suggestion is shown only
   // when the detected languages match the table, the framework exists on
@@ -612,6 +637,14 @@ const SubmitPage: React.FC = () => {
       if (totalSize > MAX_TOTAL_BYTES) { toast.error("Total upload size exceeds 200 MB limit"); return; }
     }
 
+    if (mode === "paste") {
+      const pastedBytes = new TextEncoder().encode(pastedCode).byteLength;
+      if (pastedBytes > MAX_PASTED_CODE_BYTES) {
+        toast.error("Pasted code exceeds the 10 MB limit");
+        return;
+      }
+    }
+
     // V02.2.1 / V05.2.1: archive size defense-in-depth check
     if (mode === "archive" && archiveFile) {
       if (archiveFile.size > MAX_ARCHIVE_BYTES) { toast.error("Archive exceeds 500 MB limit"); return; }
@@ -651,6 +684,9 @@ const SubmitPage: React.FC = () => {
       appendScanField(payload, "frameworks", safeFrameworks.join(","));
       if (mode === "upload") {
         for (const f of files) appendScanField(payload, "files", f);
+      } else if (mode === "paste") {
+        appendScanField(payload, "pasted_code", pastedCode);
+        appendScanField(payload, "pasted_filename", pastedFilename.trim());
       } else if (mode === "git") {
         appendScanField(payload, "repo_url", repoUrl.trim());
       } else if (mode === "archive" && archiveFile) {
@@ -703,6 +739,8 @@ const SubmitPage: React.FC = () => {
     const fileNames =
       mode === "upload"
         ? files.map((f) => f.name)
+        : mode === "paste"
+          ? [pastedFilename.trim()]
         : (mode === "archive" || mode === "git") && previewFiles
           ? previewFiles.map((f) => f.path)
           : [];
@@ -740,7 +778,8 @@ const SubmitPage: React.FC = () => {
       <div>
         <h1 style={{ color: "var(--fg)" }}>New scan</h1>
         <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-          Submit code via upload, git repo, or archive. SCCAP runs SAST + AI
+          Submit code by pasting it, uploading files, connecting a git repo, or
+          uploading an archive. SCCAP runs SAST + AI
           triage and (optionally) applies fixes.
         </div>
       </div>
@@ -820,7 +859,11 @@ const SubmitPage: React.FC = () => {
         >
           <div
             className="sccap-tabs"
-            style={{ padding: "0 18px", background: "var(--bg-soft)" }}
+            style={{
+              padding: "0 18px",
+              background: "var(--bg-soft)",
+              overflowX: "auto",
+            }}
           >
             {TAB_DEFS.map((t) => (
               <div
@@ -895,6 +938,78 @@ const SubmitPage: React.FC = () => {
                     />
                   </div>
                 )}
+              </div>
+            )}
+
+            {mode === "paste" && (
+              <div style={{ display: "grid", gap: 12 }}>
+                <div>
+                  <label
+                    htmlFor="field-pasted-filename"
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      color: "var(--fg-muted)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Filename
+                  </label>
+                  <input
+                    id="field-pasted-filename"
+                    className="sccap-input mono"
+                    value={pastedFilename}
+                    onChange={(event) => setPastedFilename(event.target.value)}
+                    placeholder="snippet.py"
+                    maxLength={1024}
+                  />
+                  <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--fg-subtle)" }}>
+                    Include the correct extension so SCCAP can select the language-specific scanners.
+                  </div>
+                </div>
+                <div>
+                  <label
+                    htmlFor="field-pasted-code"
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      color: "var(--fg-muted)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Code
+                  </label>
+                  <textarea
+                    id="field-pasted-code"
+                    className="sccap-input mono"
+                    value={pastedCode}
+                    onChange={(event) => setPastedCode(event.target.value)}
+                    placeholder={"def greet(name):\n    return f\"Hello, {name}!\""}
+                    rows={16}
+                    spellCheck={false}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      minHeight: 280,
+                      resize: "vertical",
+                      lineHeight: 1.55,
+                      tabSize: 2,
+                    }}
+                  />
+                  <div
+                    style={{
+                      marginTop: 6,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      fontSize: 11.5,
+                      color: "var(--fg-subtle)",
+                    }}
+                  >
+                    <span>The pasted text is stored as one source file in the scan snapshot.</span>
+                    <span className="mono">{pastedCode.length.toLocaleString()} chars · 10 MB max</span>
+                  </div>
+                </div>
               </div>
             )}
 

@@ -18,12 +18,15 @@ Pick exactly one on the top of the page:
    extensions are auto-selected; unsupported files appear **greyed out**
    in the tree and are excluded from the scan. Max 50 MB per file,
    200 MB total.
-2. **Git repository** — paste a public Git URL. For GitHub repos,
+2. **Paste code** — enter a filename such as `snippet.py`, then paste one
+   source file into the code box. The extension is important: SCCAP uses it
+   to detect the language and select relevant scanners. Max 10 MiB.
+3. **Git repository** — paste a public Git URL. For GitHub repos,
    **Preview** lists the source tree via the GitHub API (no clone
    required) and individual source files are fetched from raw URLs
    at scan time. Non-GitHub repos fall back to a temp-dir clone for
    both preview and submission. Max 10,000 files.
-3. **Archive upload** — `.zip` or `.tar.gz`. Similar preview flow;
+4. **Archive upload** — `.zip` or `.tar.gz`. Similar preview flow;
    the contents are extracted into the file tree for pruning.
    Unsupported files appear greyed out. Max 10,000 files, 100 MB
    uncompressed.

@@ -1167,7 +1167,7 @@ class AnalysisResultDetailResponse(BaseModel):
     disable_temperature: bool = False
     stage_temperatures: Optional[Dict[str, Any]] = None
     repository_url: Optional[str] = None
-    # How the code was submitted: 'upload' / 'archive' / 'git'. None for
+    # How the code was submitted: 'upload' / 'archive' / 'git' / 'paste'. None for
     # scans created before the column existed.
     source_type: Optional[str] = None
     # Whether durable per-scan task artifacts exist for this scan. Used by

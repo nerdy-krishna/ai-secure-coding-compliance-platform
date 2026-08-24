@@ -4129,6 +4129,10 @@ export interface components {
             files?: string[] | null;
             /** Archive File */
             archive_file?: string | null;
+            /** Pasted Code */
+            pasted_code?: string | null;
+            /** Pasted Filename */
+            pasted_filename?: string | null;
             /** Selected Files */
             selected_files?: string | null;
         };
