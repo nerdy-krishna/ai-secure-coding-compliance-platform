@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "capacity": {
+    "concurrent_tenants": [1, 10, 50],
+    "profiles": [
+      {"name": "small", "file_count": 100, "uncompressed_bytes": 5242880},
+      {"name": "representative", "file_count": 2000, "uncompressed_bytes": 104857600},
+      {"name": "maximum", "file_count": 5000, "uncompressed_bytes": 209715200}
+    ],
+    "provider_modes": ["deterministic_fixture", "live_budgeted_smoke"],
+    "representative_10_tenant_slos": {
+      "accepted_persistence_p95_seconds_lt": 2,
+      "queue_to_start_p95_seconds_lt": 300,
+      "approval_resume_p95_seconds_lt": 60,
+      "terminal_success_ratio_gte": 0.99,
+      "sse_freshness_p95_seconds_lt": 5
+    },
+    "maximum_profile_saturation_all_concurrency_levels": {
+      "oom_kills_eq": 0,
+      "queue_peak_lte_declared_capacity": true,
+      "queue_after_drain_lte_start": true,
+      "storage_growth_lte_declared_budget": true,
+      "tenant_progress_min_gt": 0,
+      "jain_fairness_gte": 0.9
+    }
+  },
+  "recovery": {
+    "rpo_seconds_lte": {
+      "postgres": 300,
+      "checkpoints": 300,
+      "configuration": 300,
+      "object_evidence": 900,
+      "vector_evidence": 900
+    },
+    "acknowledged_rabbitmq_messages_lost_eq": 0,
+    "rto_seconds_lte": {
+      "api": 3600,
+      "scan_resumption": 3600,
+      "analytics": 14400,
+      "search": 14400
+    }
+  },
+  "failures": [
+    {"scenario": "postgres_failover", "expected": "intake pauses; no stale-primary resume"},
+    {"scenario": "rabbitmq_restart_redelivery", "expected": "outbox accumulates then redelivers idempotently"},
+    {"scenario": "object_store_outage", "expected": "artifact operations fail explicitly and retry"},
+    {"scenario": "object_store_corruption", "expected": "digest verification fails closed"},
+    {"scenario": "qdrant_outage", "expected": "RAG is explicitly degraded without cross-tenant fallback"},
+    {"scenario": "scanner_timeout", "expected": "scanner coverage is degraded, never reported verified"},
+    {"scenario": "scanner_crash", "expected": "scanner coverage is degraded, never reported verified"},
+    {"scenario": "provider_429", "expected": "bounded retry or circuit break preserves the attempt"},
+    {"scenario": "provider_5xx", "expected": "bounded retry or circuit break preserves the attempt"},
+    {"scenario": "provider_timeout", "expected": "bounded retry or circuit break preserves the attempt"},
+    {"scenario": "node_termination_prescan_gate", "expected": "same checkpoint and gate identity resumes"},
+    {"scenario": "node_termination_profiling_gate", "expected": "same checkpoint and gate identity resumes"},
+    {"scenario": "node_termination_analysis_gate", "expected": "same checkpoint and gate identity resumes"},
+    {"scenario": "network_partition", "expected": "durable work waits without authorization bypass"}
+  ]
+}
