@@ -22,6 +22,7 @@ from app.infrastructure.database.repositories.finding_governance_repo import (
 )
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
+from app.infrastructure.observability import record_metric
 from app.shared.lib.risk_score import compute_cvss_aggregate, scoreable_findings
 from app.shared.lib.risk_severity import risk_severity_for_score
 from app.shared.lib.scan_progress import EV_STARTED
@@ -181,6 +182,12 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
                 )
                 return {}
             await db.commit()
+            record_metric(
+                "sccap.workflow.terminal",
+                1,
+                {"scan.id": scan_id, "scan.status": final_status},
+                kind="counter",
+            )
             try:
                 await repo.create_scan_event(
                     scan_id=scan_id,

@@ -1,0 +1,91 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $root := . -}}
+{{- $components := list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "otel-collector" "migration" -}}
+{{- range $component := $components }}
+{{- $enabled := true -}}
+{{- if and (eq $component "worker-unified") (not $root.Values.workerPools.unified.enabled) }}{{- $enabled = false -}}{{- end }}
+{{- if and (has $component (list "worker-scanner" "worker-llm" "worker-report")) (not $root.Values.workerPools.splitEnabled) }}{{- $enabled = false -}}{{- end }}
+{{- if and (eq $component "otel-collector") (not $root.Values.otel.enabled) }}{{- $enabled = false -}}{{- end }}
+{{- if and (eq $component "migration") (not $root.Values.migrations.enabled) }}{{- $enabled = false -}}{{- end }}
+{{- if $enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sccap.fullname" $root }}-{{ $component }}
+  labels:
+    {{- include "sccap.labels" $root | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "sccap.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: {{ $component }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    {{- if eq $component "api" }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $root.Values.networkPolicy.ingressNamespaceLabels | nindent 14 }}
+        - podSelector: {}
+      ports:
+        - {protocol: TCP, port: 8000}
+    {{- else if eq $component "otel-collector" }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "sccap.selectorLabels" $root | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 4317}
+        - {protocol: TCP, port: 4318}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $root.Values.networkPolicy.monitoringNamespaceLabels | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 8889}
+    {{- else }}
+    []
+    {{- end }}
+  egress:
+    # Runtime dependencies deployed in the SCCAP namespace only.
+    - to:
+        - podSelector: {}
+      ports:
+        {{- if eq $component "migration" }}
+        - {protocol: TCP, port: 5432}
+        {{- else }}
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 5671}
+        - {protocol: TCP, port: 5672}
+        - {protocol: TCP, port: 6333}
+        - {protocol: TCP, port: 9000}
+        - {protocol: TCP, port: 4318}
+        {{- end }}
+    # DNS only in the configured DNS namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $root.Values.networkPolicy.dnsNamespaceLabels | nindent 14 }}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    {{- if and $root.Values.networkPolicy.allowExternalHttps (has $component (list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "otel-collector")) }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+      ports:
+        - {protocol: TCP, port: 443}
+    {{- end }}
+    {{- range $destination := $root.Values.networkPolicy.externalInfrastructure }}
+    - to:
+        - ipBlock: {cidr: {{ $destination.cidr | quote }}}
+      ports:
+        {{- range $port := $destination.ports }}
+        - {protocol: TCP, port: {{ $port }}}
+        {{- end }}
+    {{- end }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

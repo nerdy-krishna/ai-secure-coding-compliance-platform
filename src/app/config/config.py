@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     # Renamed CODE_QUEUE for clarity and added the new approval queue
     RABBITMQ_SUBMISSION_QUEUE: str = "code_submission_queue"
     RABBITMQ_APPROVAL_QUEUE: str = "analysis_approved_queue"
+    RABBITMQ_REPORT_QUEUE: str = "report_export_queue"
 
     @field_validator("RABBITMQ_URL", mode="before")
     def assemble_rabbitmq_connection(cls, v, info):
@@ -265,6 +266,12 @@ class Settings(BaseSettings):
     SCAN_WORKFLOW_TIMEOUT_SECONDS: int = Field(
         default=2 * 60 * 60, description="Max seconds a single scan workflow may run."
     )
+    WORKER_POOL: Literal["unified", "scanner", "llm", "report"] = "unified"
+    WORKER_PREFETCH_COUNT: int = Field(default=5, ge=1, le=20)
+    WORKER_DRAIN_TIMEOUT_SECONDS: int = Field(default=570, ge=1, le=570)
+    WORKER_DRAIN_FILE: str = "/tmp/sccap-worker/drain-requested"
+    WORKER_DRAINED_FILE: str = "/tmp/sccap-worker/drained"
+    REPORT_HANDOFF_READY_TIMEOUT_SECONDS: int = Field(default=15, ge=1, le=60)
 
     # --- Concurrency limits (per-lane / per-workflow-node semaphores) ---
     # These bound in-flight LLM / scanner / validation calls so a single
@@ -407,6 +414,16 @@ class Settings(BaseSettings):
     LANGFUSE_HOST: str = "https://langfuse-web:3000"
     LANGFUSE_PUBLIC_KEY: Optional[SecretStr] = None
     LANGFUSE_SECRET_KEY: Optional[SecretStr] = None
+
+    # Operational OpenTelemetry is intentionally metadata-only. Langfuse
+    # remains the opt-in LLM-detail trace store; OTLP never receives source,
+    # prompts, responses, credentials, or raw exception bodies.
+    OTEL_ENABLED: bool = False
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://otel-collector:4318"
+    OTEL_SERVICE_NAME: str = "sccap"
+    OTEL_METRIC_EXPORT_INTERVAL_MILLIS: int = Field(
+        default=15_000, ge=5_000, le=300_000
+    )
 
     @field_validator("FRONTEND_BASE_URL")
     def _validate_frontend_base_url(cls, v: Optional[str]) -> Optional[str]:

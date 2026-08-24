@@ -1,0 +1,132 @@
+{{- if .Values.otel.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sccap.fullname" . }}-otel
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {endpoint: 0.0.0.0:4317}
+          http: {endpoint: 0.0.0.0:4318}
+    processors:
+      memory_limiter: {check_interval: 1s, limit_mib: 768}
+      attributes/privacy:
+        actions:
+          - {key: code.filepath, action: delete}
+          - {key: code.function.name, action: delete}
+          - {key: db.statement, action: delete}
+          - {key: exception.message, action: delete}
+          - {key: exception.stacktrace, action: delete}
+          - {key: http.request.body, action: delete}
+          - {key: messaging.message.body, action: delete}
+          - {key: gen_ai.prompt, action: delete}
+          - {key: gen_ai.completion, action: delete}
+      batch: {send_batch_size: 1024, timeout: 5s}
+    connectors:
+      spanmetrics:
+        namespace: sccap_spanmetrics
+        dimensions:
+          - {name: auth.present}
+          - {name: http.status_code}
+          - {name: messaging.destination.name}
+    exporters:
+      otlphttp/backend:
+        endpoint: ${env:OTEL_BACKEND_ENDPOINT}
+      prometheus:
+        endpoint: 0.0.0.0:8889
+    service:
+      telemetry:
+        logs: {level: info}
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, attributes/privacy, batch]
+          exporters: [spanmetrics, otlphttp/backend]
+        metrics:
+          receivers: [otlp, spanmetrics]
+          processors: [memory_limiter, attributes/privacy, batch]
+          exporters: [prometheus, otlphttp/backend]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sccap.fullname" . }}-otel
+  labels:
+    {{- include "sccap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  replicas: {{ .Values.otel.collector.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      {{- include "sccap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: otel-collector
+  template:
+    metadata:
+      labels:
+        {{- include "sccap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: otel-collector
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        {{- include "sccap.spread" . | nindent 8 }}
+      containers:
+        - name: collector
+          image: {{ .Values.otel.collector.image }}
+          args: ["--config=/conf/collector.yaml"]
+          env:
+            - {name: OTEL_BACKEND_ENDPOINT, value: {{ .Values.otel.collector.backendEndpoint | quote }}}
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: metrics, containerPort: 8889}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            {{- toYaml .Values.otel.collector.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /conf, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "sccap.fullname" . }}-otel}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sccap.fullname" . }}-otel
+  labels:
+    {{- include "sccap.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "sccap.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: metrics, port: 8889, targetPort: metrics}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sccap.fullname" . }}-otel
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "sccap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: otel-collector
+{{- end }}

@@ -12,9 +12,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
+from app.infrastructure.observability import inject_trace_context
+from app.infrastructure.observability.otel import utc_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,8 @@ class ScanOutboxRepository:
         payload = dict(payload)
         payload["outbox_id"] = str(outbox_id)
         payload["tenant_id"] = str(tenant_id)
+        payload.setdefault("enqueued_at", utc_timestamp())
+        inject_trace_context(payload)
         if attempt_id is not None:
             payload.setdefault("attempt_id", str(attempt_id))
         row = db_models.ScanOutbox(
@@ -76,6 +81,84 @@ class ScanOutboxRepository:
                 "queue_name": queue_name,
             },
         )
+        return row
+
+    async def enqueue_once(
+        self,
+        scan_id: uuid.UUID,
+        queue_name: str,
+        payload: Dict,
+        *,
+        idempotency_key: str,
+        commit: bool = True,
+    ) -> db_models.ScanOutbox:
+        """Idempotently enqueue one durable stage handoff.
+
+        A replay may re-enter the graph node before its interrupt checkpoint is
+        visible. PostgreSQL conflict handling guarantees that every replay
+        observes the original outbox identity instead of publishing a second
+        handoff.
+        """
+        scan_identity = (
+            await self.db.execute(
+                select(
+                    db_models.Scan.current_attempt_id,
+                    db_models.Scan.tenant_id,
+                ).where(db_models.Scan.id == scan_id)
+            )
+        ).one_or_none()
+        if scan_identity is None:
+            raise ValueError("cannot enqueue dispatch for an unknown scan")
+        attempt_id, tenant_id = scan_identity
+        outbox_id = uuid.uuid4()
+        prepared = dict(payload)
+        prepared["outbox_id"] = str(outbox_id)
+        prepared["tenant_id"] = str(tenant_id)
+        prepared.setdefault("enqueued_at", utc_timestamp())
+        if attempt_id is not None:
+            prepared.setdefault("attempt_id", str(attempt_id))
+        if str(prepared.get("attempt_id") or "") != str(attempt_id or ""):
+            raise RuntimeError("handoff attempt does not match the current scan attempt")
+        inject_trace_context(prepared)
+        inserted_id = (
+            await self.db.execute(
+                pg_insert(db_models.ScanOutbox)
+                .values(
+                    id=outbox_id,
+                    scan_id=scan_id,
+                    attempt_id=attempt_id,
+                    queue_name=queue_name,
+                    payload=prepared,
+                    idempotency_key=idempotency_key,
+                    attempts=0,
+                )
+                .on_conflict_do_nothing(index_elements=["idempotency_key"])
+                .returning(db_models.ScanOutbox.id)
+            )
+        ).scalar_one_or_none()
+        if inserted_id is not None:
+            row = await self.db.get(db_models.ScanOutbox, inserted_id)
+            if row is None:  # pragma: no cover - same-transaction invariant
+                raise RuntimeError("inserted outbox handoff is not readable")
+        else:
+            row = (
+                await self.db.execute(
+                    select(db_models.ScanOutbox).where(
+                        db_models.ScanOutbox.idempotency_key == idempotency_key
+                    )
+                )
+            ).scalar_one()
+        if (
+            row.scan_id != scan_id
+            or row.attempt_id != attempt_id
+            or row.queue_name != queue_name
+            or row.payload.get("kind") != payload.get("kind")
+        ):
+            raise RuntimeError("outbox idempotency key is bound to another handoff")
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         return row
 
     async def mark_published(self, outbox_id: uuid.UUID) -> None:

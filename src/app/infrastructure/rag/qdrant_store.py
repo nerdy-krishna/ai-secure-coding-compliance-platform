@@ -24,6 +24,7 @@ import os
 import re
 import threading
 import uuid
+from functools import wraps
 from typing import Any, Dict, List, Optional
 
 from qdrant_client import QdrantClient
@@ -36,6 +37,7 @@ from app.infrastructure.rag.base import (
     RAGQueryResult,
 )
 from app.infrastructure.rag.embedder import embed, sparse_embed
+from app.infrastructure.observability import mark_error, span
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,26 @@ def _check_framework_name(framework_name: str) -> None:
 
 # V02.4.1 — anti-automation semaphore: cap concurrent Qdrant calls at 8.
 _RAG_CALL_SEM = threading.Semaphore(8)
+
+
+def _traced(operation: str):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            with span(
+                "sccap.qdrant.request",
+                {"qdrant.operation": operation},
+                kind="client",
+            ) as current:
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as exc:
+                    mark_error(current, exc)
+                    raise
+
+        return wrapped
+
+    return decorator
 
 
 class RAGUnavailableError(RuntimeError):
@@ -283,6 +305,7 @@ class QdrantStore:
     # VectorStore protocol
     # ------------------------------------------------------------------
 
+    @_traced("upsert")
     def add(
         self,
         documents: List[str],
@@ -374,6 +397,7 @@ class QdrantStore:
                 with_payload=True,
             ).points
 
+    @_traced("query_guidelines")
     def query_guidelines(
         self,
         query_texts: List[str],
@@ -431,6 +455,7 @@ class QdrantStore:
             "distances": dists_out,
         }
 
+    @_traced("query_cwe")
     def query_cwe_collection(
         self, query_texts: List[str], n_results: int = 3
     ) -> RAGQueryResult:
@@ -482,6 +507,7 @@ class QdrantStore:
             "distances": dists_out,
         }
 
+    @_traced("scroll_framework")
     def get_by_framework(self, framework_name: str) -> Dict[str, Any]:
         # V02.3.2 — validate framework_name by format (any configured
         # framework is allowed; an un-ingested one simply scrolls empty).
@@ -533,6 +559,7 @@ class QdrantStore:
             ],
         }
 
+    @_traced("framework_stats")
     def get_framework_stats(self) -> Dict[str, int]:
         """Document count per `framework_name` across the guidelines
         collection — dynamic, so every ingested framework is reported."""
@@ -562,6 +589,7 @@ class QdrantStore:
                 offset = next_offset
         return stats
 
+    @_traced("delete_framework")
     def delete_by_framework(self, framework_name: str) -> int:
         # V02.3.2 — validate framework_name by format.
         _check_framework_name(framework_name)
@@ -592,6 +620,7 @@ class QdrantStore:
                 raise RAGUnavailableError(str(e)) from e
         return n
 
+    @_traced("delete")
     def delete(self, ids: List[str]) -> None:
         point_ids = [_qdrant_id(i) for i in ids]
         # V02.4.1 — cap concurrent Qdrant calls.
@@ -606,6 +635,7 @@ class QdrantStore:
                 logger.warning("qdrant_store: delete failed: %s", e)
                 raise RAGUnavailableError(str(e)) from e
 
+    @_traced("health")
     def health_check(self) -> bool:
         try:
             self._client.get_collections()

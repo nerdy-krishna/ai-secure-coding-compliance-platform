@@ -1,0 +1,12 @@
+apiVersion: v2
+name: sccap
+description: Production Kubernetes deployment for SCCAP
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+kubeVersion: ">=1.30.0-0"
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Workload-specific workers, KEDA scaling, and OTLP telemetry.
+dependencies: []

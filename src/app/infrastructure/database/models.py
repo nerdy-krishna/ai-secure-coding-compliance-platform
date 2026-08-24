@@ -26,7 +26,7 @@ from fastapi_users.db import SQLAlchemyBaseUserTable
 
 from app.shared.lib.scan_status import STATUS_QUEUED
 from app.shared.lib.scan_task_status import STATUS_SCAN_TASK_PENDING
-from app.infrastructure.database.database import Base
+from app.infrastructure.database.base import Base
 
 
 class User(SQLAlchemyBaseUserTable[int], Base):

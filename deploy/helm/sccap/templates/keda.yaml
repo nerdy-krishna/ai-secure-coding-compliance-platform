@@ -1,0 +1,50 @@
+{{- if and .Values.autoscaling.keda.enabled .Values.workerPools.splitEnabled }}
+{{- $root := . -}}
+{{- $pools := dict "scanner" .Values.workerPools.scanner "llm" .Values.workerPools.llm "report" .Values.workerPools.report -}}
+{{- range $name, $pool := $pools }}
+{{- if $pool.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "sccap.fullname" $root }}-worker-{{ $name }}
+  labels:
+    {{- include "sccap.labels" $root | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "sccap.fullname" $root }}-worker-{{ $name }}
+  pollingInterval: {{ $root.Values.autoscaling.keda.pollingInterval }}
+  cooldownPeriod: {{ $root.Values.autoscaling.keda.cooldownPeriod }}
+  minReplicaCount: {{ $pool.minReplicas }}
+  maxReplicaCount: {{ $pool.maxReplicas }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ $root.Values.autoscaling.keda.scaleDownStabilizationSeconds }}
+          policies:
+            - {type: Percent, value: 25, periodSeconds: 60}
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - {type: Percent, value: 100, periodSeconds: 15}
+            - {type: Pods, value: 4, periodSeconds: 15}
+          selectPolicy: Max
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: auto
+        mode: QueueLength
+        queueName: {{ $pool.queue | quote }}
+        value: {{ $pool.backlogTarget | quote }}
+        hostFromEnv: RABBITMQ_URL
+    - type: prometheus
+      metadata:
+        serverAddress: {{ $root.Values.autoscaling.keda.rabbitmqPrometheusAddress | quote }}
+        metricName: {{ printf "sccap_%s_oldest_message_age_seconds" $name | quote }}
+        threshold: {{ $pool.oldestAgeTargetSeconds | quote }}
+        query: >-
+          clamp_min(time() - (max(rabbitmq_detailed_queue_head_message_timestamp{queue="{{ $pool.queue }}"}) or vector(time())), 0)
+---
+{{- end }}
+{{- end }}
+{{- end }}

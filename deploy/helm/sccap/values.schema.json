@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["images", "runtime", "workerPools", "autoscaling", "drain"],
+  "properties": {
+    "images": {
+      "type": "object",
+      "required": ["api", "worker"],
+      "properties": {
+        "api": {"$ref": "#/$defs/image"},
+        "worker": {"$ref": "#/$defs/image"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret"],
+      "properties": {
+        "apiSecret": {"type": "string", "minLength": 1},
+        "scannerSecret": {"type": "string", "minLength": 1},
+        "llmSecret": {"type": "string", "minLength": 1},
+        "reportSecret": {"type": "string", "minLength": 1},
+        "unifiedSecret": {"type": "string", "minLength": 1},
+        "migrationSecret": {"type": "string", "minLength": 1}
+      }
+    },
+    "workerPools": {
+      "type": "object",
+      "properties": {
+        "splitEnabled": {"type": "boolean"},
+        "scanner": {"$ref": "#/$defs/pool"},
+        "llm": {"$ref": "#/$defs/pool"},
+        "report": {"$ref": "#/$defs/pool"}
+      }
+    },
+    "drain": {
+      "type": "object",
+      "properties": {
+        "gracePeriodSeconds": {"type": "integer", "minimum": 600},
+        "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 570}
+      }
+    }
+  },
+  "$defs": {
+    "image": {
+      "type": "object",
+      "required": ["repository", "tag"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string", "minLength": 1, "not": {"const": "latest"}},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "pool": {
+      "type": "object",
+      "required": ["queue", "minReplicas", "maxReplicas", "prefetch"],
+      "properties": {
+        "queue": {"type": "string", "minLength": 1},
+        "minReplicas": {"type": "integer", "minimum": 1},
+        "maxReplicas": {"type": "integer", "minimum": 1},
+        "prefetch": {"type": "integer", "minimum": 1, "maximum": 20}
+      }
+    }
+  }
+}

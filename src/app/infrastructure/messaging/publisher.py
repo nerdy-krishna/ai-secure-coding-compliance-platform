@@ -4,12 +4,19 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 import aio_pika
 from aio_pika.abc import AbstractRobustChannel, AbstractRobustConnection
 
 from app.config.config import settings
+from app.infrastructure.observability import (
+    inject_trace_context,
+    mark_error,
+    span,
+    trace_carrier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,13 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "evidence_hash",
         "approved",
         "override_critical_secret",
+        "enqueued_at",
+        "handoff_checkpoint_node",
+        "handoff_retry",
+        "outbox_id",
+        "tenant_id",
+        "traceparent",
+        "tracestate",
     }
 )
 
@@ -83,21 +97,43 @@ async def publish_message(
         return False
 
     safe_body = {k: v for k, v in message_body.items() if k in ALLOWED_OUTBOX_KEYS}
-    full_body = {
-        **safe_body,
-        "correlation_id": correlation_id or str(uuid.uuid4()),
-    }
-
-    try:
-        channel = await _get_channel()
-        await _ensure_queue(channel, queue_name)
-        await channel.default_exchange.publish(
-            aio_pika.Message(
-                body=json.dumps(full_body).encode("utf-8"),
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-            ),
-            routing_key=queue_name,
-        )
+    with span(
+        "sccap.rabbitmq.publish",
+        {
+            "messaging.system": "rabbitmq",
+            "messaging.operation": "publish",
+            "messaging.destination.name": queue_name,
+            "outbox.id": safe_body.get("outbox_id"),
+        },
+        carrier=trace_carrier(safe_body),
+        kind="producer",
+    ) as current:
+        full_body = {
+            **safe_body,
+            "correlation_id": correlation_id or str(uuid.uuid4()),
+        }
+        try:
+            channel = await _get_channel()
+            await _ensure_queue(channel, queue_name)
+            trace_headers: dict[str, str] = {}
+            inject_trace_context(trace_headers)
+            await channel.default_exchange.publish(
+                aio_pika.Message(
+                    body=json.dumps(full_body).encode("utf-8"),
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                    headers=trace_headers,
+                    timestamp=datetime.now(timezone.utc),
+                ),
+                routing_key=queue_name,
+            )
+        except Exception as exc:
+            mark_error(current, exc)
+            logger.error(
+                "Failed to publish message to queue %r (%s)",
+                queue_name,
+                type(exc).__name__,
+            )
+            return False
         logger.info(
             "Published message to queue.",
             extra={
@@ -108,14 +144,6 @@ async def publish_message(
             },
         )
         return True
-    except Exception as e:
-        logger.error(
-            "Failed to publish message to queue %r: %s",
-            queue_name,
-            e,
-            exc_info=True,
-        )
-        return False
 
 
 async def close_publisher() -> None:

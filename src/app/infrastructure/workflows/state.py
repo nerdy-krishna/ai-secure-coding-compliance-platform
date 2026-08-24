@@ -30,6 +30,14 @@ class WorkerState(TypedDict):
     attempt_id: Optional[uuid.UUID]
     scan_type: str
     current_scan_status: Optional[str]
+    # New split-pool scans checkpoint between result persistence and terminal
+    # report generation. Missing/false preserves the N-1 straight-through
+    # graph contract for existing checkpoints and the unified worker.
+    distributed_worker_pools: NotRequired[bool]
+    # Set only after the internal report interrupt resumes. It lets a
+    # redelivery prove the exact outbox already advanced and continue from the
+    # next durable checkpoint without replaying Command(resume).
+    report_handoff_outbox_id: NotRequired[str]
     # The two LLM slots configured on the scan (#69). The reasoning slot
     # drives analysis / consolidation / patch-evidence judgement; the utility slot drives
     # the profiler. Slot resolution lives

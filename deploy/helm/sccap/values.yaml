@@ -1,0 +1,134 @@
+images:
+  api:
+    repository: ghcr.io/nerdy-krishna/sccap-api
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  worker:
+    repository: ghcr.io/nerdy-krishna/sccap-worker
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+runtime:
+  # Separate Secrets enforce least-privilege at the pod boundary. Never point
+  # scanner/report at api/llm/unified secrets in production.
+  apiSecret: sccap-api-runtime
+  scannerSecret: sccap-scanner-runtime
+  llmSecret: sccap-llm-runtime
+  reportSecret: sccap-report-runtime
+  unifiedSecret: sccap-unified-runtime
+  migrationSecret: sccap-migration-runtime
+  existingConfigMap: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+api:
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "1", memory: 2Gi}
+
+workerPools:
+  splitEnabled: true
+  scanner:
+    enabled: true
+    queue: code_submission_queue
+    minReplicas: 1
+    maxReplicas: 20
+    prefetch: 1
+    backlogTarget: 2
+    oldestAgeTargetSeconds: 300
+    resources:
+      requests: {cpu: "1", memory: 2Gi, ephemeral-storage: 2Gi}
+      limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}
+  llm:
+    enabled: true
+    queue: analysis_approved_queue
+    minReplicas: 1
+    maxReplicas: 50
+    prefetch: 3
+    backlogTarget: 3
+    oldestAgeTargetSeconds: 60
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {cpu: "2", memory: 4Gi}
+  report:
+    enabled: true
+    queue: report_export_queue
+    minReplicas: 1
+    maxReplicas: 10
+    prefetch: 2
+    backlogTarget: 2
+    oldestAgeTargetSeconds: 300
+    resources:
+      requests: {cpu: 250m, memory: 512Mi, ephemeral-storage: 1Gi}
+      limits: {cpu: "2", memory: 3Gi, ephemeral-storage: 10Gi}
+  unified:
+    enabled: false
+    replicas: 1
+    # Compatibility invariant: historical unified worker behavior.
+    prefetch: 5
+    resources:
+      requests: {cpu: "1", memory: 2Gi, ephemeral-storage: 2Gi}
+      limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}
+
+autoscaling:
+  keda:
+    enabled: true
+    pollingInterval: 15
+    cooldownPeriod: 60
+    scaleDownStabilizationSeconds: 60
+    rabbitmqPrometheusAddress: http://rabbitmq:15692
+
+drain:
+  gracePeriodSeconds: 600
+  timeoutSeconds: 570
+
+migrations:
+  enabled: true
+  backoffLimit: 3
+
+otel:
+  enabled: true
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.132.0
+    replicas: 2
+    backendEndpoint: http://tempo:4318
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {cpu: 500m, memory: 1Gi}
+
+monitoring:
+  prometheusRule:
+    enabled: true
+  grafanaDashboard:
+    enabled: true
+  llmSpendAlertUsdPerHour: 100
+
+networkPolicy:
+  enabled: true
+  ingressNamespaceLabels:
+    kubernetes.io/metadata.name: ingress-nginx
+  dnsNamespaceLabels:
+    kubernetes.io/metadata.name: kube-system
+  monitoringNamespaceLabels:
+    kubernetes.io/metadata.name: monitoring
+  # External HTTPS is used only by components that need providers, advisory
+  # data, git, or an external evidence endpoint.
+  allowExternalHttps: true
+  # Add private managed DB/RabbitMQ/Qdrant/object-store CIDRs and exact ports.
+  externalInfrastructure: []
+  # - cidr: 10.20.0.0/24
+  #   ports: [5432, 5671, 6333, 443]
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

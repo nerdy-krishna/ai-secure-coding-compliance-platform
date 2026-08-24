@@ -9,12 +9,12 @@
     {
       "vhost": "/",
       "name": "sccap-bounded-queues",
-      "pattern": "^(code_submission_queue|analysis_approved_queue)$",
+      "pattern": "^(code_submission_queue|analysis_approved_queue|report_export_queue)$",
       "apply-to": "queues",
       "priority": 0,
       "definition": {
         "max-length": 100000,
-        "overflow": "drop-head"
+        "overflow": "reject-publish"
       }
     }
   ],

@@ -1,0 +1,108 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "sccap.fullname" . }}-slos
+  labels:
+    {{- include "sccap.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: sccap.slo.recording
+      interval: 30s
+      rules:
+        - record: sccap:api_error_ratio:1h
+          expr: sum(rate(sccap_spanmetrics_calls_total{service_name="sccap-api",auth_present="true",status_code="STATUS_CODE_ERROR"}[1h])) / clamp_min(sum(rate(sccap_spanmetrics_calls_total{service_name="sccap-api",auth_present="true"}[1h])), 1e-9)
+        - record: sccap:api_error_ratio:6h
+          expr: sum(rate(sccap_spanmetrics_calls_total{service_name="sccap-api",auth_present="true",status_code="STATUS_CODE_ERROR"}[6h])) / clamp_min(sum(rate(sccap_spanmetrics_calls_total{service_name="sccap-api",auth_present="true"}[6h])), 1e-9)
+        - record: sccap:terminal_error_ratio:1h
+          expr: sum(rate(sccap_workflow_terminal_total{scan_status="FAILED"}[1h])) / clamp_min(sum(rate(sccap_workflow_terminal_total{scan_status!~"BLOCKED_.*"}[1h])), 1e-9)
+        - record: sccap:terminal_error_ratio:6h
+          expr: sum(rate(sccap_workflow_terminal_total{scan_status="FAILED"}[6h])) / clamp_min(sum(rate(sccap_workflow_terminal_total{scan_status!~"BLOCKED_.*"}[6h])), 1e-9)
+    - name: sccap.slo.alerts
+      rules:
+        # Monthly budget consumption: 2% in 1h / 5% in 6h.
+        - alert: SCCAPApiErrorBudgetFastBurn
+          expr: sccap:api_error_ratio:1h > 0.0144
+          for: 5m
+          labels: {severity: critical, slo: api-availability}
+          annotations:
+            summary: SCCAP API is consuming at least 2% of its monthly error budget per hour
+            runbook_url: operations/observability-slos/#api-availability
+        - alert: SCCAPApiErrorBudgetSlowBurn
+          expr: sccap:api_error_ratio:6h > 0.006
+          for: 15m
+          labels: {severity: warning, slo: api-availability}
+          annotations:
+            summary: SCCAP API is consuming at least 5% of its monthly error budget per six hours
+            runbook_url: operations/observability-slos/#api-availability
+        - alert: SCCAPWorkflowErrorBudgetFastBurn
+          expr: sccap:terminal_error_ratio:1h > 0.144
+          for: 5m
+          labels: {severity: critical, slo: terminal-success}
+          annotations:
+            summary: Terminal workflows are consuming at least 2% of their monthly error budget per hour
+            runbook_url: operations/dependency-degradation/
+        - alert: SCCAPWorkflowErrorBudgetSlowBurn
+          expr: sccap:terminal_error_ratio:6h > 0.06
+          for: 15m
+          labels: {severity: warning, slo: terminal-success}
+          annotations:
+            summary: Terminal workflows are consuming at least 5% of their monthly error budget per six hours
+            runbook_url: operations/dependency-degradation/
+        - alert: SCCAPAcceptedSubmissionLatency
+          expr: histogram_quantile(0.95, sum by (le) (rate(sccap_api_accepted_submission_duration_bucket[15m]))) > 2
+          for: 15m
+          labels: {severity: warning, slo: submission-latency}
+          annotations: {summary: Accepted submission/outbox persistence p95 exceeds 2 seconds}
+        - alert: SCCAPQueueStartLatency
+          expr: histogram_quantile(0.95, sum by (le) (rate(sccap_queue_to_start_bucket[15m]))) > 300
+          for: 15m
+          labels: {severity: warning, slo: queue-start}
+          annotations: {summary: Queue-to-start p95 exceeds 5 minutes under declared capacity}
+        - alert: SCCAPApprovalResumeLatency
+          expr: histogram_quantile(0.95, sum by (le) (rate(sccap_queue_to_start_bucket{messaging_destination_name="analysis_approved_queue"}[15m]))) > 60
+          for: 10m
+          labels: {severity: warning, slo: approval-resume}
+          annotations: {summary: Approval resume p95 exceeds 60 seconds}
+        - alert: SCCAPSseFreshness
+          expr: histogram_quantile(0.95, sum by (le) (rate(sccap_sse_freshness_bucket[15m]))) > 5
+          for: 15m
+          labels: {severity: warning, slo: sse-freshness}
+          annotations: {summary: SSE event freshness p95 exceeds 5 seconds}
+        - alert: SCCAPCancellationSpike
+          expr: sum(increase(sccap_cancellation_total[15m])) > 20
+          for: 5m
+          labels: {severity: warning}
+          annotations: {summary: Scan cancellations increased abruptly}
+        - alert: SCCAPLlmSpendSpike
+          expr: sum(increase(sccap_llm_spend_total[1h])) > {{ .Values.monitoring.llmSpendAlertUsdPerHour }}
+          for: 5m
+          labels: {severity: warning}
+          annotations: {summary: LLM spend exceeded the configured hourly threshold}
+{{- end }}
+{{- if .Values.monitoring.grafanaDashboard.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "sccap.fullname" . }}-dashboard
+  labels:
+    grafana_dashboard: "1"
+    {{- include "sccap.labels" . | nindent 4 }}
+data:
+  sccap-operations.json: |
+    {
+      "title": "SCCAP Operations",
+      "uid": "sccap-operations",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": {"from": "now-6h", "to": "now"},
+      "panels": [
+        {"type":"timeseries","title":"RabbitMQ backlog","targets":[{"expr":"rabbitmq_queue_messages{queue=~\"code_submission_queue|analysis_approved_queue|report_export_queue\"}"}],"gridPos":{"x":0,"y":0,"w":12,"h":8}},
+        {"type":"timeseries","title":"Oldest message age","targets":[{"expr":"clamp_min(time() - rabbitmq_detailed_queue_head_message_timestamp, 0)"}],"gridPos":{"x":12,"y":0,"w":12,"h":8}},
+        {"type":"timeseries","title":"Queue/start and SSE p95","targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(sccap_queue_to_start_bucket[15m])))","legendFormat":"queue-to-start"},{"expr":"histogram_quantile(0.95, sum by (le) (rate(sccap_sse_freshness_bucket[15m])))","legendFormat":"SSE freshness"}],"gridPos":{"x":0,"y":8,"w":12,"h":8}},
+        {"type":"timeseries","title":"Terminal outcomes and cancellations","targets":[{"expr":"sum by (scan_status) (rate(sccap_workflow_terminal_total[15m]))"},{"expr":"sum(rate(sccap_cancellation_total[15m]))","legendFormat":"cancellations"}],"gridPos":{"x":12,"y":8,"w":12,"h":8}},
+        {"type":"timeseries","title":"LLM spend","targets":[{"expr":"sum(increase(sccap_llm_spend_total[1h]))"}],"gridPos":{"x":0,"y":16,"w":24,"h":8}}
+      ]
+    }
+{{- end }}

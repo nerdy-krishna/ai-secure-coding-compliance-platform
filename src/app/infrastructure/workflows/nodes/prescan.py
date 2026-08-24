@@ -61,6 +61,7 @@ from app.infrastructure.scanners.provenance import (
 from app.infrastructure.scanners.semgrep_rules import derive_semgrep_languages
 from app.infrastructure.scanners.semgrep_runner import run_semgrep
 from app.infrastructure.scanners.staging import stage_files
+from app.infrastructure.observability import mark_error, span
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
 from app.shared.lib.file_classification import should_skip_semgrep
@@ -436,7 +437,15 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     {"scanner": scanner_name, "files_total": len(eligible)},
                 )
                 try:
-                    result = await _gated(coro_factory)
+                    with span(
+                        "sccap.scanner.run",
+                        {"scan.id": scan_id, "scanner.name": scanner_name},
+                    ) as current:
+                        try:
+                            result = await _gated(coro_factory)
+                        except BaseException as exc:
+                            mark_error(current, exc)
+                            raise
                 except BaseException:
                     await _emit_scan_activity(
                         scan_id,

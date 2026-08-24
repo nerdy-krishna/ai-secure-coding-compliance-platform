@@ -1,0 +1,153 @@
+{{- $root := . -}}
+{{- $pools := dict "scanner" .Values.workerPools.scanner "llm" .Values.workerPools.llm "report" .Values.workerPools.report -}}
+{{- $secrets := dict "scanner" .Values.runtime.scannerSecret "llm" .Values.runtime.llmSecret "report" .Values.runtime.reportSecret -}}
+{{- if .Values.workerPools.splitEnabled }}
+{{- range $name, $pool := $pools }}
+{{- if $pool.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sccap.fullname" $root }}-worker-{{ $name }}
+  labels:
+    {{- include "sccap.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: worker-{{ $name }}
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      {{- include "sccap.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: worker-{{ $name }}
+  template:
+    metadata:
+      labels:
+        {{- include "sccap.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: worker-{{ $name }}
+    spec:
+      terminationGracePeriodSeconds: {{ $root.Values.drain.gracePeriodSeconds }}
+      serviceAccountName: {{ include "sccap.serviceAccountName" $root }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        {{- include "sccap.spread" $root | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "sccap.workerImage" $root }}
+          imagePullPolicy: {{ $root.Values.images.worker.pullPolicy }}
+          command: ["python", "-m", "app.workers.consumer"]
+          envFrom:
+            {{- include "sccap.envFrom" (dict "root" $root "secret" (get $secrets $name)) | nindent 12 }}
+          env:
+            - {name: WORKER_POOL, value: {{ $name | quote }}}
+            - {name: WORKER_PREFETCH_COUNT, value: {{ $pool.prefetch | quote }}}
+            - {name: WORKER_DRAIN_TIMEOUT_SECONDS, value: {{ $root.Values.drain.timeoutSeconds | quote }}}
+            - {name: OTEL_ENABLED, value: {{ $root.Values.otel.enabled | quote }}}
+            - {name: OTEL_SERVICE_NAME, value: {{ printf "sccap-worker-%s" $name | quote }}}
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://{{ include "sccap.fullname" $root }}-otel:4318"}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["python", "-m", "app.workers.drain", "--wait", "--timeout", {{ $root.Values.drain.timeoutSeconds | quote }}]
+          securityContext:
+            {{- include "sccap.securityContext" $root | nindent 12 }}
+          resources:
+            {{- toYaml $pool.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 20Gi}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sccap.fullname" $root }}-worker-{{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "sccap.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: worker-{{ $name }}
+---
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.workerPools.unified.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sccap.fullname" . }}-worker-unified
+  labels:
+    {{- include "sccap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker-unified
+spec:
+  replicas: {{ .Values.workerPools.unified.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      {{- include "sccap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker-unified
+  template:
+    metadata:
+      labels:
+        {{- include "sccap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker-unified
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.drain.gracePeriodSeconds }}
+      serviceAccountName: {{ include "sccap.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+        {{- include "sccap.spread" . | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "sccap.workerImage" . }}
+          imagePullPolicy: {{ .Values.images.worker.pullPolicy }}
+          command: ["python", "-m", "app.workers.consumer"]
+          envFrom:
+            {{- include "sccap.envFrom" (dict "root" . "secret" .Values.runtime.unifiedSecret) | nindent 12 }}
+          env:
+            - {name: WORKER_POOL, value: "unified"}
+            - {name: WORKER_PREFETCH_COUNT, value: {{ .Values.workerPools.unified.prefetch | quote }}}
+            - {name: WORKER_DRAIN_TIMEOUT_SECONDS, value: {{ .Values.drain.timeoutSeconds | quote }}}
+            - {name: OTEL_ENABLED, value: {{ .Values.otel.enabled | quote }}}
+            - {name: OTEL_SERVICE_NAME, value: "sccap-worker-unified"}
+            - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://{{ include "sccap.fullname" . }}-otel:4318"}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["python", "-m", "app.workers.drain", "--wait", "--timeout", {{ .Values.drain.timeoutSeconds | quote }}]
+          securityContext:
+            {{- include "sccap.securityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.workerPools.unified.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 20Gi}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "sccap.fullname" . }}-worker-unified
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "sccap.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker-unified
+{{- end }}

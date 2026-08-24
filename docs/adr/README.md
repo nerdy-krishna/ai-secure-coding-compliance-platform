@@ -16,3 +16,4 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-005: Self-hosted, fail-open LLM observability](005-llm-observability.md)
 - [ADR-006: Bounded operational log storage](006-bounded-log-storage.md)
 - [ADR-007: Immutable scan-attempt evidence storage](007-immutable-scan-evidence.md)
+- [ADR-011: Observable, autoscaled worker pools](011-observable-autoscaled-worker-pools.md)

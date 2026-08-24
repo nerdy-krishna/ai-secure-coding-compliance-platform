@@ -20,6 +20,7 @@ from app.infrastructure.workflows.budget import (
     ScanBudgetExhausted,
     mark_scan_budget_exhausted,
 )
+from app.infrastructure.observability import mark_error, record_metric, span
 
 
 class ScanCancellationRequested(Exception):
@@ -86,6 +87,7 @@ async def record_cancellation_phase(
             if requested_at is not None
             else None
         )
+        recorded = True
         try:
             await ScanRepository(db).create_scan_event(
                 scan_id,
@@ -105,7 +107,15 @@ async def record_cancellation_phase(
                 activity_kind="cancellation",
             )
         except IntegrityError:
+            recorded = False
             await db.rollback()
+        if recorded and phase == "COMPLETED":
+            record_metric(
+                "sccap.cancellation.total",
+                1,
+                {"scan.id": scan_id},
+                kind="counter",
+            )
 
 
 async def invoke_with_forceful_cancellation(
@@ -178,12 +188,20 @@ def cancellation_aware(
         scan_id = state.get("scan_id")
         if scan_id is not None and await is_scan_cancelled(scan_id):
             raise ScanCancellationRequested(str(scan_id))
-        try:
-            result = await node(state)
-        except BudgetExceededError as exc:
-            if scan_id is not None:
-                await mark_scan_budget_exhausted(scan_id, exc)
-            raise ScanBudgetExhausted(str(scan_id)) from exc
+        with span(
+            "sccap.workflow.node",
+            {"scan.id": scan_id, "workflow.node": stage_name or node.__name__},
+        ) as current:
+            try:
+                result = await node(state)
+            except BudgetExceededError as exc:
+                mark_error(current, exc)
+                if scan_id is not None:
+                    await mark_scan_budget_exhausted(scan_id, exc)
+                raise ScanBudgetExhausted(str(scan_id)) from exc
+            except Exception as exc:
+                mark_error(current, exc)
+                raise
         if stage_name is None:
             return result
 

@@ -22,7 +22,10 @@ import json
 import logging
 import logging.config
 import signal
+import time
 import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Optional
 
 import aio_pika
@@ -42,7 +45,16 @@ from app.infrastructure.messaging.worker_identity import (
     TrustedScanDelivery,
     resolve_trusted_scan_delivery,
 )
-from app.infrastructure.observability import flush_langfuse, get_langchain_handler
+from app.infrastructure.observability import (
+    configure_otel,
+    flush_langfuse,
+    get_langchain_handler,
+    mark_error,
+    record_metric,
+    shutdown_otel,
+    span,
+    trace_carrier,
+)
 from app.infrastructure.workflows.cancellation import (
     ScanCancellationRequested,
     invoke_with_forceful_cancellation,
@@ -51,10 +63,6 @@ from app.infrastructure.workflows.cancellation import (
 from app.infrastructure.workflows.budget import (
     ScanBudgetExhausted,
     release_scan_budget,
-)
-from app.infrastructure.workflows.worker_graph import (
-    close_workflow_resources,
-    get_workflow,
 )
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.scan_status import (
@@ -222,6 +230,131 @@ _BACKOFF_START_SECONDS = 1.0
 _BACKOFF_CAP_SECONDS = 30.0
 
 
+class ReportHandoffNotReady(RuntimeError):
+    """The outbox delivery arrived before its interrupt checkpoint."""
+
+
+_ACTIVE_DELIVERIES: set[asyncio.Task[None]] = set()
+
+
+async def get_workflow() -> Any:
+    """Load scanner-only graph dependencies only in the worker process."""
+    from app.infrastructure.workflows.worker_graph import get_workflow as load
+
+    return await load()
+
+
+async def close_workflow_resources() -> None:
+    """Close graph resources without making worker extras an API test dependency."""
+    from app.infrastructure.workflows.worker_graph import close_workflow_resources as close
+
+    await close()
+
+
+def queues_for_pool(pool: str) -> tuple[str, ...]:
+    """Return the exact queue subscription contract for one worker pool."""
+    mapping = {
+        "scanner": (settings.RABBITMQ_SUBMISSION_QUEUE,),
+        "llm": (settings.RABBITMQ_APPROVAL_QUEUE,),
+        "report": (settings.RABBITMQ_REPORT_QUEUE,),
+        "unified": (
+            settings.RABBITMQ_SUBMISSION_QUEUE,
+            settings.RABBITMQ_APPROVAL_QUEUE,
+            settings.RABBITMQ_REPORT_QUEUE,
+        ),
+    }
+    try:
+        return mapping[pool]
+    except KeyError as exc:
+        raise ValueError(f"unsupported worker pool: {pool}") from exc
+
+
+def _track_delivery(coro: Any) -> None:
+    task = asyncio.create_task(coro)
+    _ACTIVE_DELIVERIES.add(task)
+
+    def _done(completed: asyncio.Task[None]) -> None:
+        _ACTIVE_DELIVERIES.discard(completed)
+        if completed.cancelled():
+            return
+        try:
+            completed.result()
+        except Exception as exc:
+            logger.error(
+                "WORKER: delivery task failed (%s)", type(exc).__name__
+            )
+
+    task.add_done_callback(_done)
+
+
+def _queue_age_seconds(message: AbstractIncomingMessage) -> float:
+    timestamp = message.timestamp
+    if timestamp is None:
+        return 0.0
+    try:
+        return max(0.0, time.time() - timestamp.timestamp())
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
+def _interrupt_payloads(snapshot: Any) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for task in getattr(snapshot, "tasks", ()) or ():
+        for item in getattr(task, "interrupts", ()) or ():
+            value = getattr(item, "value", None)
+            if isinstance(value, dict):
+                payloads.append(value)
+    return payloads
+
+
+async def _wait_for_report_handoff_checkpoint(
+    workflow: Any,
+    config: RunnableConfig,
+    resume_payload: dict[str, Any],
+) -> tuple[str, bool]:
+    """Return exact checkpoint ID and whether this delivery already advanced."""
+    deadline = time.monotonic() + settings.REPORT_HANDOFF_READY_TIMEOUT_SECONDS
+    expected = {
+        "scan_id": resume_payload.get("scan_id"),
+        "attempt_id": resume_payload.get("attempt_id"),
+        "outbox_id": resume_payload.get("outbox_id"),
+        "kind": "report_handoff",
+        "handoff_checkpoint_node": "report_handoff",
+    }
+    while time.monotonic() < deadline:
+        snapshot = await workflow.aget_state(config)
+        next_nodes = tuple(getattr(snapshot, "next", ()) or ())
+        matching_interrupt = any(
+            all(
+                str(payload.get(key) or "") == str(value or "")
+                for key, value in expected.items()
+            )
+            for payload in _interrupt_payloads(snapshot)
+        )
+        checkpoint_id = await _current_checkpoint_id(workflow, config)
+        if (
+            "report_handoff" in next_nodes
+            and matching_interrupt
+            and checkpoint_id is not None
+        ):
+            return checkpoint_id, False
+        values = getattr(snapshot, "values", None) or {}
+        completed_stages = values.get("completed_stages") or []
+        if (
+            checkpoint_id is not None
+            and "report_handoff" not in next_nodes
+            and "report_handoff" in completed_stages
+            and str(values.get("scan_id") or "") == str(expected["scan_id"] or "")
+            and str(values.get("attempt_id") or "")
+            == str(expected["attempt_id"] or "")
+            and str(values.get("report_handoff_outbox_id") or "")
+            == str(expected["outbox_id"] or "")
+        ):
+            return checkpoint_id, True
+        await asyncio.sleep(0.25)
+    raise ReportHandoffNotReady("report handoff checkpoint is not durable yet")
+
+
 async def _current_checkpoint_id(
     workflow: Any, config: RunnableConfig
 ) -> Optional[str]:
@@ -365,6 +498,9 @@ async def _run_workflow_for_scan(
     resume_claim_owner: Optional[str] = None
     claimed_gate_id: Optional[uuid.UUID] = None
     claimed_gate_checkpoint_id: Optional[str] = None
+    report_handoff_checkpoint_id: Optional[str] = None
+    report_handoff_already_advanced = False
+    retryable_without_failure = False
     resume_scan_status: Optional[str] = None
     worker_workflow: Any = None
     config: Optional[RunnableConfig] = None
@@ -470,6 +606,38 @@ async def _run_workflow_for_scan(
                     e,
                 )
                 return False
+        elif payload_kind == "report_handoff":
+            try:
+                from app.infrastructure.database import AsyncSessionLocal
+                from app.infrastructure.database.repositories.scan_repo import (
+                    ScanRepository,
+                )
+
+                raw_attempt_id = resume_payload.get("attempt_id")
+                delivery_attempt_id = (
+                    uuid.UUID(str(raw_attempt_id)) if raw_attempt_id else None
+                )
+                async with AsyncSessionLocal() as db:
+                    current = await ScanRepository(db).get_scan(scan_id_uuid)
+                if (
+                    current is None
+                    or delivery_attempt_id is None
+                    or current.current_attempt_id != delivery_attempt_id
+                    or current.status
+                    in (_TERMINAL_STATUSES_FOR_CLEANUP | {STATUS_FAILED})
+                ):
+                    logger.info(
+                        "WORKFLOW: Stale report handoff for scan %s; ACKing as noop.",
+                        scan_id_str_log,
+                    )
+                    return True
+            except Exception as exc:
+                logger.warning(
+                    "WORKFLOW: report-attempt validation failed for %s (%s); retrying.",
+                    scan_id_str_log,
+                    type(exc).__name__,
+                )
+                return False
 
     try:
         worker_workflow = await get_workflow()
@@ -501,7 +669,25 @@ async def _run_workflow_for_scan(
         if lc_handler is not None:
             config["callbacks"] = [lc_handler]
 
+        if (
+            resume_payload is not None
+            and resume_payload.get("kind") == "report_handoff"
+        ):
+            (
+                report_handoff_checkpoint_id,
+                report_handoff_already_advanced,
+            ) = await _wait_for_report_handoff_checkpoint(
+                worker_workflow, config, resume_payload
+            )
+            resume_payload["checkpoint_id"] = report_handoff_checkpoint_id
         parked_checkpoint_id = await _current_checkpoint_id(worker_workflow, config)
+        if (
+            report_handoff_checkpoint_id is not None
+            and parked_checkpoint_id != report_handoff_checkpoint_id
+        ):
+            raise ReportHandoffNotReady(
+                "report handoff checkpoint changed before resume"
+            )
         if claimed_gate_id is not None:
             if parked_checkpoint_id is None:
                 raise RuntimeError(
@@ -552,7 +738,12 @@ async def _run_workflow_for_scan(
                 )
                 return True
         workflow_input: Any
-        if resume_payload is not None:
+        if report_handoff_already_advanced:
+            # The prior delivery committed the node checkpoint but crashed
+            # before terminal work/ACK. Continue pending nodes; never replay
+            # the dynamic interrupt command.
+            workflow_input = None
+        elif resume_payload is not None:
             workflow_input = Command(resume=resume_payload)
         else:
             workflow_input = initial_state
@@ -564,6 +755,17 @@ async def _run_workflow_for_scan(
         )
 
         advanced_checkpoint_id = await _current_checkpoint_id(worker_workflow, config)
+        if (
+            report_handoff_checkpoint_id is not None
+            and not report_handoff_already_advanced
+            and (
+            advanced_checkpoint_id is None
+            or advanced_checkpoint_id == report_handoff_checkpoint_id
+            )
+        ):
+            raise ReportHandoffNotReady(
+                "report handoff resume did not advance its checkpoint"
+            )
         if claimed_gate_id is not None:
             if (
                 advanced_checkpoint_id is None
@@ -598,10 +800,16 @@ async def _run_workflow_for_scan(
             settings.SCAN_WORKFLOW_TIMEOUT_SECONDS,
         )
     except asyncio.CancelledError:
-        logger.error(
-            "WORKFLOW: Scan %s workflow invocation was cancelled; marking FAILED.",
+        logger.info(
+            "WORKFLOW: Scan %s worker task cancelled during drain; durable checkpoint retained.",
             scan_id_str_log,
-            exc_info=True,
+        )
+        raise
+    except ReportHandoffNotReady:
+        retryable_without_failure = True
+        logger.warning(
+            "WORKFLOW: report handoff for scan %s arrived before its exact checkpoint; requeueing.",
+            scan_id_str_log,
         )
     except ScanCancellationRequested:
         success = True
@@ -627,7 +835,7 @@ async def _run_workflow_for_scan(
         )
 
     # On any failure, mark the scan FAILED so the UI doesn't show it stuck.
-    if not success:
+    if not success and not retryable_without_failure:
         checkpoint_advanced = False
         if (
             claimed_gate_id is not None
@@ -698,7 +906,8 @@ async def _run_workflow_for_scan(
     # Best-effort checkpointer-thread cleanup for any scan now in a
     # terminal state. Runs after the FAILED-on-crash status update so
     # crash paths also get cleaned up. (M5 / G7.)
-    await _maybe_cleanup_checkpointer_thread(scan_id_str_log)
+    if not retryable_without_failure:
+        await _maybe_cleanup_checkpointer_thread(scan_id_str_log)
 
     return success
 
@@ -739,6 +948,10 @@ async def _build_initial_state(
         "attempt_id": attempt_uuid,
         "scan_type": "AUDIT",  # overwritten by the DB value in retrieve_and_prepare_data
         "current_scan_status": None,
+        "distributed_worker_pools": (
+            settings.WORKER_POOL == "scanner"
+            and (message.routing_key or "") == settings.RABBITMQ_SUBMISSION_QUEUE
+        ),
         "reasoning_llm_config_id": None,
         "utility_llm_config_id": None,
         "secondary_reasoning_llm_config_id": None,
@@ -774,6 +987,8 @@ async def _build_initial_state(
     queue_name = message.routing_key or ""
     if queue_name == settings.RABBITMQ_APPROVAL_QUEUE:
         logger.info("MSG: Resuming ANALYSIS for scan_id: %s", scan_uuid)
+    elif queue_name == settings.RABBITMQ_REPORT_QUEUE:
+        logger.info("MSG: Resuming REPORT for scan_id: %s", scan_uuid)
     else:
         logger.info("MSG: Starting new ANALYSIS for scan_id: %s", scan_uuid)
 
@@ -783,9 +998,9 @@ async def _build_initial_state(
 async def _handle_message(message: AbstractIncomingMessage) -> None:
     """Top-level message handler.
 
-    Submission-queue messages are processed inline (sequential, one at a
-    time). Approval-queue messages spawn a background task so the consumer
-    isn't blocked while another scan's full analysis runs.
+    Every accepted delivery becomes a tracked task. The per-process workflow
+    semaphore retains the unified worker's three-scan concurrency limit while
+    pool-specific prefetch values bound broker delivery in Kubernetes.
     """
     logger.info(
         "MSG: Received from queue '%s' (delivery_tag=%s).",
@@ -822,6 +1037,26 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         )
         await message.reject(requeue=False)
         return
+
+    message_carrier = trace_carrier(
+        {
+            **body,
+            **{
+                str(key).lower(): value
+                for key, value in (message.headers or {}).items()
+                if isinstance(value, str)
+            },
+        }
+    )
+    queue_age = _queue_age_seconds(message)
+    record_metric(
+        "sccap.queue.to_start",
+        queue_age,
+        {
+            "messaging.destination.name": queue_name,
+            "worker.pool": settings.WORKER_POOL,
+        },
+    )
 
     is_manual_restart = (
         queue_name == settings.RABBITMQ_SUBMISSION_QUEUE
@@ -873,29 +1108,65 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         }
         # Spawn background task — don't block the consumer while
         # the full analysis runs (can take 5–30 min of LLM calls).
-        asyncio.create_task(
+        _track_delivery(
             _run_workflow_task(
                 initial_state,
                 resume_payload,
                 message,
                 trusted_delivery,
+                message_carrier,
+                queue_name,
+                queue_age,
+            )
+        )
+        return
+
+    if queue_name == settings.RABBITMQ_REPORT_QUEUE:
+        if body_parse_failed or body.get("kind") != "report_handoff":
+            logger.error("MSG: Invalid internal report handoff body")
+            await message.reject(requeue=False)
+            return
+        if body.get("handoff_checkpoint_node") != "report_handoff":
+            logger.error("MSG: Invalid internal report checkpoint node")
+            await message.reject(requeue=False)
+            return
+        if str(body.get("outbox_id") or "") != str(trusted_delivery.outbox_id):
+            logger.error("MSG: Internal report outbox identity mismatch")
+            await message.reject(requeue=False)
+            return
+        resume_payload = {
+            "scan_id": str(initial_state["scan_id"]),
+            "attempt_id": body.get("attempt_id"),
+            "outbox_id": body.get("outbox_id"),
+            "kind": "report_handoff",
+            "handoff_checkpoint_node": "report_handoff",
+        }
+        _track_delivery(
+            _run_workflow_task(
+                initial_state,
+                resume_payload,
+                message,
+                trusted_delivery,
+                message_carrier,
+                queue_name,
+                queue_age,
             )
         )
         return
 
     # Submission queue: process inline with the context manager for
     # proper ACK/NACK semantics.
-    with principal_scope(
-        tenant_id=trusted_delivery.tenant_id,
-        principal_kind="service_principal",
-        principal_id=f"scan-worker:{trusted_delivery.outbox_id}",
-    ):
-        async with message.process(requeue=False, ignore_processed=True):
-            success = await _run_workflow_for_scan(
-                initial_state, resume_payload=resume_payload
-            )
-            if not success:
-                await message.reject(requeue=True)
+    _track_delivery(
+        _run_workflow_task(
+            initial_state,
+            resume_payload,
+            message,
+            trusted_delivery,
+            message_carrier,
+            queue_name,
+            queue_age,
+        )
+    )
 
 
 # Track in-flight analysis workflows so we don't overwhelm the LLM
@@ -903,6 +1174,21 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
 # agent calls; this semaphore puts an upper bound on concurrent scan
 # analysis to prevent memory/DB-connection exhaustion.
 _analysis_semaphore = asyncio.Semaphore(3)
+_unified_submission_semaphore = asyncio.Semaphore(1)
+
+
+@asynccontextmanager
+async def _workflow_slot(queue_name: str):
+    """Retain unified submission serialization while bounding all workflows."""
+    async with _analysis_semaphore:
+        if (
+            settings.WORKER_POOL == "unified"
+            and queue_name == settings.RABBITMQ_SUBMISSION_QUEUE
+        ):
+            async with _unified_submission_semaphore:
+                yield
+            return
+        yield
 
 
 async def _run_workflow_task(
@@ -910,21 +1196,47 @@ async def _run_workflow_task(
     resume_payload: Optional[dict],
     message: AbstractIncomingMessage,
     trusted_delivery: TrustedScanDelivery,
+    carrier: dict[str, str],
+    queue_name: str,
+    queue_age: float,
 ) -> None:
     """Background task wrapper that ACKs/NACKs the message after completion."""
-    with principal_scope(
-        tenant_id=trusted_delivery.tenant_id,
-        principal_kind="service_principal",
-        principal_id=f"scan-worker:{trusted_delivery.outbox_id}",
-    ):
-        async with _analysis_semaphore:
-            success = await _run_workflow_for_scan(
-                initial_state, resume_payload=resume_payload
-            )
-            if not success:
+    with span(
+        "sccap.rabbitmq.consume",
+        {
+            "messaging.system": "rabbitmq",
+            "messaging.operation": "process",
+            "messaging.destination.name": queue_name,
+            "outbox.id": trusted_delivery.outbox_id,
+            "scan.id": initial_state["scan_id"],
+            "attempt.id": initial_state.get("attempt_id"),
+            "worker.pool": settings.WORKER_POOL,
+            "queue.age_seconds": queue_age,
+        },
+        carrier=carrier,
+        kind="consumer",
+    ) as current:
+        try:
+            with principal_scope(
+                tenant_id=trusted_delivery.tenant_id,
+                principal_kind="service_principal",
+                principal_id=f"scan-worker:{trusted_delivery.outbox_id}",
+            ):
+                async with _workflow_slot(queue_name):
+                    success = await _run_workflow_for_scan(
+                        initial_state, resume_payload=resume_payload
+                    )
+                    if not success:
+                        await message.reject(requeue=True)
+                    else:
+                        await message.ack()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            mark_error(current, exc)
+            if not message.processed:
                 await message.reject(requeue=True)
-            else:
-                await message.ack()
+            raise
 
 
 class WorkerRunner:
@@ -942,32 +1254,78 @@ class WorkerRunner:
         logger.info("WORKER: Stop requested.")
         self._stop_event.set()
 
-    async def run(self) -> None:
+    async def _watch_drain_request(self) -> None:
+        drain_path = Path(settings.WORKER_DRAIN_FILE)
         while not self._stop_event.is_set():
+            if drain_path.exists():
+                logger.info("WORKER: Explicit drain request observed.")
+                self.request_stop()
+                return
             try:
-                await self._consume_forever()
-                # If _consume_forever returns cleanly (not via exception),
-                # it's because stop was requested. Break out.
-                break
-            except asyncio.CancelledError:
-                logger.info("WORKER: Run cancelled.")
-                raise
-            except Exception as e:
-                logger.error(
-                    "WORKER: Consume loop error: %s. Retrying in %.0fs.",
-                    e,
-                    self.__backoff,
-                    exc_info=True,
-                )
-
-            if self._stop_event.is_set():
-                break
-            try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=self.__backoff)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=1)
             except asyncio.TimeoutError:
-                pass
-            self.__backoff = min(self.__backoff * 2, _BACKOFF_CAP_SECONDS)
+                continue
 
+    async def _drain_deliveries(self) -> None:
+        if not _ACTIVE_DELIVERIES:
+            return
+        logger.info(
+            "WORKER: Draining %d active deliveries for up to %ds.",
+            len(_ACTIVE_DELIVERIES),
+            settings.WORKER_DRAIN_TIMEOUT_SECONDS,
+        )
+        _done, pending = await asyncio.wait(
+            set(_ACTIVE_DELIVERIES),
+            timeout=settings.WORKER_DRAIN_TIMEOUT_SECONDS,
+        )
+        if pending:
+            logger.warning(
+                "WORKER: Drain deadline reached; cancelling %d deliveries for durable redelivery.",
+                len(pending),
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    @staticmethod
+    def _mark_drained() -> None:
+        drained = Path(settings.WORKER_DRAINED_FILE)
+        try:
+            drained.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            drained.touch(mode=0o600, exist_ok=True)
+        except OSError:
+            logger.warning("WORKER: Could not write drained marker.")
+
+    async def run(self) -> None:
+        drain_watcher = asyncio.create_task(self._watch_drain_request())
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    await self._consume_forever()
+                    break
+                except asyncio.CancelledError:
+                    logger.info("WORKER: Run cancelled.")
+                    raise
+                except Exception as e:
+                    logger.error(
+                        "WORKER: Consume loop error: %s. Retrying in %.0fs.",
+                        e,
+                        self.__backoff,
+                        exc_info=True,
+                    )
+
+                if self._stop_event.is_set():
+                    break
+                try:
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=self.__backoff
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                self.__backoff = min(self.__backoff * 2, _BACKOFF_CAP_SECONDS)
+        finally:
+            drain_watcher.cancel()
+            await asyncio.gather(drain_watcher, return_exceptions=True)
         logger.info("WORKER: Run loop exited.")
 
     async def _consume_forever(self) -> None:
@@ -981,25 +1339,27 @@ class WorkerRunner:
 
         try:
             channel = await self._connection.channel()
-            # prefetch=1 keeps us aligned with the old blocking behavior —
-            # one scan at a time per worker. Increase if you want per-worker
-            # parallelism across scans (analyze_files_parallel already gives
-            # us intra-scan parallelism via the CONCURRENT_LLM_LIMIT semaphore).
-            await channel.set_qos(prefetch_count=5)
+            await channel.set_qos(prefetch_count=settings.WORKER_PREFETCH_COUNT)
 
             queues = []
-            for queue_name in (
-                settings.RABBITMQ_SUBMISSION_QUEUE,
-                settings.RABBITMQ_APPROVAL_QUEUE,
-            ):
+            consumers = []
+            for queue_name in queues_for_pool(settings.WORKER_POOL):
                 queue = await channel.declare_queue(queue_name, durable=True)
-                await queue.consume(_handle_message)
+                consumer_tag = await queue.consume(_handle_message)
                 queues.append(queue_name)
+                consumers.append((queue, consumer_tag))
 
             logger.info(
                 "WORKER: Consuming from queues: %s. Waiting for messages…", queues
             )
             await self._stop_event.wait()
+            for queue, consumer_tag in consumers:
+                try:
+                    await queue.cancel(consumer_tag)
+                except Exception:
+                    logger.warning("WORKER: Consumer cancellation failed.")
+            await self._drain_deliveries()
+            self._mark_drained()
         finally:
             if self._connection is not None and not self._connection.is_closed:
                 await self._connection.close()
@@ -1008,6 +1368,16 @@ class WorkerRunner:
 
 
 async def _async_main() -> None:
+    for runtime_file in (
+        Path(settings.WORKER_DRAIN_FILE),
+        Path(settings.WORKER_DRAINED_FILE),
+    ):
+        try:
+            runtime_file.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("WORKER: Could not clear stale drain marker.")
+    configure_otel(settings.OTEL_SERVICE_NAME)
+
     # Initialise the per-provider LLM rate limiters BEFORE we start
     # consuming. The agent code calls `get_rate_limiter_for_provider`
     # which raises RuntimeError if the registry hasn't been built —
@@ -1017,6 +1387,11 @@ async def _async_main() -> None:
     # and the silent gather upstream let the scan complete with 0
     # findings. (2026-05-04)
     initialize_rate_limiters()
+
+    # Build the graph before accepting deliveries. Imports remain lazy so the
+    # API-only test/runtime image can inspect pool contracts, while a real
+    # worker still fails startup immediately if a scanner dependency is absent.
+    await get_workflow()
 
     # The worker must enforce the same RLS role posture as the API before it
     # accepts a queue delivery. A superuser, table owner, or BYPASSRLS login
@@ -1071,6 +1446,7 @@ async def _async_main() -> None:
             flush_langfuse()
         except Exception as e:
             logger.warning("WORKER: Error during Langfuse flush: %s", e)
+        shutdown_otel()
         logger.info("WORKER: Consumer has fully shut down.")
 
 

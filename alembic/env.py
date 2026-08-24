@@ -2,8 +2,10 @@
 import asyncio
 import logging
 from logging.config import fileConfig
+import os
 import sys
 from pathlib import Path
+import urllib.parse
 
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.engine import Connection
@@ -25,21 +27,50 @@ try:
     # This ensures 'from app...' works when running from the project root
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-    from app.infrastructure.database.database import Base
-    from app.config.config import settings
+    from app.infrastructure.database.base import Base
 
-    log.info("Successfully imported Base and settings.")
+    log.info("Successfully imported database metadata.")
     # Ensure all models are imported so Base.metadata is populated
     import app.infrastructure.database.models  # noqa: F401 — registers all models with Base.metadata
 
-    alembic_db_url = settings.ALEMBIC_DATABASE_URL
+    # Migrations are intentionally isolated from application Settings so the
+    # hook needs only a database URL, never broker/auth/provider credentials.
+    alembic_db_url = os.environ.get("ALEMBIC_DATABASE_URL")
     if not alembic_db_url:
-        raise ValueError("ALEMBIC_DATABASE_URL could not be constructed from settings.")
+        # Keep Alembic independent from application Settings while preserving
+        # the documented local-Compose fallback. Production supplies the
+        # explicit migration-owner URL; Compose derives the same URL from its
+        # POSTGRES_* environment without importing broker/provider settings.
+        required = (
+            "POSTGRES_USER",
+            "POSTGRES_PASSWORD",
+            "POSTGRES_DB",
+            "POSTGRES_HOST_ALEMBIC",
+            "POSTGRES_PORT",
+        )
+        missing = [name for name in required if not os.environ.get(name)]
+        if missing:
+            raise ValueError(
+                "ALEMBIC_DATABASE_URL or all migration POSTGRES_* variables "
+                f"are required; missing: {', '.join(missing)}"
+            )
+        user = urllib.parse.quote(os.environ["POSTGRES_USER"], safe="")
+        password = urllib.parse.quote(os.environ["POSTGRES_PASSWORD"], safe="")
+        host = os.environ["POSTGRES_HOST_ALEMBIC"]
+        port = os.environ["POSTGRES_PORT"]
+        database = urllib.parse.quote(os.environ["POSTGRES_DB"], safe="")
+        alembic_db_url = (
+            f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{database}"
+        )
 
     # ASVS V02.2.1: enforce expected URL scheme before engine is created
     if not alembic_db_url.startswith(("postgresql+asyncpg://", "postgresql://")):
         raise ValueError(
             "ALEMBIC_DATABASE_URL must use postgresql+asyncpg or postgresql scheme"
+        )
+    if alembic_db_url.startswith("postgresql://"):
+        alembic_db_url = alembic_db_url.replace(
+            "postgresql://", "postgresql+asyncpg://", 1
         )
 
     # Set the sqlalchemy.url in the config for Alembic to use
@@ -106,10 +137,9 @@ def do_run_migrations(connection: Connection):
 
 async def run_async_migrations() -> None:
     """Connect asynchronously and run migrations."""
-    # We use the URL from settings directly, as it's configured for host access
-    db_url = settings.ALEMBIC_DATABASE_URL
+    db_url = config.get_main_option("sqlalchemy.url")
     if not db_url:
-        raise ValueError("ALEMBIC_DATABASE_URL is not set in settings.")
+        raise ValueError("Alembic database URL is not configured.")
 
     connectable = create_async_engine(db_url)
 

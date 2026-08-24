@@ -61,6 +61,7 @@ from app.infrastructure.workflows.nodes.results import (
     save_final_report_node,
     save_results_node,
 )
+from app.infrastructure.workflows.nodes.report_handoff import report_handoff_node
 from app.infrastructure.workflows.nodes.retrieve import retrieve_and_prepare_data_node
 from app.infrastructure.workflows.nodes.validate_cross_file import (
     validate_cross_file_node,
@@ -110,6 +111,7 @@ _add_workflow_node("validate_cross_file", validate_cross_file_node)
 _add_workflow_node("consolidate_and_patch", consolidate_and_patch_node)
 _add_workflow_node("verify_patches", verify_patches_node)
 _add_workflow_node("save_results", save_results_node)
+_add_workflow_node("report_handoff", report_handoff_node)
 _add_workflow_node("save_final_report", save_final_report_node)
 _add_workflow_node("handle_error", handle_error_node)
 
@@ -381,8 +383,9 @@ workflow.add_conditional_edges(
 workflow.add_conditional_edges(
     "save_results",
     should_continue,
-    {"continue": "save_final_report", "handle_error": "handle_error"},
+    {"continue": "report_handoff", "handle_error": "handle_error"},
 )
+workflow.add_edge("report_handoff", "save_final_report")
 workflow.add_edge("save_final_report", END)
 workflow.add_edge("handle_error", END)
 

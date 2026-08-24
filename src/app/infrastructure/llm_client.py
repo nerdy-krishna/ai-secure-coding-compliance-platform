@@ -48,7 +48,13 @@ from app.infrastructure.llm_usage_capture import (
     load_active_price_override,
     record_run_usage,
 )
-from app.infrastructure.observability import get_langfuse, mask
+from app.infrastructure.observability import (
+    get_langfuse,
+    mark_error,
+    mask,
+    record_metric,
+    span as otel_span,
+)
 from app.shared.lib import cost_estimation
 from app.shared.lib.circuit_breaker import call as circuit_breaker_call
 from app.shared.lib.llm_estimation import calibrate_estimate
@@ -541,13 +547,25 @@ class LLMClient:
                 )
 
         try:
-            await circuit_breaker_call(
-                key=circuit_key,
-                fn=lambda: retry_with_backoff(
-                    lambda: _invoke_llm(agent), on_retry=_on_retry
-                ),
-                is_retryable=_default_is_retryable,
-            )
+            with otel_span(
+                "sccap.provider.request",
+                {
+                    "scan.id": usage_context.scan_id,
+                    "provider.name": self.provider_name,
+                },
+                kind="client",
+            ) as operational_span:
+                try:
+                    await circuit_breaker_call(
+                        key=circuit_key,
+                        fn=lambda: retry_with_backoff(
+                            lambda: _invoke_llm(agent), on_retry=_on_retry
+                        ),
+                        is_retryable=_default_is_retryable,
+                    )
+                except Exception as exc:
+                    mark_error(operational_span, exc)
+                    raise
         except asyncio.CancelledError:
             try:
                 await _finalize_usage_budget(
@@ -624,6 +642,16 @@ class LLMClient:
                     )
                 )
                 cost = float(ledger_cost) if ledger_cost is not None else None
+                if usage_event_created and cost is not None:
+                    record_metric(
+                        "sccap.llm.spend",
+                        cost,
+                        {
+                            "scan.id": usage_context.scan_id,
+                            "provider.name": self.provider_name,
+                        },
+                        kind="counter",
+                    )
             except Exception:
                 # Never replay a successful provider request because accounting
                 # persistence failed; that risks charging twice. The missing ledger

@@ -27,10 +27,32 @@ from app.infrastructure.observability.langfuse_client import (
     get_langfuse,
 )
 from app.infrastructure.observability.mask import mask
+from app.infrastructure.observability.otel import (
+    configure_otel,
+    inject_trace_context,
+    instrument_sqlalchemy,
+    mark_error,
+    mark_status_error,
+    record_metric,
+    safe_attributes,
+    shutdown_otel,
+    span,
+    trace_carrier,
+)
 
 __all__ = [
     "flush_langfuse",
     "get_langchain_handler",
     "get_langfuse",
     "mask",
+    "configure_otel",
+    "inject_trace_context",
+    "instrument_sqlalchemy",
+    "mark_error",
+    "mark_status_error",
+    "record_metric",
+    "safe_attributes",
+    "shutdown_otel",
+    "span",
+    "trace_carrier",
 ]

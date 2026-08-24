@@ -228,7 +228,10 @@ stateDiagram-v2
 | `code_submission_queue`        | API → Worker       | same          | Start of every scan                                                  |
 | `analysis_approved_queue`      | API → Worker       | same          | Resume after a `*_APPROVAL` interrupt                                |
 
-Both carry `DeliveryMode.PERSISTENT`; the `sccap-bounded-queues` RabbitMQ policy caps each at 100k messages with `overflow=drop-head` so a runaway producer cannot exhaust disk.
+Submission, approval, and internal report-handoff deliveries carry
+`DeliveryMode.PERSISTENT`; `sccap-bounded-queues` caps each at 100k with
+`overflow=reject-publish`. Broker pressure therefore remains an unpublished or
+retrying outbox intent instead of silently deleting the oldest durable work.
 
 ### Interrupt payloads (`Command(resume=...)`)
 

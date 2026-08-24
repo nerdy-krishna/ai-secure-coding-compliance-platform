@@ -79,7 +79,7 @@ flowchart TB
     subgraph DataTier["Data Tier"]
       direction LR
       PG[("PostgreSQL 16<br/>scans · findings · projects · users<br/>chat_messages · llm_interactions<br/>frameworks · agents · prompt_templates<br/>system_configurations · tenants<br/>sso_providers · webauthn_credentials<br/>auth_audit_events · scim_tokens<br/>rag_preprocessing_jobs · semgrep_rules<br/>scan_events · scan_outbox · checkpoints")]:::data
-      RMQ[/"RabbitMQ 3.12-management<br/>code_submission_queue<br/>analysis_approved_queue<br/>policy: max-length=100k, drop-head"/]:::data
+      RMQ[/"RabbitMQ 3.12-management<br/>submission / approval / report queues<br/>policy: max-length=100k, reject-publish"/]:::data
       QD[("Qdrant<br/>SECURITY_GUIDELINES_COLLECTION<br/>CWE_COLLECTION_NAME<br/>per-framework payload metadata")]:::data
       Volumes[("Named volumes<br/>postgres_data · rabbitmq_data<br/>qdrant_data · loki-data · grafana-data")]:::data
     end
@@ -237,7 +237,7 @@ flowchart TB
 | Store         | Notes                                                                                                                          |
 |---------------|--------------------------------------------------------------------------------------------------------------------------------|
 | PostgreSQL 16 | `postgresql+asyncpg://`; Alembic migrations under `/alembic/versions/`. Holds business state **and** LangGraph `checkpoints` table |
-| RabbitMQ 3.12 | Two named queues (`code_submission_queue`, `analysis_approved_queue`); `sccap-bounded-queues` policy enforces `max-length=100000` + `overflow=drop-head` |
+| RabbitMQ 3.12 | Three named queues (`code_submission_queue`, `analysis_approved_queue`, `report_export_queue`); `sccap-bounded-queues` enforces `max-length=100000` + `overflow=reject-publish` so pressure retries through the outbox instead of deleting old work |
 | Qdrant        | SHA256-pinned, mandatory `QDRANT_API_KEY`, internal-only (no host port)                                                        |
 | Volumes       | Persistent Docker named volumes — see diagram 12                                                                               |
 

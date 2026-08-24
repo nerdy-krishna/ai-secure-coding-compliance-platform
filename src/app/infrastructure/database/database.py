@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import declarative_base
+from app.infrastructure.database.base import Base
+
+__all__ = ["AsyncSessionLocal", "Base", "get_db"]
 
 # It's best practice to use a centralized settings management system
 # from `app.config.config` instead of loading environment variables in multiple files.
@@ -45,6 +47,12 @@ engine = create_async_engine(
     hide_parameters=True,
 )
 
+# Operational telemetry records only the SQL operation verb; SQL text and
+# bound parameters never leave the process.
+from app.infrastructure.observability import instrument_sqlalchemy  # noqa: E402
+
+instrument_sqlalchemy(engine.sync_engine)
+
 # Create an asynchronous session factory.
 # expire_on_commit=False is a good default for FastAPI to prevent issues
 # with accessing ORM objects from a session after a commit.
@@ -63,11 +71,6 @@ from app.infrastructure.database.tenant_context import (  # noqa: E402
 )
 
 install_tenant_context_hooks()
-
-# Define the declarative base for our ORM models.
-# All models in src/app/db/models.py will inherit from this Base.
-Base = declarative_base()
-
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
