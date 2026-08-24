@@ -124,7 +124,7 @@ async def main() -> None:
         db.add(
             RoleAssignment(
                 user_id=user.id,
-                tenant_id=None,
+                tenant_id=user.tenant_id,
                 role_key=DEVELOPER,
             )
         )
