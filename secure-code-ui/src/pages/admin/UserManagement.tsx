@@ -240,14 +240,14 @@ const UserManagementTab: React.FC = () => {
 
       <div className="surface" style={{ padding: 0 }}>
         <div
-          className="section-head"
+          className="section-head user-admin-toolbar"
           style={{ padding: "14px 18px 10px", marginBottom: 0 }}
         >
           <h3 style={{ margin: 0 }}>
             {loading ? "Loading…" : `${users.length} users`}
           </h3>
-          <div style={{ display: "flex", gap: 8 }}>
-            <div className="input-with-icon" style={{ width: 220 }}>
+          <div className="user-admin-actions" style={{ display: "flex", gap: 8 }}>
+            <div className="input-with-icon user-admin-search">
               <Icon.Search size={14} />
               <input
                 className="sccap-input"
@@ -287,6 +287,7 @@ const UserManagementTab: React.FC = () => {
             {loading ? "Loading…" : "No users match your search."}
           </div>
         ) : (
+          <div className="table-scroll">
           <table className="sccap-t">
             <thead>
               <tr>
@@ -440,6 +441,7 @@ const UserManagementTab: React.FC = () => {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

@@ -746,11 +746,12 @@ const SubmitPage: React.FC = () => {
       </div>
 
       <div
-        style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20 }}
+        className="submission-layout"
       >
         <div style={{ display: "grid", gap: 16 }}>
           <div className="surface" style={{ padding: 20 }}>
           <label
+            htmlFor="field-project-select"
             style={{
               display: "block",
               fontSize: 12,
@@ -762,13 +763,14 @@ const SubmitPage: React.FC = () => {
             Project
           </label>
           <div
+            className="submission-two-column"
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
               gap: 12,
             }}
           >
             <select
+              id="field-project-select"
               className="sccap-select"
               value={selectedProjectId ?? "__new__"}
               onChange={(e) => {
@@ -1099,9 +1101,9 @@ const SubmitPage: React.FC = () => {
             Scan configuration
           </h3>
           <div
+            className="submission-two-column"
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
               gap: 20,
             }}
           >
@@ -1178,6 +1180,7 @@ const SubmitPage: React.FC = () => {
 
             <div>
               <label
+                htmlFor="field-reasoning-llm"
                 style={{
                   display: "block",
                   fontSize: 12,
@@ -1217,6 +1220,7 @@ const SubmitPage: React.FC = () => {
               </div>
 
               <label
+                htmlFor="field-utility-llm"
                 style={{
                   display: "block",
                   fontSize: 12,
@@ -1296,6 +1300,7 @@ const SubmitPage: React.FC = () => {
                 <div style={{ marginTop: 10 }}>
                   <select
                     id="field-secondary-llm"
+                    aria-label="Secondary reasoning LLM"
                     className="sccap-select"
                     value={secondaryLlmConfigId}
                     onChange={(e) => setSecondaryLlmConfigId(e.target.value)}
@@ -1422,9 +1427,9 @@ const SubmitPage: React.FC = () => {
                 </span>
               </label>
               <div
+                className="submission-two-column"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
                   gap: 8,
                   opacity: disableTemperature ? 0.45 : 1,
                 }}

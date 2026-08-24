@@ -18,6 +18,7 @@ from app.infrastructure.database.models import (
     Framework,
     LLMConfiguration,
     Project,
+    RoleAssignment,
     Scan,
     ScanArtifact,
     ScanAttempt,
@@ -32,6 +33,7 @@ from app.infrastructure.database.repositories.scan_artifact_repo import (
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.shared.lib.encryption import FernetEncrypt
+from app.shared.lib.permissions import PLATFORM_OWNER
 from app.shared.lib.scan_status import (
     STATUS_COMPLETED,
     STATUS_PENDING_APPROVAL,
@@ -124,6 +126,13 @@ async def _setup() -> None:
         )
         db.add(user)
         await db.flush()
+        db.add(
+            RoleAssignment(
+                user_id=user.id,
+                tenant_id=None,
+                role_key=PLATFORM_OWNER,
+            )
+        )
 
         llm = LLMConfiguration(
             name=f"{FIXTURE_LLM_PREFIX}{user.id}",

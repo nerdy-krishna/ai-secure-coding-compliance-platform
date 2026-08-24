@@ -389,7 +389,7 @@ export const FindingLineage: React.FC<Props> = ({ scanId }) => {
           style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)",
             fontSize: 12, width: 180, background: "var(--bg-soft)", color: "var(--fg)" }}
         />
-        <select value={filterSev} onChange={(e) => setFilterSev(e.target.value)}
+        <select aria-label="Filter finding lineage by severity" value={filterSev} onChange={(e) => setFilterSev(e.target.value)}
           style={{ padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)",
             fontSize: 12, background: "var(--bg-soft)", color: "var(--fg)" }}>
           <option value="">All severities</option>

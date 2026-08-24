@@ -33,9 +33,10 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   const hasTrail = crumbs.length > 1;
 
   return (
-    <div>
+    <div className="page-header">
       {hasTrail && (
         <nav
+          className="page-header-breadcrumbs"
           style={{
             display: "flex",
             alignItems: "center",
@@ -87,6 +88,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
       )}
       {chip && <div style={{ marginBottom: 8 }}>{chip}</div>}
       <div
+        className="page-header-row"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -94,7 +96,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
           gap: 20,
         }}
       >
-        <div>
+        <div className="page-header-copy">
           <h1
             style={{
               color: "var(--fg)",
@@ -122,7 +124,10 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
           )}
         </div>
         {actions && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div
+            className="page-header-actions"
+            style={{ display: "flex", gap: 8, alignItems: "center" }}
+          >
             {actions}
           </div>
         )}

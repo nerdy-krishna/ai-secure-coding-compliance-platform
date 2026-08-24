@@ -184,17 +184,17 @@ const FindingsBreakdown: React.FC<{ debug: ScanFindingsDebug }> = ({ debug }) =>
       {/* Filters */}
       <div style={{ display: "flex", gap: 12, padding: "10px 18px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", alignItems: "center" }}>
         <span style={{ fontSize: 11, color: "var(--fg-subtle)", textTransform: "uppercase" }}>Severity</span>
-        <select value={sevFilter} onChange={e => setSevFilter(e.target.value)}
+        <select aria-label="Filter findings by severity" value={sevFilter} onChange={e => setSevFilter(e.target.value)}
           style={{ background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "var(--fg)" }}>
           {sevs.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <span style={{ fontSize: 11, color: "var(--fg-subtle)", textTransform: "uppercase" }}>Source</span>
-        <select value={sourceCat} onChange={e => setSourceCat(e.target.value as SourceCategory)}
+        <select aria-label="Filter findings by source category" value={sourceCat} onChange={e => setSourceCat(e.target.value as SourceCategory)}
           style={{ background: "var(--bg-soft)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "var(--fg)" }}>
           {SOURCE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         {sourceCat === "LLM" && (
-          <select value={sourceAgent} onChange={e => setSourceAgent(e.target.value)}
+          <select aria-label="Filter findings by source agent" value={sourceAgent} onChange={e => setSourceAgent(e.target.value)}
             style={{ background: "var(--bg-soft)", border: "1px solid var(--primary)", borderRadius: 6, padding: "4px 8px", fontSize: 12, color: "var(--fg)" }}>
             {llmAgents.map(a => <option key={a} value={a}>{a}</option>)}
           </select>

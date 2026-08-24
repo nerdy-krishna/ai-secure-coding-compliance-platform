@@ -90,12 +90,11 @@ export const UserDashboard: React.FC = () => {
     <div className="fade-in" style={{ display: "grid", gap: 20 }}>
       {/* hero */}
       <div
-        className="sccap-card"
+        className="sccap-card dashboard-hero-card"
         style={{
           background: "linear-gradient(135deg, var(--bg-elev), var(--bg-soft))",
           padding: 28,
           display: "grid",
-          gridTemplateColumns: "1fr auto",
           alignItems: "center",
           gap: 20,
         }}
@@ -118,7 +117,7 @@ export const UserDashboard: React.FC = () => {
             {totalOpen === 1 ? "" : "s"} ·{" "}
             <b>${stats.cost_this_month_usd.toFixed(2)}</b> spent
           </div>
-          <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+          <div className="dashboard-hero-actions">
             <button
               className="sccap-btn sccap-btn-primary"
               onClick={() => navigate("/submission/submit")}
@@ -140,9 +139,9 @@ export const UserDashboard: React.FC = () => {
 
       {/* metrics */}
       <div
+        className="dashboard-metric-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
           gap: 16,
         }}
       >
@@ -173,9 +172,7 @@ export const UserDashboard: React.FC = () => {
       </div>
 
       {/* two-col */}
-      <div
-        style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}
-      >
+      <div className="dashboard-content-grid">
         {/* recent scans */}
         <div className="sccap-card" style={{ padding: 0, overflow: "hidden" }}>
           <SectionHead

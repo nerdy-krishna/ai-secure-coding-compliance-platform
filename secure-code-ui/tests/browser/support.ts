@@ -21,6 +21,7 @@ export interface BrowserFixture {
 }
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../");
+const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
@@ -83,5 +84,51 @@ export async function login(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/account\/dashboard$/);
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Dashboard", exact: true }),
+  ).toBeVisible();
+
+  // The browser fixture is a platform owner so it can exercise the complete
+  // authenticated route inventory. In multi-tenant mode, platform owners must
+  // explicitly enter a tenant before tenant-scoped scan APIs will authorize.
+  const tenantEntry = await page.evaluate(
+    async ({ password: fixturePassword, tenantId }) => {
+      const csrfResponse = await fetch("/api/v1/auth/session/csrf", {
+        credentials: "include",
+      });
+      const csrfBody = (await csrfResponse.json()) as { csrf_token?: string };
+      if (!csrfResponse.ok || !csrfBody.csrf_token) {
+        return { status: csrfResponse.status, detail: "CSRF token unavailable" };
+      }
+      const response = await fetch("/api/v1/admin/tenants/entry", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfBody.csrf_token,
+        },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          password: fixturePassword,
+          reason: "Automated browser acceptance fixture",
+        }),
+      });
+      const body = (await response.json()) as {
+        detail?: string;
+        entry_token?: string;
+      };
+      return { status: response.status, ...body };
+    },
+    { password, tenantId: DEFAULT_TENANT_ID },
+  );
+  if (tenantEntry.status !== 200 || !tenantEntry.entry_token) {
+    throw new Error(
+      `browser tenant entry failed (${tenantEntry.status}): ${tenantEntry.detail ?? "missing grant"}`,
+    );
+  }
+  await page.context().setExtraHTTPHeaders({
+    "X-SCCAP-Tenant-Entry": tenantEntry.entry_token,
+  });
+  await page.goto("/account/dashboard");
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 }

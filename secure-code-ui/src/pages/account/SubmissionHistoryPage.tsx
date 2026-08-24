@@ -110,11 +110,10 @@ const SubmissionHistoryPage: React.FC = () => {
       </div>
 
       <div
-        className="sccap-card"
+        className="sccap-card history-filter-grid"
         style={{
           padding: 14,
           display: "grid",
-          gridTemplateColumns: "1fr 180px 180px",
           gap: 10,
         }}
       >

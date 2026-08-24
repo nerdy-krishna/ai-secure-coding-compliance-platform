@@ -149,6 +149,7 @@ const AgentManagementPage: React.FC = () => {
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
       <div
+        className="admin-page-heading"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -162,7 +163,7 @@ const AgentManagementPage: React.FC = () => {
             Specialized analysis agents and their RAG retrieval queries.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="admin-page-heading-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <RestoreDefaultsButton
             label="Agents"
             invalidateKeys={[["agents"], ["prompts"], ["frameworks"]]}
@@ -205,9 +206,9 @@ const AgentManagementPage: React.FC = () => {
         </div>
       ) : (
         <div
+          className="admin-card-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
             gap: 14,
           }}
         >

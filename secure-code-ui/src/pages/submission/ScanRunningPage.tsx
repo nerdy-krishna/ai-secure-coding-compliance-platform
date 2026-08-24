@@ -1284,9 +1284,9 @@ const ScanRunningPage: React.FC = () => {
 
       {/* Body — 2-col grid, content + sidebar. */}
       <div
+        className="scan-running-layout"
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 360px",
           gap: 20,
           alignItems: "start",
         }}

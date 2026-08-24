@@ -153,7 +153,7 @@ export const SevBar: React.FC<SevBarProps> = ({
   const total = c + h + m + l + i || 1;
   const pct = (n: number) => `${((n / total) * 100).toFixed(1)}%`;
   return (
-    <div className="stat-bar" aria-label="Severity breakdown">
+    <div className="stat-bar" role="img" aria-label="Severity breakdown">
       <span style={{ width: pct(c), background: "var(--critical)" }} />
       <span style={{ width: pct(h), background: "var(--high)" }} />
       <span style={{ width: pct(m), background: "var(--medium)" }} />

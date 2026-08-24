@@ -160,6 +160,7 @@ const PromptManagementPage: React.FC = () => {
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
       <div
+        className="admin-page-heading"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -174,7 +175,7 @@ const PromptManagementPage: React.FC = () => {
             automatic fallback.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="admin-page-heading-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <RestoreDefaultsButton
             label="Prompts"
             invalidateKeys={[["prompts"], ["agents"], ["frameworks"]]}
@@ -186,9 +187,9 @@ const PromptManagementPage: React.FC = () => {
       </div>
 
       <div
+        className="prompt-management-layout"
         style={{
           display: "grid",
-          gridTemplateColumns: "280px 1fr",
           gap: 16,
           alignItems: "start",
         }}
@@ -289,6 +290,7 @@ const PromptManagementPage: React.FC = () => {
 
         <div className="surface" style={{ padding: 18 }}>
           <div
+            className="prompt-editor-heading"
             style={{
               display: "flex",
               justifyContent: "space-between",
@@ -299,7 +301,13 @@ const PromptManagementPage: React.FC = () => {
           >
             <h3
               className="mono"
-              style={{ fontSize: 14, color: "var(--fg)", margin: 0 }}
+              style={{
+                fontSize: 14,
+                color: "var(--fg)",
+                margin: 0,
+                minWidth: 0,
+                overflowWrap: "anywhere",
+              }}
             >
               {form.id ? form.name : "New template"}
             </h3>
@@ -324,9 +332,9 @@ const PromptManagementPage: React.FC = () => {
           </div>
 
           <div
+            className="settings-two-column"
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
               gap: 10,
               marginBottom: 10,
             }}

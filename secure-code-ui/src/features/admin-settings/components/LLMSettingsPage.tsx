@@ -303,9 +303,9 @@ const LLMSettingsPage: React.FC = () => {
         </div>
         <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
           <div
+            className="settings-two-column"
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
               gap: 12,
             }}
           >
@@ -541,7 +541,8 @@ const LLMSettingsPage: React.FC = () => {
             No configurations match the current filter.
           </div>
         ) : (
-          <table className="sccap-t">
+          <div className="table-scroll">
+            <table className="sccap-t">
             <thead>
               <tr>
                 <th>Name</th>
@@ -610,7 +611,8 @@ const LLMSettingsPage: React.FC = () => {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         )}
       </div>
 

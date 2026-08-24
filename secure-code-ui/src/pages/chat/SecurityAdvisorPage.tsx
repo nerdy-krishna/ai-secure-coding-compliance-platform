@@ -252,9 +252,9 @@ const SecurityAdvisorPage: React.FC = () => {
         </div>
       </div>
       <div
+        className="advisor-layout"
         style={{
           display: "grid",
-          gridTemplateColumns: "240px 1fr 280px",
           gap: 16,
           height: "calc(100vh - 170px)",
         }}

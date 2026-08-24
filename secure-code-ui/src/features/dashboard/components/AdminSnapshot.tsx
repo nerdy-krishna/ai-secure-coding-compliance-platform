@@ -75,7 +75,7 @@ export const AdminSnapshot: React.FC = () => {
     <div className="fade-in" style={{ display: "grid", gap: 20 }}>
       {/* Admin quick-access */}
       <div
-        className="sccap-card"
+        className="sccap-card dashboard-hero-card"
         style={{
           display: "flex",
           flexWrap: "wrap",
@@ -139,7 +139,6 @@ export const AdminSnapshot: React.FC = () => {
           background: "linear-gradient(135deg, var(--bg-elev), var(--bg-soft))",
           padding: 28,
           display: "grid",
-          gridTemplateColumns: "1fr auto",
           alignItems: "center",
           gap: 20,
         }}
@@ -158,7 +157,7 @@ export const AdminSnapshot: React.FC = () => {
             {stats.scans_this_month === 1 ? "" : "s"} this month · platform spend{" "}
             <b>${stats.cost_this_month_usd.toFixed(2)}</b>
           </div>
-          <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+          <div className="dashboard-hero-actions">
             <Link
               to="/admin/user-groups"
               className="sccap-btn sccap-btn-primary"
@@ -187,9 +186,9 @@ export const AdminSnapshot: React.FC = () => {
       </div>
 
       <div
+        className="dashboard-metric-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
           gap: 16,
         }}
       >
@@ -235,9 +234,9 @@ export const AdminSnapshot: React.FC = () => {
             info={stats.open_findings.informational}
           />
           <div
+            className="dashboard-severity-grid"
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(5, 1fr)",
               gap: 12,
               marginTop: 14,
               fontSize: 12,

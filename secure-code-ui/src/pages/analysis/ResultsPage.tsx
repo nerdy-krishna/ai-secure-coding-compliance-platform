@@ -782,7 +782,7 @@ const ResultsPage: React.FC = () => {
 
       {/* summary strip */}
       <div
-        className="surface"
+        className="surface results-summary-grid"
         style={{
           padding: 16,
           display: "grid",
@@ -1520,6 +1520,7 @@ const ResultsPage: React.FC = () => {
         />
       ) : (
       <div
+        className="results-workspace"
         style={{
           display: "grid",
           gridTemplateColumns: [
@@ -1702,6 +1703,7 @@ const ResultsPage: React.FC = () => {
               </span>
               <select
                 className="sccap-input"
+                aria-label="Filter findings by triage disposition"
                 value={dispFilter}
                 onChange={(e) =>
                   setDispFilter(e.target.value as "all" | FindingDisposition)
@@ -2650,6 +2652,7 @@ const BulkDispositionBar: React.FC<{
       </strong>
       <select
         className="sccap-input"
+        aria-label="Set disposition for selected findings"
         value={disp}
         onChange={(e) => setDisp(e.target.value as FindingDisposition | "")}
         disabled={busy}

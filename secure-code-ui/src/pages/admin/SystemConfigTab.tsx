@@ -454,9 +454,9 @@ const SystemConfigTab: React.FC = () => {
       </div>
 
       <div
+        className="settings-two-column"
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
           gap: 16,
         }}
       >
@@ -740,7 +740,7 @@ const SystemConfigTab: React.FC = () => {
         title="Concurrency limits"
         description="Max in-flight LLM and scanner calls. Changes take effect on the next scan — no restart needed. Increase for faster scans on high-RPM providers (DeepSeek, OpenAI T4). Decrease if you hit rate-limit errors."
       >
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div className="settings-two-column" style={{ display: "grid", gap: 14 }}>
           <LabeledNumber
             label="LLM agents"
             value={llmLimit}
@@ -819,7 +819,8 @@ const SystemConfigTab: React.FC = () => {
             No custom settings stored.
           </div>
         ) : (
-          <table className="sccap-t">
+          <div className="table-scroll">
+            <table className="sccap-t">
             <thead>
               <tr>
                 <th>Key</th>
@@ -889,7 +890,8 @@ const SystemConfigTab: React.FC = () => {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         )}
       </div>
 

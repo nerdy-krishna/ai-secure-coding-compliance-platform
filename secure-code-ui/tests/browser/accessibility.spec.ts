@@ -65,11 +65,16 @@ async function expectShellContract(page: Page): Promise<void> {
     page.getByRole("heading", { name: "This page could not be loaded" }),
   ).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
-  await expect(page.locator("button:not([aria-label]):not([aria-labelledby])").filter({ has: page.locator("svg:only-child") })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "", exact: true }),
+  ).toHaveCount(0);
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
-  expect(overflow).toBeLessThanOrEqual(1);
+  expect.soft(
+    overflow,
+    `${new URL(page.url()).pathname} must not overflow horizontally`,
+  ).toBeLessThanOrEqual(1);
 }
 
 test("every authenticated route preserves landmarks, names, and responsive actions", async ({
@@ -87,15 +92,20 @@ test("every authenticated route preserves landmarks, names, and responsive actio
   ];
 
   for (const route of routes) {
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto(route);
-    await expectShellContract(page);
-    await expectRouteDestination(page, route);
+    await test.step(route, async () => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto(route);
+      await expectShellContract(page);
+      await expectRouteDestination(page, route);
 
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expectShellContract(page);
-    await expect(page.getByRole("button", { name: /theme/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /account menu/i })).toBeVisible();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expectShellContract(page);
+      await expect(page.getByRole("button", { name: /theme/i })).toBeVisible();
+      await expect(page.getByRole("button", { name: /account menu/i })).toBeVisible();
+      // Each full-page route bootstrap makes several authenticated API calls.
+      // Pace the inventory below the production proxy's per-client burst limit.
+      await page.waitForTimeout(250);
+    });
   }
 });
 

@@ -96,6 +96,7 @@ const ProjectsPage: React.FC = () => {
       <div>
         <h1 style={{ color: "var(--fg)" }}>Projects</h1>
         <div
+          className="project-page-toolbar"
           style={{
             display: "flex",
             justifyContent: "space-between",
@@ -109,8 +110,8 @@ const ProjectsPage: React.FC = () => {
               ? "Loading…"
               : `${data?.total ?? 0} project${data?.total === 1 ? "" : "s"}`}
           </span>
-          <div style={{ display: "flex", gap: 8 }}>
-            <div className="input-with-icon" style={{ width: 240 }}>
+          <div className="project-page-actions" style={{ display: "flex", gap: 8 }}>
+            <div className="input-with-icon project-page-search">
               <Icon.Search size={14} />
               <input
                 className="sccap-input"
