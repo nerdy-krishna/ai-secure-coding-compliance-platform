@@ -23,8 +23,8 @@ from app.infrastructure.integrations.clients import (
     verify_github_webhook_signature,
 )
 from app.infrastructure.integrations.secrets import (
-    decrypt_integration_secrets,
-    encrypt_integration_secrets,
+    decrypt_principal_secrets,
+    encrypt_principal_secrets,
 )
 from app.shared.lib.integration_contract import (
     IntegrationContractError,
@@ -341,8 +341,14 @@ class IntegrationService:
         safe_config, normalized_secrets = self.validate_configuration(
             kind=kind, config=config, secret_values=secret_values
         )
-        ciphertext, fingerprint = encrypt_integration_secrets(normalized_secrets)
+        principal_id = uuid.uuid4()
+        ciphertext, fingerprint = await encrypt_principal_secrets(
+            normalized_secrets,
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+        )
         return await self.repo.create_principal(
+            principal_id=principal_id,
             tenant_id=tenant_id,
             kind=kind,
             display_name=display_name.strip(),
@@ -523,7 +529,7 @@ class IntegrationService:
             lock=True,
         ):
             raise PermissionError("GitHub webhook metadata grant is missing")
-        connector_secrets = decrypt_integration_secrets(principal.secrets_encrypted)
+        connector_secrets = await decrypt_principal_secrets(principal)
         verify_github_webhook_signature(
             secret=connector_secrets["webhook_secret"], body=body, signature=signature
         )
@@ -589,7 +595,7 @@ class IntegrationService:
             lock=True,
         ):
             raise PermissionError("repository contents grant is missing")
-        connector_secrets = decrypt_integration_secrets(principal.secrets_encrypted)
+        connector_secrets = await decrypt_principal_secrets(principal)
         client = GitHubAppClient(http=http)
         token = await client.installation_token(
             app_id=str(principal.config["app_id"]),
@@ -626,7 +632,7 @@ class IntegrationService:
             lock=True,
         ):
             raise PermissionError("security events grant is missing")
-        connector_secrets = decrypt_integration_secrets(principal.secrets_encrypted)
+        connector_secrets = await decrypt_principal_secrets(principal)
         client = GitHubAppClient(http=http)
         token = await client.installation_token(
             app_id=str(principal.config["app_id"]),

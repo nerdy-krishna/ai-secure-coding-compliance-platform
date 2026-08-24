@@ -14,7 +14,7 @@ from app.infrastructure.integrations.clients import (
     PinnedHttpClient,
     SiemWebhookClient,
 )
-from app.infrastructure.integrations.secrets import decrypt_integration_secrets
+from app.infrastructure.integrations.secrets import decrypt_principal_secrets
 from app.shared.lib.integration_contract import build_envelope, stable_idempotency_key
 
 
@@ -55,7 +55,7 @@ class IntegrationDeliveryDispatcher:
             lock=True,
         ):
             return DeliveryResult(False, False, None, "grant_revoked")
-        secrets = decrypt_integration_secrets(principal.secrets_encrypted)
+        secrets = await decrypt_principal_secrets(principal)
         sent_at = datetime.now(timezone.utc)
         envelope = build_envelope(
             event_id=str(row.id),
@@ -99,7 +99,7 @@ class IntegrationDeliveryDispatcher:
         entry: Any = mapping.get(desired_status) if isinstance(mapping, dict) else None
         if not isinstance(entry, dict) or not str(entry.get("transition_id") or ""):
             return DeliveryResult(False, False, None, "jira_status_mapping_missing")
-        connector_secrets = decrypt_integration_secrets(principal.secrets_encrypted)
+        connector_secrets = await decrypt_principal_secrets(principal)
         client = JiraCloudClient(
             base_url=str(principal.config["base_url"]),
             allowed_host=str(principal.config["allowed_host"]),

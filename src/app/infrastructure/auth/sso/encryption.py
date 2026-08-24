@@ -1,11 +1,8 @@
-"""Fernet helpers for ``sso_providers.config_encrypted``.
+"""Read-only legacy SSO decoder retained for one-read repository migration.
 
-Wraps the existing ``app.shared.lib.encryption.FernetEncrypt`` (same key
-as LLM API keys + SMTP passwords) and adds JSON envelope serialization.
-
-We store ``bytes`` in Postgres (BYTEA / LargeBinary) but FernetEncrypt
-returns ``str`` — encrypt() returns the URL-safe-base64 token; decrypt()
-takes the same. We round-trip via UTF-8 for the BYTEA storage layer.
+New persistence must use :class:`SsoProviderRepository`, which binds a KMS
+envelope to the tenant and provider identifiers. This module cannot create a
+new legacy value.
 """
 
 from __future__ import annotations
@@ -17,10 +14,9 @@ from app.shared.lib.encryption import FernetEncrypt
 
 
 def encrypt_provider_config(config: Dict[str, Any]) -> bytes:
-    """Serialize ``config`` to JSON and Fernet-encrypt; return BYTEA-shaped bytes."""
-    serialized = json.dumps(config, ensure_ascii=False, separators=(",", ":"))
-    token_str = FernetEncrypt.encrypt(serialized)
-    return token_str.encode("utf-8")
+    """Reject obsolete unscoped persistence; use the async repository API."""
+    del config
+    raise RuntimeError("SSO configuration must use a scoped repository envelope.")
 
 
 def decrypt_provider_config(token_bytes: bytes) -> Dict[str, Any]:

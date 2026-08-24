@@ -4,10 +4,14 @@ from typing import List, Optional
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.infrastructure.database import models as db_models
 from app.api.v1 import models as api_models
-from app.shared.lib.encryption import FernetEncrypt
+from app.infrastructure.secrets.scoped import (
+    decrypt_scoped_secret,
+    encrypt_scoped_secret,
+)
 from app.shared.lib.optimistic_lock import OptimisticLockError
 
 logger = logging.getLogger(__name__)
@@ -41,10 +45,22 @@ class SystemConfigRepository:
         db_config = result.scalars().first()
         if db_config is not None and db_config.encrypted:
             stored = db_config.value
-            if isinstance(stored, dict) and "_encrypted" in stored:
-                db_config.value = json.loads(
-                    FernetEncrypt.decrypt(stored["_encrypted"])
+            if isinstance(stored, dict) and (
+                "_kms_envelope" in stored or "_encrypted" in stored
+            ):
+                persisted = stored.get("_kms_envelope") or stored["_encrypted"]
+                secret = await decrypt_scoped_secret(
+                    persisted,
+                    scope={"kind": "system_configuration", "key": db_config.key},
                 )
+                if secret.persisted_value is not None:
+                    await self.db.execute(
+                        update(db_models.SystemConfiguration)
+                        .where(db_models.SystemConfiguration.key == db_config.key)
+                        .values(value={"_kms_envelope": secret.persisted_value})
+                    )
+                    await self.db.commit()
+                set_committed_value(db_config, "value", json.loads(secret.plaintext))
         return db_config
 
     async def set_value(
@@ -59,6 +75,8 @@ class SystemConfigRepository:
         matches `expected_version`. On mismatch, raises
         `OptimisticLockError` carrying the current version (V02.3.4).
         """
+        if config.is_secret and not config.encrypted:
+            raise ValueError("Secret system configuration must be encrypted.")
         db_config = await self.get_by_key(config.key)
 
         value_to_store = config.value
@@ -66,7 +84,10 @@ class SystemConfigRepository:
             # Encrypt the entire JSON-serialised value and wrap it in a sentinel
             # envelope so the read path can reliably detect ciphertext at rest.
             value_to_store = {
-                "_encrypted": FernetEncrypt.encrypt(json.dumps(config.value))
+                "_kms_envelope": await encrypt_scoped_secret(
+                    json.dumps(config.value),
+                    scope={"kind": "system_configuration", "key": config.key},
+                )
             }
 
         if db_config:

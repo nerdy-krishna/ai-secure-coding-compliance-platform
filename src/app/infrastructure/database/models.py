@@ -1365,7 +1365,7 @@ class LLMConfiguration(Base):
     base_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     tokenizer: Mapped[Optional[str]] = mapped_column(String(100))
     # classification: Secret / level=Confidential
-    # protection: Fernet-encrypted at rest; must NOT be included in any LLMConfigurationRead Pydantic schema or API response
+    # protection: resource-scoped KMS envelope at rest; must NOT be included in any LLMConfigurationRead Pydantic schema or API response
     # V15.3.1: info={"sensitive": True} prevents accidental serialisation by downstream Pydantic adapters
     encrypted_api_key: Mapped[str] = mapped_column(
         Text, nullable=False, info={"sensitive": True}
@@ -2047,7 +2047,7 @@ class UsageBudgetNotificationOutbox(Base):
 class ProviderBillingConnector(Base):
     """Optional tenant-scoped, read-only provider billing connection.
 
-    The credential envelope is Fernet encrypted and is never exposed through a
+    The credential uses a tenant/resource-scoped KMS envelope and is never exposed through a
     response schema.  The provider-side principal is expected to have usage/cost
     read permissions only.
     """
@@ -2483,7 +2483,7 @@ class SystemConfiguration(Base):
     __tablename__ = "system_configurations"
     key: Mapped[str] = mapped_column(String(255), primary_key=True)
     # classification: Config / level=Secret when is_secret=true
-    # protection: Fernet-encrypted when encrypted=true; never logged; redacted on non-admin API surfaces
+    # protection: resource-scoped KMS envelope when encrypted=true; never logged; redacted on non-admin API surfaces
     value: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
     is_secret: Mapped[bool] = mapped_column(
@@ -3282,7 +3282,7 @@ class TenantVerifiedDomain(Base):
 # --- Enterprise SSO -----------------------------------------------------------
 # `sso_providers` is the row-per-IdP table. The SP can have multiple OIDC and
 # SAML providers active simultaneously; the `protocol` discriminator selects
-# the codepath. `config_encrypted` is a Fernet-encrypted JSON blob — protocol-
+# the codepath. `config_encrypted` is a tenant/provider-bound KMS envelope — protocol-
 # specific fields (issuer URL, client_id/secret for OIDC; IdP entity ID, X.509
 # cert, attribute map for SAML) live inside the blob so the schema stays
 # protocol-agnostic.
@@ -3303,7 +3303,7 @@ class SsoProvider(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="true"
     )
-    # Fernet(JSON(OidcConfig | SamlConfig)). Never returned plaintext over
+    # KMS-envelope(JSON(OidcConfig | SamlConfig)). Never returned plaintext over
     # the wire (M13). Decrypted by the SSO repository for in-process use only.
     config_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     # null = any domain may use this provider; ["company.com"] = restrict.

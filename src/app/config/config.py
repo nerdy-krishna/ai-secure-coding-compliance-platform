@@ -1,10 +1,25 @@
 # src/app/config/config.py
 import math
+import re
 import urllib.parse
 from typing import List, Literal, Optional
 
 from pydantic import SecretStr, field_validator, model_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_KMS_KEY_ID_PATTERN = re.compile(
+    r"^(?:"
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    r"|alias/[A-Za-z0-9/_-]{1,256}"
+    r"|arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:"
+    r"(?:key/[0-9a-fA-F-]{36}|alias/[A-Za-z0-9/_-]{1,256})"
+    r")$"
+)
+
+
+def _valid_kms_key_id(value: str) -> bool:
+    return bool(_KMS_KEY_ID_PATTERN.fullmatch(value))
 
 
 class Settings(BaseSettings):
@@ -414,7 +429,8 @@ class Settings(BaseSettings):
     EVIDENCE_KEY_PROVIDER: Literal["local", "aws_kms"] = "local"
     EVIDENCE_LOCAL_KEK: Optional[SecretStr] = None
     EVIDENCE_KMS_KEY_ID: Optional[str] = None
-    EVIDENCE_RETENTION_DAYS: int = Field(default=90, ge=1, le=3650)
+    EVIDENCE_KMS_PREVIOUS_KEY_IDS: List[str] = Field(default_factory=list)
+    EVIDENCE_RETENTION_DAYS: int = Field(default=365, ge=1, le=3650)
     EVIDENCE_DUAL_WRITE_LEGACY: bool = True
 
     # --- Signed tenant rule deployments (Task 18) ---
@@ -422,6 +438,10 @@ class Settings(BaseSettings):
     # production local-key fallback; tests inject LocalTestDigestSigner.
     RULE_FOUNDRY_KMS_KEY_ID: Optional[str] = None
     RULE_FOUNDRY_KMS_REGION: str = "us-east-1"
+
+    # --- Signed cross-store governance manifests (Task 22) ---
+    GOVERNANCE_SIGNING_KMS_KEY_ID: Optional[str] = None
+    GOVERNANCE_SIGNING_KMS_REGION: str = "us-east-1"
 
     # --- Observability (Langfuse v3, optional) ---
     # Disabled by default; opt in by setting LANGFUSE_ENABLED=true plus the
@@ -474,8 +494,27 @@ class Settings(BaseSettings):
             raise ValueError(
                 "SMTP_TLS and SMTP_SSL are mutually exclusive; set only one."
             )
+        configured_kms_ids = [
+            key_id
+            for key_id in [
+                self.EVIDENCE_KMS_KEY_ID,
+                *self.EVIDENCE_KMS_PREVIOUS_KEY_IDS,
+            ]
+            if key_id is not None
+        ]
+        if any(not _valid_kms_key_id(key_id) for key_id in configured_kms_ids):
+            raise ValueError(
+                "Evidence KMS keys must be a key UUID, key/alias ARN, or alias/name."
+            )
+        if self.EVIDENCE_KMS_KEY_ID in self.EVIDENCE_KMS_PREVIOUS_KEY_IDS or len(
+            set(self.EVIDENCE_KMS_PREVIOUS_KEY_IDS)
+        ) != len(self.EVIDENCE_KMS_PREVIOUS_KEY_IDS):
+            raise ValueError(
+                "EVIDENCE_KMS_PREVIOUS_KEY_IDS must contain distinct non-current key ids."
+            )
         outbound_hosts = {
-            host.rstrip(".").casefold() for host in self.INTEGRATION_OUTBOUND_ALLOWED_HOSTS
+            host.rstrip(".").casefold()
+            for host in self.INTEGRATION_OUTBOUND_ALLOWED_HOSTS
         }
         if any(
             not host
@@ -518,6 +557,16 @@ class Settings(BaseSettings):
                     "LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY from leaking in plaintext."
                 )
         # Production invariants (V13.4.2)
+        # The local KEK exists only for developer workstations. Staging and
+        # production persist integration-principal secrets with AWS KMS even
+        # when immutable evidence storage itself is disabled.
+        if self.ENVIRONMENT != "development":
+            if self.EVIDENCE_KEY_PROVIDER != "aws_kms":
+                raise ValueError(
+                    "Non-development secret envelopes require EVIDENCE_KEY_PROVIDER=aws_kms."
+                )
+            if not self.EVIDENCE_KMS_KEY_ID:
+                raise ValueError("EVIDENCE_KMS_KEY_ID is required outside development.")
         if self.ENVIRONMENT == "production":
             if self.ALLOW_INSECURE_COOKIES:
                 raise ValueError("ALLOW_INSECURE_COOKIES must be False in production.")

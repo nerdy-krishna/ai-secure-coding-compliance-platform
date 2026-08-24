@@ -626,8 +626,24 @@ class ScanRepository:
             SystemConfigCache,
         )
 
-        retention_days = SystemConfigCache.get_retention_days(
+        from app.infrastructure.database.tenant_context import tenant_id_var
+        from app.infrastructure.governance.retention import effective_retention_days
+
+        tenant_id = tenant_id_var.get()
+        if interaction_data.scan_id is not None:
+            tenant_id = await self.db.scalar(
+                select(db_models.Scan.tenant_id).where(
+                    db_models.Scan.id == interaction_data.scan_id
+                )
+            )
+        configured_days = SystemConfigCache.get_retention_days(
             RETENTION_KIND_LLM_INTERACTION
+        )
+        retention_days = await effective_retention_days(
+            self.db,
+            tenant_id=tenant_id,
+            data_class="llm",
+            default_days=configured_days,
         )
         payload = interaction_data.model_dump()
         if retention_days > 0:
@@ -1495,7 +1511,10 @@ class ScanRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     "scan_repo.save_final_reports_and_status.commit_failed",
-                    extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
+                    extra={
+                        "scan_id": str(scan_id),
+                        "error_class": e.__class__.__name__,
+                    },
                     exc_info=True,
                 )
                 raise

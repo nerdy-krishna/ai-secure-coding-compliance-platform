@@ -17,7 +17,11 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.config.config import Settings, settings
-from app.infrastructure.evidence.crypto import KeyProvider, build_key_provider
+from app.infrastructure.evidence.crypto import (
+    KeyProvider,
+    WrappedDataKey,
+    build_key_provider,
+)
 
 
 class EvidenceIntegrityError(RuntimeError):
@@ -179,6 +183,19 @@ class EvidenceObjectStore:
             aad_sha256=aad_sha256,
         )
 
+    def needs_key_rotation(self, key_id: str) -> bool:
+        return self.key_provider.needs_rotation(key_id)
+
+    async def rewrap_data_key(
+        self, *, wrapped_data_key: bytes, key_id: str
+    ) -> WrappedDataKey:
+        """Rotate only the encrypted DEK; immutable object bytes stay untouched."""
+        return await asyncio.to_thread(
+            self.key_provider.rewrap_data_key,
+            wrapped_data_key,
+            key_id,
+        )
+
     def _get_sync(self, **kwargs: Any) -> bytes:
         request: dict[str, Any] = {
             "Bucket": self.bucket,
@@ -209,6 +226,31 @@ class EvidenceObjectStore:
         if object_version != "null":
             request["VersionId"] = object_version
         await asyncio.to_thread(self.client.delete_object, **request)
+
+    async def get_ciphertext(
+        self, *, object_key: str, object_version: str, ciphertext_sha256: str
+    ) -> bytes:
+        request: dict[str, Any] = {"Bucket": self.bucket, "Key": object_key}
+        if object_version != "null":
+            request["VersionId"] = object_version
+        result = await asyncio.to_thread(self.client.get_object, **request)
+        ciphertext = await asyncio.to_thread(result["Body"].read)
+        if hashlib.sha256(ciphertext).hexdigest() != ciphertext_sha256:
+            raise EvidenceIntegrityError("Evidence ciphertext digest mismatch.")
+        return ciphertext
+
+    async def version_exists(self, *, object_key: str, object_version: str) -> bool:
+        request: dict[str, Any] = {"Bucket": self.bucket, "Key": object_key}
+        if object_version != "null":
+            request["VersionId"] = object_version
+        try:
+            await asyncio.to_thread(self.client.head_object, **request)
+            return True
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NoSuchVersion", "NotFound"}:
+                return False
+            raise
 
     async def list_versions_older_than(
         self, cutoff: datetime, *, limit: int = 100

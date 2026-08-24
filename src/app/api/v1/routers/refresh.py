@@ -187,8 +187,8 @@ async def refresh_access_token(
     try:
         from sqlalchemy import select as _select
 
-        from app.infrastructure.auth.sso.encryption import decrypt_provider_config
         from app.infrastructure.auth.sso.models import OidcConfig
+        from app.infrastructure.auth.sso.repository import SsoProviderRepository
         from app.infrastructure.database.models import OAuthAccount, SsoProvider
 
         async with AsyncSessionLocal() as _check_session:
@@ -206,8 +206,12 @@ async def refresh_access_token(
                     provider_row.protocol == "oidc"
                     and oauth_account.idp_token_expires_at is not None
                 ):
-                    cfg_plain = decrypt_provider_config(provider_row.config_encrypted)
-                    oidc_cfg = OidcConfig.model_validate(cfg_plain)
+                    restored = await SsoProviderRepository(
+                        _check_session
+                    ).get_with_config(provider_row.id, tenant_id=provider_row.tenant_id)
+                    if restored is None:
+                        raise LookupError("SSO provider disappeared during refresh")
+                    oidc_cfg = OidcConfig.model_validate(restored.config)
                     if oidc_cfg.bind_to_idp_session:
                         now_utc = datetime.now(timezone.utc)
                         if oauth_account.idp_token_expires_at < now_utc:

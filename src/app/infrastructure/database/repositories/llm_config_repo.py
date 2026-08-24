@@ -8,7 +8,10 @@ from sqlalchemy import select
 
 from app.infrastructure.database import models as db_models
 from app.api.v1 import models as api_models
-from app.shared.lib.encryption import FernetEncrypt
+from app.infrastructure.secrets.scoped import (
+    decrypt_scoped_secret,
+    encrypt_scoped_secret,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,11 +123,14 @@ class LLMConfigRepository:
         if config:
             # Use a try-except block for safer decryption
             try:
-                setattr(
-                    config,
-                    "decrypted_api_key",
-                    FernetEncrypt.decrypt(config.encrypted_api_key),
+                secret = await decrypt_scoped_secret(
+                    config.encrypted_api_key,
+                    scope={"kind": "llm_configuration", "id": str(config.id)},
                 )
+                setattr(config, "decrypted_api_key", secret.plaintext)
+                if secret.persisted_value is not None:
+                    config.encrypted_api_key = secret.persisted_value
+                    await self.db.commit()
             except Exception as e:
                 logger.error(
                     "Failed to decrypt API key for LLM config.",
@@ -167,8 +173,13 @@ class LLMConfigRepository:
             if hasattr(config.api_key, "get_secret_value")
             else str(config.api_key)
         )
-        encrypted_key = FernetEncrypt.encrypt(api_key_plain)
+        config_id = uuid.uuid4()
+        encrypted_key = await encrypt_scoped_secret(
+            api_key_plain,
+            scope={"kind": "llm_configuration", "id": str(config_id)},
+        )
         db_config = db_models.LLMConfiguration(
+            id=config_id,
             name=config.name,
             provider=config.provider,
             model_name=config.model_name,
@@ -217,7 +228,10 @@ class LLMConfigRepository:
                         if hasattr(new_api_key, "get_secret_value")
                         else str(new_api_key)
                     )
-                    db_config.encrypted_api_key = FernetEncrypt.encrypt(plain)
+                    db_config.encrypted_api_key = await encrypt_scoped_secret(
+                        plain,
+                        scope={"kind": "llm_configuration", "id": str(config_id)},
+                    )
             elif hasattr(db_config, key):
                 setattr(db_config, key, value)
         _validate_cfg(db_config)

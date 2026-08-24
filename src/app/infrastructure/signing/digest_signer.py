@@ -33,8 +33,12 @@ class AwsKmsDigestSigner:
     def __init__(self, *, key_id: str, region: str, client: Any | None = None) -> None:
         if not key_id.strip():
             raise ValueError("A KMS signing key id is required.")
-        self.key_id = key_id
         self.client = client or boto3.client("kms", region_name=region)
+        metadata = self.client.describe_key(KeyId=key_id).get("KeyMetadata", {})
+        canonical_arn = str(metadata.get("Arn") or "")
+        if not canonical_arn.startswith("arn:"):
+            raise ValueError("KMS signing key must resolve to a canonical ARN.")
+        self.key_id = canonical_arn
 
     async def sign_sha256(self, digest: bytes) -> DigestSignature:
         if len(digest) != hashlib.sha256().digest_size:
@@ -49,11 +53,14 @@ class AwsKmsDigestSigner:
         return DigestSignature(
             signature_b64=base64.b64encode(bytes(result["Signature"])).decode("ascii"),
             algorithm=self.algorithm,
-            key_id=str(result.get("KeyId") or self.key_id),
+            # Persist the configured/pinned key reference. Accepting the KMS
+            # response ARN here would make an alias-configured verifier either
+            # drift or trust any other key its IAM role can access.
+            key_id=self.key_id,
         )
 
     async def verify_sha256(self, digest: bytes, signature: DigestSignature) -> bool:
-        if signature.algorithm != self.algorithm:
+        if signature.algorithm != self.algorithm or signature.key_id != self.key_id:
             return False
         result = await asyncio.to_thread(
             self.client.verify,

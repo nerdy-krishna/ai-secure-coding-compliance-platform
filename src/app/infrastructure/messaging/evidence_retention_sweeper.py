@@ -6,7 +6,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.config.config import settings
 from app.infrastructure.database import AsyncSessionLocal, models as db_models
@@ -70,6 +70,11 @@ async def _process_deletions() -> int:
             if evidence is None:
                 intent.processed_at = datetime.now(timezone.utc)
                 continue
+            await db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"governance-delete-barrier:{evidence.tenant_id}"},
+            )
+            await db.refresh(evidence)
             if evidence.legal_hold:
                 evidence.state = "available"
                 intent.processed_at = datetime.now(timezone.utc)

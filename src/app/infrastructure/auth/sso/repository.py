@@ -8,6 +8,7 @@ in ``app.api.v1.routers.admin_sso``.
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,8 +18,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
+from app.infrastructure.secrets.scoped import (
+    decrypt_scoped_secret,
+    encrypt_scoped_secret,
+)
 
-from .encryption import decrypt_provider_config, encrypt_provider_config
 from .models import SsoConfig, parse_provider_config
 
 
@@ -34,9 +38,7 @@ class SsoProviderRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def list_all(
-        self, *, tenant_id: uuid.UUID
-    ) -> List[db_models.SsoProvider]:
+    async def list_all(self, *, tenant_id: uuid.UUID) -> List[db_models.SsoProvider]:
         """All providers in one explicit tenant (enabled + disabled)."""
         result = await self.session.execute(
             select(db_models.SsoProvider)
@@ -94,7 +96,18 @@ class SsoProviderRepository:
         row = await self.get_by_id(provider_id, tenant_id=tenant_id)
         if row is None:
             return None
-        plaintext = decrypt_provider_config(row.config_encrypted)
+        secret = await decrypt_scoped_secret(
+            row.config_encrypted.decode(),
+            scope={
+                "kind": "sso_provider",
+                "tenant_id": str(row.tenant_id),
+                "id": str(row.id),
+            },
+        )
+        if secret.persisted_value is not None:
+            row.config_encrypted = secret.persisted_value.encode()
+            await self.session.commit()
+        plaintext = json.loads(secret.plaintext)
         cfg = parse_provider_config(row.protocol, plaintext)
         return SsoProviderWithConfig(row=row, config=cfg)
 
@@ -113,12 +126,23 @@ class SsoProviderRepository:
     ) -> db_models.SsoProvider:
         # Validate the config plaintext BEFORE encryption.
         parse_provider_config(protocol, config_plain)
+        provider_id = uuid.uuid4()
         row = db_models.SsoProvider(
+            id=provider_id,
             name=name,
             display_name=display_name,
             protocol=protocol,
             enabled=enabled,
-            config_encrypted=encrypt_provider_config(config_plain),
+            config_encrypted=(
+                await encrypt_scoped_secret(
+                    json.dumps(config_plain, ensure_ascii=False, separators=(",", ":")),
+                    scope={
+                        "kind": "sso_provider",
+                        "tenant_id": str(tenant_id),
+                        "id": str(provider_id),
+                    },
+                )
+            ).encode(),
             allowed_email_domains=allowed_email_domains,
             force_for_domains=force_for_domains,
             jit_policy=jit_policy,
@@ -151,7 +175,16 @@ class SsoProviderRepository:
         if config_plain is not None:
             # Re-validate against the (possibly-updated) protocol before encryption.
             parse_provider_config(protocol or row.protocol, config_plain)
-            row.config_encrypted = encrypt_provider_config(config_plain)
+            row.config_encrypted = (
+                await encrypt_scoped_secret(
+                    json.dumps(config_plain, ensure_ascii=False, separators=(",", ":")),
+                    scope={
+                        "kind": "sso_provider",
+                        "tenant_id": str(row.tenant_id),
+                        "id": str(row.id),
+                    },
+                )
+            ).encode()
         if allowed_email_domains is not None:
             row.allowed_email_domains = allowed_email_domains or None
         if force_for_domains is not None:

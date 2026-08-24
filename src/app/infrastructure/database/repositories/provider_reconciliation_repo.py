@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database import models as db_models
 from app.shared.lib.encryption import FernetEncrypt
+from app.infrastructure.secrets.scoped import (
+    decrypt_scoped_secret,
+    encrypt_scoped_secret,
+)
 from app.shared.lib.provider_reconciliation import (
     Comparison,
     UsageSlice,
@@ -54,11 +58,22 @@ class ProviderReconciliationRepository:
         created_by_user_id: int,
         now: datetime,
     ) -> db_models.ProviderBillingConnector:
+        connector_id = uuid.uuid4()
         row = db_models.ProviderBillingConnector(
+            id=connector_id,
             tenant_id=tenant_id,
             provider=provider,
             display_name=display_name,
-            credentials_encrypted=encrypt_credentials(credentials),
+            credentials_encrypted=(
+                await encrypt_scoped_secret(
+                    json.dumps(credentials, separators=(",", ":"), sort_keys=True),
+                    scope={
+                        "kind": "provider_billing_connector",
+                        "tenant_id": str(tenant_id),
+                        "id": str(connector_id),
+                    },
+                )
+            ).encode(),
             provider_project_ids=list(provider_project_ids),
             # Endpoint access is recorded only after a live read succeeds.
             verified_scopes=[],
@@ -90,11 +105,22 @@ class ProviderReconciliationRepository:
         provider_project_ids: Sequence[str],
         now: datetime,
     ) -> db_models.ProviderBillingConnector | None:
-        row = await self.get_connector(connector_id=connector_id, tenant_id=tenant_id, for_update=True)
+        row = await self.get_connector(
+            connector_id=connector_id, tenant_id=tenant_id, for_update=True
+        )
         if row is None:
             return None
         if credentials is not None:
-            row.credentials_encrypted = encrypt_credentials(credentials)
+            row.credentials_encrypted = (
+                await encrypt_scoped_secret(
+                    json.dumps(credentials, separators=(",", ":"), sort_keys=True),
+                    scope={
+                        "kind": "provider_billing_connector",
+                        "tenant_id": str(tenant_id),
+                        "id": str(row.id),
+                    },
+                )
+            ).encode()
             row.verified_scopes = []
         row.enabled = enabled
         row.absolute_tolerance_micro_usd = absolute_tolerance_micro_usd
@@ -102,12 +128,33 @@ class ProviderReconciliationRepository:
         row.lookback_minutes = lookback_minutes
         row.poll_interval_minutes = poll_interval_minutes
         row.provider_project_ids = list(provider_project_ids)
-        row.next_run_at = now if enabled and row.next_run_at is None else row.next_run_at
+        row.next_run_at = (
+            now if enabled and row.next_run_at is None else row.next_run_at
+        )
         if not enabled:
             row.next_run_at = None
         row.updated_at = now
         await self.db.flush()
         return row
+
+    async def decrypt_connector_credentials(
+        self, row: db_models.ProviderBillingConnector
+    ) -> dict[str, str]:
+        secret = await decrypt_scoped_secret(
+            row.credentials_encrypted.decode(),
+            scope={
+                "kind": "provider_billing_connector",
+                "tenant_id": str(row.tenant_id),
+                "id": str(row.id),
+            },
+        )
+        if secret.persisted_value is not None:
+            row.credentials_encrypted = secret.persisted_value.encode()
+            await self.db.commit()
+        payload = json.loads(secret.plaintext)
+        if not isinstance(payload, dict) or not isinstance(payload.get("api_key"), str):
+            raise ValueError("invalid provider billing credential envelope")
+        return {str(key): str(value) for key, value in payload.items()}
 
     async def get_connector(
         self, *, connector_id: uuid.UUID, tenant_id: uuid.UUID, for_update: bool = False
@@ -120,7 +167,9 @@ class ProviderReconciliationRepository:
             query = query.with_for_update()
         return await self.db.scalar(query)
 
-    async def list_connectors(self, *, tenant_id: uuid.UUID) -> list[db_models.ProviderBillingConnector]:
+    async def list_connectors(
+        self, *, tenant_id: uuid.UUID
+    ) -> list[db_models.ProviderBillingConnector]:
         rows = await self.db.scalars(
             select(db_models.ProviderBillingConnector)
             .where(db_models.ProviderBillingConnector.tenant_id == tenant_id)
@@ -128,7 +177,9 @@ class ProviderReconciliationRepository:
         )
         return list(rows)
 
-    async def list_due_connectors(self, *, now: datetime, limit: int = 20) -> list[db_models.ProviderBillingConnector]:
+    async def list_due_connectors(
+        self, *, now: datetime, limit: int = 20
+    ) -> list[db_models.ProviderBillingConnector]:
         rows = await self.db.scalars(
             select(db_models.ProviderBillingConnector)
             .where(
@@ -156,22 +207,33 @@ class ProviderReconciliationRepository:
             )
             .where(
                 db_models.LLMUsageEvent.tenant_id == connector.tenant_id,
-                func.lower(db_models.LLMUsageRequest.provider) == connector.provider.lower(),
+                func.lower(db_models.LLMUsageRequest.provider)
+                == connector.provider.lower(),
                 db_models.LLMUsageRequest.received_at >= window_start,
                 db_models.LLMUsageRequest.received_at < window_end,
             )
-            .order_by(db_models.LLMUsageRequest.received_at, db_models.LLMUsageRequest.id)
+            .order_by(
+                db_models.LLMUsageRequest.received_at, db_models.LLMUsageRequest.id
+            )
         )
         requests = list(rows.scalars())
         response_counts: dict[str, int] = {}
         for request in requests:
             if request.provider_response_id:
-                response_counts[request.provider_response_id] = response_counts.get(request.provider_response_id, 0) + 1
-        project = connector.provider_project_ids[0] if len(connector.provider_project_ids) == 1 else None
+                response_counts[request.provider_response_id] = (
+                    response_counts.get(request.provider_response_id, 0) + 1
+                )
+        project = (
+            connector.provider_project_ids[0]
+            if len(connector.provider_project_ids) == 1
+            else None
+        )
         slices: list[UsageSlice] = []
         total_cost_micro_usd = 0
         for request in requests:
-            duplicate_count = max(response_counts.get(request.provider_response_id or "", 1) - 1, 0)
+            duplicate_count = max(
+                response_counts.get(request.provider_response_id or "", 1) - 1, 0
+            )
             slices.append(
                 UsageSlice(
                     provider=request.provider,
@@ -210,7 +272,9 @@ class ProviderReconciliationRepository:
             )
         return slices
 
-    async def existing_run(self, *, idempotency_key: str) -> db_models.ProviderReconciliationRun | None:
+    async def existing_run(
+        self, *, idempotency_key: str
+    ) -> db_models.ProviderReconciliationRun | None:
         return await self.db.scalar(
             select(db_models.ProviderReconciliationRun).where(
                 db_models.ProviderReconciliationRun.idempotency_key == idempotency_key
@@ -250,8 +314,12 @@ class ProviderReconciliationRepository:
         started_at: datetime,
         completed_at: datetime,
     ) -> db_models.ProviderReconciliationRun:
-        canonical_total = sum(item.canonical.cost_micro_usd for item in comparisons if item.canonical)
-        provider_total = sum(item.provider.cost_micro_usd for item in comparisons if item.provider)
+        canonical_total = sum(
+            item.canonical.cost_micro_usd for item in comparisons if item.canonical
+        )
+        provider_total = sum(
+            item.provider.cost_micro_usd for item in comparisons if item.provider
+        )
         unresolved_classes = {
             "missing_event",
             "duplicate_event",
@@ -267,7 +335,13 @@ class ProviderReconciliationRepository:
         ]
         unresolved_amount = sum(abs(item.variance_micro_usd) for item in unresolved)
         compared = len(comparisons)
-        coverage = Decimal("100") if compared == 0 else Decimal(compared - len(unresolved)) * Decimal("100") / Decimal(compared)
+        coverage = (
+            Decimal("100")
+            if compared == 0
+            else Decimal(compared - len(unresolved))
+            * Decimal("100")
+            / Decimal(compared)
+        )
         run = db_models.ProviderReconciliationRun(
             tenant_id=connector.tenant_id,
             connector_id=connector.id,
@@ -294,7 +368,9 @@ class ProviderReconciliationRepository:
             ours, theirs = item.canonical, item.provider
             basis = ours or theirs
             assert basis is not None
-            provider_ids = list((theirs.metadata.get("external_ids") if theirs else ()) or ())
+            provider_ids = list(
+                (theirs.metadata.get("external_ids") if theirs else ()) or ()
+            )
             evidence = db_models.ProviderReconciliationEvidence(
                 tenant_id=connector.tenant_id,
                 run_id=run.id,
@@ -416,7 +492,11 @@ class ProviderReconciliationRepository:
         from datetime import timedelta
 
         connector.last_run_at = now
-        connector.next_run_at = now + timedelta(minutes=connector.poll_interval_minutes) if connector.enabled else None
+        connector.next_run_at = (
+            now + timedelta(minutes=connector.poll_interval_minutes)
+            if connector.enabled
+            else None
+        )
         if verified:
             connector.verified_scopes = [
                 "organization.usage.read",
@@ -438,12 +518,20 @@ class ProviderReconciliationRepository:
                 )
             )
             if anchor:
-                query = query.where(db_models.ProviderReconciliationRun.completed_at < anchor)
+                query = query.where(
+                    db_models.ProviderReconciliationRun.completed_at < anchor
+                )
         return list(
-            await self.db.scalars(query.order_by(db_models.ProviderReconciliationRun.completed_at.desc()).limit(limit))
+            await self.db.scalars(
+                query.order_by(
+                    db_models.ProviderReconciliationRun.completed_at.desc()
+                ).limit(limit)
+            )
         )
 
-    async def get_run(self, *, run_id: uuid.UUID, tenant_id: uuid.UUID) -> db_models.ProviderReconciliationRun | None:
+    async def get_run(
+        self, *, run_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> db_models.ProviderReconciliationRun | None:
         return await self.db.scalar(
             select(db_models.ProviderReconciliationRun).where(
                 db_models.ProviderReconciliationRun.id == run_id,
@@ -452,7 +540,12 @@ class ProviderReconciliationRepository:
         )
 
     async def list_evidence(
-        self, *, run_id: uuid.UUID, tenant_id: uuid.UUID, cursor: uuid.UUID | None, limit: int
+        self,
+        *,
+        run_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        cursor: uuid.UUID | None,
+        limit: int,
     ) -> list[db_models.ProviderReconciliationEvidence]:
         query = select(db_models.ProviderReconciliationEvidence).where(
             db_models.ProviderReconciliationEvidence.run_id == run_id,
@@ -460,9 +553,15 @@ class ProviderReconciliationRepository:
         )
         if cursor:
             query = query.where(db_models.ProviderReconciliationEvidence.id > cursor)
-        return list(await self.db.scalars(query.order_by(db_models.ProviderReconciliationEvidence.id).limit(limit)))
+        return list(
+            await self.db.scalars(
+                query.order_by(db_models.ProviderReconciliationEvidence.id).limit(limit)
+            )
+        )
 
-    async def summary(self, *, tenant_id: uuid.UUID) -> db_models.ProviderReconciliationRun | None:
+    async def summary(
+        self, *, tenant_id: uuid.UUID
+    ) -> db_models.ProviderReconciliationRun | None:
         return await self.db.scalar(
             select(db_models.ProviderReconciliationRun)
             .where(db_models.ProviderReconciliationRun.tenant_id == tenant_id)
@@ -477,4 +576,8 @@ def _cost_micro_usd(value: Decimal | None) -> int:
     return int((value * Decimal("1000000")).to_integral_value())
 
 
-__all__ = ["ProviderReconciliationRepository", "decrypt_credentials", "encrypt_credentials"]
+__all__ = [
+    "ProviderReconciliationRepository",
+    "decrypt_credentials",
+    "encrypt_credentials",
+]

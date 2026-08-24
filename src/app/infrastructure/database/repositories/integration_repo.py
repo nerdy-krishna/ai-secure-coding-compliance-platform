@@ -33,6 +33,7 @@ class IntegrationRepository:
     async def create_principal(
         self,
         *,
+        principal_id: uuid.UUID,
         tenant_id: uuid.UUID,
         kind: str,
         display_name: str,
@@ -42,6 +43,7 @@ class IntegrationRepository:
         created_by_user_id: int,
     ) -> db_models.IntegrationServicePrincipal:
         row = db_models.IntegrationServicePrincipal(
+            id=principal_id,
             tenant_id=tenant_id,
             kind=kind,
             display_name=display_name,

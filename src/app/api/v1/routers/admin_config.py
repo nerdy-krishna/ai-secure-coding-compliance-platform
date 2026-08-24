@@ -154,6 +154,11 @@ async def set_system_config(
             "encrypted": config.encrypted if config.encrypted is not None else False,
         }
 
+    if create_data["is_secret"] and not create_data["encrypted"]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Secret system configuration must be encrypted.",
+        )
     system_config = api_models.SystemConfigurationCreate(**create_data)
     # V02.3.4 — thread expected_version through to the repo for optimistic
     # locking on UPDATEs. Insert path ignores the parameter.

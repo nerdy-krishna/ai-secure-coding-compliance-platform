@@ -227,7 +227,11 @@ class SystemConfigurationBase(BaseModel):
 
 
 class SystemConfigurationCreate(SystemConfigurationBase):
-    pass
+    @model_validator(mode="after")
+    def _require_secret_encryption(self) -> "SystemConfigurationCreate":
+        if self.is_secret and not self.encrypted:
+            raise ValueError("Secret system configuration must be encrypted.")
+        return self
 
 
 class SystemConfigurationUpdate(BaseModel):
@@ -246,6 +250,12 @@ class SystemConfigurationUpdate(BaseModel):
             "modified by another writer in the meantime."
         ),
     )
+
+    @model_validator(mode="after")
+    def _reject_explicit_plaintext_secret(self) -> "SystemConfigurationUpdate":
+        if self.is_secret is True and self.encrypted is False:
+            raise ValueError("Secret system configuration must be encrypted.")
+        return self
 
 
 class SystemConfigurationRead(SystemConfigurationBase):

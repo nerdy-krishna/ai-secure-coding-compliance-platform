@@ -1,6 +1,6 @@
 """Pydantic models for the *decrypted* SSO provider configurations.
 
-The on-disk shape is one Fernet-encrypted JSON blob inside
+The on-disk shape is one tenant/provider-bound KMS-enveloped JSON blob inside
 ``sso_providers.config_encrypted``. These models constrain what we accept
 into the blob (per protocol) and validate it on every load — defense in
 depth against a tampered ``config_encrypted`` value.

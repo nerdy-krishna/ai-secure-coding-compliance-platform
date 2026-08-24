@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.config import settings
@@ -70,6 +70,19 @@ class EvidenceRepository:
             attempt = await ScanAttemptRepository(self.db).create_initial(
                 scan, actor_user_id=actor_user_id or scan.user_id, commit=False
             )
+        inherited_hold = await self._inherits_governance_hold(scan, attempt.id)
+        retention_days = settings.EVIDENCE_RETENTION_DAYS
+        if scan.tenant_id is not None:
+            from app.infrastructure.governance.models import TenantRetentionPolicy
+
+            override_days = await self.db.scalar(
+                select(TenantRetentionPolicy.retention_days).where(
+                    TenantRetentionPolicy.tenant_id == scan.tenant_id,
+                    TenantRetentionPolicy.data_class == "evidence",
+                )
+            )
+            if override_days is not None:
+                retention_days = int(override_days)
         evidence_id = uuid.uuid4()
         plaintext = canonical_json(payload)
         plaintext_digest = hashlib.sha256(plaintext).hexdigest()
@@ -111,10 +124,9 @@ class EvidenceRepository:
             wrapped_data_key=stored.wrapped_data_key,
             nonce=stored.nonce,
             aad_sha256=stored.aad_sha256,
-            retention_policy=f"default-{settings.EVIDENCE_RETENTION_DAYS}d-v1",
-            retain_until=datetime.now(timezone.utc)
-            + timedelta(days=settings.EVIDENCE_RETENTION_DAYS),
-            legal_hold=False,
+            retention_policy=f"tenant-effective-{retention_days}d-v1",
+            retain_until=datetime.now(timezone.utc) + timedelta(days=retention_days),
+            legal_hold=inherited_hold,
             state="available",
             legacy_artifact_id=legacy_artifact_id,
         )
@@ -126,6 +138,36 @@ class EvidenceRepository:
             await self.db.commit()
             await self.db.refresh(evidence)
         return evidence
+
+    async def _inherits_governance_hold(
+        self, scan: db_models.Scan, attempt_id: uuid.UUID
+    ) -> bool:
+        """Serialize evidence creation with hold placement and inherit ancestors."""
+        if scan.tenant_id is None:
+            return False
+        from app.infrastructure.governance.models import GovernanceLegalHold
+
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"governance-delete-barrier:{scan.tenant_id}"},
+        )
+        holds = list(
+            (
+                await self.db.scalars(
+                    select(GovernanceLegalHold).where(
+                        GovernanceLegalHold.tenant_id == scan.tenant_id,
+                        GovernanceLegalHold.released_at.is_(None),
+                    )
+                )
+            ).all()
+        )
+        ancestors = {
+            ("tenant", str(scan.tenant_id)),
+            ("project", str(scan.project_id)),
+            ("scan", str(scan.id)),
+            ("attempt", str(attempt_id)),
+        }
+        return any((hold.scope_type, hold.scope_id) in ancestors for hold in holds)
 
     async def _append_manifest(
         self, evidence: db_models.EvidenceObject, *, actor_user_id: int | None
@@ -272,6 +314,67 @@ class EvidenceRepository:
         payload = json.loads(plaintext)
         if not isinstance(payload, dict):
             raise TypeError("Evidence JSON root must be an object.")
+        if self.object_store.needs_key_rotation(evidence.key_id):
+            previous_key_id = evidence.key_id
+            rotated = await self.object_store.rewrap_data_key(
+                wrapped_data_key=evidence.wrapped_data_key,
+                key_id=previous_key_id,
+            )
+            rotation_details = {
+                "previous_key_id_sha256": hashlib.sha256(
+                    previous_key_id.encode("utf-8")
+                ).hexdigest(),
+                "current_key_id_sha256": hashlib.sha256(
+                    rotated.key_id.encode("utf-8")
+                ).hexdigest(),
+            }
+            if audit:
+                evidence.wrapped_data_key = rotated.wrapped
+                evidence.key_provider = rotated.provider
+                evidence.key_id = rotated.key_id
+                self._audit(
+                    evidence,
+                    "EVIDENCE_DATA_KEY_REWRAPPED",
+                    actor_user_id=actor_user_id,
+                    reason="lazy_kms_rotation_after_verified_read",
+                    details=rotation_details,
+                )
+            else:
+                # Pipeline reads intentionally avoid committing their caller's
+                # transaction. Persist rotation and its audit atomically in a
+                # dedicated session so audit=False cannot silently disable key
+                # rotation or governance evidence.
+                from app.infrastructure.database import AsyncSessionLocal
+
+                async with AsyncSessionLocal() as rotation_db:
+                    updated = await rotation_db.scalar(
+                        update(db_models.EvidenceObject)
+                        .where(
+                            db_models.EvidenceObject.id == evidence.id,
+                            db_models.EvidenceObject.key_id == previous_key_id,
+                        )
+                        .values(
+                            wrapped_data_key=rotated.wrapped,
+                            key_provider=rotated.provider,
+                            key_id=rotated.key_id,
+                        )
+                        .returning(db_models.EvidenceObject.id)
+                    )
+                    if updated is not None:
+                        rotation_db.add(
+                            db_models.EvidenceGovernanceEvent(
+                                scan_id=evidence.scan_id,
+                                attempt_id=evidence.attempt_id,
+                                evidence_id=evidence.id,
+                                tenant_id=evidence.tenant_id,
+                                action="EVIDENCE_DATA_KEY_REWRAPPED",
+                                actor_user_id=actor_user_id,
+                                reason="lazy_kms_rotation_after_verified_read",
+                                correlation_id=correlation_id_var.get(),
+                                details=rotation_details,
+                            )
+                        )
+                    await rotation_db.commit()
         if audit:
             self._audit(evidence, "DOWNLOAD_VERIFIED", actor_user_id=actor_user_id)
             await self.db.commit()

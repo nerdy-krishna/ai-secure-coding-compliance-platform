@@ -18,6 +18,21 @@ _ALLOWED_ROLES = {"user", "assistant", "system"}
 MAX_MESSAGES_PER_SESSION = 1000
 
 
+def _chat_message_expiry() -> datetime | None:
+    """Resolve the deployment-effective approved chat retention deadline."""
+    from app.core.config_cache import (
+        RETENTION_KIND_CHAT_MESSAGE,
+        SystemConfigCache,
+    )
+
+    retention_days = SystemConfigCache.get_retention_days(RETENTION_KIND_CHAT_MESSAGE)
+    return (
+        datetime.now(timezone.utc) + timedelta(days=retention_days)
+        if retention_days > 0
+        else None
+    )
+
+
 class ChatRepository:
     """Handles all database operations for Chat Sessions and Messages."""
 
@@ -146,25 +161,12 @@ class ChatRepository:
             extra={"session_id": str(session_id), "role": role, "user_id": user_id},
         )
         # V14.2.7 — stamp the retention expiry from the cached config.
-        from app.core.config_cache import (
-            RETENTION_KIND_CHAT_MESSAGE,
-            SystemConfigCache,
-        )
-
-        retention_days = SystemConfigCache.get_retention_days(
-            RETENTION_KIND_CHAT_MESSAGE
-        )
-        expires_at = (
-            datetime.now(timezone.utc) + timedelta(days=retention_days)
-            if retention_days > 0
-            else None
-        )
         message = db_models.ChatMessage(
             session_id=session_id,
             role=role,
             content=content,
             cost=cost,
-            expires_at=expires_at,
+            expires_at=_chat_message_expiry(),
         )
         self.db.add(message)
         try:
@@ -241,6 +243,7 @@ class ChatRepository:
                 session_id=session_id,
                 role="system",
                 content=f"Summary of earlier conversation: {summary_content}",
+                expires_at=_chat_message_expiry(),
             )
             self.db.add(summary_message)
 

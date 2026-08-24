@@ -231,8 +231,9 @@ docker compose exec app python -m app.scripts.run_governance_operation \
 
 Tenant retention overrides are persisted and immediately rematerialize applicable evidence/LLM
 expiry timestamps. Only privacy-short-lived LLM and log classes may be shorter than the approved
-default; regulated evidence, audit, transactional, vector, and backup classes may only be
-lengthened. The ordinary database/evidence sweepers exclude active ancestor holds. Run bounded
+default; evidence, vector, and backup classes may only be lengthened. Transactional and audit
+tenant overrides are rejected until durable tenant-aware sweepers exist for those classes. The
+ordinary database/evidence sweepers exclude active ancestor and descendant-overlap holds. Run bounded
 Qdrant, observability/log, and tenant-backup enforcement with signed evidence using:
 
 ```bash
@@ -249,19 +250,154 @@ signed report retains the original matched/deleted counts.
 
 ## Isolated restore verification
 
-Restore PostgreSQL, object versions, Qdrant snapshots, and observability/config backups into an
-isolated network. Use the non-owner, `NOSUPERUSER NOBYPASSRLS` runtime DSN, then run:
+Before backup, create a private host directory and a named Qdrant snapshot for every collection.
+Generate the signed expected inventory from the live source. Snapshot names are explicit: the
+generator never guesses a latest snapshot. Preserve `expected/` alongside, but outside, the backup
+being tested. The bind mount is necessary because the ordinary `app` container has no writable
+`/var/lib/sccap/restore` mount.
 
 ```bash
-docker compose exec app python -m app.scripts.verify_governance_restore
+RESTORE_EVIDENCE_HOST_DIR="$PWD/.scratch/restore-evidence"
+install -d -m 0700 "$RESTORE_EVIDENCE_HOST_DIR/expected"
+install -d -m 0700 "$RESTORE_EVIDENCE_HOST_DIR/restored-governance"
+export RESTORE_EVIDENCE_HOST_DIR
+: "${GOVERNANCE_SIGNING_KMS_KEY_ID:?set the governance KMS key ID}"
+: "${GOVERNANCE_SIGNING_KMS_REGION:?set the governance KMS region}"
+
+docker compose run --rm --no-deps \
+  --user "$(id -u):$(id -g)" \
+  --volume "$RESTORE_EVIDENCE_HOST_DIR/expected:/var/lib/sccap/restore-expected" \
+  --env GOVERNANCE_SIGNING_KMS_KEY_ID="$GOVERNANCE_SIGNING_KMS_KEY_ID" \
+  --env GOVERNANCE_SIGNING_KMS_REGION="$GOVERNANCE_SIGNING_KMS_REGION" \
+  app python -m app.scripts.generate_qdrant_restore_artifact \
+  --snapshot security_guidelines=PREBACKUP_SNAPSHOT_NAME \
+  --snapshot cwe=PREBACKUP_SNAPSHOT_NAME \
+  --output /var/lib/sccap/restore-expected/qdrant-restore.json
 ```
 
-The command emits one canonical signed JSON report and exits `0` only when all checks pass. It must
-observe at least two restored tenants: the verifier switches transaction-local principal context to
-tenant A, confirms same-tenant visibility, and confirms an explicit tenant-B query returns zero.
-It dynamically verifies forced RLS on every table with a `tenant_id`, authenticates all persisted
-application-secret classes, validates outbox references and meaningful checkpoint payloads,
-evidence manifest chains/object bytes, strict four-store governance convergence, Qdrant snapshot
-availability, observability restore digests, and every completed governance signature.
-`--max-evidence-objects` is permitted only for routine drills; final recovery acceptance must use
-the default full verification.
+Restore PostgreSQL, object versions, those Qdrant snapshots, and observability/config backups into
+an isolated network. Seed the drill before backup with a decided scan gate and pending outbox row, a
+resumable production checkpoint, evidence for at least two tenants, and a completed four-store
+governance operation. Generate the expected observability SHA-256 independently from the source
+export, not from the restored service.
+
+After restoring, copy the restored governance artifact tree into
+`$RESTORE_EVIDENCE_HOST_DIR/restored-governance` without modifying `expected/`. This must be a copy
+inside the isolated drill: convergence can append recovered-operation artifacts to it. It must not
+point at production evidence or the preserved source expectations. Set every recovery input in the
+operator shell. `RESTORE_CHECKPOINT_DSN` must name a non-owner PostgreSQL role with `NOSUPERUSER
+NOBYPASSRLS`. The same KMS key verifies source artifacts and signs recovery receipts/reports. Shell
+exports alone are not inherited by an already-running container; every variable is therefore
+passed explicitly to the processes below.
+
+```bash
+RESTORE_CHECKPOINT_DSN=postgresql://restore_runtime:...@db/sccap
+RESTORE_QDRANT_ARTIFACT=/var/lib/sccap/restore-expected/qdrant-restore.json
+RESTORE_EXPECTED_OBSERVABILITY_SHA256=64_LOWERCASE_HEX
+RESTORE_OUTBOX_RECEIPT_URL=http://127.0.0.1:8765/v1/restore/outbox-receipts
+RESTORE_CHECKPOINT_RESUME_URL=http://127.0.0.1:8765/v1/restore/checkpoint-resume
+RESTORE_PROBE_BEARER_TOKEN=HIGH_ENTROPY_ONE_DRILL_SECRET
+RESTORE_ALLOW_LOOPBACK_HTTP=true
+RESTORE_PROBE_EFFECT_TIMEOUT_SECONDS=300
+RESTORE_PROBE_RESUME_TIMEOUT_SECONDS=1800
+GOVERNANCE_ARTIFACT_ROOT=/var/lib/sccap/restored-governance
+GOVERNANCE_OBSERVABILITY_URL=https://restored-observability.internal
+GOVERNANCE_OBSERVABILITY_BEARER_TOKEN=RESTORED_SERVICE_TOKEN
+GOVERNANCE_SIGNING_KMS_KEY_ID=KMS_KEY_ID
+GOVERNANCE_SIGNING_KMS_REGION=us-east-1
+export RESTORE_CHECKPOINT_DSN RESTORE_QDRANT_ARTIFACT RESTORE_EXPECTED_OBSERVABILITY_SHA256
+export RESTORE_OUTBOX_RECEIPT_URL RESTORE_CHECKPOINT_RESUME_URL RESTORE_PROBE_BEARER_TOKEN
+export RESTORE_ALLOW_LOOPBACK_HTTP RESTORE_PROBE_EFFECT_TIMEOUT_SECONDS
+export RESTORE_PROBE_RESUME_TIMEOUT_SECONDS GOVERNANCE_ARTIFACT_ROOT
+export GOVERNANCE_OBSERVABILITY_URL GOVERNANCE_OBSERVABILITY_BEARER_TOKEN
+export GOVERNANCE_SIGNING_KMS_KEY_ID GOVERNANCE_SIGNING_KMS_REGION
+```
+
+Create one disposable operator container so the gateway and verifier share the same mounted files
+and loopback namespace. The restored database, RabbitMQ, Qdrant, object store, and observability
+services must already be running on the isolated Compose network. The preserved expected inventory
+is mounted read-only. The isolated restored-governance copy is a separate writable mount because
+recovery of incomplete operations durably appends artifacts there. The disposable processes use
+the invoking operator's numeric UID/GID so the `0700` host directories remain private and writable
+without broadening their modes.
+
+```bash
+docker compose run --detach --rm --no-deps \
+  --name sccap-restore-operator \
+  --user "$(id -u):$(id -g)" \
+  --volume "$RESTORE_EVIDENCE_HOST_DIR/expected:/var/lib/sccap/restore-expected:ro" \
+  --volume "$RESTORE_EVIDENCE_HOST_DIR/restored-governance:/var/lib/sccap/restored-governance:rw" \
+  app sleep infinity
+
+cleanup_restore_operator() {
+  docker stop sccap-restore-operator >/dev/null 2>&1 || true
+  if [ -n "${RESTORE_GATEWAY_EXEC_PID:-}" ]; then
+    wait "$RESTORE_GATEWAY_EXEC_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup_restore_operator EXIT INT TERM
+```
+
+From the same operator shell, launch the gateway as a background `docker exec` process. Its output
+goes to the private evidence directory. Bind it only to exact loopback; never publish this
+privileged system-principal service on a container, host, or cluster interface. HTTP is accepted
+only with the explicit loopback opt-in above. Use TLS for any non-loopback deployment.
+
+```bash
+docker exec \
+  --env RESTORE_PROBE_BEARER_TOKEN="$RESTORE_PROBE_BEARER_TOKEN" \
+  --env RESTORE_PROBE_EFFECT_TIMEOUT_SECONDS="$RESTORE_PROBE_EFFECT_TIMEOUT_SECONDS" \
+  --env RESTORE_PROBE_RESUME_TIMEOUT_SECONDS="$RESTORE_PROBE_RESUME_TIMEOUT_SECONDS" \
+  --env GOVERNANCE_SIGNING_KMS_KEY_ID="$GOVERNANCE_SIGNING_KMS_KEY_ID" \
+  --env GOVERNANCE_SIGNING_KMS_REGION="$GOVERNANCE_SIGNING_KMS_REGION" \
+  sccap-restore-operator uvicorn app.scripts.restore_recovery_gateway:app \
+  --host 127.0.0.1 --port 8765 \
+  >"$RESTORE_EVIDENCE_HOST_DIR/gateway.log" 2>&1 &
+RESTORE_GATEWAY_EXEC_PID=$!
+
+for attempt in 1 2 3 4 5; do
+  docker exec sccap-restore-operator python -c \
+    'import socket; socket.create_connection(("127.0.0.1", 8765), timeout=1).close()' \
+    && break
+  if [ "$attempt" -eq 5 ]; then
+    cat "$RESTORE_EVIDENCE_HOST_DIR/gateway.log"
+    exit 1
+  fi
+  sleep 1
+done
+```
+
+Run the verifier with every recovery input passed explicitly. Stop and remove the disposable
+container after success or failure; the trap also handles an interrupted shell and terminates the
+gateway.
+
+```bash
+docker exec \
+  --env RESTORE_CHECKPOINT_DSN="$RESTORE_CHECKPOINT_DSN" \
+  --env RESTORE_QDRANT_ARTIFACT="$RESTORE_QDRANT_ARTIFACT" \
+  --env RESTORE_EXPECTED_OBSERVABILITY_SHA256="$RESTORE_EXPECTED_OBSERVABILITY_SHA256" \
+  --env RESTORE_OUTBOX_RECEIPT_URL="$RESTORE_OUTBOX_RECEIPT_URL" \
+  --env RESTORE_CHECKPOINT_RESUME_URL="$RESTORE_CHECKPOINT_RESUME_URL" \
+  --env RESTORE_PROBE_BEARER_TOKEN="$RESTORE_PROBE_BEARER_TOKEN" \
+  --env RESTORE_ALLOW_LOOPBACK_HTTP="$RESTORE_ALLOW_LOOPBACK_HTTP" \
+  --env RESTORE_PROBE_EFFECT_TIMEOUT_SECONDS="$RESTORE_PROBE_EFFECT_TIMEOUT_SECONDS" \
+  --env RESTORE_PROBE_RESUME_TIMEOUT_SECONDS="$RESTORE_PROBE_RESUME_TIMEOUT_SECONDS" \
+  --env GOVERNANCE_ARTIFACT_ROOT="$GOVERNANCE_ARTIFACT_ROOT" \
+  --env GOVERNANCE_OBSERVABILITY_URL="$GOVERNANCE_OBSERVABILITY_URL" \
+  --env GOVERNANCE_OBSERVABILITY_BEARER_TOKEN="$GOVERNANCE_OBSERVABILITY_BEARER_TOKEN" \
+  --env GOVERNANCE_SIGNING_KMS_KEY_ID="$GOVERNANCE_SIGNING_KMS_KEY_ID" \
+  --env GOVERNANCE_SIGNING_KMS_REGION="$GOVERNANCE_SIGNING_KMS_REGION" \
+  sccap-restore-operator python -m app.scripts.verify_governance_restore
+
+cleanup_restore_operator
+trap - EXIT INT TERM
+```
+
+The command emits one canonical signed JSON report and exits `0` only when all checks pass. It
+switches transaction-local principal context, proves same-tenant writes and cross-tenant write
+denial, drains the complete outbox (not merely a sample), resumes through the production worker and
+checkpointer, then independently re-reads durable gate/outbox/checkpoint identity. Recovery receipts
+are nonce-bound and KMS-signed. It also verifies every evidence manifest/object/ciphertext byte,
+strict four-store governance convergence and post-recovery signatures, the exact signed Qdrant
+inventory, and the independently pinned observability digest. `--max-evidence-objects` is permitted
+only for routine drills; final recovery acceptance must use the default full verification.

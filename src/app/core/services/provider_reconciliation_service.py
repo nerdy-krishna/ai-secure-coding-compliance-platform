@@ -32,7 +32,9 @@ class ConnectorDisabledError(ValueError):
     pass
 
 
-ClientFactory = Callable[[db_models.ProviderBillingConnector, dict[str, str]], ProviderBillingClient]
+ClientFactory = Callable[
+    [db_models.ProviderBillingConnector, dict[str, str]], ProviderBillingClient
+]
 
 
 def _default_client_factory(
@@ -85,12 +87,19 @@ class ProviderReconciliationService:
         existing = await self.repo.existing_run(idempotency_key=key)
         if existing is not None:
             if existing.tenant_id != tenant_id or existing.connector_id != connector_id:
-                raise ValueError("reconciliation idempotency key already belongs to another target")
+                raise ValueError(
+                    "reconciliation idempotency key already belongs to another target"
+                )
             return existing
 
         started_at = datetime.now(timezone.utc)
         try:
-            credentials = decrypt_credentials(connector.credentials_encrypted)
+            decryptor = getattr(self.repo, "decrypt_connector_credentials", None)
+            credentials = (
+                await decryptor(connector)
+                if decryptor is not None
+                else decrypt_credentials(connector.credentials_encrypted)
+            )
             client = self.client_factory(connector, credentials)
             provider_rows, page_count = await fetch_all_pages(
                 client, window_start=start, window_end=end
@@ -101,9 +110,13 @@ class ProviderReconciliationService:
                     connector_id=connector.id, tenant_id=connector.tenant_id
                 )
                 provider_rows = [
-                    replace(row, late_arrival=True)
-                    if _is_late_arrival(row, known_ids=known_ids, last_run_at=last_run_at)
-                    else row
+                    (
+                        replace(row, late_arrival=True)
+                        if _is_late_arrival(
+                            row, known_ids=known_ids, last_run_at=last_run_at
+                        )
+                        else row
+                    )
                     for row in provider_rows
                 ]
             canonical_rows = await self.repo.canonical_slices(
@@ -202,7 +215,9 @@ class ProviderReconciliationService:
 
 
 def _run_key(connector_id: uuid.UUID, start: datetime, end: datetime) -> str:
-    raw = f"provider-reconciliation:{connector_id}:{start.isoformat()}:{end.isoformat()}"
+    raw = (
+        f"provider-reconciliation:{connector_id}:{start.isoformat()}:{end.isoformat()}"
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
