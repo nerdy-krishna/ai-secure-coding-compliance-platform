@@ -31,7 +31,7 @@ async def create_framework(
     result = await admin_service.create_framework(framework)
     logger.info(
         "admin.framework.created",
-        extra={"actor_id": str(user.id), "name": framework.name},
+        extra={"actor_id": str(user.id), "framework_name": framework.name},
     )
     return result
 

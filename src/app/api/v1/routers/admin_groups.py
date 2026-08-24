@@ -216,7 +216,11 @@ async def create_group(
     assert fresh is not None
     logger.info(
         "admin.group.created",
-        extra={"actor_id": user.id, "group_id": str(group.id), "name": payload.name},
+        extra={
+            "actor_id": user.id,
+            "group_id": str(group.id),
+            "group_name": payload.name,
+        },
     )
     return await _hydrate(fresh, db, tenant_id=tenant_id)
 

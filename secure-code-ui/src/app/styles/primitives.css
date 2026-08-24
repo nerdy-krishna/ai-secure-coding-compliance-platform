@@ -479,6 +479,10 @@ mark.diff-hl {
 
 .sccap-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
 .sccap-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  font-family: inherit;
   padding: 10px 14px;
   font-size: 13.5px;
   color: var(--fg-muted);

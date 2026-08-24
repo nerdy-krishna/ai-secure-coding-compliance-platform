@@ -53,14 +53,18 @@ class UserGroupRepository:
         except SQLAlchemyError:
             logger.error(
                 "user_group.created.failed",
-                extra={"name": name, "created_by": created_by},
+                extra={"group_name": name, "created_by": created_by},
                 exc_info=True,
             )
             raise
         await self.db.refresh(group)
         logger.info(
             "user_group.created",
-            extra={"group_id": str(group.id), "name": name, "created_by": created_by},
+            extra={
+                "group_id": str(group.id),
+                "group_name": name,
+                "created_by": created_by,
+            },
         )
         return group
 

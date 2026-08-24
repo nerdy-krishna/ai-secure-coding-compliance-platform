@@ -331,6 +331,11 @@ jobs:
           npm run check:api
       - name: Start real worker
         run: docker compose up -d --build worker
+      - name: Seed stable master admin for integration contracts
+        run: |
+          docker compose exec -T \
+            -e SCCAP_RUN_INTEGRATION=1 \
+            app python -m tests.integration.ci_master_admin setup
       - name: Real-infrastructure integration suite
         run: |
           docker compose exec -T \
@@ -370,6 +375,12 @@ jobs:
         run: |
           docker compose exec -T app python -m tests.integration.outbox_recovery_scenario \
             cleanup --run-id ci-rabbit-recovery
+      - name: Remove integration master admin fixture
+        if: always()
+        run: |
+          docker compose exec -T \
+            -e SCCAP_RUN_INTEGRATION=1 \
+            app python -m tests.integration.ci_master_admin cleanup
       - name: Integration service logs
         if: failure()
         run: docker compose logs --no-color --tail=300 app worker rabbitmq db

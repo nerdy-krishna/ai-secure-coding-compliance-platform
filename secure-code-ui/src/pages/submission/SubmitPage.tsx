@@ -859,6 +859,8 @@ const SubmitPage: React.FC = () => {
         >
           <div
             className="sccap-tabs"
+            role="tablist"
+            aria-label="Code source"
             style={{
               padding: "0 18px",
               background: "var(--bg-soft)",
@@ -866,13 +868,16 @@ const SubmitPage: React.FC = () => {
             }}
           >
             {TAB_DEFS.map((t) => (
-              <div
+              <button
+                type="button"
+                role="tab"
                 key={t.id}
                 className={"sccap-tab " + (mode === t.id ? "active" : "")}
+                aria-selected={mode === t.id}
                 onClick={() => setMode(t.id)}
               >
                 {t.icon} {t.label}
-              </div>
+              </button>
             ))}
           </div>
 

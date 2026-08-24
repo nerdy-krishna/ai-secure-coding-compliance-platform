@@ -25,7 +25,10 @@ async def create_agent(
 ):
     """Creates a new specialized agent."""
     result = await admin_service.create_agent(agent)
-    logger.info("admin.agent.created", extra={"actor_id": user.id, "name": agent.name})
+    logger.info(
+        "admin.agent.created",
+        extra={"actor_id": user.id, "agent_name": agent.name},
+    )
     return result
 
 
