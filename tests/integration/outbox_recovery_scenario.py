@@ -232,10 +232,33 @@ async def _assert_recovered(identity: ScenarioIdentity) -> None:
             raise AssertionError(
                 f"public result read failed: {public_result.status_code} {public_result.text}"
             )
-        if public_result.json()["status"] != status:
-            raise AssertionError(
-                "public status disagrees with the durable worker state"
+        public_status = public_result.json()["status"]
+        durable_status = status
+        consistency_deadline = time.monotonic() + 30
+        while (
+            public_status != durable_status
+            and time.monotonic() < consistency_deadline
+        ):
+            await asyncio.sleep(0.25)
+            public_result = await client.get(
+                f"/api/v1/scans/{scan_id}/result", headers=headers
             )
+            if public_result.status_code != 200:
+                raise AssertionError(
+                    "public result re-read failed: "
+                    f"{public_result.status_code} {public_result.text}"
+                )
+            public_status = public_result.json()["status"]
+            async with AsyncSessionLocal() as db:
+                durable_status = await db.scalar(
+                    select(Scan.status).where(Scan.id == scan_id)
+                )
+        if public_status != durable_status:
+            raise AssertionError(
+                "public status did not converge with the durable worker state "
+                f"(public={public_status}, durable={durable_status})"
+            )
+        status = durable_status
 
         cancel = await client.post(f"/api/v1/scans/{scan_id}/cancel", headers=headers)
         if cancel.status_code != 200:
