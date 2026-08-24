@@ -43,6 +43,13 @@ dedicated format-native generator:
   primary locations, related locations for merged findings, and
   CWE/CVSS/source/triage metadata.
 
+For `SUGGEST` and `REMEDIATE`, every format also identifies the persisted patch-plan artifact and
+its exact resolved hunks, candidate outcome, required imports/dependencies/configuration/migrations,
+commands and manual steps, and validation tool/profile/version/outcome/timestamp. `AUDIT` reports
+show remediation guidance but explicitly say that no code patch was generated or applied. Partial
+remediation is called out in the summary; CSV includes governance-summary and fixed-lineage rows so
+that fixed-only scans retain their evidence.
+
 All four are served on demand by
 `GET /api/v1/scans/{scan_id}/report?format=html|csv|pdf|sarif` — see
 [API → Results Endpoints](../api-reference/results-endpoints.md).
@@ -72,6 +79,21 @@ For custom integrations, call
 `ScanEvent` emitted during the run. See
 [API → Results Endpoints](../api-reference/results-endpoints.md) for
 the full shape.
+
+## Validated patch artifact (suggestion and remediation)
+
+Completed `SUGGEST` and `REMEDIATE` scans expose the versioned artifact that SCCAP actually
+validated and persisted:
+
+```http
+GET /api/v1/scans/{scan_id}/patch-plan?format=json
+GET /api/v1/scans/{scan_id}/patch-plan?format=patch
+```
+
+JSON is the complete machine-readable plan. The patch download includes requirements, validation
+evidence, and the persisted unified diff; save it as `scan-{scan_id}.patch`, review it, then use
+`git apply --check` before `git apply`. The Results page copy/download actions read this artifact and
+never reconstruct a patch by searching an LLM-provided snippet.
 
 ## Patched codebase (remediation only)
 

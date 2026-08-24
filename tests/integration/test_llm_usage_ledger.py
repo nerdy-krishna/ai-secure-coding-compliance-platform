@@ -287,10 +287,22 @@ class LLMUsageLedgerTests(unittest.IsolatedAsyncioTestCase):
             feedback = await repository.measure_scan_estimate_variance(
                 scan_id=self.scan_id,
                 stage="analysis",
+                commit=False,
             )
             self.assertIsNotNone(feedback)
             self.assertEqual(feedback["actual_input_tokens"], 1_200)  # type: ignore[index]
             self.assertEqual(feedback["actual_output_tokens"], 340)  # type: ignore[index]
+            self.assertTrue(feedback["within_upper_bound"])  # type: ignore[index]
+            await db.rollback()
+            scan = await db.get(db_models.Scan, self.scan_id)
+            self.assertIsNotNone(scan)
+            self.assertNotIn("estimate_variance", scan.cost_details)  # type: ignore[union-attr]
+
+            feedback = await repository.measure_scan_estimate_variance(
+                scan_id=self.scan_id,
+                stage="analysis",
+            )
+            self.assertIsNotNone(feedback)
             self.assertTrue(feedback["within_upper_bound"])  # type: ignore[index]
 
             original_total = first.event.total_cost

@@ -418,6 +418,7 @@ class LLMUsageRepository:
         *,
         scan_id: uuid.UUID,
         stage: str,
+        commit: bool = True,
     ) -> dict[str, Any] | None:
         """Attach actual-vs-expected feedback to a completed scan estimate."""
         scan = await self.db.scalar(
@@ -485,7 +486,10 @@ class LLMUsageRepository:
             )
         details["estimate_variance"] = feedback
         scan.cost_details = details
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         return feedback
 
     async def _resolve_attribution(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
@@ -19,10 +19,10 @@ from app.infrastructure.database.repositories.scanner_coverage_repo import (
 )
 from app.shared.lib.finding_governance import (
     GatePolicy,
-    classify_baseline,
     evaluate_gate,
     exact_ranges,
     finding_fingerprint,
+    finding_site_identity,
     waiver_is_eligible,
 )
 
@@ -105,17 +105,19 @@ class FindingGovernanceRepository:
                         db_models.Scan.project_id == scan.project_id,
                         db_models.Scan.tenant_id == scan.tenant_id,
                         db_models.Scan.created_at < scan.created_at,
+                        db_models.Scan.completed_at.is_not(None),
                         self._final_findings(),
                     )
                 )
             ).all()
         )
-        current_map = {finding_fingerprint(row): row for row in current}
-        previous_map = {finding_fingerprint(row): row for row in previous}
+        current_groups: dict[str, list[db_models.Finding]] = defaultdict(list)
+        previous_groups: dict[str, list[db_models.Finding]] = defaultdict(list)
+        for row in current:
+            current_groups[finding_fingerprint(row)].append(row)
+        for row in previous:
+            previous_groups[finding_fingerprint(row)].append(row)
         historical_fingerprints = {finding_fingerprint(row) for row in historical}
-        states, fixed = classify_baseline(
-            current_map, previous_map, historical_fingerprints
-        )
         evidence_ids = []
         if scan.current_attempt_id is not None:
             evidence_ids = list(
@@ -143,55 +145,138 @@ class FindingGovernanceRepository:
                     dict(edge) for edge in raw_edges if isinstance(edge, dict)
                 ]
         payloads: list[dict[str, Any]] = []
-        for fingerprint, state in states.items():
-            finding = current_map[fingerprint]
-            coverage_ids = list(finding.coverage_entry_ids or [])
-            if (
-                finding.coverage_entry_id
-                and finding.coverage_entry_id not in coverage_ids
+        fingerprints = sorted(set(current_groups) | set(previous_groups))
+        for fingerprint in fingerprints:
+            current_occurrences = sorted(
+                current_groups.get(fingerprint, []), key=self._occurrence_sort_key
+            )
+            unmatched_previous = sorted(
+                previous_groups.get(fingerprint, []), key=self._occurrence_sort_key
+            )
+            matched: list[
+                tuple[db_models.Finding, str, db_models.Finding | None]
+            ] = []
+            unmatched_current: list[db_models.Finding] = []
+            for finding in current_occurrences:
+                exact_key = self._occurrence_site_key(finding)
+                exact_index = next(
+                    (
+                        index
+                        for index, predecessor in enumerate(unmatched_previous)
+                        if self._occurrence_site_key(predecessor) == exact_key
+                    ),
+                    None,
+                )
+                if exact_index is None:
+                    unmatched_current.append(finding)
+                else:
+                    matched.append(
+                        (finding, "unchanged", unmatched_previous.pop(exact_index))
+                    )
+            # A harmless line shift may move an existing occurrence. Pair the
+            # remaining deterministic order before classifying true additions
+            # or removals, so multiplicity is preserved per exact occurrence.
+            pair_count = min(len(unmatched_current), len(unmatched_previous))
+            for index in range(pair_count):
+                matched.append(
+                    (
+                        unmatched_current[index],
+                        "unchanged",
+                        unmatched_previous[index],
+                    )
+                )
+            for finding in unmatched_current[pair_count:]:
+                state = (
+                    "reintroduced"
+                    if not previous_groups.get(fingerprint)
+                    and fingerprint in historical_fingerprints
+                    else "new"
+                )
+                matched.append((finding, state, None))
+            fixed_occurrences = unmatched_previous[pair_count:]
+
+            for finding, state, predecessor in sorted(
+                matched, key=lambda item: self._occurrence_sort_key(item[0])
             ):
-                coverage_ids.append(finding.coverage_entry_id)
-            payloads.append(
-                self._lineage_payload(
-                    scan=scan,
-                    finding=finding,
-                    fingerprint=fingerprint,
-                    baseline_state=state,
-                    predecessor=previous_map.get(fingerprint),
-                    coverage_ids=coverage_ids,
-                    evidence_ids=evidence_ids,
-                    dependency_digest=dependency_digest,
-                    dependency_edges=dependency_edges,
+                coverage_ids = list(finding.coverage_entry_ids or [])
+                if (
+                    finding.coverage_entry_id
+                    and finding.coverage_entry_id not in coverage_ids
+                ):
+                    coverage_ids.append(finding.coverage_entry_id)
+                payloads.append(
+                    self._lineage_payload(
+                        scan=scan,
+                        finding=finding,
+                        fingerprint=fingerprint,
+                        baseline_state=state,
+                        predecessor=predecessor,
+                        coverage_ids=coverage_ids,
+                        evidence_ids=evidence_ids,
+                        dependency_digest=dependency_digest,
+                        dependency_edges=dependency_edges,
+                    )
                 )
-            )
-        for fingerprint in sorted(fixed):
-            predecessor = previous_map[fingerprint]
-            payloads.append(
-                self._lineage_payload(
-                    scan=scan,
-                    finding=None,
-                    fingerprint=fingerprint,
-                    baseline_state="fixed",
-                    predecessor=predecessor,
-                    coverage_ids=[],
-                    evidence_ids=evidence_ids,
-                    dependency_digest=dependency_digest,
-                    dependency_edges=dependency_edges,
+            for predecessor in fixed_occurrences:
+                payloads.append(
+                    self._lineage_payload(
+                        scan=scan,
+                        finding=None,
+                        fingerprint=fingerprint,
+                        baseline_state="fixed",
+                        predecessor=predecessor,
+                        coverage_ids=[],
+                        evidence_ids=evidence_ids,
+                        dependency_digest=dependency_digest,
+                        dependency_edges=dependency_edges,
+                    )
                 )
-            )
         for payload in payloads:
-            await self.db.execute(
-                pg_insert(db_models.FindingLineageRecord)
-                .values(**payload)
-                .on_conflict_do_nothing(
-                    index_elements=["scan_id", "fingerprint", "baseline_state"]
+            insert = pg_insert(db_models.FindingLineageRecord).values(**payload)
+            if payload["finding_id"] is not None:
+                statement = insert.on_conflict_do_update(
+                    index_elements=[
+                        "scan_id",
+                        "attempt_id",
+                        "fingerprint",
+                        "baseline_state",
+                        "site_identity",
+                    ],
+                    set_={"finding_id": payload["finding_id"]},
+                    where=db_models.FindingLineageRecord.finding_id.is_(None),
                 )
-            )
+            else:
+                statement = insert.on_conflict_do_nothing(
+                    index_elements=[
+                        "scan_id",
+                        "attempt_id",
+                        "fingerprint",
+                        "baseline_state",
+                        "site_identity",
+                    ]
+                )
+            await self.db.execute(statement)
         if commit:
             await self.db.commit()
         else:
             await self.db.flush()
         return await self.lineage_for_scan(scan.id)
+
+    @staticmethod
+    def _occurrence_site_key(finding: db_models.Finding) -> tuple[str, int, str]:
+        return (
+            str(finding.file_path or "").replace("\\", "/"),
+            int(finding.line_number or 0),
+            " ".join(str(finding.vulnerable_snippet or "").split()).casefold(),
+        )
+
+    @classmethod
+    def _occurrence_sort_key(
+        cls, finding: db_models.Finding
+    ) -> tuple[str, int, str, str, int]:
+        site = cls._occurrence_site_key(finding)
+        canonical = finding.canonical_finding_id or finding.raw_finding_id or ""
+        return (*site, str(canonical), int(finding.id or 0))
 
     @staticmethod
     def _lineage_payload(
@@ -208,6 +293,12 @@ class FindingGovernanceRepository:
     ) -> dict[str, Any]:
         source = finding or predecessor
         assert source is not None
+        ranges = exact_ranges(source)
+        site_identity = finding_site_identity(
+            canonical_finding_id=source.canonical_finding_id,
+            raw_finding_id=source.raw_finding_id,
+            exact_site_ranges=ranges,
+        )
         related_edges = [
             edge
             for edge in dependency_edges
@@ -223,7 +314,8 @@ class FindingGovernanceRepository:
             "predecessor_finding_id": predecessor.id if predecessor else None,
             "fingerprint": fingerprint,
             "baseline_state": baseline_state,
-            "exact_ranges": exact_ranges(source),
+            "site_identity": site_identity,
+            "exact_ranges": ranges,
             "dataflow": {
                 "affected_locations": source.affected_locations or [],
                 "cross_file_status": source.cross_file_status,
@@ -266,12 +358,43 @@ class FindingGovernanceRepository:
     async def lineage_for_scan(
         self, scan_id: uuid.UUID
     ) -> list[db_models.FindingLineageRecord]:
+        """Return the current attempt projection used by results and reports."""
+        current_attempt_id = await self.db.scalar(
+            select(db_models.Scan.current_attempt_id).where(db_models.Scan.id == scan_id)
+        )
+        attempt_clause = (
+            db_models.FindingLineageRecord.attempt_id == current_attempt_id
+            if current_attempt_id is not None
+            else db_models.FindingLineageRecord.attempt_id.is_(None)
+        )
+        return list(
+            (
+                await self.db.scalars(
+                    select(db_models.FindingLineageRecord)
+                    .where(
+                        db_models.FindingLineageRecord.scan_id == scan_id,
+                        attempt_clause,
+                    )
+                    .order_by(
+                        db_models.FindingLineageRecord.baseline_state,
+                        db_models.FindingLineageRecord.fingerprint,
+                    )
+                )
+            ).all()
+        )
+
+    async def lineage_history_for_scan(
+        self, scan_id: uuid.UUID
+    ) -> list[db_models.FindingLineageRecord]:
+        """Return immutable generations across attempts for explicit audit views."""
         return list(
             (
                 await self.db.scalars(
                     select(db_models.FindingLineageRecord)
                     .where(db_models.FindingLineageRecord.scan_id == scan_id)
                     .order_by(
+                        db_models.FindingLineageRecord.created_at,
+                        db_models.FindingLineageRecord.attempt_id,
                         db_models.FindingLineageRecord.baseline_state,
                         db_models.FindingLineageRecord.fingerprint,
                     )
@@ -463,7 +586,12 @@ class FindingGovernanceRepository:
         if waiver is None:
             return None, []
         if waiver.expires_at <= datetime.now(timezone.utc):
-            await self.record_expired_waivers(tenant_id=tenant_id, commit=False)
+            # A history read is the lazy materialization boundary for elapsed
+            # waivers. Persist the append-only event here rather than relying on
+            # the request-scoped session to commit: `get_db` closes read
+            # sessions without an implicit commit. The unique
+            # `(waiver_id, action)` constraint keeps repeated reads idempotent.
+            await self.record_expired_waivers(tenant_id=tenant_id, commit=True)
         events = list(
             (
                 await self.db.scalars(
@@ -517,13 +645,31 @@ class FindingGovernanceRepository:
         }
 
     async def evaluate_scan_policy(
-        self, scan_id: uuid.UUID, *, commit: bool = True
+        self,
+        scan_id: uuid.UUID,
+        *,
+        commit: bool = True,
+        idempotent: bool = False,
     ) -> db_models.FindingPolicyEvaluation:
         scan = await self.db.get(db_models.Scan, scan_id)
         if scan is None:
             raise LookupError("Scan not found.")
         version = await self.latest_policy(scan.tenant_id, create_default=True)
         assert version is not None
+        if idempotent:
+            existing = await self.db.scalar(
+                select(db_models.FindingPolicyEvaluation)
+                .where(
+                    db_models.FindingPolicyEvaluation.scan_id == scan.id,
+                    db_models.FindingPolicyEvaluation.attempt_id
+                    == scan.current_attempt_id,
+                    db_models.FindingPolicyEvaluation.policy_version_id == version.id,
+                )
+                .order_by(db_models.FindingPolicyEvaluation.created_at.asc())
+                .limit(1)
+            )
+            if existing is not None:
+                return existing
         policy = GatePolicy(
             minimum_severity=version.minimum_severity,
             minimum_confidence=version.minimum_confidence,
@@ -597,6 +743,9 @@ class FindingGovernanceRepository:
             .where(
                 db_models.FindingLineageRecord.tenant_id == tenant_id,
                 db_models.Scan.created_at >= since,
+                db_models.FindingLineageRecord.attempt_id.is_not_distinct_from(
+                    db_models.Scan.current_attempt_id
+                ),
             )
         )
         if visible_user_ids is not None:

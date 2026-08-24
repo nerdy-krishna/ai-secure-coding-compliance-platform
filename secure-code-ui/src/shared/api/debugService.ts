@@ -58,6 +58,7 @@ export interface FindingFixCandidate {
   required_dependencies: string[];
   configuration_changes: string[];
   migration_changes: string[];
+  required_commands: string[];
   manual_steps: string[];
   file_path: string;
   line_number: number;

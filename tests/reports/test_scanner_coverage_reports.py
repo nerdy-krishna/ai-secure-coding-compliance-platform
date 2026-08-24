@@ -62,7 +62,17 @@ class ScannerCoverageReportTests(unittest.TestCase):
     def test_governance_semantics_are_shared_by_html_csv_and_sarif(self) -> None:
         self.result.finding_governance = {
             "counts": {"new": 2, "fixed": 1, "unchanged": 3, "reintroduced": 1},
-            "items": [],
+            "items": [
+                {
+                    "finding_id": None,
+                    "predecessor_finding_id": 17,
+                    "attempt_id": str(uuid4()),
+                    "fingerprint": "c" * 64,
+                    "baseline_state": "fixed",
+                    "dataflow": {"cross_file_status": "confirmed"},
+                    "evidence_object_ids": [str(uuid4())],
+                }
+            ],
             "policy_evaluation": {
                 "outcome": "fail",
                 "coverage_complete": False,
@@ -75,9 +85,15 @@ class ScannerCoverageReportTests(unittest.TestCase):
         self.assertIn("FAIL", html)
         self.assertIn("reintroduced: 1", html)
 
+        csv_rows = list(csv.DictReader(io.StringIO(render_csv(self.result))))
         csv_header = render_csv(self.result).splitlines()[0]
         self.assertIn("baseline_state", csv_header)
         self.assertIn("finding_fingerprint", csv_header)
+        summary = next(row for row in csv_rows if row["record_type"] == "governance_summary")
+        self.assertIn("fixed=1", summary["governance_state"])
+        fixed = next(row for row in csv_rows if row["record_type"] == "governance_lineage")
+        self.assertEqual(fixed["governance_state"], "fixed")
+        self.assertEqual(fixed["predecessor_finding_id"], "17")
 
         sarif = json.loads(render_sarif(self.result))
         governance = sarif["runs"][0]["properties"]["sccapFindingGovernance"]

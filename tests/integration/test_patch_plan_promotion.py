@@ -16,6 +16,7 @@ from app.config.config import settings
 from app.core.schemas import FixResult, FixSuggestion, VulnerabilityFinding
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import (
+    FindingFixCandidate,
     Project,
     Scan,
     ScanEvent,
@@ -194,10 +195,12 @@ class PatchPlanPromotionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "app.infrastructure.workflows.nodes.verify._run_builtin_scanner_replay",
             new=clean_builtin_replay,
         ):
+            candidate.validation_status = "not_run"
             verified = await verify_patches_node({**state, **planned})
         planned = {**planned, **verified}
         self.assertEqual(planned["patched_files"]["src/app.py"], self.replacement)
         self.assertTrue(candidate.is_applied)
+        self.assertEqual(candidate.validation_status, "passed")
         self.assertEqual(candidate.applicability_status, "planned")
         self.assertIsNotNone(candidate.patch_hunk_id)
         self.assertEqual(
@@ -229,6 +232,11 @@ class PatchPlanPromotionIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
                 .order_by(ScanEvent.id.desc())
             )
+            persisted_candidate = await db.scalar(
+                select(FindingFixCandidate).where(
+                    FindingFixCandidate.candidate_id == candidate.candidate_id
+                )
+            )
 
         self.assertEqual(patched_source, self.replacement)
         self.assertEqual(
@@ -240,6 +248,8 @@ class PatchPlanPromotionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             validation_event.details["candidates"]["applied"],
             1,
         )
+        self.assertIsNotNone(persisted_candidate)
+        self.assertEqual(persisted_candidate.validation_status, "passed")
 
     async def test_persistent_originating_rule_blocks_blob_and_snapshot_promotion(
         self,

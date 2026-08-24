@@ -931,6 +931,7 @@ async def analysis_node(
                         required_dependencies=verified_suggestion.required_dependencies,
                         configuration_changes=verified_suggestion.configuration_changes,
                         migration_changes=verified_suggestion.migration_changes,
+                        required_commands=verified_suggestion.required_commands,
                         manual_steps=verified_suggestion.manual_steps,
                     )
                 )

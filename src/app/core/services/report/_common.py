@@ -183,6 +183,8 @@ class ReportData:
     toolchain_provenance: Dict[str, Any]
     scanner_coverage: Dict[str, Any]
     finding_governance: Dict[str, Any]
+    remediation_summary: Dict[str, Any]
+    patch_plan: Dict[str, Any]
     exec_summary: str = field(default="")
 
 
@@ -301,6 +303,12 @@ def build_report_data(result: AnalysisResultDetailResponse) -> ReportData:
             else {}
         ),
         finding_governance=dict(result.finding_governance or {}),
+        remediation_summary=(
+            report.remediation.model_dump(mode="json")
+            if report and report.remediation is not None
+            else {}
+        ),
+        patch_plan=dict(result.patch_plan or {}),
     )
     data.exec_summary = _exec_summary(data)
     return data
@@ -403,6 +411,75 @@ def render_finding_governance_section(data: ReportData) -> str:
         '<h2 class="section">Finding governance</h2>'
         f'<p class="exec"><b>{_e(outcome)}</b> &middot; {count_text}<br>'
         f"Blocking: {_e(blocking)} &middot; Waived: {_e(waived)}</p>"
+    )
+
+
+def render_remediation_section(data: ReportData) -> str:
+    """Render persisted patch truth, requirements, and validation evidence."""
+    if data.scan_type.upper() == "AUDIT":
+        return (
+            '<h2 class="section">Remediation guidance</h2>'
+            '<p class="exec">Audit mode reports vulnerable evidence and guidance only. '
+            "No generated code patch was produced or applied.</p>"
+        )
+    if not data.patch_plan:
+        return (
+            '<h2 class="section">Patch evidence</h2>'
+            '<p class="exec">No persisted patch artifact is available for this legacy scan. '
+            "No source should be treated as validated or applied.</p>"
+        )
+    outcome = str(data.remediation_summary.get("outcome") or "unknown")
+    candidates = data.remediation_summary.get("candidates") or {}
+    files = data.remediation_summary.get("files") or {}
+    prominence = (
+        "PARTIAL REMEDIATION — only validated files were promoted."
+        if outcome == "partial_remediation"
+        else outcome.replace("_", " ").upper()
+    )
+    file_blocks: List[str] = []
+    for file_plan in data.patch_plan.get("files") or []:
+        requirements: List[str] = []
+        for req in file_plan.get("requirements") or []:
+            for label, key in (
+                ("Import", "required_imports"),
+                ("Dependency", "required_dependencies"),
+                ("Configuration", "configuration_changes"),
+                ("Migration", "migration_changes"),
+                ("Command", "required_commands"),
+                ("Manual step", "manual_steps"),
+            ):
+                requirements.extend(
+                    f"<li><b>{_e(label)}:</b> {_e(value)}</li>"
+                    for value in req.get(key) or []
+                )
+        checks = "".join(
+            "<li>"
+            f"<b>{_e(check.get('status', 'not_run'))}</b> &middot; "
+            f"{_e(check.get('profile') or check.get('stage') or 'unknown profile')} &middot; "
+            f"{_e(check.get('tool') or 'unknown tool')} "
+            f"{_e(check.get('tool_version') or 'version not recorded')} &middot; "
+            f"{_e(check.get('completed_at') or 'timestamp not recorded')} &mdash; "
+            f"{_e(check.get('detail') or '')}</li>"
+            for check in file_plan.get("validation_checks") or []
+        )
+        diff = file_plan.get("unified_diff") or ""
+        file_blocks.append(
+            f'<div class="finding"><h3>{_e(file_plan.get("file_path"))}</h3>'
+            f'<div class="loc">Candidate state: {_e(file_plan.get("status"))}</div>'
+            + (f'<ul class="compact">{"".join(requirements)}</ul>' if requirements else "")
+            + (f'<div class="label">Validation evidence</div><ul class="compact">{checks}</ul>' if checks else "")
+            + (f'<div class="label">Persisted unified diff</div><pre>{_e(diff)}</pre>' if diff else "")
+            + "</div>"
+        )
+    summary = (
+        f"{_e(prominence)} Candidates: proposed {_e(candidates.get('proposed', 0))}, "
+        f"validated {_e(candidates.get('validated', 0))}, applied {_e(candidates.get('applied', 0))}. "
+        f"Files: {_e(files.get('planned', 0))} planned, "
+        f"{_e(files.get('manual_review', 0))} manual review."
+    )
+    return (
+        '<h2 class="section">Patch evidence</h2>'
+        f'<p class="exec"><b>{summary}</b></p>{"".join(file_blocks)}'
     )
 
 

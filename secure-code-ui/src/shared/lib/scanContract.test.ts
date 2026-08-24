@@ -162,10 +162,14 @@ describe("normalizeScanResult", () => {
       finding_governance: {
         counts: { new: 2, fixed: 1, unchanged: "bad", reintroduced: 1 },
         items: [{
+          id: "lineage-1",
+          attempt_id: "attempt-1",
           finding_id: 42,
+          predecessor_finding_id: 17,
           fingerprint: "a".repeat(64),
           baseline_state: "reintroduced",
           exact_ranges: [{ file_path: "src/a.py", start_line: 8, end_line: 9 }, "bad"],
+          dataflow: { cross_file_status: "confirmed" },
           source_provenance: { source: "semgrep", scanner_rule_id: "rule-a" },
           producer_provenance: {},
           coverage_entry_ids: ["coverage-1"],
@@ -179,6 +183,14 @@ describe("normalizeScanResult", () => {
           waived_fingerprints: [],
           policy_version_id: "version-1",
         },
+        active_waivers: [{
+          id: "waiver-1",
+          finding_id: 42,
+          fingerprint: "a".repeat(64),
+          scope: "finding",
+          reason: "Temporary exception",
+          expires_at: "2026-08-25T00:00:00Z",
+        }],
       },
     } as unknown as Parameters<typeof normalizeScanResult>[0];
 
@@ -190,8 +202,47 @@ describe("normalizeScanResult", () => {
       finding_id: 42,
       baseline_state: "reintroduced",
       coverage_entry_ids: ["coverage-1"],
+      attempt_id: "attempt-1",
+      predecessor_finding_id: 17,
+      dataflow: { cross_file_status: "confirmed" },
     });
     expect(result.finding_governance.items[0].exact_ranges).toHaveLength(1);
     expect(result.finding_governance.policy_evaluation?.outcome).toBe("fail");
+    expect(result.finding_governance.active_waivers?.[0].id).toBe("waiver-1");
+  });
+
+  it("retains the persisted patch artifact without rebuilding browser snippets", () => {
+    const patchPlan = {
+      schema_version: 2,
+      scan_id: "scan-1",
+      files: [{
+        file_path: "src/a.py",
+        source_snapshot_hash: "a".repeat(64),
+        output_hash: "b".repeat(64),
+        status: "planned",
+        hunks: [{
+          patch_hunk_id: "hunk-1",
+          candidate_ids: ["candidate-1"],
+          resolved_range: { start_byte: 8, end_byte: 14, start_line: 2, start_column: 1, end_line: 2, end_column: 7 },
+          context_fingerprint: "c".repeat(64),
+          original_text: "bad()",
+          replacement_text: "safe()",
+        }],
+        requirements: [],
+        validation_checks: [],
+        unified_diff: "persisted-diff",
+      }],
+      candidate_decisions: [],
+    };
+    const result = normalizeScanResult({
+      status: "COMPLETED", error_message: "", project_id: "project-1",
+      project_name: "patch", summary_report: null, cross_file_validation: false,
+      deep_vendor_scan: false, scan_type: "SUGGEST", disable_temperature: false,
+      has_resumable_artifacts: false, toolchain_provenance: {}, patch_plan: patchPlan,
+    } as unknown as Parameters<typeof normalizeScanResult>[0]);
+
+    expect(result.patch_plan).toBe(patchPlan);
+    expect(result.patch_plan?.files[0].hunks[0].resolved_range.start_line).toBe(2);
+    expect(result.patch_plan?.files[0].unified_diff).toBe("persisted-diff");
   });
 });

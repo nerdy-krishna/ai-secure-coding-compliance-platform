@@ -25,7 +25,7 @@ export interface FindingWaiver {
 
 export const findingGovernanceService = {
   getScan: async (scanId: string): Promise<FindingGovernanceSummary> => {
-    const response = await apiClient.get<{ counts: FindingGovernanceSummary["counts"]; items: FindingGovernanceSummary["items"]; policy_evaluation?: FindingGovernanceSummary["policy_evaluation"] }>(
+    const response = await apiClient.get<FindingGovernanceSummary>(
       `/finding-governance/scans/${encodeURIComponent(scanId)}/findings`,
     );
     return response.data;

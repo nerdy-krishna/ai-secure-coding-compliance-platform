@@ -1108,9 +1108,11 @@ class FindingLineageRecord(Base):
     __table_args__ = (
         UniqueConstraint(
             "scan_id",
+            "attempt_id",
             "fingerprint",
             "baseline_state",
-            name="uq_finding_lineage_scan_fingerprint_state",
+            "site_identity",
+            name="uq_finding_lineage_attempt_fingerprint_state_site",
         ),
         sa.CheckConstraint(
             "baseline_state IN ('new', 'fixed', 'unchanged', 'reintroduced')",
@@ -1147,6 +1149,7 @@ class FindingLineageRecord(Base):
     )
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     baseline_state: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    site_identity: Mapped[str] = mapped_column(String(64), nullable=False)
     exact_ranges: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, default=list
     )

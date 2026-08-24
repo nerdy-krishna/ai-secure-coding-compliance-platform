@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -327,9 +328,12 @@ def _run_profile(profile: str, workspace: Path, timeout_seconds: int) -> dict[st
         detail = f"{detail} Toolchain: {tool_version}."
     return {
         "stage": profile,
+        "profile": profile,
         "status": status,
         "blocking": True,
         "tool": tool,
+        "tool_version": tool_version,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
         "detail": detail,
         "return_code": return_code,
         "duration_ms": int((time.monotonic() - started) * 1000),

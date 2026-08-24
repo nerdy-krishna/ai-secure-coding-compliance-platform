@@ -22,7 +22,7 @@ from app.infrastructure.database.repositories.finding_governance_repo import (
 )
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
-from app.shared.lib.risk_score import compute_cvss_aggregate
+from app.shared.lib.risk_score import compute_cvss_aggregate, scoreable_findings
 from app.shared.lib.risk_severity import risk_severity_for_score
 from app.shared.lib.scan_progress import EV_STARTED
 from app.shared.lib.scan_status import (
@@ -108,17 +108,18 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
         "LOW": 0,
         "INFORMATIONAL": 0,
     }
-    for f in findings:
+    active_findings = scoreable_findings(findings)
+    for f in active_findings:
         sev = (f.severity or "LOW").upper()
         if sev in severity_map:
             severity_map[sev] += 1
-    aggregate = compute_cvss_aggregate(findings, scan_id=scan_id)
+    aggregate = compute_cvss_aggregate(active_findings, scan_id=scan_id)
     final_risk_score = min(10, int(round(aggregate)))
 
     summary_data = {
         "summary": {
-            "total_findings_count": len(findings),
-            "files_analyzed_count": len(set(f.file_path for f in findings)),
+            "total_findings_count": len(active_findings),
+            "files_analyzed_count": len(set(f.file_path for f in active_findings)),
             "severity_counts": severity_map,
         },
         "overall_risk_score": {
@@ -139,7 +140,8 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
             "scan_id": str(scan_id),
             "scan_type": state.get("scan_type"),
             "final_status": final_status,
-            "findings_total": len(findings),
+            "findings_total": len(active_findings),
+            "remediated_findings": len(findings) - len(active_findings),
             "risk_score": final_risk_score,
             "severity_counts": severity_map,
         },
@@ -154,32 +156,39 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
             await LLMUsageRepository(db).measure_scan_estimate_variance(
                 scan_id=scan_id,
                 stage="analysis",
+                commit=False,
             )
             # Freeze the evidence-first detail and policy result before the
             # attempt manifest is finalized. Both operations are idempotent,
             # so a resumed report node cannot create conflicting semantics.
             governance = FindingGovernanceRepository(db)
-            await governance.materialize_scan(scan_id)
-            await governance.evaluate_scan_policy(scan_id)
+            await governance.materialize_scan(scan_id, commit=False)
+            await governance.evaluate_scan_policy(
+                scan_id, commit=False, idempotent=True
+            )
             finalized = await repo.save_final_reports_and_status(
                 scan_id=scan_id,
                 status=final_status,
                 summary=summary_data,
                 risk_score=final_risk_score,
+                commit=False,
             )
             if not finalized:
+                await db.rollback()
                 logger.info(
                     "save_final_report: terminal transition rejected for scan %s",
                     scan_id,
                 )
                 return {}
+            await db.commit()
             try:
                 await repo.create_scan_event(
                     scan_id=scan_id,
                     stage_name="GENERATING_REPORTS",
                     status="COMPLETED",
                     details={
-                        "findings_total": len(findings),
+                        "findings_total": len(active_findings),
+                        "remediated_findings": len(findings) - len(active_findings),
                         "risk_score": final_risk_score,
                         "severity_counts": severity_map,
                     },
@@ -425,6 +434,9 @@ async def _persist_finding_lineage_artifact(
                 "required_dependencies": row.required_dependencies,
                 "configuration_changes": row.configuration_changes,
                 "migration_changes": row.migration_changes,
+                "required_commands": (row.suggestion or {}).get(
+                    "required_commands", []
+                ),
                 "manual_steps": row.manual_steps,
                 "file_path": row.file_path,
                 "line_number": row.line_number,

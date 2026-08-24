@@ -45,6 +45,71 @@ export interface SuggestedFix {
   description?: string;
   original_snippet?: string;
   code?: string;
+  required_imports?: string[];
+  required_dependencies?: string[];
+  configuration_changes?: string[];
+  migration_changes?: string[];
+  required_commands?: string[];
+  manual_steps?: string[];
+}
+
+export interface ResolvedPatchRange {
+  start_byte: number;
+  end_byte: number;
+  start_line: number;
+  start_column: number;
+  end_line: number;
+  end_column: number;
+}
+
+export interface PatchValidationEvidence {
+  stage: string;
+  profile?: string | null;
+  status: "passed" | "failed" | "not_run" | "tool_missing" | "timeout" | "infrastructure_error" | "skipped";
+  blocking: boolean;
+  tool?: string | null;
+  tool_version?: string | null;
+  completed_at?: string | null;
+  detail: string;
+  output?: string | null;
+  duration_ms?: number | null;
+}
+
+export interface PatchPlanArtifact {
+  schema_version: number;
+  scan_id: string;
+  files: Array<{
+    file_path: string;
+    source_snapshot_hash: string;
+    output_hash: string;
+    status: "planned" | "manual_review_required" | "no_changes";
+    hunks: Array<{
+      patch_hunk_id: string;
+      candidate_ids: string[];
+      resolved_range: ResolvedPatchRange;
+      context_fingerprint: string;
+      original_text: string;
+      replacement_text: string;
+    }>;
+    requirements: Array<{
+      candidate_id: string;
+      required_imports: string[];
+      required_dependencies: string[];
+      configuration_changes: string[];
+      migration_changes: string[];
+      required_commands: string[];
+      manual_steps: string[];
+    }>;
+    validation_checks: PatchValidationEvidence[];
+    unified_diff: string;
+  }>;
+  candidate_decisions: Array<{
+    candidate_id: string;
+    status: string;
+    reason: string;
+    resolved_range?: ResolvedPatchRange | null;
+    patch_hunk_id?: string | null;
+  }>;
 }
 
 export interface AffectedLocation {
@@ -177,10 +242,14 @@ export interface ScannerCoverageManifest {
 }
 
 export interface FindingGovernanceItem {
+  id?: string;
+  attempt_id?: string | null;
   finding_id?: number | null;
+  predecessor_finding_id?: number | null;
   fingerprint: string;
   baseline_state: "new" | "fixed" | "unchanged" | "reintroduced";
   exact_ranges: Array<Record<string, unknown>>;
+  dataflow: Record<string, unknown>;
   source_provenance: Record<string, unknown>;
   producer_provenance: Record<string, unknown>;
   coverage_entry_ids: string[];
@@ -198,6 +267,14 @@ export interface FindingGovernanceSummary {
     waived_fingerprints: string[];
     policy_version_id: string;
   } | null;
+  active_waivers?: Array<{
+    id: string;
+    finding_id?: number | null;
+    fingerprint: string;
+    scope: "finding" | "fingerprint" | "project";
+    reason: string;
+    expires_at: string;
+  }>;
 }
 
 export interface ApprovalGate {
@@ -224,6 +301,8 @@ export type ScanResultResponse = Omit<
   | "stage_temperatures"
   | "toolchain_provenance"
   | "active_approval_gate"
+  | "finding_governance"
+  | "patch_plan"
 > & {
   summary_report?: SummaryReport | null;
   cost_details?: CostDetails | null;
@@ -232,6 +311,7 @@ export type ScanResultResponse = Omit<
   active_approval_gate?: ApprovalGate | null;
   scanner_coverage?: ScannerCoverageManifest | null;
   finding_governance: FindingGovernanceSummary;
+  patch_plan?: PatchPlanArtifact | null;
 };
 
 const COVERAGE_STATES = new Set<ScannerCoverageStatus>([
@@ -313,11 +393,15 @@ function normalizeFindingGovernance(value: unknown): FindingGovernanceSummary {
         ].includes(String(raw.baseline_state))) return [];
         return [{
           finding_id: finiteNumber(raw.finding_id),
+          id: optionalString(raw.id),
+          attempt_id: raw.attempt_id === null ? null : optionalString(raw.attempt_id),
+          predecessor_finding_id: finiteNumber(raw.predecessor_finding_id),
           fingerprint: String(raw.fingerprint ?? ""),
           baseline_state: raw.baseline_state as FindingGovernanceItem["baseline_state"],
           exact_ranges: Array.isArray(raw.exact_ranges)
             ? raw.exact_ranges.filter(isRecord)
             : [],
+          dataflow: isRecord(raw.dataflow) ? raw.dataflow : {},
           source_provenance: isRecord(raw.source_provenance) ? raw.source_provenance : {},
           producer_provenance: isRecord(raw.producer_provenance) ? raw.producer_provenance : {},
           coverage_entry_ids: Array.isArray(raw.coverage_entry_ids)
@@ -346,7 +430,19 @@ function normalizeFindingGovernance(value: unknown): FindingGovernanceSummary {
         policy_version_id: String(rawEvaluation.policy_version_id ?? ""),
       }
     : null;
-  return { counts, items, policy_evaluation: policyEvaluation };
+  const activeWaivers = Array.isArray(value.active_waivers)
+    ? value.active_waivers.flatMap((raw) => isRecord(raw) ? [{
+        id: String(raw.id ?? ""),
+        finding_id: finiteNumber(raw.finding_id),
+        fingerprint: String(raw.fingerprint ?? ""),
+        scope: (["finding", "fingerprint", "project"].includes(String(raw.scope))
+          ? raw.scope
+          : "finding") as "finding" | "fingerprint" | "project",
+        reason: String(raw.reason ?? ""),
+        expires_at: String(raw.expires_at ?? ""),
+      }] : [])
+    : [];
+  return { counts, items, policy_evaluation: policyEvaluation, active_waivers: activeWaivers };
 }
 
 const DISPOSITIONS = new Set<FindingDisposition>([
@@ -383,6 +479,12 @@ function normalizeFinding(finding: FindingWire): Finding {
         description: optionalString(rawFix.description),
         original_snippet: optionalString(rawFix.original_snippet),
         code: optionalString(rawFix.code),
+        required_imports: Array.isArray(rawFix.required_imports) ? rawFix.required_imports.map(String) : [],
+        required_dependencies: Array.isArray(rawFix.required_dependencies) ? rawFix.required_dependencies.map(String) : [],
+        configuration_changes: Array.isArray(rawFix.configuration_changes) ? rawFix.configuration_changes.map(String) : [],
+        migration_changes: Array.isArray(rawFix.migration_changes) ? rawFix.migration_changes.map(String) : [],
+        required_commands: Array.isArray(rawFix.required_commands) ? rawFix.required_commands.map(String) : [],
+        manual_steps: Array.isArray(rawFix.manual_steps) ? rawFix.manual_steps.map(String) : [],
       }
     : rawFix === null
       ? null
@@ -588,6 +690,9 @@ export function normalizeScanResult(wire: ScanResultWire): ScanResultResponse {
   const governance = (wire as ScanResultWire & {
     finding_governance?: unknown;
   }).finding_governance;
+  const patchPlan = (wire as ScanResultWire & {
+    patch_plan?: PatchPlanArtifact | null;
+  }).patch_plan;
   return {
     ...wire,
     summary_report: normalizeSummaryReport(wire.summary_report),
@@ -599,5 +704,6 @@ export function normalizeScanResult(wire: ScanResultWire): ScanResultResponse {
     active_approval_gate: gate,
     scanner_coverage: normalizeScannerCoverage(coverage),
     finding_governance: normalizeFindingGovernance(governance),
+    patch_plan: patchPlan ?? null,
   };
 }

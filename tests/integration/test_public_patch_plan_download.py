@@ -59,7 +59,7 @@ class PublicPatchPlanDownloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
             db.add_all([project, scan])
             await db.commit()
             self.payload = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "scan_id": str(scan.id),
                 "files": [
                     {
@@ -67,9 +67,48 @@ class PublicPatchPlanDownloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
                         "source_snapshot_hash": "a" * 64,
                         "output_hash": "b" * 64,
                         "status": "planned",
-                        "hunks": [],
+                        "hunks": [
+                            {
+                                "patch_hunk_id": str(uuid4()),
+                                "candidate_ids": [str(uuid4())],
+                                "resolved_range": {
+                                    "start_byte": 0,
+                                    "end_byte": 5,
+                                    "start_line": 1,
+                                    "start_column": 1,
+                                    "end_line": 1,
+                                    "end_column": 6,
+                                },
+                                "context_fingerprint": "c" * 64,
+                                "original_text": "bad()",
+                                "replacement_text": "safe()",
+                            }
+                        ],
                         "conflict_components": [],
-                        "unified_diff": "--- a/src/app.py\n+++ b/src/app.py\n",
+                        "requirements": [
+                            {
+                                "candidate_id": str(uuid4()),
+                                "required_imports": ["from secure import safe"],
+                                "required_dependencies": ["secure-lib==1.0"],
+                                "configuration_changes": [],
+                                "migration_changes": [],
+                                "required_commands": ["pytest -q"],
+                                "manual_steps": ["Rotate the legacy credential."],
+                            }
+                        ],
+                        "validation_checks": [
+                            {
+                                "stage": "python_compile",
+                                "profile": "python_compile",
+                                "status": "passed",
+                                "blocking": True,
+                                "tool": "python",
+                                "tool_version": "Python 3.13.7",
+                                "completed_at": "2026-08-24T12:00:00Z",
+                                "detail": "Compiled successfully.",
+                            }
+                        ],
+                        "unified_diff": "--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-bad()\n+safe()\n",
                     }
                 ],
                 "candidate_decisions": [],
@@ -112,6 +151,16 @@ class PublicPatchPlanDownloadIntegrationTests(unittest.IsolatedAsyncioTestCase):
             response.headers["content-disposition"],
             f'attachment; filename="scan-{self.scan_id}-patch-plan.json"',
         )
+
+        patch = await self.client.get(
+            f"/api/v1/scans/{self.scan_id}/patch-plan?format=patch",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        )
+        self.assertEqual(patch.status_code, 200, patch.text)
+        self.assertIn("Required command: pytest -q", patch.text)
+        self.assertIn("Manual step: Rotate the legacy credential.", patch.text)
+        self.assertIn("@@ -1 +1 @@", patch.text)
+        self.assertEqual(patch.headers["content-type"], "text/x-diff; charset=utf-8")
 
 
 if __name__ == "__main__":

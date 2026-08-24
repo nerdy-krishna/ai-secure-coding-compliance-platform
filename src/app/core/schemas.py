@@ -50,6 +50,11 @@ class FixSuggestion(BaseModel):
     )
     configuration_changes: List[str] = Field(default_factory=list, max_length=100)
     migration_changes: List[str] = Field(default_factory=list, max_length=100)
+    required_commands: List[str] = Field(
+        default_factory=list,
+        max_length=100,
+        description="Exact operator commands required after applying this patch.",
+    )
     manual_steps: List[str] = Field(default_factory=list, max_length=100)
 
 
@@ -255,6 +260,9 @@ class VulnerabilityFinding(BaseModel):
             "the cross-file evidence (caller / input-context slices)."
         ),
     )
+    disposition: Literal[
+        "open", "confirmed", "false_positive", "remediated", "risk_accepted"
+    ] = "open"
 
     @field_validator("references", mode="before")
     @classmethod
@@ -372,6 +380,7 @@ class FixResult(BaseModel):
     required_dependencies: List[str] = Field(default_factory=list, max_length=100)
     configuration_changes: List[str] = Field(default_factory=list, max_length=100)
     migration_changes: List[str] = Field(default_factory=list, max_length=100)
+    required_commands: List[str] = Field(default_factory=list, max_length=100)
     manual_steps: List[str] = Field(default_factory=list, max_length=100)
 
 

@@ -423,14 +423,19 @@ export const scanService = {
   },
 
   /** Download the immutable candidate-to-hunk patch plan. */
-  downloadPatchPlan: async (scanId: string): Promise<void> => {
+  downloadPatchPlan: async (
+    scanId: string,
+    format: "json" | "patch" = "json",
+  ): Promise<void> => {
     const response = await apiClient.get(
       `/scans/${encodeURIComponent(scanId)}/patch-plan`,
-      { responseType: "blob" },
+      { params: { format }, responseType: "blob" },
     );
     const disposition = String(response.headers["content-disposition"] ?? "");
     const match = /filename="?([^"]+)"?/.exec(disposition);
-    const filename = match ? match[1] : `scan-${scanId}-patch-plan.json`;
+    const filename = match ? match[1] : format === "patch"
+      ? `scan-${scanId}.patch`
+      : `scan-${scanId}-patch-plan.json`;
     const url = URL.createObjectURL(response.data as Blob);
     const anchor = document.createElement("a");
     anchor.href = url;

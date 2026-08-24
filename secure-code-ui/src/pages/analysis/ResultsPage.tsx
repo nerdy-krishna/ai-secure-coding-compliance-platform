@@ -17,6 +17,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { scanService } from "../../shared/api/scanService";
+import { debugService } from "../../shared/api/debugService";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { isSafeHttpUrl } from "../../shared/lib/safeUrl";
 import { isTerminalStatus } from "../../shared/lib/scanRoute";
@@ -28,6 +29,8 @@ import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
 import { FindingsDebugPanel } from "../../features/scans/FindingsDebugPanel";
+import { ActionableRemediationPanel } from "../../features/scans/ActionableRemediationPanel";
+import { FindingGovernancePanel } from "../../features/scans/FindingGovernancePanel";
 import type {
   Finding,
   FindingDisposition,
@@ -36,7 +39,7 @@ import type {
   SubmittedFile,
   SummaryReport,
 } from "../../shared/types/api";
-import type { FindingGovernanceItem } from "../../shared/lib/scanContract";
+import type { FindingGovernanceItem, PatchPlanArtifact, ResolvedPatchRange } from "../../shared/lib/scanContract";
 
 const PRESCAN_BLOCKED_STATUSES = new Set([
   "BLOCKED_USER_DECLINE",
@@ -1412,8 +1415,10 @@ const ResultsPage: React.FC = () => {
               >
                 Patch validation
               </div>
-              <strong style={{ fontSize: 15 }}>
-                {remediation.outcome.replace(/_/g, " ")}
+              <strong style={{ fontSize: 15 }} role={remediation.outcome === "partial_remediation" ? "alert" : undefined}>
+                {remediation.outcome === "partial_remediation"
+                  ? "PARTIAL REMEDIATION — manual review remains"
+                  : remediation.outcome.replace(/_/g, " ")}
               </strong>
             </div>
             <button
@@ -1878,7 +1883,7 @@ const ResultsPage: React.FC = () => {
                       >
                         {f.file_path}:{f.line_number}
                       </span>
-                      {f.fixes?.code && (
+                      {String(data.scan_type ?? report?.scan_type ?? "AUDIT").toUpperCase() !== "AUDIT" && f.fixes?.code && (
                         <span
                           className="chip chip-ai"
                           style={{ fontSize: 10, padding: "1px 7px" }}
@@ -1927,6 +1932,8 @@ const ResultsPage: React.FC = () => {
             governance={data?.finding_governance.items.find(
               (item) => item.finding_id === selected.id,
             )}
+            scanType={String(data.scan_type ?? report?.scan_type ?? "AUDIT")}
+            patchPlan={data.patch_plan}
           />
         ) : (
           <div
@@ -2811,11 +2818,52 @@ const FindingDetail: React.FC<{
   scanId?: string;
   originalCodeMap?: Record<string, string>;
   governance?: FindingGovernanceItem;
-}> = ({ f, scanId, originalCodeMap, governance }) => {
+  scanType: string;
+  patchPlan?: PatchPlanArtifact | null;
+}> = ({ f, scanId, originalCodeMap, governance, scanType, patchPlan }) => {
   const sev = (f.severity || "").toUpperCase();
   const sevColor = SEV_COLOR[sev] ?? "var(--fg-muted)";
-  const hasFix = !!f.fixes?.code;
+  const hasFix = scanType.toUpperCase() !== "AUDIT" && !patchPlan && !!f.fixes?.code;
   const fileContent = originalCodeMap?.[f.file_path] ?? null;
+  const contributingRawIds = f.contributing_raw_finding_ids ?? [];
+  const { data: fixLineage } = useQuery({
+    queryKey: ["actionable-fix-lineage", scanId],
+    queryFn: () => debugService.getFindingLineage(scanId!, [], null, 250),
+    enabled: !!scanId && !!patchPlan,
+  });
+  const linkedCandidateIds = useMemo(() => new Set(
+    (fixLineage?.fix_candidates ?? [])
+      .filter((candidate) => (
+        !!f.canonical_finding_id
+        && candidate.canonical_finding_id === f.canonical_finding_id
+      ) || (
+        !!f.raw_finding_id
+        && candidate.raw_finding_id === f.raw_finding_id
+      ))
+      .map((candidate) => candidate.candidate_id),
+  ), [f.canonical_finding_id, f.raw_finding_id, fixLineage?.fix_candidates]);
+  const resolvedRange = useMemo<ResolvedPatchRange | null>(() => {
+    const hunks = (patchPlan?.files ?? [])
+      .filter((file) => file.file_path === f.file_path)
+      .flatMap((file) => file.hunks)
+      .filter((hunk) => hunk.candidate_ids.some((id) => linkedCandidateIds.has(id)));
+    if (hunks.length === 0) {
+      const evidence = governance?.exact_ranges.find(
+        (range) => String(range.file_path ?? f.file_path) === f.file_path
+          && typeof range.start_line === "number",
+      );
+      if (!evidence) return null;
+      return {
+        start_byte: Number(evidence.start_byte ?? 0),
+        end_byte: Number(evidence.end_byte ?? 0),
+        start_line: Number(evidence.start_line),
+        start_column: Number(evidence.start_column ?? 1),
+        end_line: Number(evidence.end_line ?? evidence.start_line),
+        end_column: Number(evidence.end_column ?? 1),
+      };
+    }
+    return hunks[0].resolved_range;
+  }, [f.file_path, governance?.exact_ranges, linkedCandidateIds, patchPlan]);
   // Full-screen diff view (#83 follow-up) — the inline pane is narrow;
   // this opens the before/after diff in a near-fullscreen modal.
   const [diffExpanded, setDiffExpanded] = useState(false);
@@ -2929,32 +2977,8 @@ const FindingDetail: React.FC<{
 
       <div className="sccap-divider" />
 
-      {governance && (
-        <details className="sccap-card" style={{ marginBottom: 18 }} open>
-          <summary style={{ cursor: "pointer", fontWeight: 700 }}>
-            Evidence · {governance.baseline_state}
-          </summary>
-          <div style={{ display: "grid", gap: 6, marginTop: 10, fontSize: 12 }}>
-            <div><b>Fingerprint:</b> <span className="mono">{governance.fingerprint}</span></div>
-            <div>
-              <b>Exact ranges:</b>{" "}
-              {governance.exact_ranges.map((range, index) => (
-                <span key={index} className="chip" style={{ marginRight: 4 }}>
-                  {String(range.file_path ?? f.file_path)}:{String(range.start_line ?? 0)}–{String(range.end_line ?? 0)}
-                </span>
-              ))}
-            </div>
-            <div><b>Coverage evidence:</b> {governance.coverage_entry_ids.length}</div>
-            <div><b>Immutable evidence objects:</b> {governance.evidence_object_ids.length}</div>
-            <div>
-              <b>Producer:</b>{" "}
-              {String(governance.source_provenance.source ?? "agent")}
-              {governance.source_provenance.scanner_rule_id
-                ? ` · ${String(governance.source_provenance.scanner_rule_id)}`
-                : ""}
-            </div>
-          </div>
-        </details>
+      {governance && scanId && (
+        <FindingGovernancePanel scanId={scanId} findingId={f.id} initial={governance} />
       )}
 
       {/* Code snippet — shown for all findings that have source code available */}
@@ -2967,6 +2991,7 @@ const FindingDetail: React.FC<{
             lineNumber={f.line_number ?? 0}
             filePath={f.file_path}
             severityColor={sevColor}
+            resolvedRange={resolvedRange}
           />
           {f.affected_locations && f.affected_locations.length > 0 && (
             <div
@@ -3088,6 +3113,26 @@ const FindingDetail: React.FC<{
               {f.remediation}
             </div>
           </div>
+        )}
+
+        {contributingRawIds.length > 0 && (
+          <details className="sccap-card">
+            <summary style={{ cursor: "pointer", fontWeight: 700 }}>
+              Canonical lineage · {contributingRawIds.length} contributing finding{contributingRawIds.length === 1 ? "" : "s"}
+            </summary>
+            <ul style={{ marginBottom: 0 }}>
+              {contributingRawIds.map((id) => <li key={id}><code>{id}</code></li>)}
+            </ul>
+          </details>
+        )}
+
+        {scanId && (
+          <ActionableRemediationPanel
+            scanId={scanId}
+            scanType={scanType}
+            finding={f}
+            patchPlan={patchPlan}
+          />
         )}
 
         {hasFix && (
@@ -3522,6 +3567,7 @@ const CodeSnippet: React.FC<{
   filePath: string;
   severityColor: string;
   contextLines?: number;
+  resolvedRange?: ResolvedPatchRange | null;
 }> = ({
   fileContent,
   snippet,
@@ -3530,6 +3576,7 @@ const CodeSnippet: React.FC<{
   filePath,
   severityColor,
   contextLines = 5,
+  resolvedRange,
 }) => {
   // Prefer full file content (from original_code_map) over snippet-only
   const source = useMemo(() => {
@@ -3542,12 +3589,15 @@ const CodeSnippet: React.FC<{
   // exact lines light up. Fall back to the single reported line when
   // the snippet can't be matched (legacy finding, or whitespace drift).
   const [hlStart, hlEnd] = useMemo<[number, number]>(() => {
+    if (resolvedRange) {
+      return [resolvedRange.start_line, resolvedRange.end_line];
+    }
     if (fileContent && vulnerableSnippet) {
       const loc = locateSnippet(fileContent, vulnerableSnippet);
       if (loc) return loc;
     }
     return [lineNumber, lineNumber];
-  }, [fileContent, vulnerableSnippet, lineNumber]);
+  }, [fileContent, vulnerableSnippet, lineNumber, resolvedRange]);
 
   const [expanded, setExpanded] = useState(false);
 
@@ -3651,6 +3701,9 @@ const CodeSnippet: React.FC<{
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>{filePath}</span>
         <span style={{ color: "var(--fg-subtle)" }}>·</span>
         <span style={{ color: severityColor, fontWeight: 600 }}>{lineLabel}</span>
+        <span className="chip" style={{ fontSize: 9 }}>
+          {resolvedRange ? "persisted exact range" : "approximate / legacy evidence"}
+        </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           <CopyButton
             value={displayLines.join("\n")}

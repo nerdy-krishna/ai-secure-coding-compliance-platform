@@ -1844,6 +1844,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finding-governance/scans/{scan_id}/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Finding Evidence */
+        get: operations["list_finding_evidence_api_v1_finding_governance_scans__scan_id__findings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finding-governance/scans/{scan_id}/findings/{finding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Finding Evidence */
+        get: operations["get_finding_evidence_api_v1_finding_governance_scans__scan_id__findings__finding_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finding-governance/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Finding Policy */
+        get: operations["get_finding_policy_api_v1_finding_governance_policy_get"];
+        put?: never;
+        /** Create Finding Policy */
+        post: operations["create_finding_policy_api_v1_finding_governance_policy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finding-governance/scans/{scan_id}/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate Finding Policy */
+        post: operations["evaluate_finding_policy_api_v1_finding_governance_scans__scan_id__evaluate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finding-governance/scans/{scan_id}/findings/{finding_id}/waivers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grant Finding Waiver */
+        post: operations["grant_finding_waiver_api_v1_finding_governance_scans__scan_id__findings__finding_id__waivers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finding-governance/waivers/{waiver_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Finding Waiver */
+        post: operations["revoke_finding_waiver_api_v1_finding_governance_waivers__waiver_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finding-governance/waivers/{waiver_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Finding Waiver History */
+        get: operations["get_finding_waiver_history_api_v1_finding_governance_waivers__waiver_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finding-governance/portfolio/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Finding Portfolio Trends */
+        get: operations["get_finding_portfolio_trends_api_v1_finding_governance_portfolio_trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/findings": {
         parameters: {
             query?: never;
@@ -3663,6 +3800,10 @@ export interface components {
             fixed_code_map?: {
                 [key: string]: string;
             } | null;
+            /** Patch Plan */
+            patch_plan?: {
+                [key: string]: unknown;
+            } | null;
             /** Source Counts */
             source_counts?: {
                 [key: string]: number;
@@ -3672,6 +3813,10 @@ export interface components {
                 [key: string]: unknown;
             };
             scanner_coverage?: components["schemas"]["ScannerCoverageManifestResponse"] | null;
+            /** Finding Governance */
+            finding_governance?: {
+                [key: string]: unknown;
+            };
             /** Cost Details */
             cost_details?: {
                 [key: string]: unknown;
@@ -4607,6 +4752,8 @@ export interface components {
             configuration_changes?: string[];
             /** Migration Changes */
             migration_changes?: string[];
+            /** Required Commands */
+            required_commands?: string[];
             /** Manual Steps */
             manual_steps?: string[];
             /** File Path */
@@ -4629,6 +4776,77 @@ export interface components {
             validation_status: string;
             /** Is Applied */
             is_applied: boolean;
+        };
+        /** FindingLineageListResponse */
+        FindingLineageListResponse: {
+            /**
+             * Scan Id
+             * Format: uuid
+             */
+            scan_id: string;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Items */
+            items: components["schemas"]["FindingLineageRecordResponse"][];
+            policy_evaluation?: components["schemas"]["FindingPolicyEvaluationResponse"] | null;
+            /** Active Waivers */
+            active_waivers?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** FindingLineageRecordResponse */
+        FindingLineageRecordResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Scan Id */
+            scan_id: string | null;
+            /** Attempt Id */
+            attempt_id: string | null;
+            /** Finding Id */
+            finding_id: number | null;
+            /** Predecessor Finding Id */
+            predecessor_finding_id: number | null;
+            /** Fingerprint */
+            fingerprint: string;
+            /**
+             * Baseline State
+             * @enum {string}
+             */
+            baseline_state: "new" | "fixed" | "unchanged" | "reintroduced";
+            /** Exact Ranges */
+            exact_ranges: {
+                [key: string]: unknown;
+            }[];
+            /** Dataflow */
+            dataflow: {
+                [key: string]: unknown;
+            };
+            /** Source Provenance */
+            source_provenance: {
+                [key: string]: unknown;
+            };
+            /** Producer Provenance */
+            producer_provenance: {
+                [key: string]: unknown;
+            };
+            /** Coverage Entry Ids */
+            coverage_entry_ids: string[];
+            /** Evidence Object Ids */
+            evidence_object_ids: string[];
+            /** Remediation State */
+            remediation_state: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** FindingLineageRequest */
         FindingLineageRequest: {
@@ -4677,6 +4895,208 @@ export interface components {
             full_sankey_nodes?: components["schemas"]["SankeyNode"][] | null;
             /** Full Sankey Links */
             full_sankey_links?: components["schemas"]["SankeyLink"][] | null;
+        };
+        /** FindingPolicyEvaluationResponse */
+        FindingPolicyEvaluationResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Scan Id */
+            scan_id: string | null;
+            /** Attempt Id */
+            attempt_id: string | null;
+            /**
+             * Policy Version Id
+             * Format: uuid
+             */
+            policy_version_id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "pass" | "fail";
+            /** Coverage Complete */
+            coverage_complete: boolean;
+            /** Blocking Fingerprints */
+            blocking_fingerprints: string[];
+            /** Waived Fingerprints */
+            waived_fingerprints: string[];
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** FindingPolicyRequest */
+        FindingPolicyRequest: {
+            /**
+             * Minimum Severity
+             * @default high
+             * @enum {string}
+             */
+            minimum_severity: "informational" | "low" | "medium" | "high" | "critical";
+            /**
+             * Minimum Confidence
+             * @default medium
+             * @enum {string}
+             */
+            minimum_confidence: "low" | "medium" | "high";
+            /**
+             * Require Complete Coverage
+             * @default true
+             */
+            require_complete_coverage: boolean;
+            /**
+             * Allow Waivers
+             * @default true
+             */
+            allow_waivers: boolean;
+            /**
+             * Minimum Waiver Remaining Hours
+             * @default 0
+             */
+            minimum_waiver_remaining_hours: number;
+            /** Reason */
+            reason: string;
+        };
+        /** FindingPolicyResponse */
+        FindingPolicyResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /**
+             * Minimum Severity
+             * @enum {string}
+             */
+            minimum_severity: "informational" | "low" | "medium" | "high" | "critical";
+            /**
+             * Minimum Confidence
+             * @enum {string}
+             */
+            minimum_confidence: "low" | "medium" | "high";
+            /** Require Complete Coverage */
+            require_complete_coverage: boolean;
+            /** Allow Waivers */
+            allow_waivers: boolean;
+            /** Minimum Waiver Remaining Hours */
+            minimum_waiver_remaining_hours: number;
+            /** Actor User Id */
+            actor_user_id: number | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** FindingPortfolioTrendsResponse */
+        FindingPortfolioTrendsResponse: {
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /** Items */
+            items: components["schemas"]["FindingTrendBucketResponse"][];
+        };
+        /** FindingTrendBucketResponse */
+        FindingTrendBucketResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** New */
+            new: number;
+            /** Fixed */
+            fixed: number;
+            /** Unchanged */
+            unchanged: number;
+            /** Reintroduced */
+            reintroduced: number;
+        };
+        /** FindingWaiverEventResponse */
+        FindingWaiverEventResponse: {
+            /** Id */
+            id: number;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "granted" | "revoked" | "expired";
+            /** Actor User Id */
+            actor_user_id: number | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** FindingWaiverRequest */
+        FindingWaiverRequest: {
+            /**
+             * Scope
+             * @default finding
+             * @enum {string}
+             */
+            scope: "finding" | "fingerprint" | "project";
+            /** Reason */
+            reason: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** FindingWaiverResponse */
+        FindingWaiverResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Scan Id */
+            scan_id: string | null;
+            /** Finding Id */
+            finding_id: number | null;
+            /** Fingerprint */
+            fingerprint: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "finding" | "fingerprint" | "project";
+            /** Scope Value */
+            scope_value: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Actor User Id */
+            actor_user_id: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Events */
+            events?: components["schemas"]["FindingWaiverEventResponse"][];
         };
         /** FrameworkAgentMappingUpdate */
         FrameworkAgentMappingUpdate: {
@@ -5900,6 +6320,11 @@ export interface components {
         RevocationResult: {
             /** Revoked */
             revoked: number;
+        };
+        /** RevokeFindingWaiverRequest */
+        RevokeFindingWaiverRequest: {
+            /** Reason */
+            reason: string;
         };
         /** RuleRead */
         RuleRead: {
@@ -8575,7 +9000,9 @@ export interface operations {
     };
     download_patch_plan_api_v1_scans__scan_id__patch_plan_get: {
         parameters: {
-            query?: never;
+            query?: {
+                format?: "json" | "patch";
+            };
             header?: never;
             path: {
                 scan_id: string;
@@ -11485,6 +11912,286 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsagePolicyPreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_finding_evidence_api_v1_finding_governance_scans__scan_id__findings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingLineageListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_finding_evidence_api_v1_finding_governance_scans__scan_id__findings__finding_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+                finding_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingLineageListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_finding_policy_api_v1_finding_governance_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPolicyResponse"];
+                };
+            };
+        };
+    };
+    create_finding_policy_api_v1_finding_governance_policy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindingPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evaluate_finding_policy_api_v1_finding_governance_scans__scan_id__evaluate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPolicyEvaluationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_finding_waiver_api_v1_finding_governance_scans__scan_id__findings__finding_id__waivers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+                finding_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindingWaiverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingWaiverResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_finding_waiver_api_v1_finding_governance_waivers__waiver_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                waiver_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeFindingWaiverRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingWaiverResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_finding_waiver_history_api_v1_finding_governance_waivers__waiver_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                waiver_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingWaiverResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_finding_portfolio_trends_api_v1_finding_governance_portfolio_trends_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingPortfolioTrendsResponse"];
                 };
             };
             /** @description Validation Error */

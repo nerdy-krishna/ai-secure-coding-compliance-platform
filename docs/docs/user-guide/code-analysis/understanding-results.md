@@ -42,6 +42,28 @@ reasoning-model pass merges raw per-agent findings describing the
 same root cause into one root finding and drops false positives and
 noise, so the same bug never shows up as several rows.
 
+## Actionable remediation evidence
+
+Result semantics depend on the selected workflow mode:
+
+- **AUDIT** shows the vulnerable evidence range and remediation guidance, and explicitly says no
+  source patch was generated or applied.
+- **SUGGEST** shows the persisted validated unified diff and candidate state, always labelled as not
+  applied.
+- **REMEDIATE** compares original and promoted snapshots and shows each hunk's applied, duplicate,
+  conflict, rejected, or manual-review disposition. Partial remediation is prominent.
+
+Exact highlights use the planner's persisted resolved line/column range. Older scans without a
+patch artifact are marked legacy/approximate instead of implying exactness. Expand a canonical
+finding to see contributing lineage IDs, immutable evidence, scanner coverage, data-flow evidence,
+and active waivers; authorized operators can grant or revoke a waiver there.
+
+Each actionable patch groups necessary imports, dependencies, configuration or migration changes,
+commands, and manual steps alongside its diff. Validation rows distinguish `passed`, `failed`, and
+`not_run` and preserve the exact profile/tool/version/timestamp and bounded diagnostic. Candidate
+badges show the progression from proposed and anchor-validated through validation/security review,
+plus final application or exception states.
+
 If the scan used a **second reasoning LLM**, each finding shows which
 model(s) detected it. A finding both models independently flagged is
 labelled *"Independently detected by …"* with highlighted model chips

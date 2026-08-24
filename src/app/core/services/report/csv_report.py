@@ -40,6 +40,22 @@ _COLUMNS = [
     "baseline_state",
     "finding_fingerprint",
     "evidence_object_ids",
+    "candidate_id",
+    "candidate_state",
+    "requirement_type",
+    "requirement_value",
+    "validation_profile",
+    "validation_tool",
+    "validation_tool_version",
+    "validation_outcome",
+    "validation_timestamp",
+    "validation_diagnostic",
+    "unified_diff",
+    "governance_state",
+    "policy_outcome",
+    "predecessor_finding_id",
+    "attempt_id",
+    "dataflow",
 ]
 
 
@@ -53,6 +69,32 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
         for item in (result.finding_governance or {}).get("items", [])
         if item.get("finding_id") is not None
     }
+    governance_payload = result.finding_governance or {}
+    if governance_payload:
+        governance_counts = governance_payload.get("counts", {})
+        evaluation = governance_payload.get("policy_evaluation") or {}
+        writer.writerow(
+            {
+                "record_type": "governance_summary",
+                "governance_state": "; ".join(
+                    f"{state}={governance_counts.get(state, 0)}"
+                    for state in ("new", "fixed", "unchanged", "reintroduced")
+                ),
+                "policy_outcome": evaluation.get("outcome", "not_evaluated"),
+            }
+        )
+        for item in governance_payload.get("items", []):
+            writer.writerow(
+                {
+                    "record_type": "governance_lineage",
+                    "governance_state": item.get("baseline_state", ""),
+                    "finding_fingerprint": item.get("fingerprint", ""),
+                    "predecessor_finding_id": item.get("predecessor_finding_id", ""),
+                    "attempt_id": item.get("attempt_id", ""),
+                    "dataflow": str(item.get("dataflow", {})),
+                    "evidence_object_ids": "; ".join(item.get("evidence_object_ids", [])),
+                }
+            )
     for finding in collect_findings(result):
         source = finding.source or "agent"
         provenance = result.toolchain_provenance.get(source, {})
@@ -126,6 +168,64 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
                     "coverage_entry_id": entry.id,
                     "coverage_status": entry.status,
                     "coverage_reason": entry.reason or "",
+                }
+            )
+    remediation = (
+        result.summary_report.remediation.model_dump(mode="json")
+        if result.summary_report and result.summary_report.remediation is not None
+        else {}
+    )
+    if remediation:
+        writer.writerow(
+            {
+                "record_type": "remediation_summary",
+                "candidate_state": remediation.get("outcome", "unknown"),
+                "validation_diagnostic": str(remediation),
+            }
+        )
+    for file_plan in (result.patch_plan or {}).get("files", []):
+        for requirement in file_plan.get("requirements", []):
+            for label, key in (
+                ("import", "required_imports"),
+                ("dependency", "required_dependencies"),
+                ("configuration", "configuration_changes"),
+                ("migration", "migration_changes"),
+                ("command", "required_commands"),
+                ("manual_step", "manual_steps"),
+            ):
+                for value in requirement.get(key, []):
+                    writer.writerow(
+                        {
+                            "record_type": "patch_requirement",
+                            "file_path": file_plan.get("file_path", ""),
+                            "candidate_id": requirement.get("candidate_id", ""),
+                            "candidate_state": file_plan.get("status", ""),
+                            "requirement_type": label,
+                            "requirement_value": value,
+                        }
+                    )
+        for check in file_plan.get("validation_checks", []):
+            writer.writerow(
+                {
+                    "record_type": "validation_evidence",
+                    "file_path": file_plan.get("file_path", ""),
+                    "candidate_state": file_plan.get("status", ""),
+                    "validation_profile": check.get("profile")
+                    or check.get("stage", ""),
+                    "validation_tool": check.get("tool", ""),
+                    "validation_tool_version": check.get("tool_version", ""),
+                    "validation_outcome": check.get("status", "not_run"),
+                    "validation_timestamp": check.get("completed_at", ""),
+                    "validation_diagnostic": check.get("detail", ""),
+                }
+            )
+        if file_plan.get("unified_diff"):
+            writer.writerow(
+                {
+                    "record_type": "patch",
+                    "file_path": file_plan.get("file_path", ""),
+                    "candidate_state": file_plan.get("status", ""),
+                    "unified_diff": file_plan["unified_diff"],
                 }
             )
     return buffer.getvalue()

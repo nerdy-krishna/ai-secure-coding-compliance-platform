@@ -81,6 +81,13 @@ def render_sarif(result: AnalysisResultDetailResponse) -> str:
                         }
                     ),
                     "sccapFindingGovernance": result.finding_governance or {},
+                    "sccapRemediation": (
+                        result.summary_report.remediation.model_dump(mode="json")
+                        if result.summary_report
+                        and result.summary_report.remediation is not None
+                        else {}
+                    ),
+                    "sccapPatchPlan": result.patch_plan or {},
                 },
                 "results": results,
             }

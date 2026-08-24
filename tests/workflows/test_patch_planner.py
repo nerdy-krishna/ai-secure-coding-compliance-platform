@@ -878,6 +878,21 @@ class PatchPlannerTests(unittest.TestCase):
         self.assertEqual(plan.validation_checks[0].stage, "manual_requirements")
         self.assertEqual(plan.validation_checks[0].status, "failed")
 
+    def test_required_commands_block_automatic_source_promotion(self):
+        source = "danger()\n"
+        item = candidate(source, "danger()", "safe()", 1, 0)
+        item.required_commands = ["python manage.py migrate"]
+        plan, decisions, patched = plan_file_patch(
+            file_path="src/app.py",
+            source=source,
+            expected_source_hash=source_hash(source),
+            candidates=[item],
+        )
+        self.assertEqual(patched, source)
+        self.assertEqual(decisions[0].status, "conflict")
+        self.assertEqual(plan.validation_checks[0].stage, "manual_requirements")
+        self.assertIn("commands", plan.validation_checks[0].detail)
+
     def test_second_application_is_rejected_by_original_snapshot_hash(self):
         source = "danger()\n"
         item = candidate(source, "danger()", "safe()", 1, 0)

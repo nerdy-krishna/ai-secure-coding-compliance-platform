@@ -7,6 +7,7 @@ import difflib
 import hashlib
 import json
 import uuid
+from datetime import datetime
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Callable, Literal, Sequence
 
@@ -65,6 +66,7 @@ class CandidateRequirements(BaseModel):
     required_dependencies: list[str] = Field(default_factory=list)
     configuration_changes: list[str] = Field(default_factory=list)
     migration_changes: list[str] = Field(default_factory=list)
+    required_commands: list[str] = Field(default_factory=list)
     manual_steps: list[str] = Field(default_factory=list)
 
 
@@ -81,6 +83,9 @@ class PatchValidationCheck(BaseModel):
     ]
     blocking: bool = True
     tool: str | None = None
+    profile: str | None = None
+    tool_version: str | None = None
+    completed_at: datetime | None = None
     detail: str
     return_code: int | None = None
     duration_ms: int | None = Field(default=None, ge=0)
@@ -601,6 +606,7 @@ def plan_file_patch(
             required_dependencies=candidate.required_dependencies,
             configuration_changes=candidate.configuration_changes,
             migration_changes=candidate.migration_changes,
+            required_commands=candidate.required_commands,
             manual_steps=candidate.manual_steps,
         )
         for candidate in candidates
@@ -699,6 +705,7 @@ def plan_file_patch(
         manual_requirements = (
             candidate.configuration_changes
             or candidate.migration_changes
+            or candidate.required_commands
             or candidate.manual_steps
         )
         if manual_requirements:
@@ -709,7 +716,8 @@ def plan_file_patch(
                     tool=None,
                     detail=(
                         f"Candidate {candidate.candidate_id} requires configuration, "
-                        "migration, or operator steps outside this source-file patch."
+                        "migration, commands, or operator steps outside this "
+                        "source-file patch."
                     ),
                 )
             )
@@ -741,7 +749,10 @@ def plan_file_patch(
             elif not imports_ready and import_check is not None:
                 candidate.decision_reason = import_check.detail
             elif manual_requirements:
-                candidate.decision_reason = "Configuration, migration, or manual requirements need a separately approved change."
+                candidate.decision_reason = (
+                    "Configuration, migration, command, or manual requirements need "
+                    "a separately approved change."
+                )
             else:
                 candidate.decision_reason = "Required imports cannot be placed deterministically for this language."
             decisions.append(

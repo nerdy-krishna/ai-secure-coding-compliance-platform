@@ -1,6 +1,12 @@
 from datetime import datetime, timedelta, timezone
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
+from app.infrastructure.database.repositories.finding_governance_repo import (
+    FindingGovernanceRepository,
+)
 from app.shared.lib.finding_governance import (
     GatePolicy,
     classify_baseline,
@@ -87,6 +93,36 @@ class FindingGovernanceSemanticsTests(unittest.TestCase):
             waiver_is_eligible(
                 expires_at=now + timedelta(hours=25), policy=policy, now=now
             )
+        )
+
+
+class FindingGovernanceExpiryAuditTests(unittest.IsolatedAsyncioTestCase):
+    async def test_expired_history_read_persists_audit_event(self):
+        tenant_id = uuid4()
+        waiver_id = uuid4()
+        waiver = SimpleNamespace(
+            id=waiver_id,
+            tenant_id=tenant_id,
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+        event = SimpleNamespace(id=1, waiver_id=waiver_id, action="expired")
+        db = SimpleNamespace(
+            scalar=AsyncMock(return_value=waiver),
+            scalars=AsyncMock(
+                return_value=SimpleNamespace(all=lambda: [event])
+            ),
+        )
+        repo = FindingGovernanceRepository(db)
+        repo.record_expired_waivers = AsyncMock(return_value=1)
+
+        returned_waiver, events = await repo.waiver_history(
+            waiver_id, tenant_id=tenant_id
+        )
+
+        self.assertIs(returned_waiver, waiver)
+        self.assertEqual(events, [event])
+        repo.record_expired_waivers.assert_awaited_once_with(
+            tenant_id=tenant_id, commit=True
         )
 
 

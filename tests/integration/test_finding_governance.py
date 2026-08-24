@@ -6,7 +6,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import DBAPIError
 
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import AsyncSessionLocal, engine
@@ -26,12 +27,14 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
         await engine.dispose()
 
     @staticmethod
-    def finding(scan, *, rule: str, path: str, snippet: str) -> db_models.Finding:
+    def finding(
+        scan, *, rule: str, path: str, snippet: str, line_number: int = 10
+    ) -> db_models.Finding:
         return db_models.Finding(
             scan_id=scan.id,
             tenant_id=scan.tenant_id,
             file_path=path,
-            line_number=10,
+            line_number=line_number,
             vulnerable_snippet=snippet,
             title=rule,
             severity="High",
@@ -98,6 +101,19 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                     )
                     scans.append(scan)
                 scan1, scan2, current = scans
+                failed_partial = db_models.Scan(
+                    project_id=project.id,
+                    user_id=user.id,
+                    tenant_id=tenant.id,
+                    scan_type="AUDIT",
+                    status="FAILED",
+                    frameworks=[],
+                    summary={},
+                    created_at=start + timedelta(days=1, hours=12),
+                    completed_at=None,
+                )
+                db.add(failed_partial)
+                await db.flush()
                 db.add_all(
                     [
                         self.finding(
@@ -110,6 +126,19 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                             scan2, rule="rule-d", path="d.py", snippet="bad_d()"
                         ),
                         self.finding(
+                            scan2, rule="rule-e", path="e.py", snippet="bad_e()"
+                        ),
+                        self.finding(
+                            scan2, rule="rule-f", path="f.py", snippet="bad_f()"
+                        ),
+                        self.finding(
+                            scan2,
+                            rule="rule-f",
+                            path="f.py",
+                            snippet="bad_f()",
+                            line_number=30,
+                        ),
+                        self.finding(
                             current, rule="rule-a", path="a.py", snippet="bad_a()"
                         ),
                         self.finding(
@@ -117,6 +146,32 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                         ),
                         self.finding(
                             current, rule="rule-c", path="c.py", snippet="bad_c()"
+                        ),
+                        self.finding(
+                            current,
+                            rule="rule-c",
+                            path="c.py",
+                            snippet="bad_c()",
+                            line_number=30,
+                        ),
+                        self.finding(
+                            current, rule="rule-e", path="e.py", snippet="bad_e()"
+                        ),
+                        self.finding(
+                            current,
+                            rule="rule-e",
+                            path="e.py",
+                            snippet="bad_e()",
+                            line_number=30,
+                        ),
+                        self.finding(
+                            current, rule="rule-f", path="f.py", snippet="bad_f()"
+                        ),
+                        self.finding(
+                            failed_partial,
+                            rule="rule-c",
+                            path="c.py",
+                            snippet="bad_c()",
                         ),
                     ]
                 )
@@ -129,7 +184,7 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                         scanner_name="semgrep",
                         input_path=".",
                         status="completed",
-                        finding_count=3,
+                        finding_count=7,
                     )
                 )
                 await db.flush()
@@ -150,17 +205,141 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                     reintroduced.source_provenance["scanner_rule_id"], "rule-a"
                 )
                 self.assertEqual(reintroduced.exact_ranges[0]["start_line"], 10)
+                repeated_sites = [
+                    row
+                    for row in records
+                    if row.source_provenance["scanner_rule_id"] == "rule-c"
+                ]
+                self.assertEqual(len(repeated_sites), 2)
+                self.assertEqual(
+                    {row.exact_ranges[0]["start_line"] for row in repeated_sites},
+                    {10, 30},
+                )
+                self.assertTrue(
+                    all(row.baseline_state == "new" for row in repeated_sites),
+                    "failed/cancelled partial scans must not create reintroduced history",
+                )
+                expanded_occurrences = [
+                    row
+                    for row in records
+                    if row.source_provenance["scanner_rule_id"] == "rule-e"
+                ]
+                self.assertEqual(
+                    sorted(row.baseline_state for row in expanded_occurrences),
+                    ["new", "unchanged"],
+                )
+                contracted_occurrences = [
+                    row
+                    for row in records
+                    if row.source_provenance["scanner_rule_id"] == "rule-f"
+                ]
+                self.assertEqual(
+                    sorted(row.baseline_state for row in contracted_occurrences),
+                    ["fixed", "unchanged"],
+                )
+                self.assertEqual(len({row.site_identity for row in repeated_sites}), 2)
+                self.assertTrue(
+                    all(len(row.site_identity) == 64 for row in repeated_sites)
+                )
+                replaced_finding = await db.scalar(
+                    select(db_models.Finding).where(
+                        db_models.Finding.scan_id == current.id,
+                        db_models.Finding.scanner_rule_id == "rule-c",
+                        db_models.Finding.line_number == 30,
+                    )
+                )
+                old_finding_id = replaced_finding.id
+                await db.delete(replaced_finding)
+                await db.flush()
+                replacement = self.finding(
+                    current,
+                    rule="rule-c",
+                    path="c.py",
+                    snippet="bad_c()",
+                    line_number=30,
+                )
+                db.add(replacement)
+                await db.flush()
+                self.assertNotEqual(replacement.id, old_finding_id)
+                retried_records = await repo.materialize_scan(current.id, commit=False)
+                retried_site = next(
+                    row
+                    for row in retried_records
+                    if row.source_provenance["scanner_rule_id"] == "rule-c"
+                    and row.exact_ranges[0]["start_line"] == 30
+                )
+                await db.refresh(retried_site)
+                self.assertEqual(
+                    retried_site.site_identity,
+                    next(
+                        row.site_identity
+                        for row in repeated_sites
+                        if row.exact_ranges[0]["start_line"] == 30
+                    ),
+                )
+                self.assertEqual(retried_site.finding_id, replacement.id)
+                self.assertEqual(len(retried_records), len(records))
+                savepoint = await db.begin_nested()
+                with self.assertRaises(DBAPIError):
+                    await db.execute(
+                        update(db_models.FindingLineageRecord)
+                        .where(db_models.FindingLineageRecord.id == retried_site.id)
+                        .values(exact_ranges=[])
+                    )
+                await savepoint.rollback()
+                first_attempt_id = current.current_attempt_id
+                restarted = await ScanAttemptRepository(db).create_restart(
+                    current.id, actor_user_id=user.id, commit=False
+                )
+                db.add(
+                    db_models.ScannerCoverageEntry(
+                        id=uuid4(),
+                        scan_id=current.id,
+                        attempt_id=restarted.id,
+                        tenant_id=tenant.id,
+                        scanner_name="semgrep",
+                        input_path=".",
+                        status="completed",
+                        finding_count=7,
+                    )
+                )
+                await db.flush()
+                current_attempt_records = await repo.materialize_scan(
+                    current.id, commit=False
+                )
+                self.assertNotEqual(restarted.id, first_attempt_id)
+                self.assertTrue(
+                    all(row.attempt_id == restarted.id for row in current_attempt_records)
+                )
+                history = await repo.lineage_history_for_scan(current.id)
+                self.assertEqual(
+                    len(history), len(records) + len(current_attempt_records)
+                )
 
-                evaluation = await repo.evaluate_scan_policy(current.id, commit=False)
+                evaluation = await repo.evaluate_scan_policy(
+                    current.id, commit=False, idempotent=True
+                )
                 self.assertEqual(evaluation.outcome, "fail")
                 self.assertTrue(evaluation.coverage_complete)
-                self.assertEqual(len(evaluation.blocking_fingerprints), 3)
+                self.assertEqual(len(evaluation.blocking_fingerprints), 5)
                 persisted = await db.scalar(
                     select(db_models.FindingPolicyEvaluation).where(
                         db_models.FindingPolicyEvaluation.id == evaluation.id
                     )
                 )
                 self.assertIsNotNone(persisted)
+                retry = await repo.evaluate_scan_policy(
+                    current.id, commit=False, idempotent=True
+                )
+                self.assertEqual(retry.id, evaluation.id)
+                evaluation_count = await db.scalar(
+                    select(func.count(db_models.FindingPolicyEvaluation.id)).where(
+                        db_models.FindingPolicyEvaluation.scan_id == current.id,
+                        db_models.FindingPolicyEvaluation.policy_version_id
+                        == evaluation.policy_version_id,
+                    )
+                )
+                self.assertEqual(evaluation_count, 1)
 
                 current_finding = await db.scalar(
                     select(db_models.Finding).where(
@@ -181,7 +360,7 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                     current.id, commit=False
                 )
                 self.assertEqual(len(waived_evaluation.waived_fingerprints), 1)
-                self.assertEqual(len(waived_evaluation.blocking_fingerprints), 2)
+                self.assertEqual(len(waived_evaluation.blocking_fingerprints), 4)
                 await repo.revoke_waiver(
                     waiver,
                     actor_user_id=user.id,
@@ -224,6 +403,12 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                         tenant_id=tenant.id, commit=False
                     ),
                     1,
+                )
+                self.assertEqual(
+                    await repo.record_expired_waivers(
+                        tenant_id=tenant.id, commit=False
+                    ),
+                    0,
                 )
                 await db.delete(current)
                 await db.flush()

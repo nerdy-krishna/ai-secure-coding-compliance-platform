@@ -54,7 +54,7 @@ class FindingGovernanceService:
         visible_user_ids: list[int] | None,
         finding_id: int | None = None,
     ) -> FindingLineageListResponse:
-        await self._scan(
+        scan = await self._scan(
             scan_id, tenant_id=tenant_id, visible_user_ids=visible_user_ids
         )
         records = await self.repo.lineage_for_scan(scan_id)
@@ -67,9 +67,28 @@ class FindingGovernanceService:
         counts = Counter(row.baseline_state for row in records)
         evaluation = await self.repo.db.scalar(
             select(db_models.FindingPolicyEvaluation)
-            .where(db_models.FindingPolicyEvaluation.scan_id == scan_id)
+            .where(
+                db_models.FindingPolicyEvaluation.scan_id == scan_id,
+                db_models.FindingPolicyEvaluation.attempt_id
+                == scan.current_attempt_id,
+            )
             .order_by(db_models.FindingPolicyEvaluation.created_at.desc())
             .limit(1)
+        )
+        revoked = select(db_models.FindingWaiverEvent.waiver_id).where(
+            db_models.FindingWaiverEvent.action == "revoked"
+        )
+        waivers = list(
+            (
+                await self.repo.db.scalars(
+                    select(db_models.FindingWaiver).where(
+                        db_models.FindingWaiver.scan_id == scan_id,
+                        db_models.FindingWaiver.expires_at
+                        > datetime.now(timezone.utc),
+                        db_models.FindingWaiver.id.not_in(revoked),
+                    )
+                )
+            ).all()
         )
         return FindingLineageListResponse(
             scan_id=scan_id,
@@ -83,6 +102,17 @@ class FindingGovernanceService:
                 if evaluation
                 else None
             ),
+            active_waivers=[
+                {
+                    "id": str(row.id),
+                    "finding_id": row.finding_id,
+                    "fingerprint": row.fingerprint,
+                    "scope": row.scope,
+                    "reason": row.reason,
+                    "expires_at": row.expires_at.isoformat(),
+                }
+                for row in waivers
+            ],
         )
 
     async def latest_policy(self, tenant_id: uuid.UUID) -> FindingPolicyResponse:

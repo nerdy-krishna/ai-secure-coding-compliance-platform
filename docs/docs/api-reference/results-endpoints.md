@@ -32,7 +32,8 @@ GET /scans/{scan_id}/result
 
 Returns `AnalysisResultDetailResponse`: the parsed `summary_report`,
 the per-file findings bundle, original / fixed code maps, and the
-final scan `status`.
+final scan `status`. New `SUGGEST` and `REMEDIATE` results also include the persisted `patch_plan`;
+legacy and `AUDIT` results return `null`.
 
 Use this for the Results page.
 
@@ -79,6 +80,21 @@ defaults to `html`; an unsupported value returns `400`.
 | `sarif` | `application/sarif+json` | SARIF 2.1.0 JSON suitable for GitHub code scanning upload; includes stable rules, rule indexes, repository-relative artifact URIs, locations / related locations, CWE/CVSS/source/triage metadata. |
 
 Scoped by H.2 visibility — the same `404`-not-`403` rule applies.
+
+## Download persisted patch plan
+
+```http
+GET /scans/{scan_id}/patch-plan?format=json|patch
+```
+
+Available when a completed scan has a persisted patch-plan artifact. `json` returns the versioned
+artifact with exact resolved ranges, per-candidate requirements, validation evidence and
+dispositions. `patch` returns the same artifact as a reviewable apply document containing the
+persisted unified diff and adjacent requirements/commands/manual steps. Unsupported formats return
+`400`; missing or unauthorized artifacts return `404`.
+
+Consumers must treat `validation_checks[].status` literally: `not_run` is not success. Candidate
+`is_applied` is authoritative; a passed `SUGGEST` candidate remains unapplied.
 
 !!! note "SARIF export"
 

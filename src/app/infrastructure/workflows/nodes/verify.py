@@ -794,6 +794,11 @@ async def verify_patches_node(state: WorkerState) -> Dict[str, Any]:
                 continue
 
         for candidate in plan_candidates:
+            # This file survived every blocking deterministic replay and, when
+            # required, LLM evidence re-analysis. Persist the candidate-level
+            # outcome explicitly instead of leaving the planner's pre-gate
+            # `not_run` state attached to a promoted candidate.
+            candidate.validation_status = "passed"
             if candidate.finding.source in REPLAYABLE_SOURCES:
                 candidate.finding.fix_verified = True
 
@@ -839,6 +844,10 @@ async def verify_patches_node(state: WorkerState) -> Dict[str, Any]:
                 and str(finding.canonical_finding_id) in applied_canonical_ids
             ):
                 finding.is_applied_in_remediation = True
+                # Promotion changes the finding's effective disposition. Persist
+                # this alongside the promoted snapshot so risk is computed from
+                # the code that actually survived every blocking check.
+                finding.disposition = "remediated"
                 if finding.source in REPLAYABLE_SOURCES:
                     finding.fix_verified = True
 

@@ -23,7 +23,7 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import (
     APIRouter,
@@ -1105,6 +1105,7 @@ async def evaluate_scanner_coverage_policy(
 )
 async def download_patch_plan(
     scan_id: uuid.UUID,
+    artifact_format: Literal["json", "patch"] = Query("json", alias="format"),
     user: db_models.User = Depends(current_active_user),
     service: ScanQueryService = Depends(get_scan_query_service),
     visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
@@ -1117,6 +1118,16 @@ async def download_patch_plan(
         visible_user_ids=visible_user_ids,
         tenant_id=tenant_id,
     )
+    if artifact_format == "patch":
+        from app.shared.lib.patch_artifact import render_patch_export
+
+        return Response(
+            content=render_patch_export(payload),
+            media_type="text/x-diff",
+            headers={
+                "Content-Disposition": f'attachment; filename="scan-{scan_id}.patch"'
+            },
+        )
     return Response(
         content=json.dumps(payload, indent=2, ensure_ascii=False),
         media_type="application/json",

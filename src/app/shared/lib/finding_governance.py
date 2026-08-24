@@ -133,6 +133,32 @@ def exact_ranges(finding: Mapping[str, Any] | object) -> list[dict[str, Any]]:
     return ranges
 
 
+def finding_site_identity(
+    *,
+    canonical_finding_id: object = None,
+    raw_finding_id: object = None,
+    exact_site_ranges: Sequence[Mapping[str, Any]],
+    fallback_identity: object = None,
+) -> str:
+    """Return a replay-stable identity for one canonical finding site."""
+
+    stable_ranges = [dict(item) for item in exact_site_ranges]
+    canonical_identity = canonical_finding_id or raw_finding_id
+    if canonical_identity is None:
+        canonical_identity = (
+            f"legacy:{fallback_identity}"
+            if not stable_ranges and fallback_identity is not None
+            else "legacy"
+        )
+    payload = json.dumps(
+        ["finding-site-v1", str(canonical_identity), stable_ranges],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 @dataclass(frozen=True)
 class GatePolicy:
     minimum_severity: str = "high"

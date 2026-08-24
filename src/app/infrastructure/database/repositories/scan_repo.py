@@ -1463,6 +1463,8 @@ class ScanRepository:
         status: str,
         summary: Optional[Dict[str, Any]],
         risk_score: Optional[int],
+        *,
+        commit: bool = True,
     ):
         """Saves the final summary + risk score, sets the completion timestamp, and updates the status."""
         logger.info(
@@ -1487,15 +1489,18 @@ class ScanRepository:
             .values(**values)
         )
         result = await self.db.execute(stmt)
-        try:
-            await self.db.commit()
-        except SQLAlchemyError as e:
-            logger.error(
-                "scan_repo.save_final_reports_and_status.commit_failed",
-                extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
-                exc_info=True,
-            )
-            raise
+        if commit:
+            try:
+                await self.db.commit()
+            except SQLAlchemyError as e:
+                logger.error(
+                    "scan_repo.save_final_reports_and_status.commit_failed",
+                    extra={"scan_id": str(scan_id), "error_class": e.__class__.__name__},
+                    exc_info=True,
+                )
+                raise
+        else:
+            await self.db.flush()
         return bool(result.rowcount)
 
     async def get_project_by_id(

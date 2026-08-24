@@ -36,6 +36,7 @@ class FindingLineageListResponse(BaseModel):
     counts: dict[str, int]
     items: list[FindingLineageRecordResponse]
     policy_evaluation: "FindingPolicyEvaluationResponse | None" = None
+    active_waivers: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FindingPolicyRequest(BaseModel):

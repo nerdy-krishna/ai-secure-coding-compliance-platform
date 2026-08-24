@@ -30,6 +30,7 @@ from app.core.services.report._common import (
     render_toolchain_section,
     render_coverage_section,
     render_finding_governance_section,
+    render_remediation_section,
     render_risk_panel,
     severity_color,
     severity_text_color,
@@ -151,7 +152,7 @@ def _print_html(result: AnalysisResultDetailResponse) -> str:
     project = _e(data.project)
 
     if data.active:
-        cards = "".join(_finding_card(f) for f in data.active)
+        cards = "".join(_finding_card(f, data.scan_type) for f in data.active)
     else:
         cards = '<p class="empty">No active findings for this scan.</p>'
 
@@ -164,6 +165,7 @@ def _print_html(result: AnalysisResultDetailResponse) -> str:
         + render_toolchain_section(data)
         + render_coverage_section(data)
         + render_finding_governance_section(data)
+        + render_remediation_section(data)
         + f'<h2 class="section">Active findings ({len(data.active)})</h2>'
         + cards
         + render_compact_findings("Remediated", data.remediated)
@@ -192,7 +194,7 @@ def _print_html(result: AnalysisResultDetailResponse) -> str:
 </body></html>"""
 
 
-def _finding_card(finding) -> str:
+def _finding_card(finding, scan_type: str = "audit") -> str:
     sev = finding.severity or "Informational"
     color = severity_color(sev)
     sev_fg = severity_text_color(sev)

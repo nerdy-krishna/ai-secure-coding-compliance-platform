@@ -1114,6 +1114,9 @@ class AnalysisResultDetailResponse(BaseModel):
     text_report: Optional[str] = None
     original_code_map: Optional[Dict[str, str]] = None
     fixed_code_map: Optional[Dict[str, str]] = None
+    # Exact persisted candidate-to-hunk artifact. None for AUDIT and legacy
+    # scans; never reconstructed from finding snippets.
+    patch_plan: Optional[Dict[str, Any]] = None
     # Per-source finding counts for the scan results page badge row
     # (sast-prescan-followups Group D2). Bucket "agent" covers legacy
     # LLM-emitted findings whose `source` is NULL. Empty dict when no
@@ -1338,6 +1341,7 @@ class FindingFixCandidateResponse(BaseModel):
     required_dependencies: List[str] = Field(default_factory=list)
     configuration_changes: List[str] = Field(default_factory=list)
     migration_changes: List[str] = Field(default_factory=list)
+    required_commands: List[str] = Field(default_factory=list)
     manual_steps: List[str] = Field(default_factory=list)
     file_path: str
     line_number: int

@@ -554,10 +554,14 @@ class ScanQueryService:
                 },
                 "items": [
                     {
+                        "id": str(row.id),
+                        "attempt_id": str(row.attempt_id) if row.attempt_id else None,
                         "finding_id": row.finding_id,
+                        "predecessor_finding_id": row.predecessor_finding_id,
                         "fingerprint": row.fingerprint,
                         "baseline_state": row.baseline_state,
                         "exact_ranges": row.exact_ranges,
+                        "dataflow": row.dataflow,
                         "source_provenance": row.source_provenance,
                         "producer_provenance": row.producer_provenance,
                         "coverage_entry_ids": [
@@ -589,6 +593,30 @@ class ScanQueryService:
                 exc,
             )
 
+        patch_plan: Dict[str, Any] | None = None
+        if str(scan.scan_type or "").upper() in {"SUGGEST", "REMEDIATE"}:
+            try:
+                from app.infrastructure.database.repositories.scan_artifact_repo import (
+                    ARTIFACT_TYPE_PATCH_PLAN,
+                    ScanArtifactRepository,
+                )
+
+                patch_artifact = await ScanArtifactRepository(self.repo.db).get_by_type(
+                    scan_id, ARTIFACT_TYPE_PATCH_PLAN
+                )
+                if patch_artifact is not None:
+                    patch_plan = await ScanArtifactRepository(
+                        self.repo.db
+                    ).resolve_payload(
+                        patch_artifact, actor_user_id=user.id, audit=False
+                    )
+            except Exception as exc:  # noqa: BLE001 - legacy scans lack artifacts
+                logger.warning(
+                    "scan-query: patch artifact unavailable scan_id=%s: %s",
+                    scan_id,
+                    exc,
+                )
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             current_attempt_id=scan.current_attempt_id,
@@ -598,6 +626,7 @@ class ScanQueryService:
             summary_report=summary_report_response,
             original_code_map=original_code_map or None,
             fixed_code_map=fixed_code_map or None,
+            patch_plan=patch_plan,
             source_counts=source_counts,
             toolchain_provenance=toolchain_provenance,
             scanner_coverage=scanner_coverage,
