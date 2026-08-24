@@ -223,6 +223,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -237,6 +238,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpen(false);
+        triggerRef.current?.focus();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -269,6 +271,7 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button
+        ref={triggerRef}
         className="sccap-btn sccap-btn-ghost"
         onClick={() => setOpen((o) => !o)}
         style={{ padding: "4px 10px 4px 4px", gap: 8 }}

@@ -31,9 +31,39 @@ const STATIC_AUTHENTICATED_ROUTES = [
   "/admin/tenants",
 ] as const;
 
+// FeatureRoute explicitly redirects disabled modules to the dashboard. No
+// other redirect is accepted here: permission, lazy-load, and route wiring
+// regressions must fail the inventory instead of passing on a healthy shell.
+const FEATURE_GUARDED_ROUTES = new Set<string>([
+  "/advisor",
+  "/compliance",
+  "/admin/smtp",
+  "/admin/agents",
+  "/admin/frameworks",
+  "/admin/prompts",
+  "/admin/sso/audit",
+  "/admin/users",
+  "/admin/user-groups",
+  "/admin/sso/providers",
+  "/admin/scim/tokens",
+  "/admin/tenants",
+]);
+
+async function expectRouteDestination(page: Page, route: string): Promise<void> {
+  const allowedPaths = FEATURE_GUARDED_ROUTES.has(route)
+    ? new Set([route, "/account/dashboard"])
+    : new Set([route]);
+  await expect
+    .poll(() => allowedPaths.has(new URL(page.url()).pathname))
+    .toBe(true);
+}
+
 async function expectShellContract(page: Page): Promise<void> {
   await expect(page.locator("main#main-content")).toBeVisible();
   await expect(page.locator('[aria-label="Loading page…"]')).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "This page could not be loaded" }),
+  ).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
   await expect(page.locator("button:not([aria-label]):not([aria-labelledby])").filter({ has: page.locator("svg:only-child") })).toHaveCount(0);
   const overflow = await page.evaluate(
@@ -60,6 +90,7 @@ test("every authenticated route preserves landmarks, names, and responsive actio
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(route);
     await expectShellContract(page);
+    await expectRouteDestination(page, route);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expectShellContract(page);
@@ -103,7 +134,16 @@ test("keyboard users can bypass navigation and dismiss account controls", async 
   const account = page.getByRole("button", { name: /account menu/i });
   await account.focus();
   await account.press("Enter");
-  await expect(page.getByRole("menu", { name: "Account" })).toBeVisible();
+  const accountMenu = page.getByRole("menu", { name: "Account" });
+  await expect(accountMenu).toBeVisible();
+  await page.keyboard.press("Tab");
+  await expect(accountMenu.getByRole("menuitem").first()).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("menu", { name: "Account" })).toBeHidden();
+  await expect(accountMenu).toBeHidden();
+  await expect(account).toBeFocused();
+
+  const search = page.getByRole("combobox", { name: "Global search" });
+  await search.fill("scan");
+  await search.press("Escape");
+  await expect(search).toBeFocused();
 });

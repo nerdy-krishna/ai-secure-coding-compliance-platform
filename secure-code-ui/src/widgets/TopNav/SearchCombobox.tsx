@@ -109,7 +109,6 @@ export const SearchCombobox: React.FC = () => {
   const onKeyDown: React.KeyboardEventHandler<HTMLInputElement> = (e) => {
     if (e.key === "Escape") {
       setOpen(false);
-      inputRef.current?.blur();
       return;
     }
     if (!open && (e.key === "ArrowDown" || e.key === "Enter")) {
