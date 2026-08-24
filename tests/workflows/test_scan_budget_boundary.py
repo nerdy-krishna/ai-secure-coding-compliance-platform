@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 import uuid
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from app.core.services.usage_budget_service import (
     BudgetExceededError,
@@ -14,10 +14,12 @@ from app.core.services.usage_budget_service import (
 from app.infrastructure.agents.file_profiler import FileProfiler
 from app.infrastructure.workflows.budget import (
     ScanBudgetExhausted,
+    mark_scan_budget_exhausted,
     raise_first_budget_denial,
     scan_gate_estimate,
 )
 from app.infrastructure.workflows.cancellation import cancellation_aware
+from app.shared.lib.scan_progress import EV_REJECTED
 
 
 def _denial() -> BudgetExceededError:
@@ -62,6 +64,46 @@ class ScanBudgetValueTests(unittest.TestCase):
 
 
 class ScanBudgetAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_terminal_budget_event_uses_supported_rejection_status(self) -> None:
+        denial = _denial()
+        db = AsyncMock()
+        repo = AsyncMock()
+        repo.update_status.return_value = True
+        attempt_repo = AsyncMock()
+        attempt_repo.mark_current_terminal.return_value = None
+
+        class SessionContext:
+            async def __aenter__(self):
+                return db
+
+            async def __aexit__(self, *_args):
+                return None
+
+        with (
+            patch(
+                "app.infrastructure.workflows.budget.AsyncSessionLocal",
+                new=Mock(return_value=SessionContext()),
+            ),
+            patch(
+                "app.infrastructure.workflows.budget.ScanRepository",
+                new=Mock(return_value=repo),
+            ),
+            patch(
+                "app.infrastructure.workflows.budget.ScanAttemptRepository",
+                new=Mock(return_value=attempt_repo),
+            ),
+            patch(
+                "app.infrastructure.workflows.budget.release_scan_budget",
+                new=AsyncMock(return_value=1),
+            ),
+        ):
+            changed = await mark_scan_budget_exhausted(uuid.uuid4(), denial)
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            repo.create_scan_event.await_args.kwargs["status"], EV_REJECTED
+        )
+
     async def test_file_profiler_re_raises_budget_denial(self) -> None:
         denial = _denial()
         client = AsyncMock()

@@ -116,8 +116,10 @@ async def main() -> None:
             model_name="integration-model",
             base_url="http://app:8765/v1",
             encrypted_api_key=FernetEncrypt.encrypt("integration-only-key"),
-            input_cost_per_million=0,
-            output_cost_per_million=0,
+            # Explicit non-zero rates make the deterministic provider priceable
+            # by the fail-closed usage-budget admission boundary.
+            input_cost_per_million=1,
+            output_cost_per_million=1,
         )
         db.add_all([user, llm])
         await db.flush()

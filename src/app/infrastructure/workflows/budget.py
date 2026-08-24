@@ -28,6 +28,7 @@ from app.infrastructure.database.repositories.usage_budget_repo import (
     BudgetAmounts,
     UsageBudgetRepository,
 )
+from app.shared.lib.scan_progress import EV_REJECTED
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     STATUS_BUDGET_EXHAUSTED,
@@ -132,7 +133,7 @@ async def mark_scan_budget_exhausted(
             await repo.create_scan_event(
                 scan_id=scan_id,
                 stage_name="BUDGET_ENFORCEMENT",
-                status="BLOCKED",
+                status=EV_REJECTED,
                 details=reason,
                 activity_kind="budget",
                 commit=False,

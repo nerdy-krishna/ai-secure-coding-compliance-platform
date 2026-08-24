@@ -51,7 +51,7 @@ from app.shared.lib.permissions import (
     WAIVER_APPROVE,
     WAIVER_REQUEST,
 )
-from app.shared.lib.scan_visibility import can_view_scan
+from app.shared.lib.scan_progress import EV_REJECTED
 from app.shared.lib.scan_status import (
     ACTIVE_SCAN_STATUSES,
     STATUS_BUDGET_EXHAUSTED,
@@ -63,6 +63,7 @@ from app.shared.lib.scan_status import (
     STATUS_QUEUED,
     STATUS_QUEUED_FOR_SCAN,
 )
+from app.shared.lib.scan_visibility import can_view_scan
 from app.shared.lib.scan_task_status import STATUS_SCAN_TASK_COMPLETED
 
 logger = logging.getLogger(__name__)
@@ -357,7 +358,7 @@ class ScanLifecycleService:
                     await self.repo.create_scan_event(
                         scan_id=scan_id,
                         stage_name="BUDGET_ENFORCEMENT",
-                        status="BLOCKED",
+                        status=EV_REJECTED,
                         details=safe_reason,
                         activity_kind="budget",
                         commit=False,
