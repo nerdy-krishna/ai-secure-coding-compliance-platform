@@ -31,6 +31,7 @@ from langgraph.types import interrupt
 from app.config.config import settings
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.database import AsyncSessionLocal
+from app.infrastructure.database import models as db_models
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.database.repositories.scanner_coverage_repo import (
     CoverageOutcome,
@@ -124,6 +125,45 @@ PRESCAN_FILE_BYTE_LIMIT = 10 * 1024 * 1024
 # Maximum number of files passed to the prescan loop (V02.4.1 — caps
 # prescan walltime on hostile submissions with many small files).
 PRESCAN_MAX_FILES = 10_000
+
+
+def _degrade_promoted_pack_coverage(
+    *,
+    scanner_name: str,
+    input_paths: set[str],
+    coverage_outcomes: List[CoverageOutcome],
+    scanner_statuses: Dict[str, Dict[str, Any]],
+    provenance_status: str,
+) -> None:
+    """Make a promoted foundry-pack failure visible in canonical coverage."""
+
+    scanner_statuses[scanner_name] = {
+        **scanner_statuses.get(scanner_name, {}),
+        "status": "degraded",
+        "foundry_promoted_pack": "failed",
+    }
+    replacement = {
+        path: CoverageOutcome(
+            scanner_name=scanner_name,
+            input_path=path,
+            status="failed",
+            reason_code="foundry_promoted_pack_failed",
+            reason="A promoted tenant rule pack failed; scanner coverage is incomplete.",
+            provenance_status=provenance_status,
+            details={"pack": "tenant_foundry", "mode": "promoted"},
+        )
+        for path in input_paths
+    }
+    retained = [
+        outcome
+        for outcome in coverage_outcomes
+        if not (
+            outcome.scanner_name == scanner_name
+            and outcome.input_path in replacement
+        )
+    ]
+    retained.extend(replacement.values())
+    coverage_outcomes[:] = retained
 
 
 async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
@@ -300,6 +340,12 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     languages = derive_semgrep_languages(semgrep_eligible.keys())
     _semgrep_rules = []
     _semgrep_sources = []
+    _foundry_promoted_semgrep = []
+    _foundry_shadow_semgrep = []
+    _foundry_promoted_gitleaks = []
+    _foundry_shadow_gitleaks = []
+    _foundry_promoted_osv = []
+    _foundry_shadow_osv = []
     if languages:
         try:
             from app.core.services.semgrep_ingestion.selector import (
@@ -312,6 +358,21 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     technologies=[],
                     db=_db,
                 )
+                from app.core.services.rule_foundry_runtime import load_active_rules
+
+                _scan = await _db.get(db_models.Scan, uuid.UUID(str(scan_id)))
+                if _scan is not None:
+                    _foundry_rules = await load_active_rules(
+                        db=_db,
+                        tenant_id=_scan.tenant_id,
+                        registry_kind="semgrep",
+                    )
+                    _foundry_promoted_semgrep = [
+                        rule for rule in _foundry_rules if rule.mode == "promoted"
+                    ]
+                    _foundry_shadow_semgrep = [
+                        rule for rule in _foundry_rules if rule.mode == "shadow"
+                    ]
                 _semgrep_sources = list(
                     {
                         str(rule.source_id): rule.source
@@ -333,6 +394,31 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 scan_id,
                 _exc,
             )
+
+    try:
+        from app.core.services.rule_foundry_runtime import load_active_rules
+
+        async with AsyncSessionLocal() as _db:
+            _scan = await _db.get(db_models.Scan, uuid.UUID(str(scan_id)))
+            if _scan is not None:
+                for _registry in ("gitleaks", "osv"):
+                    _active = await load_active_rules(
+                        db=_db,
+                        tenant_id=_scan.tenant_id,
+                        registry_kind=_registry,
+                    )
+                    if _registry == "gitleaks":
+                        _foundry_promoted_gitleaks = [r for r in _active if r.mode == "promoted"]
+                        _foundry_shadow_gitleaks = [r for r in _active if r.mode == "shadow"]
+                    else:
+                        _foundry_promoted_osv = [r for r in _active if r.mode == "promoted"]
+                        _foundry_shadow_osv = [r for r in _active if r.mode == "shadow"]
+    except Exception as _exc:  # noqa: BLE001 - tenant rules fail closed
+        logger.warning(
+            "rule_foundry.runtime_selection_failed scan_id=%s err=%s",
+            scan_id,
+            _exc,
+        )
 
     for path in eligible:
         if "semgrep" not in scanners_for_file(path):
@@ -676,6 +762,250 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                             provenance_status=provenance["status"],
                         )
                     )
+
+            # Tenant foundry rules execute separately from the global pack so
+            # shadow matches can never enter findings/policy. Signed promoted
+            # versions do enter findings; bounded shadow counts are emitted
+            # through a failure-isolated trusted hook.
+            if (
+                _foundry_promoted_semgrep
+                or _foundry_shadow_semgrep
+                or _foundry_promoted_gitleaks
+                or _foundry_shadow_gitleaks
+                or _foundry_promoted_osv
+                or _foundry_shadow_osv
+            ):
+                from app.core.services.rule_foundry_runtime import (
+                    build_promoted_osv_findings,
+                    osv_observation_counts,
+                    record_promoted_degradation_safely,
+                    record_shadow_observation_safely,
+                    retain_promoted_findings,
+                )
+                from app.core.services.semgrep_ingestion.materializer import (
+                    materialize_rules as _mat,
+                )
+
+                async def _run_foundry_semgrep(foundry_rules):
+                    with stage_files(semgrep_eligible) as (
+                        foundry_dir,
+                        foundry_original_paths,
+                    ):
+                        materialized = [rule.as_semgrep_rule() for rule in foundry_rules]
+                        async with _mat(materialized) as foundry_config:
+                            return await run_semgrep(
+                                foundry_dir,
+                                foundry_original_paths,
+                                config_path=foundry_config,
+                            )
+
+                if _foundry_promoted_semgrep:
+                    try:
+                        promoted_findings = await _gated(
+                            lambda: _run_foundry_semgrep(_foundry_promoted_semgrep)
+                        )
+                        prescan_findings.extend(
+                            retain_promoted_findings(
+                                _foundry_promoted_semgrep, promoted_findings
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 - scanner failure isolation
+                        _degrade_promoted_pack_coverage(
+                            scanner_name="semgrep",
+                            input_paths=set(semgrep_eligible),
+                            coverage_outcomes=coverage_outcomes,
+                            scanner_statuses=scanner_statuses,
+                            provenance_status=toolchain_provenance["semgrep"]["status"],
+                        )
+                        await _emit_scan_activity(
+                            scan_id,
+                            "SCANNER_RUN",
+                            EV_FAILED,
+                            {
+                                "scanner": "semgrep",
+                                "pack": "tenant_foundry",
+                                "mode": "promoted",
+                                "message": "Promoted tenant rule pack failed; coverage is reduced.",
+                            },
+                            activity_kind="degradation",
+                        )
+                        await record_promoted_degradation_safely(
+                            rules=_foundry_promoted_semgrep,
+                            scan_id=uuid.UUID(str(scan_id)),
+                            reason_code="scanner_execution_failed",
+                        )
+                        logger.warning(
+                            "rule_foundry.promoted_semgrep_failed scan_id=%s",
+                            scan_id,
+                            exc_info=True,
+                        )
+                if _foundry_shadow_semgrep:
+                    try:
+                        shadow_findings = await _gated(
+                            lambda: _run_foundry_semgrep(_foundry_shadow_semgrep)
+                        )
+                        for foundry_rule in _foundry_shadow_semgrep:
+                            rule_id = (
+                                f"foundry.{foundry_rule.candidate_id}."
+                                f"{foundry_rule.version_id}"
+                            )
+                            unexpected_files = {
+                                finding.file_path
+                                for finding in shadow_findings
+                                if finding.scanner_rule_id == rule_id
+                            }
+                            await record_shadow_observation_safely(
+                                rule=foundry_rule,
+                                scan_id=uuid.UUID(str(scan_id)),
+                                eligible_files=len(semgrep_eligible),
+                                unexpected_matches=len(unexpected_files),
+                            )
+                    except Exception:  # noqa: BLE001 - shadow never breaks scans
+                        logger.warning(
+                            "rule_foundry.shadow_semgrep_failed scan_id=%s",
+                            scan_id,
+                            exc_info=True,
+                        )
+
+                async def _run_foundry_gitleaks(foundry_rules):
+                    from app.core.services.rule_foundry_materializer import (
+                        materialize_gitleaks_rules,
+                    )
+
+                    with stage_files(eligible) as (
+                        foundry_dir,
+                        foundry_original_paths,
+                    ):
+                        async with materialize_gitleaks_rules(foundry_rules) as config:
+                            return await run_gitleaks(
+                                foundry_dir,
+                                foundry_original_paths,
+                                config_path=config,
+                            )
+
+                if _foundry_promoted_gitleaks:
+                    try:
+                        promoted_findings = await _gated(
+                            lambda: _run_foundry_gitleaks(_foundry_promoted_gitleaks)
+                        )
+                        prescan_findings.extend(
+                            retain_promoted_findings(
+                                _foundry_promoted_gitleaks, promoted_findings
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 - scanner failure isolation
+                        _degrade_promoted_pack_coverage(
+                            scanner_name="gitleaks",
+                            input_paths=set(eligible),
+                            coverage_outcomes=coverage_outcomes,
+                            scanner_statuses=scanner_statuses,
+                            provenance_status=toolchain_provenance["gitleaks"]["status"],
+                        )
+                        await _emit_scan_activity(
+                            scan_id,
+                            "SCANNER_RUN",
+                            EV_FAILED,
+                            {
+                                "scanner": "gitleaks",
+                                "pack": "tenant_foundry",
+                                "mode": "promoted",
+                                "message": "Promoted tenant rule pack failed; coverage is reduced.",
+                            },
+                            activity_kind="degradation",
+                        )
+                        await record_promoted_degradation_safely(
+                            rules=_foundry_promoted_gitleaks,
+                            scan_id=uuid.UUID(str(scan_id)),
+                            reason_code="scanner_execution_failed",
+                        )
+                        logger.warning(
+                            "rule_foundry.promoted_gitleaks_failed scan_id=%s",
+                            scan_id,
+                            exc_info=True,
+                        )
+                if _foundry_shadow_gitleaks:
+                    try:
+                        shadow_findings = await _gated(
+                            lambda: _run_foundry_gitleaks(_foundry_shadow_gitleaks)
+                        )
+                        for foundry_rule in _foundry_shadow_gitleaks:
+                            rule_id = (
+                                f"foundry.{foundry_rule.candidate_id}."
+                                f"{foundry_rule.version_id}"
+                            )
+                            unexpected_files = {
+                                finding.file_path
+                                for finding in shadow_findings
+                                if finding.scanner_rule_id == rule_id
+                            }
+                            await record_shadow_observation_safely(
+                                rule=foundry_rule,
+                                scan_id=uuid.UUID(str(scan_id)),
+                                eligible_files=len(eligible),
+                                unexpected_matches=len(unexpected_files),
+                            )
+                    except Exception:  # noqa: BLE001 - shadow never breaks scans
+                        logger.warning(
+                            "rule_foundry.shadow_gitleaks_failed scan_id=%s",
+                            scan_id,
+                            exc_info=True,
+                        )
+
+                if _foundry_promoted_osv:
+                    try:
+                        prescan_findings.extend(
+                            build_promoted_osv_findings(
+                                _foundry_promoted_osv, bom_cyclonedx
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 - scanner failure isolation
+                        _degrade_promoted_pack_coverage(
+                            scanner_name="osv",
+                            input_paths={"<repository>"},
+                            coverage_outcomes=coverage_outcomes,
+                            scanner_statuses=scanner_statuses,
+                            provenance_status=toolchain_provenance["osv"]["status"],
+                        )
+                        await _emit_scan_activity(
+                            scan_id,
+                            "SCANNER_RUN",
+                            EV_FAILED,
+                            {
+                                "scanner": "osv",
+                                "pack": "tenant_foundry",
+                                "mode": "promoted",
+                                "message": "Promoted tenant rule pack failed; coverage is reduced.",
+                            },
+                            activity_kind="degradation",
+                        )
+                        await record_promoted_degradation_safely(
+                            rules=_foundry_promoted_osv,
+                            scan_id=uuid.UUID(str(scan_id)),
+                            reason_code="advisory_match_failed",
+                        )
+                        logger.warning(
+                            "rule_foundry.promoted_osv_failed scan_id=%s",
+                            scan_id,
+                            exc_info=True,
+                        )
+                for foundry_rule in _foundry_shadow_osv:
+                    try:
+                        eligible_components, matched_components = osv_observation_counts(
+                            foundry_rule, bom_cyclonedx
+                        )
+                        await record_shadow_observation_safely(
+                            rule=foundry_rule,
+                            scan_id=uuid.UUID(str(scan_id)),
+                            eligible_files=eligible_components,
+                            unexpected_matches=matched_components,
+                        )
+                    except Exception:  # noqa: BLE001 - shadow never breaks scans
+                        logger.warning(
+                            "rule_foundry.shadow_osv_failed scan_id=%s candidate_id=%s",
+                            scan_id,
+                            foundry_rule.candidate_id,
+                            exc_info=True,
+                        )
         logger.info(
             "deterministic_prescan: scan_id=%s eligible_files=%d findings=%d bom=%s",
             scan_id,

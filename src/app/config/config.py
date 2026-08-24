@@ -404,6 +404,12 @@ class Settings(BaseSettings):
     EVIDENCE_RETENTION_DAYS: int = Field(default=90, ge=1, le=3650)
     EVIDENCE_DUAL_WRITE_LEGACY: bool = True
 
+    # --- Signed tenant rule deployments (Task 18) ---
+    # Must identify an asymmetric SIGN_VERIFY KMS key. The foundry has no
+    # production local-key fallback; tests inject LocalTestDigestSigner.
+    RULE_FOUNDRY_KMS_KEY_ID: Optional[str] = None
+    RULE_FOUNDRY_KMS_REGION: str = "us-east-1"
+
     # --- Observability (Langfuse v3, optional) ---
     # Disabled by default; opt in by setting LANGFUSE_ENABLED=true plus the
     # public/secret keys minted from the self-hosted Langfuse UI. When

@@ -2736,6 +2736,300 @@ class SemgrepSyncRun(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# Governed AI rule foundry (tenant-scoped; separate from global rule sources)
+# ---------------------------------------------------------------------------
+
+
+class RuleFoundryCandidate(Base):
+    __tablename__ = "rule_foundry_candidates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    source_finding_id: Mapped[Optional[int]] = mapped_column(
+        BIGINT, ForeignKey("findings.id", ondelete="SET NULL"), nullable=True
+    )
+    source_scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), nullable=True
+    )
+    source_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    registry_kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    predicate_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    static_representable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    non_representable_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    stable_identity: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="pending_review", index=True
+    )
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    cwe: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    normalized_evidence: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    fixtures: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    creator_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewer_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    promoter_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    promoted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "registry_kind", "stable_identity",
+            name="uq_rule_foundry_candidate_identity",
+        ),
+        sa.CheckConstraint(
+            "registry_kind IN ('semgrep', 'gitleaks', 'osv', 'ai_dataflow')",
+            name="ck_rule_foundry_candidate_registry",
+        ),
+        sa.CheckConstraint(
+            "predicate_kind IN ('ast', 'taint', 'dependency_advisory', "
+            "'secret_pattern', 'semantic_runtime')",
+            name="ck_rule_foundry_candidate_predicate",
+        ),
+        sa.CheckConstraint(
+            "status IN ('ai_dataflow', 'pending_review', 'rejected', 'approved', "
+            "'shadow', 'promoted', 'rolled_back', 'expired', 'review_required')",
+            name="ck_rule_foundry_candidate_status",
+        ),
+        sa.CheckConstraint(
+            "(static_representable AND registry_kind <> 'ai_dataflow' AND "
+            "non_representable_reason IS NULL) OR "
+            "(NOT static_representable AND registry_kind = 'ai_dataflow' AND "
+            "length(non_representable_reason) > 0)",
+            name="ck_rule_foundry_candidate_representability",
+        ),
+    )
+
+
+class RuleFoundrySemgrepCandidate(Base):
+    __tablename__ = "rule_foundry_semgrep_candidates"
+
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_candidates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    rule: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class RuleFoundryGitleaksCandidate(Base):
+    __tablename__ = "rule_foundry_gitleaks_candidates"
+
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_candidates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    rule: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class RuleFoundryOsvCandidate(Base):
+    __tablename__ = "rule_foundry_osv_candidates"
+
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_candidates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    advisory: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class RuleFoundryVersion(Base):
+    """Immutable, KMS-signed candidate snapshot."""
+
+    __tablename__ = "rule_foundry_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_candidates.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    canonical_payload: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    signature: Mapped[str] = mapped_column(Text, nullable=False)
+    signature_algorithm: Mapped[str] = mapped_column(String(64), nullable=False)
+    signing_key_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    quality_metrics: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    reviewer_decision: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    reviewer_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "version", name="uq_rule_foundry_version"),
+        UniqueConstraint("tenant_id", "payload_sha256", name="uq_rule_foundry_payload_hash"),
+        sa.CheckConstraint("version > 0", name="ck_rule_foundry_version_positive"),
+    )
+
+
+class RuleFoundryDeployment(Base):
+    __tablename__ = "rule_foundry_deployments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_candidates.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    prior_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_versions.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    shadow_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_due_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    promoted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        sa.CheckConstraint(
+            "state IN ('shadow', 'promoted', 'rolled_back', 'superseded', 'review_required')",
+            name="ck_rule_foundry_deployment_state",
+        ),
+    )
+
+
+class RuleFoundryShadowObservation(Base):
+    """Append-only, bounded aggregate emitted by trusted scanner execution."""
+
+    __tablename__ = "rule_foundry_shadow_observations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    deployment_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_deployments.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("scans.id", ondelete="RESTRICT"), nullable=False
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("scan_attempts.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    eligible_files: Mapped[int] = mapped_column(Integer, nullable=False)
+    unexpected_matches: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("deployment_id", "attempt_id", name="uq_rule_foundry_shadow_attempt"),
+        sa.CheckConstraint(
+            "eligible_files >= 0 AND eligible_files <= 5000 AND "
+            "unexpected_matches >= 0 AND unexpected_matches <= eligible_files",
+            name="ck_rule_foundry_shadow_bounds",
+        ),
+    )
+
+
+class RuleFoundryEvent(Base):
+    """Append-only audit history; details are bounded identifiers/metrics only."""
+
+    __tablename__ = "rule_foundry_events"
+
+    id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("rule_foundry_candidates.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    details: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Tenant(Base):
     """Tenant scoping unit (Chunk 7 — foundation).
 

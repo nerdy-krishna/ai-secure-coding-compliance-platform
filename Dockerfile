@@ -113,6 +113,8 @@ RUN --mount=type=cache,target=/home/appuser/.cache/pypoetry,uid=1001,gid=1001 \
 # ---------- api ----------------------------------------------------------
 FROM base AS api
 
+ARG TARGETARCH
+
 # git is needed by GitPython for the repo-clone submission path in
 # scan_service.create_scan_from_git, and for the semgrep rule ingestion
 # sync which clones rule repos via GitPython in BackgroundTasks.
@@ -124,6 +126,7 @@ FROM base AS api
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        curl \
         git \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
@@ -138,6 +141,22 @@ RUN set -eux; \
     /opt/semgrep-venv/bin/pip install --no-cache-dir "setuptools<81" "semgrep==1.95.0"; \
     ln -s /opt/semgrep-venv/bin/semgrep /usr/local/bin/semgrep; \
     ln -s /opt/semgrep-venv/bin/pysemgrep /usr/local/bin/pysemgrep
+
+# Gitleaks candidates are quality-gated synchronously by the authenticated
+# foundry review API. Keep this binary identical to the worker's pinned build;
+# an API image without it must fail closed rather than approve mocked metrics.
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) GITLEAKS_ARCH="x64"; GITLEAKS_SHA256="5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba" ;; \
+        arm64) GITLEAKS_ARCH="arm64"; GITLEAKS_SHA256="654c935542c89f565aabe7bf7c6c500830f116c114f0aeb509d2460c1ac2e6da" ;; \
+        *) echo "Unsupported Gitleaks target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/gitleaks.tar.gz \
+        "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_${GITLEAKS_ARCH}.tar.gz"; \
+    echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum --check --strict; \
+    tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks; \
+    chmod 0755 /usr/local/bin/gitleaks; \
+    rm /tmp/gitleaks.tar.gz
 USER appuser
 
 COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
@@ -160,6 +179,8 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 # ---------- worker -------------------------------------------------------
 FROM base AS worker
 
+ARG TARGETARCH
+
 # SAST scanner binaries used by app.infrastructure.scanners runners.
 # Installed under root, then dropped to appuser. Versions + SHA256 are
 # pinned per .agent/devsecops_playbook.md §9 (supply chain).
@@ -178,9 +199,14 @@ RUN apt-get update \
 # --- Gitleaks v8.21.2 ---
 # https://github.com/gitleaks/gitleaks/releases/tag/v8.21.2
 RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) GITLEAKS_ARCH="x64"; GITLEAKS_SHA256="5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba" ;; \
+        arm64) GITLEAKS_ARCH="arm64"; GITLEAKS_SHA256="654c935542c89f565aabe7bf7c6c500830f116c114f0aeb509d2460c1ac2e6da" ;; \
+        *) echo "Unsupported Gitleaks target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
     curl -fsSL -o /tmp/gitleaks.tar.gz \
-        "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz"; \
-    echo "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba  /tmp/gitleaks.tar.gz" | sha256sum --check --strict; \
+        "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_${GITLEAKS_ARCH}.tar.gz"; \
+    echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum --check --strict; \
     tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks; \
     chmod 0755 /usr/local/bin/gitleaks; \
     rm /tmp/gitleaks.tar.gz

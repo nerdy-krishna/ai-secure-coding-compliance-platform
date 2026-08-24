@@ -9,6 +9,9 @@ import type {
   IngestionSettingsRead,
   IngestionSettingsUpdate,
   ScanCoverageResponse,
+  RuleFoundryCandidate,
+  RuleFoundryCandidateCreate,
+  RuleFoundryCandidatePage,
 } from "../types/api";
 
 const _uuidRe = /^[0-9a-fA-F-]{32,36}$/;
@@ -98,5 +101,52 @@ export const ruleSourcesService = {
     } finally {
       clearTimeout(timer);
     }
+  },
+
+  listFoundryCandidates: async (
+    page = 1,
+    pageSize = 20,
+    status?: string,
+  ): Promise<RuleFoundryCandidatePage> =>
+    (
+      await apiClient.get<RuleFoundryCandidatePage>(
+        "/admin/rule-sources/foundry/candidates",
+        { params: { page, page_size: pageSize, status } },
+      )
+    ).data,
+  createFoundryCandidate: async (
+    payload: RuleFoundryCandidateCreate,
+  ): Promise<RuleFoundryCandidate> =>
+    (
+      await apiClient.post<RuleFoundryCandidate>(
+        "/admin/rule-sources/foundry/candidates",
+        payload,
+      )
+    ).data,
+  reviewFoundryCandidate: async (
+    id: string,
+    approved: boolean,
+    reason: string,
+  ): Promise<RuleFoundryCandidate> => {
+    _checkId(id);
+    return (
+      await apiClient.post<RuleFoundryCandidate>(
+        `/admin/rule-sources/foundry/candidates/${encodeURIComponent(id)}/review`,
+        { approved, reason },
+      )
+    ).data;
+  },
+  transitionFoundryCandidate: async (
+    id: string,
+    action: "shadow" | "promote" | "rollback",
+    reason: string,
+  ): Promise<RuleFoundryCandidate> => {
+    _checkId(id);
+    return (
+      await apiClient.post<RuleFoundryCandidate>(
+        `/admin/rule-sources/foundry/candidates/${encodeURIComponent(id)}/${action}`,
+        { reason },
+      )
+    ).data;
   },
 };

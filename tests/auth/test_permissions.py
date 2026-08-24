@@ -7,6 +7,9 @@ from app.shared.lib.permissions import (
     DEVELOPER,
     IDENTITY_MANAGE,
     PLATFORM_OWNER,
+    RULE_CANDIDATE_CREATE,
+    RULE_CANDIDATE_REVIEW,
+    RULE_PROMOTE,
     SCAN_APPROVE,
     SCAN_APPROVE_SELF,
     SECURITY_APPROVER,
@@ -56,3 +59,16 @@ class PermissionMatrixTests(unittest.TestCase):
         self.assertNotIn(TENANT_POLICY_MANAGE, auditor)
         self.assertNotIn(AUDIT_READ, developer)
         self.assertNotIn(TENANT_POLICY_MANAGE, developer)
+
+    def test_rule_foundry_uses_stable_creator_reviewer_promoter_permissions(self) -> None:
+        security_approver = permissions_for_roles([SECURITY_APPROVER])
+        developer = permissions_for_roles([DEVELOPER])
+        auditor = permissions_for_roles([AUDITOR])
+
+        self.assertIn(RULE_CANDIDATE_CREATE, developer)
+        self.assertNotIn(RULE_CANDIDATE_REVIEW, developer)
+        self.assertNotIn(RULE_PROMOTE, developer)
+        self.assertIn(RULE_CANDIDATE_CREATE, security_approver)
+        self.assertIn(RULE_CANDIDATE_REVIEW, security_approver)
+        self.assertIn(RULE_PROMOTE, security_approver)
+        self.assertNotIn(RULE_CANDIDATE_CREATE, auditor)

@@ -181,8 +181,12 @@ nav:
       - Usage Budget Enforcement: operations/usage-budget-enforcement.md
       - Usage and Budget Center: operations/usage-and-budget-center.md
       - Scanner Coverage Manifests: operations/scanner-coverage.md
+      - Governed AI Rule Foundry: operations/ai-rule-foundry.md
       - Provider Cost Reconciliation: operations/provider-cost-reconciliation.md
       - Evidence-first Findings: operations/evidence-first-findings.md
+      - Kubernetes Worker Pools: operations/kubernetes-worker-pools.md
+      - Observability and SLOs: operations/observability-slos.md
+      - Dependency Degradation: operations/dependency-degradation.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

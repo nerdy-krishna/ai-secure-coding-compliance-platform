@@ -139,7 +139,7 @@ def _gitleaks_finding_to_vulnerability(
 
 
 def _invoke_gitleaks_sync(
-    staged_dir: Path, report_path: Path
+    staged_dir: Path, report_path: Path, config_path: str | Path = GITLEAKS_CONFIG_PATH
 ) -> "subprocess.CompletedProcess[str]":
     """Run Gitleaks via ``subprocess.run``. Pure sync; called from
     ``asyncio.to_thread``.
@@ -160,7 +160,7 @@ def _invoke_gitleaks_sync(
             "detect",
             "--no-git",
             "--config",
-            GITLEAKS_CONFIG_PATH,
+            str(config_path),
             "--source",
             str(staged_dir),
             "--redact",
@@ -213,6 +213,7 @@ async def run_gitleaks(
     staged_dir: Path,
     original_paths: Dict[Path, str],
     report_collector: Optional[Callable[[Any], None]] = None,
+    config_path: str | Path = GITLEAKS_CONFIG_PATH,
 ) -> List[VulnerabilityFinding]:
     """Run Gitleaks against ``staged_dir`` and return findings.
 
@@ -234,7 +235,7 @@ async def run_gitleaks(
     try:
         try:
             completed = await asyncio.to_thread(
-                _invoke_gitleaks_sync, staged_dir, report_path
+                _invoke_gitleaks_sync, staged_dir, report_path, config_path
             )
         except subprocess.TimeoutExpired:
             logger.warning(

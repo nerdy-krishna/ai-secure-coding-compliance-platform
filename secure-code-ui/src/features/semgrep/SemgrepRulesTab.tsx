@@ -21,6 +21,8 @@ import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import { useToast } from "../../shared/ui/Toast";
 import SemgrepOnboardingWizard from "./SemgrepOnboardingWizard";
+import { RuleFoundryPanel } from "./RuleFoundryPanel";
+import { useAuth } from "../../shared/hooks/useAuth";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -542,6 +544,7 @@ const SettingsPanel: React.FC = () => {
 const SemgrepRulesTab: React.FC = () => {
   const toast = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const [editingSource, setEditingSource] = useState<RuleSourceRead | null>(null);
   const [runsSource, setRunsSource] = useState<RuleSourceRead | null>(null);
@@ -700,6 +703,7 @@ const SemgrepRulesTab: React.FC = () => {
 
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      <RuleFoundryPanel permissions={user?.permissions} />
       <SettingsPanel />
 
       {/* ── Bulk action bar ─────────────────────────────────────── */}

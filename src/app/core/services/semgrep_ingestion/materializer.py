@@ -3,7 +3,7 @@ import logging
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import yaml
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def materialize_rules(rules: list[db_models.SemgrepRule]) -> AsyncIterator[Path]:
+async def materialize_rules(rules: list[db_models.SemgrepRule] | list[Any]) -> AsyncIterator[Path]:
     """
     Write each rule's raw_yaml into a temp directory as individual YAML files.
     Yields the directory Path. Cleans up on exit regardless of errors.

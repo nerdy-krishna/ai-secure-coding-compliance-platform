@@ -633,6 +633,16 @@ async def lifespan(app: FastAPI):
         name="semgrep-sync-sweeper",
     )
 
+    from app.infrastructure.messaging.rule_foundry_sweeper import (
+        run_rule_foundry_sweeper,
+    )
+
+    rule_foundry_sweeper_stop = asyncio.Event()
+    rule_foundry_sweeper_task = asyncio.create_task(
+        run_rule_foundry_sweeper(rule_foundry_sweeper_stop),
+        name="rule-foundry-sweeper",
+    )
+
     # Optional provider billing reconciliation. Disabled connectors do no I/O.
     from app.infrastructure.messaging.provider_reconciliation_sweeper import (
         run_provider_reconciliation_sweeper,
@@ -676,6 +686,7 @@ async def lifespan(app: FastAPI):
     retention_sweeper_stop.set()
     evidence_retention_stop.set()
     semgrep_sweeper_stop.set()
+    rule_foundry_sweeper_stop.set()
     provider_reconciliation_stop.set()
     stuck_scan_stop.set()
     if progress_bus is not None:
@@ -726,6 +737,13 @@ async def lifespan(app: FastAPI):
         semgrep_sweeper_task.cancel()
     except Exception as e:
         logger.warning(f"semgrep_sync_sweeper shutdown error: {e}")
+    try:
+        await asyncio.wait_for(rule_foundry_sweeper_task, timeout=5)
+    except asyncio.TimeoutError:
+        logger.warning("rule_foundry_sweeper did not stop within 5s; cancelling.")
+        rule_foundry_sweeper_task.cancel()
+    except Exception as e:
+        logger.warning(f"rule_foundry_sweeper shutdown error: {e}")
     try:
         await asyncio.wait_for(provider_reconciliation_task, timeout=5)
     except asyncio.TimeoutError:

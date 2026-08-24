@@ -446,3 +446,91 @@ export interface ScanCoverageEntry {
 export interface ScanCoverageResponse {
   coverage: Record<string, ScanCoverageEntry>;
 }
+
+// --- Governed AI Rule Foundry ---
+
+export type RuleFoundryRegistry = "semgrep" | "gitleaks" | "osv" | "ai_dataflow";
+export type RuleFoundryPredicate =
+  | "ast"
+  | "taint"
+  | "dependency_advisory"
+  | "secret_pattern"
+  | "semantic_runtime";
+
+export interface RuleFoundryFixture {
+  name: string;
+  language: string;
+  content: string;
+}
+
+export interface RuleFoundryFixturePack {
+  vulnerable: RuleFoundryFixture[];
+  fixed: RuleFoundryFixture[];
+  negative: RuleFoundryFixture[];
+  performance: RuleFoundryFixture[];
+  churn: RuleFoundryFixture[];
+}
+
+export interface RuleFoundryCandidateCreate {
+  finding_id: number;
+  predicate_kind: RuleFoundryPredicate;
+  bounded: boolean;
+  uses_project_specific_names: boolean;
+  requires_hidden_runtime_state: boolean;
+  proposed_rule?: Record<string, JsonValue>;
+  fixtures?: RuleFoundryFixturePack;
+}
+
+export interface RuleFoundrySignedVersion {
+  id: string;
+  version: number;
+  payload_sha256: string;
+  signature_algorithm: string;
+  signing_key_id: string;
+  quality_metrics: Record<string, JsonValue>;
+  created_at: string;
+}
+
+export interface RuleFoundryDeployment {
+  id: string;
+  version_id: string;
+  prior_version_id: string | null;
+  state: "shadow" | "promoted" | "rolled_back" | "superseded" | "review_required";
+  shadow_started_at: string | null;
+  review_due_at: string | null;
+  promoted_at: string | null;
+  ended_at: string | null;
+  eligible_files: number;
+  unexpected_matches: number;
+}
+
+export interface RuleFoundryCandidate {
+  id: string;
+  tenant_id: string;
+  source_finding_id: number | null;
+  registry_kind: RuleFoundryRegistry;
+  predicate_kind: RuleFoundryPredicate;
+  static_representable: boolean;
+  non_representable_reason: string | null;
+  stable_identity: string;
+  status: string;
+  severity: string;
+  cwe: string | null;
+  normalized_evidence: Record<string, JsonValue>;
+  creator_user_id: number | null;
+  reviewer_user_id: number | null;
+  promoter_user_id: number | null;
+  expires_at: string;
+  reviewed_at: string | null;
+  promoted_at: string | null;
+  created_at: string;
+  latest_version: RuleFoundrySignedVersion | null;
+  active_deployment: RuleFoundryDeployment | null;
+}
+
+export interface RuleFoundryCandidatePage {
+  items: RuleFoundryCandidate[];
+  total: number;
+  page: number;
+  page_size: number;
+}

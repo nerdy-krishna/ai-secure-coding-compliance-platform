@@ -37,6 +37,7 @@ FINDING_TRIAGE = "finding.triage"
 WAIVER_REQUEST = "waiver.request"
 WAIVER_APPROVE = "waiver.approve"
 RULE_CANDIDATE_CREATE = "rule.candidate.create"
+RULE_CANDIDATE_REVIEW = "rule.candidate.review"
 RULE_PROMOTE = "rule.promote"
 IDENTITY_READ = "identity.read"
 IDENTITY_MANAGE = "identity.manage"
@@ -59,6 +60,7 @@ ALL_PERMISSION_KEYS = frozenset(
         WAIVER_REQUEST,
         WAIVER_APPROVE,
         RULE_CANDIDATE_CREATE,
+        RULE_CANDIDATE_REVIEW,
         RULE_PROMOTE,
         IDENTITY_READ,
         IDENTITY_MANAGE,
@@ -95,6 +97,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             WAIVER_REQUEST,
             WAIVER_APPROVE,
             RULE_CANDIDATE_CREATE,
+            RULE_CANDIDATE_REVIEW,
             RULE_PROMOTE,
             AUDIT_READ,
         }

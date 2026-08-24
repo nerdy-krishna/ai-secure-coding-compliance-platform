@@ -23,10 +23,12 @@ from app.infrastructure.database.repositories.semgrep_rule_repo import (
     SemgrepRuleRepository,
 )
 from app.core.services.semgrep_ingestion.selector import _load_ingestion_settings
+from app.api.v1.routers.rule_foundry import router as rule_foundry_router
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rule-sources")
+router.include_router(rule_foundry_router)
 
 _SETTING_KEY_MAP = {
     "allowed_licenses": (
