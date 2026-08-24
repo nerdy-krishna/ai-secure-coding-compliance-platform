@@ -17,6 +17,9 @@ from typing import Any, Dict
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.database.repositories.llm_usage_repo import LLMUsageRepository
+from app.infrastructure.database.repositories.finding_governance_repo import (
+    FindingGovernanceRepository,
+)
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
 from app.shared.lib.risk_score import compute_cvss_aggregate
@@ -152,6 +155,12 @@ async def save_final_report_node(state: WorkerState) -> Dict[str, Any]:
                 scan_id=scan_id,
                 stage="analysis",
             )
+            # Freeze the evidence-first detail and policy result before the
+            # attempt manifest is finalized. Both operations are idempotent,
+            # so a resumed report node cannot create conflicting semantics.
+            governance = FindingGovernanceRepository(db)
+            await governance.materialize_scan(scan_id)
+            await governance.evaluate_scan_policy(scan_id)
             finalized = await repo.save_final_reports_and_status(
                 scan_id=scan_id,
                 status=final_status,

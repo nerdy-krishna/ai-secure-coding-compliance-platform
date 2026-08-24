@@ -80,6 +80,7 @@ def render_sarif(result: AnalysisResultDetailResponse) -> str:
                             "warning": "Coverage manifest unavailable; zero findings are not proof of a clean scan.",
                         }
                     ),
+                    "sccapFindingGovernance": result.finding_governance or {},
                 },
                 "results": results,
             }

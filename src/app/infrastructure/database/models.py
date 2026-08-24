@@ -1101,6 +1101,252 @@ class FindingDispositionEvent(Base):
     )
 
 
+class FindingLineageRecord(Base):
+    """Immutable, attempt-bound evidence and cross-scan baseline semantics."""
+
+    __tablename__ = "finding_lineage_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_id",
+            "fingerprint",
+            "baseline_state",
+            name="uq_finding_lineage_scan_fingerprint_state",
+        ),
+        sa.CheckConstraint(
+            "baseline_state IN ('new', 'fixed', 'unchanged', 'reintroduced')",
+            name="ck_finding_lineage_baseline_state",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        index=True,
+    )
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        index=True,
+    )
+    finding_id: Mapped[Optional[int]] = mapped_column(
+        BIGINT, ForeignKey("findings.id", ondelete="SET NULL"), index=True
+    )
+    predecessor_finding_id: Mapped[Optional[int]] = mapped_column(
+        BIGINT, ForeignKey("findings.id", ondelete="SET NULL")
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    baseline_state: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    exact_ranges: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    dataflow: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    source_provenance: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    producer_provenance: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    coverage_entry_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False, default=list
+    )
+    evidence_object_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False, default=list
+    )
+    remediation_state: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+
+class FindingPolicyVersion(Base):
+    """Append-only tenant finding gate policy version."""
+
+    __tablename__ = "finding_policy_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "version", name="uq_finding_policy_tenant_version"
+        ),
+        sa.CheckConstraint(
+            "minimum_severity IN ('informational', 'low', 'medium', 'high', 'critical')",
+            name="ck_finding_policy_minimum_severity",
+        ),
+        sa.CheckConstraint(
+            "minimum_confidence IN ('low', 'medium', 'high')",
+            name="ck_finding_policy_minimum_confidence",
+        ),
+        sa.CheckConstraint(
+            "minimum_waiver_remaining_hours >= 0", name="ck_finding_policy_waiver_hours"
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    minimum_severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    minimum_confidence: Mapped[str] = mapped_column(String(16), nullable=False)
+    require_complete_coverage: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    allow_waivers: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    minimum_waiver_remaining_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class FindingPolicyEvaluation(Base):
+    """Immutable evaluation using one exact policy version."""
+
+    __tablename__ = "finding_policy_evaluations"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "outcome IN ('pass', 'fail')", name="ck_finding_policy_evaluation_outcome"
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        index=True,
+    )
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), index=True
+    )
+    attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        index=True,
+    )
+    policy_version_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("finding_policy_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    outcome: Mapped[str] = mapped_column(String(8), nullable=False)
+    coverage_complete: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    blocking_fingerprints: Mapped[list[str]] = mapped_column(
+        PG_ARRAY(String(64)), nullable=False, default=list
+    )
+    waived_fingerprints: Mapped[list[str]] = mapped_column(
+        PG_ARRAY(String(64)), nullable=False, default=list
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+
+class FindingWaiver(Base):
+    """Immutable grant. Revocation and expiry are append-only events."""
+
+    __tablename__ = "finding_waivers"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "scope IN ('finding', 'fingerprint', 'project')",
+            name="ck_finding_waiver_scope",
+        ),
+        sa.CheckConstraint(
+            "expires_at > created_at", name="ck_finding_waiver_future_expiry"
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    project_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        index=True,
+    )
+    scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), index=True
+    )
+    finding_id: Mapped[Optional[int]] = mapped_column(
+        BIGINT, ForeignKey("findings.id", ondelete="SET NULL"), index=True
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class FindingWaiverEvent(Base):
+    __tablename__ = "finding_waiver_events"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "action IN ('granted', 'revoked', 'expired')",
+            name="ck_finding_waiver_event_action",
+        ),
+        UniqueConstraint("waiver_id", "action", name="uq_finding_waiver_event_action"),
+    )
+    id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    waiver_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("finding_waivers.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class LLMConfiguration(Base):
     __tablename__ = "llm_configurations"
     id: Mapped[uuid.UUID] = mapped_column(

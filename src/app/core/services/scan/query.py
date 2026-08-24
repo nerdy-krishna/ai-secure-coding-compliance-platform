@@ -530,6 +530,65 @@ class ScanQueryService:
                     exc,
                 )
 
+        finding_governance: Dict[str, Any] = {}
+        try:
+            from collections import Counter
+
+            from app.infrastructure.database.repositories.finding_governance_repo import (
+                FindingGovernanceRepository,
+            )
+
+            governance_repo = FindingGovernanceRepository(self.repo.db)
+            lineage = await governance_repo.lineage_for_scan(scan_id)
+            counts = Counter(row.baseline_state for row in lineage)
+            evaluation = await self.repo.db.scalar(
+                select(db_models.FindingPolicyEvaluation)
+                .where(db_models.FindingPolicyEvaluation.scan_id == scan_id)
+                .order_by(db_models.FindingPolicyEvaluation.created_at.desc())
+                .limit(1)
+            )
+            finding_governance = {
+                "counts": {
+                    state: counts.get(state, 0)
+                    for state in ("new", "fixed", "unchanged", "reintroduced")
+                },
+                "items": [
+                    {
+                        "finding_id": row.finding_id,
+                        "fingerprint": row.fingerprint,
+                        "baseline_state": row.baseline_state,
+                        "exact_ranges": row.exact_ranges,
+                        "source_provenance": row.source_provenance,
+                        "producer_provenance": row.producer_provenance,
+                        "coverage_entry_ids": [
+                            str(value) for value in row.coverage_entry_ids
+                        ],
+                        "evidence_object_ids": [
+                            str(value) for value in row.evidence_object_ids
+                        ],
+                        "remediation_state": row.remediation_state,
+                    }
+                    for row in lineage
+                ],
+                "policy_evaluation": (
+                    {
+                        "outcome": evaluation.outcome,
+                        "coverage_complete": evaluation.coverage_complete,
+                        "blocking_fingerprints": evaluation.blocking_fingerprints,
+                        "waived_fingerprints": evaluation.waived_fingerprints,
+                        "policy_version_id": str(evaluation.policy_version_id),
+                    }
+                    if evaluation
+                    else None
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001 - legacy installs pre-migration
+            logger.warning(
+                "scan-query: finding governance unavailable scan_id=%s: %s",
+                scan_id,
+                exc,
+            )
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             current_attempt_id=scan.current_attempt_id,
@@ -542,6 +601,7 @@ class ScanQueryService:
             source_counts=source_counts,
             toolchain_provenance=toolchain_provenance,
             scanner_coverage=scanner_coverage,
+            finding_governance=finding_governance,
             cost_details=scan.cost_details,
             active_approval_gate=(
                 api_models.ApprovalGateResponse.model_validate(active_gate)
@@ -923,7 +983,9 @@ class ScanQueryService:
                     target_suffix = (
                         "merged"
                         if merged_by_agent.get(agent, 0) > 0
-                        else "dropped" if dropped_by_agent.get(agent, 0) > 0 else "pass"
+                        else "dropped"
+                        if dropped_by_agent.get(agent, 0) > 0
+                        else "pass"
                     )
                     for src, scnt in sast_by_source.items():
                         share = max(

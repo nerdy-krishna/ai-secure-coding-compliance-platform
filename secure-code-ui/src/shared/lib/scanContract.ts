@@ -176,6 +176,30 @@ export interface ScannerCoverageManifest {
   } | null;
 }
 
+export interface FindingGovernanceItem {
+  finding_id?: number | null;
+  fingerprint: string;
+  baseline_state: "new" | "fixed" | "unchanged" | "reintroduced";
+  exact_ranges: Array<Record<string, unknown>>;
+  source_provenance: Record<string, unknown>;
+  producer_provenance: Record<string, unknown>;
+  coverage_entry_ids: string[];
+  evidence_object_ids: string[];
+  remediation_state: Record<string, unknown>;
+}
+
+export interface FindingGovernanceSummary {
+  counts: Record<"new" | "fixed" | "unchanged" | "reintroduced", number>;
+  items: FindingGovernanceItem[];
+  policy_evaluation?: {
+    outcome: "pass" | "fail";
+    coverage_complete: boolean;
+    blocking_fingerprints: string[];
+    waived_fingerprints: string[];
+    policy_version_id: string;
+  } | null;
+}
+
 export interface ApprovalGate {
   gate_id: string;
   scan_id: string;
@@ -207,6 +231,7 @@ export type ScanResultResponse = Omit<
   toolchain_provenance: ToolchainProvenance;
   active_approval_gate?: ApprovalGate | null;
   scanner_coverage?: ScannerCoverageManifest | null;
+  finding_governance: FindingGovernanceSummary;
 };
 
 const COVERAGE_STATES = new Set<ScannerCoverageStatus>([
@@ -269,6 +294,59 @@ function normalizeScannerCoverage(value: unknown): ScannerCoverageManifest | nul
     entries,
     latest_policy_decision: decision,
   };
+}
+
+function normalizeFindingGovernance(value: unknown): FindingGovernanceSummary {
+  const emptyCounts = { new: 0, fixed: 0, unchanged: 0, reintroduced: 0 };
+  if (!isRecord(value)) return { counts: emptyCounts, items: [] };
+  const rawCounts = isRecord(value.counts) ? value.counts : {};
+  const counts = {
+    new: finiteNumber(rawCounts.new) ?? 0,
+    fixed: finiteNumber(rawCounts.fixed) ?? 0,
+    unchanged: finiteNumber(rawCounts.unchanged) ?? 0,
+    reintroduced: finiteNumber(rawCounts.reintroduced) ?? 0,
+  };
+  const items = Array.isArray(value.items)
+    ? value.items.flatMap((raw): FindingGovernanceItem[] => {
+        if (!isRecord(raw) || ![
+          "new", "fixed", "unchanged", "reintroduced",
+        ].includes(String(raw.baseline_state))) return [];
+        return [{
+          finding_id: finiteNumber(raw.finding_id),
+          fingerprint: String(raw.fingerprint ?? ""),
+          baseline_state: raw.baseline_state as FindingGovernanceItem["baseline_state"],
+          exact_ranges: Array.isArray(raw.exact_ranges)
+            ? raw.exact_ranges.filter(isRecord)
+            : [],
+          source_provenance: isRecord(raw.source_provenance) ? raw.source_provenance : {},
+          producer_provenance: isRecord(raw.producer_provenance) ? raw.producer_provenance : {},
+          coverage_entry_ids: Array.isArray(raw.coverage_entry_ids)
+            ? raw.coverage_entry_ids.map(String)
+            : [],
+          evidence_object_ids: Array.isArray(raw.evidence_object_ids)
+            ? raw.evidence_object_ids.map(String)
+            : [],
+          remediation_state: isRecord(raw.remediation_state) ? raw.remediation_state : {},
+        }];
+      })
+    : [];
+  const rawEvaluation = isRecord(value.policy_evaluation)
+    ? value.policy_evaluation
+    : null;
+  const policyEvaluation = rawEvaluation && ["pass", "fail"].includes(String(rawEvaluation.outcome))
+    ? {
+        outcome: rawEvaluation.outcome as "pass" | "fail",
+        coverage_complete: rawEvaluation.coverage_complete === true,
+        blocking_fingerprints: Array.isArray(rawEvaluation.blocking_fingerprints)
+          ? rawEvaluation.blocking_fingerprints.map(String)
+          : [],
+        waived_fingerprints: Array.isArray(rawEvaluation.waived_fingerprints)
+          ? rawEvaluation.waived_fingerprints.map(String)
+          : [],
+        policy_version_id: String(rawEvaluation.policy_version_id ?? ""),
+      }
+    : null;
+  return { counts, items, policy_evaluation: policyEvaluation };
 }
 
 const DISPOSITIONS = new Set<FindingDisposition>([
@@ -507,6 +585,9 @@ export function normalizeScanResult(wire: ScanResultWire): ScanResultResponse {
   const coverage = (wire as ScanResultWire & {
     scanner_coverage?: unknown;
   }).scanner_coverage;
+  const governance = (wire as ScanResultWire & {
+    finding_governance?: unknown;
+  }).finding_governance;
   return {
     ...wire,
     summary_report: normalizeSummaryReport(wire.summary_report),
@@ -517,5 +598,6 @@ export function normalizeScanResult(wire: ScanResultWire): ScanResultResponse {
     ),
     active_approval_gate: gate,
     scanner_coverage: normalizeScannerCoverage(coverage),
+    finding_governance: normalizeFindingGovernance(governance),
   };
 }

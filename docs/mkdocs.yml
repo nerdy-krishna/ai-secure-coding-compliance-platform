@@ -181,6 +181,7 @@ nav:
       - Usage and Budget Center: operations/usage-and-budget-center.md
       - Scanner Coverage Manifests: operations/scanner-coverage.md
       - Provider Cost Reconciliation: operations/provider-cost-reconciliation.md
+      - Evidence-first Findings: operations/evidence-first-findings.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

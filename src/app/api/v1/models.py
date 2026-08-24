@@ -1124,6 +1124,9 @@ class AnalysisResultDetailResponse(BaseModel):
     # carries the complete per-rule inventory.
     toolchain_provenance: Dict[str, Any] = Field(default_factory=dict)
     scanner_coverage: Optional[ScannerCoverageManifestResponse] = None
+    # Immutable evidence-first baseline/provenance projection. Kept as a
+    # version-tolerant JSON object so old scans can return an empty payload.
+    finding_governance: Dict[str, Any] = Field(default_factory=dict)
     # The estimate produced by the cost node before the user is asked
     # to approve. Surfaced on the ScanRunningPage so the user sees the
     # number alongside the "Approve & run" button. Stored as JSONB on

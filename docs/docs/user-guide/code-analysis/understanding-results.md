@@ -65,6 +65,14 @@ earlier Impact tab and Executive Summary PDF (backed by an
 the 2026-04-26 cleanup; report artifacts are now generated on demand
 from consolidated findings without a separate reporting node.
 
+## Evidence and baseline state
+
+Completed scans show a **Finding governance** panel alongside scanner coverage. Its `new`, `fixed`,
+`unchanged`, and `reintroduced` counts are frozen against the project's previous completed scan.
+Opening a finding shows its cross-scan fingerprint, exact source ranges, source/rule provenance,
+coverage links, and immutable evidence-object count. The gate badge uses the tenant's persisted
+severity, confidence, coverage, and waiver-expiry policy.
+
 ## Scan Logs & diagnostics
 
 The **Scan Logs** button in the results header opens the Pipeline & Logs

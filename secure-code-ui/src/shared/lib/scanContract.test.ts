@@ -145,4 +145,53 @@ describe("normalizeScanResult", () => {
       status: "timeout",
     });
   });
+
+  it("normalizes persisted finding governance without trusting arbitrary shapes", () => {
+    const wire = {
+      status: "COMPLETED",
+      error_message: "",
+      project_id: "0c5c37a3-6a03-4b60-8991-3416780efe06",
+      project_name: "baseline-review",
+      summary_report: null,
+      cross_file_validation: false,
+      deep_vendor_scan: false,
+      scan_type: "AUDIT",
+      disable_temperature: false,
+      has_resumable_artifacts: false,
+      toolchain_provenance: {},
+      finding_governance: {
+        counts: { new: 2, fixed: 1, unchanged: "bad", reintroduced: 1 },
+        items: [{
+          finding_id: 42,
+          fingerprint: "a".repeat(64),
+          baseline_state: "reintroduced",
+          exact_ranges: [{ file_path: "src/a.py", start_line: 8, end_line: 9 }, "bad"],
+          source_provenance: { source: "semgrep", scanner_rule_id: "rule-a" },
+          producer_provenance: {},
+          coverage_entry_ids: ["coverage-1"],
+          evidence_object_ids: ["evidence-1"],
+          remediation_state: { fix_verified: true },
+        }],
+        policy_evaluation: {
+          outcome: "fail",
+          coverage_complete: true,
+          blocking_fingerprints: ["a".repeat(64)],
+          waived_fingerprints: [],
+          policy_version_id: "version-1",
+        },
+      },
+    } as unknown as Parameters<typeof normalizeScanResult>[0];
+
+    const result = normalizeScanResult(wire);
+    expect(result.finding_governance.counts).toEqual({
+      new: 2, fixed: 1, unchanged: 0, reintroduced: 1,
+    });
+    expect(result.finding_governance.items[0]).toMatchObject({
+      finding_id: 42,
+      baseline_state: "reintroduced",
+      coverage_entry_ids: ["coverage-1"],
+    });
+    expect(result.finding_governance.items[0].exact_ranges).toHaveLength(1);
+    expect(result.finding_governance.policy_evaluation?.outcome).toBe("fail");
+  });
 });

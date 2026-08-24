@@ -36,6 +36,7 @@ import type {
   SubmittedFile,
   SummaryReport,
 } from "../../shared/types/api";
+import type { FindingGovernanceItem } from "../../shared/lib/scanContract";
 
 const PRESCAN_BLOCKED_STATUSES = new Set([
   "BLOCKED_USER_DECLINE",
@@ -1349,6 +1350,35 @@ const ResultsPage: React.FC = () => {
         )}
       </div>
 
+      {/* Baseline classifications and the policy result come from the same
+          immutable records used by portfolio trends and downloadable reports. */}
+      <div className="sccap-card" style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "var(--fg)" }}>Finding governance</div>
+            <div style={{ color: "var(--fg-muted)", fontSize: 12.5, marginTop: 3 }}>
+              Deterministic baseline against this project&apos;s previous completed scan.
+            </div>
+          </div>
+          {data.finding_governance.policy_evaluation && (
+            <span className={
+              data.finding_governance.policy_evaluation.outcome === "pass"
+                ? "chip chip-success"
+                : "chip chip-warn"
+            }>
+              Gate {data.finding_governance.policy_evaluation.outcome}
+            </span>
+          )}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {(["new", "fixed", "unchanged", "reintroduced"] as const).map((state) => (
+            <span key={state} className="chip">
+              {state}: {data.finding_governance.counts[state]}
+            </span>
+          ))}
+        </div>
+      </div>
+
       {remediation && (
         <div
           className="sccap-card"
@@ -1894,6 +1924,9 @@ const ResultsPage: React.FC = () => {
             f={selected}
             scanId={scanId}
             originalCodeMap={data?.original_code_map ?? undefined}
+            governance={data?.finding_governance.items.find(
+              (item) => item.finding_id === selected.id,
+            )}
           />
         ) : (
           <div
@@ -2777,7 +2810,8 @@ const FindingDetail: React.FC<{
   f: Finding;
   scanId?: string;
   originalCodeMap?: Record<string, string>;
-}> = ({ f, scanId, originalCodeMap }) => {
+  governance?: FindingGovernanceItem;
+}> = ({ f, scanId, originalCodeMap, governance }) => {
   const sev = (f.severity || "").toUpperCase();
   const sevColor = SEV_COLOR[sev] ?? "var(--fg-muted)";
   const hasFix = !!f.fixes?.code;
@@ -2894,6 +2928,34 @@ const FindingDetail: React.FC<{
       </div>
 
       <div className="sccap-divider" />
+
+      {governance && (
+        <details className="sccap-card" style={{ marginBottom: 18 }} open>
+          <summary style={{ cursor: "pointer", fontWeight: 700 }}>
+            Evidence · {governance.baseline_state}
+          </summary>
+          <div style={{ display: "grid", gap: 6, marginTop: 10, fontSize: 12 }}>
+            <div><b>Fingerprint:</b> <span className="mono">{governance.fingerprint}</span></div>
+            <div>
+              <b>Exact ranges:</b>{" "}
+              {governance.exact_ranges.map((range, index) => (
+                <span key={index} className="chip" style={{ marginRight: 4 }}>
+                  {String(range.file_path ?? f.file_path)}:{String(range.start_line ?? 0)}–{String(range.end_line ?? 0)}
+                </span>
+              ))}
+            </div>
+            <div><b>Coverage evidence:</b> {governance.coverage_entry_ids.length}</div>
+            <div><b>Immutable evidence objects:</b> {governance.evidence_object_ids.length}</div>
+            <div>
+              <b>Producer:</b>{" "}
+              {String(governance.source_provenance.source ?? "agent")}
+              {governance.source_provenance.scanner_rule_id
+                ? ` · ${String(governance.source_provenance.scanner_rule_id)}`
+                : ""}
+            </div>
+          </div>
+        </details>
+      )}
 
       {/* Code snippet — shown for all findings that have source code available */}
       {(fileContent || f.vulnerable_snippet || f.fixes?.original_snippet) && (

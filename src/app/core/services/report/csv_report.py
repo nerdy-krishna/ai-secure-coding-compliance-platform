@@ -37,6 +37,9 @@ _COLUMNS = [
     "coverage_entry_id",
     "coverage_status",
     "coverage_reason",
+    "baseline_state",
+    "finding_fingerprint",
+    "evidence_object_ids",
 ]
 
 
@@ -45,10 +48,16 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=_COLUMNS, lineterminator="\n")
     writer.writeheader()
+    governance_by_finding = {
+        item.get("finding_id"): item
+        for item in (result.finding_governance or {}).get("items", [])
+        if item.get("finding_id") is not None
+    }
     for finding in collect_findings(result):
         source = finding.source or "agent"
         provenance = result.toolchain_provenance.get(source, {})
         binary = provenance.get("binary", {}) if isinstance(provenance, dict) else {}
+        governance = governance_by_finding.get(finding.id, {})
         writer.writerow(
             {
                 "record_type": "finding",
@@ -78,6 +87,11 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
                 "coverage_entry_id": getattr(finding, "coverage_entry_id", None) or "",
                 "coverage_status": "",
                 "coverage_reason": "",
+                "baseline_state": governance.get("baseline_state", ""),
+                "finding_fingerprint": governance.get("fingerprint", ""),
+                "evidence_object_ids": "; ".join(
+                    governance.get("evidence_object_ids", [])
+                ),
             }
         )
     coverage = result.scanner_coverage

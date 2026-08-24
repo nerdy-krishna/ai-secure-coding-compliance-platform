@@ -182,6 +182,7 @@ class ReportData:
     temperature: str
     toolchain_provenance: Dict[str, Any]
     scanner_coverage: Dict[str, Any]
+    finding_governance: Dict[str, Any]
     exec_summary: str = field(default="")
 
 
@@ -299,6 +300,7 @@ def build_report_data(result: AnalysisResultDetailResponse) -> ReportData:
             if result.scanner_coverage is not None
             else {}
         ),
+        finding_governance=dict(result.finding_governance or {}),
     )
     data.exec_summary = _exec_summary(data)
     return data
@@ -353,9 +355,7 @@ def render_coverage_section(data: ReportData) -> str:
     overall = str(coverage.get("overall_status", "unavailable"))
     counts = coverage.get("counts") or {}
     count_text = " &middot; ".join(
-        f"{_e(state)}: {_e(count)}"
-        for state, count in sorted(counts.items())
-        if count
+        f"{_e(state)}: {_e(count)}" for state, count in sorted(counts.items()) if count
     )
     warning = (
         "All planned deterministic scanner inputs completed."
@@ -364,14 +364,12 @@ def render_coverage_section(data: ReportData) -> str:
     )
     entries = coverage.get("entries") or []
     degraded_rows = [
-        entry
-        for entry in entries
-        if entry.get("status") not in {"completed", "clean"}
+        entry for entry in entries if entry.get("status") not in {"completed", "clean"}
     ]
     rows = "".join(
         '<li class="cf-row">'
         f'<span class="cf-title">{_e(entry.get("scanner_name"))} &middot; '
-        f'{_e(entry.get("input_path"))} &middot; {_e(entry.get("status"))}</span>'
+        f"{_e(entry.get('input_path'))} &middot; {_e(entry.get('status'))}</span>"
         f'<span class="cf-note">{_e(entry.get("reason") or "No reason recorded")}</span>'
         "</li>"
         for entry in degraded_rows
@@ -381,6 +379,30 @@ def render_coverage_section(data: ReportData) -> str:
         '<h2 class="section">Scanner coverage</h2>'
         f'<p class="exec"><b>{_e(overall.upper())}</b> &middot; {count_text}<br>{_e(warning)}</p>'
         f"{degraded}"
+    )
+
+
+def render_finding_governance_section(data: ReportData) -> str:
+    """Render persisted baseline and gate semantics shared by HTML/PDF."""
+    governance = data.finding_governance
+    if not governance:
+        return (
+            '<h2 class="section">Finding governance</h2>'
+            '<p class="exec">Baseline and policy evidence is unavailable for this legacy scan.</p>'
+        )
+    counts = governance.get("counts") or {}
+    count_text = " &middot; ".join(
+        f"{_e(state)}: {_e(counts.get(state, 0))}"
+        for state in ("new", "fixed", "unchanged", "reintroduced")
+    )
+    evaluation = governance.get("policy_evaluation") or {}
+    outcome = str(evaluation.get("outcome") or "not evaluated").upper()
+    blocking = len(evaluation.get("blocking_fingerprints") or [])
+    waived = len(evaluation.get("waived_fingerprints") or [])
+    return (
+        '<h2 class="section">Finding governance</h2>'
+        f'<p class="exec"><b>{_e(outcome)}</b> &middot; {count_text}<br>'
+        f"Blocking: {_e(blocking)} &middot; Waived: {_e(waived)}</p>"
     )
 
 

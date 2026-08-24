@@ -35,6 +35,7 @@ from app.api.v1.routers.admin_provider_reconciliation import (
     router as admin_provider_reconciliation_router,
 )
 from app.api.v1.routers.usage_center import router as usage_center_router
+from app.api.v1.routers.finding_governance import router as finding_governance_router
 from app.api.v1.routers.admin_seed import router as admin_seed_router
 from app.api.v1.routers.dashboard import router as dashboard_router
 from app.api.v1.routers.push import router as push_router
@@ -1104,6 +1105,7 @@ app.include_router(admin_usage_budgets_router, prefix="/api/v1")
 app.include_router(admin_provider_reconciliation_router, prefix="/api/v1")
 # Canonical self/group/tenant usage analytics and exact exports.
 app.include_router(usage_center_router, prefix="/api/v1")
+app.include_router(finding_governance_router, prefix="/api/v1")
 # Cross-tenant findings list with source filter (sast-prescan-followups Group D1).
 app.include_router(admin_findings_router, prefix="/api/v1", tags=["Admin: Findings"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])
