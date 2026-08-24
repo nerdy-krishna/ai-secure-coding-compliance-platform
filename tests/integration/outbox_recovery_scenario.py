@@ -236,8 +236,7 @@ async def _assert_recovered(identity: ScenarioIdentity) -> None:
         durable_status = status
         consistency_deadline = time.monotonic() + 30
         while (
-            public_status != durable_status
-            and time.monotonic() < consistency_deadline
+            public_status != durable_status and time.monotonic() < consistency_deadline
         ):
             await asyncio.sleep(0.25)
             public_result = await client.get(
