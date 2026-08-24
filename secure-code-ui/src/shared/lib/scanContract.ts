@@ -137,6 +137,45 @@ export interface ScannerProvenance {
 
 export type ToolchainProvenance = Record<string, ScannerProvenance>;
 
+export type ScannerCoverageStatus =
+  | "planned"
+  | "completed"
+  | "clean"
+  | "skipped"
+  | "failed"
+  | "timeout"
+  | "unsupported"
+  | "truncated";
+
+export interface ScannerCoverageEntry {
+  id: string;
+  scanner_name: string;
+  input_path: string;
+  status: ScannerCoverageStatus;
+  reason_code?: string | null;
+  reason?: string | null;
+  finding_count: number;
+  native_evidence_available: boolean;
+  provenance_status?: string | null;
+}
+
+export interface ScannerCoverageManifest {
+  attempt_id: string;
+  overall_status: "unavailable" | "complete" | "degraded";
+  is_complete: boolean;
+  counts: Record<string, number>;
+  entries: ScannerCoverageEntry[];
+  latest_policy_decision?: {
+    id: string;
+    outcome: "pass" | "fail" | "waived";
+    failing_states: string[];
+    matching_entry_ids: string[];
+    audit_reason: string;
+    actor_user_id?: number | null;
+    created_at: string;
+  } | null;
+}
+
 export interface ApprovalGate {
   gate_id: string;
   scan_id: string;
@@ -167,7 +206,70 @@ export type ScanResultResponse = Omit<
   stage_temperatures?: Record<string, number> | null;
   toolchain_provenance: ToolchainProvenance;
   active_approval_gate?: ApprovalGate | null;
+  scanner_coverage?: ScannerCoverageManifest | null;
 };
+
+const COVERAGE_STATES = new Set<ScannerCoverageStatus>([
+  "planned", "completed", "clean", "skipped", "failed", "timeout",
+  "unsupported", "truncated",
+]);
+
+function normalizeScannerCoverage(value: unknown): ScannerCoverageManifest | null {
+  if (!isRecord(value) || !Array.isArray(value.entries)) return null;
+  const entries = value.entries.flatMap((raw): ScannerCoverageEntry[] => {
+    if (!isRecord(raw) || !COVERAGE_STATES.has(raw.status as ScannerCoverageStatus)) {
+      return [];
+    }
+    return [{
+      id: String(raw.id ?? ""),
+      scanner_name: String(raw.scanner_name ?? "unknown"),
+      input_path: String(raw.input_path ?? "unknown"),
+      status: raw.status as ScannerCoverageStatus,
+      reason_code: raw.reason_code === null ? null : optionalString(raw.reason_code),
+      reason: raw.reason === null ? null : optionalString(raw.reason),
+      finding_count: finiteNumber(raw.finding_count) ?? 0,
+      native_evidence_available: raw.native_evidence_available === true,
+      provenance_status:
+        raw.provenance_status === null ? null : optionalString(raw.provenance_status),
+    }];
+  });
+  const status = value.overall_status === "complete"
+    ? "complete"
+    : value.overall_status === "degraded"
+      ? "degraded"
+      : "unavailable";
+  const decision = isRecord(value.latest_policy_decision)
+    ? {
+        id: String(value.latest_policy_decision.id ?? ""),
+        outcome: value.latest_policy_decision.outcome === "pass"
+          ? "pass" as const
+          : value.latest_policy_decision.outcome === "waived"
+            ? "waived" as const
+            : "fail" as const,
+        failing_states: Array.isArray(value.latest_policy_decision.failing_states)
+          ? value.latest_policy_decision.failing_states.filter(
+              (item): item is string => typeof item === "string",
+            )
+          : [],
+        matching_entry_ids: Array.isArray(value.latest_policy_decision.matching_entry_ids)
+          ? value.latest_policy_decision.matching_entry_ids.filter(
+              (item): item is string => typeof item === "string",
+            )
+          : [],
+        audit_reason: String(value.latest_policy_decision.audit_reason ?? ""),
+        actor_user_id: finiteNumber(value.latest_policy_decision.actor_user_id),
+        created_at: String(value.latest_policy_decision.created_at ?? ""),
+      }
+    : null;
+  return {
+    attempt_id: String(value.attempt_id ?? ""),
+    overall_status: status,
+    is_complete: value.is_complete === true,
+    counts: normalizeNumberRecord(isRecord(value.counts) ? value.counts : undefined) ?? {},
+    entries,
+    latest_policy_decision: decision,
+  };
+}
 
 const DISPOSITIONS = new Set<FindingDisposition>([
   "open",
@@ -402,6 +504,9 @@ export function normalizeScanResult(wire: ScanResultWire): ScanResultResponse {
   const gate = (wire as ScanResultWire & {
     active_approval_gate?: ApprovalGate | null;
   }).active_approval_gate;
+  const coverage = (wire as ScanResultWire & {
+    scanner_coverage?: unknown;
+  }).scanner_coverage;
   return {
     ...wire,
     summary_report: normalizeSummaryReport(wire.summary_report),
@@ -411,5 +516,6 @@ export function normalizeScanResult(wire: ScanResultWire): ScanResultResponse {
       wire.toolchain_provenance,
     ),
     active_approval_gate: gate,
+    scanner_coverage: normalizeScannerCoverage(coverage),
   };
 }

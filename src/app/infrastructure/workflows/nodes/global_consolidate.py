@@ -65,6 +65,23 @@ def _merge_cluster(items: List[VulnerabilityFinding]) -> VulnerabilityFinding:
         key=str,
     )
     primary.contributing_raw_finding_ids = raw_ids
+    coverage_ids = sorted(
+        {
+            coverage_id
+            for item in items
+            for coverage_id in (
+                item.coverage_entry_ids
+                or (
+                    [item.coverage_entry_id]
+                    if item.coverage_entry_id is not None
+                    else []
+                )
+            )
+        },
+        key=str,
+    )
+    primary.coverage_entry_ids = coverage_ids
+    primary.coverage_entry_id = coverage_ids[0] if coverage_ids else None
     if raw_ids:
         primary.canonical_finding_id = canonical_finding_id(raw_ids)
     primary.id = None

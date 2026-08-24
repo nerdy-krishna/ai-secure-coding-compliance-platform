@@ -90,6 +90,14 @@ class FileProfile(BaseModel):
 
 class VulnerabilityFinding(BaseModel):
     id: Optional[int] = None
+    coverage_entry_id: Optional[uuid.UUID] = Field(
+        default=None,
+        description="Scanner/input coverage entry that produced this finding.",
+    )
+    coverage_entry_ids: List[uuid.UUID] = Field(
+        default_factory=list,
+        description="All scanner/input coverage entries represented after merges.",
+    )
     raw_finding_id: Optional[uuid.UUID] = Field(
         default=None,
         description="Stable identity assigned at the raw finding emission boundary.",

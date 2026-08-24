@@ -611,6 +611,8 @@ class FixSuggestionResponse(BaseModel):
 
 class VulnerabilityFindingResponse(BaseModel):
     id: int
+    coverage_entry_id: Optional[uuid.UUID] = None
+    coverage_entry_ids: List[uuid.UUID] = Field(default_factory=list)
     raw_finding_id: Optional[uuid.UUID] = None
     canonical_finding_id: Optional[uuid.UUID] = None
     contributing_raw_finding_ids: List[uuid.UUID] = Field(default_factory=list)
@@ -667,6 +669,12 @@ class VulnerabilityFindingResponse(BaseModel):
     @classmethod
     def empty_list_for_legacy_lineage(cls, value: Any) -> List[uuid.UUID]:
         """Legacy findings predate exact lineage and store SQL NULL."""
+        return value or []
+
+    @field_validator("coverage_entry_ids", mode="before")
+    @classmethod
+    def empty_list_for_legacy_coverage(cls, value: Any) -> List[uuid.UUID]:
+        """Legacy and LLM-only findings have no deterministic coverage link."""
         return value or []
 
     @field_validator("fixes", mode="before")
@@ -1029,6 +1037,66 @@ class ConsolidationStats(BaseModel):
     dropped: int = 0  # raw findings dropped as false-positive / noise
 
 
+class ScannerCoverageEntryResponse(BaseModel):
+    id: uuid.UUID
+    scanner_name: str
+    input_path: str
+    status: Literal[
+        "planned",
+        "completed",
+        "clean",
+        "skipped",
+        "failed",
+        "timeout",
+        "unsupported",
+        "truncated",
+    ]
+    reason_code: Optional[str] = None
+    reason: Optional[str] = None
+    finding_count: int = 0
+    native_evidence_available: bool = False
+    provenance_status: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class ScannerCoveragePolicyDecisionResponse(BaseModel):
+    id: uuid.UUID
+    outcome: Literal["pass", "fail", "waived"]
+    failing_states: List[str]
+    matching_entry_ids: List[uuid.UUID]
+    audit_reason: str
+    actor_user_id: Optional[int] = None
+    created_at: datetime
+
+
+class ScannerCoverageManifestResponse(BaseModel):
+    attempt_id: uuid.UUID
+    overall_status: Literal["unavailable", "complete", "degraded"]
+    is_complete: bool
+    counts: Dict[str, int]
+    entries: List[ScannerCoverageEntryResponse]
+    latest_policy_decision: Optional[ScannerCoveragePolicyDecisionResponse] = None
+
+
+class ScannerCoveragePolicyRequest(BaseModel):
+    failing_states: List[
+        Literal[
+            "planned",
+            "completed",
+            "clean",
+            "skipped",
+            "failed",
+            "timeout",
+            "unsupported",
+            "truncated",
+        ]
+    ] = Field(min_length=1, max_length=8)
+    waive: bool = False
+    audit_reason: str = Field(min_length=3, max_length=2000)
+
+
 class AnalysisResultDetailResponse(BaseModel):
     status: str
     current_attempt_id: Optional[uuid.UUID] = None
@@ -1055,6 +1123,7 @@ class AnalysisResultDetailResponse(BaseModel):
     # exposes a bounded summary; the authenticated scanner-report download
     # carries the complete per-rule inventory.
     toolchain_provenance: Dict[str, Any] = Field(default_factory=dict)
+    scanner_coverage: Optional[ScannerCoverageManifestResponse] = None
     # The estimate produced by the cost node before the user is asked
     # to approve. Surfaced on the ScanRunningPage so the user sees the
     # number alongside the "Approve & run" button. Stored as JSONB on

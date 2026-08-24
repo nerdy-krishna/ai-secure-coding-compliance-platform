@@ -15,6 +15,7 @@ from app.api.v1.models import AnalysisResultDetailResponse
 from app.core.services.report._common import affected_lines, collect_findings
 
 _COLUMNS = [
+    "record_type",
     "file_path",
     "line_number",
     "severity",
@@ -33,6 +34,9 @@ _COLUMNS = [
     # Operator triage state + justification (PRD #96 / #102).
     "disposition",
     "disposition_note",
+    "coverage_entry_id",
+    "coverage_status",
+    "coverage_reason",
 ]
 
 
@@ -47,6 +51,7 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
         binary = provenance.get("binary", {}) if isinstance(provenance, dict) else {}
         writer.writerow(
             {
+                "record_type": "finding",
                 "file_path": finding.file_path,
                 "line_number": finding.line_number,
                 "severity": finding.severity,
@@ -70,6 +75,43 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
                 ),
                 "disposition": getattr(finding, "disposition", None) or "open",
                 "disposition_note": getattr(finding, "disposition_note", None) or "",
+                "coverage_entry_id": getattr(finding, "coverage_entry_id", None) or "",
+                "coverage_status": "",
+                "coverage_reason": "",
             }
         )
+    coverage = result.scanner_coverage
+    if coverage is None:
+        writer.writerow(
+            {
+                "record_type": "coverage",
+                "coverage_status": "unavailable",
+                "coverage_reason": (
+                    "Coverage manifest unavailable; zero findings are not proof of a clean scan."
+                ),
+            }
+        )
+    else:
+        writer.writerow(
+            {
+                "record_type": "coverage",
+                "coverage_status": coverage.overall_status,
+                "coverage_reason": (
+                    "Every planned deterministic scanner/input completed."
+                    if coverage.is_complete
+                    else "Coverage is incomplete; zero findings are not proof of a clean scan."
+                ),
+            }
+        )
+        for entry in coverage.entries:
+            writer.writerow(
+                {
+                    "record_type": "coverage",
+                    "file_path": entry.input_path,
+                    "source": entry.scanner_name,
+                    "coverage_entry_id": entry.id,
+                    "coverage_status": entry.status,
+                    "coverage_reason": entry.reason or "",
+                }
+            )
     return buffer.getvalue()

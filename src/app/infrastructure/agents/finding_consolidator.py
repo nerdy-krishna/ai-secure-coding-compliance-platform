@@ -469,6 +469,22 @@ def _build_merged_finding(
 
     return VulnerabilityFinding(
         id=None,
+        coverage_entry_id=base.coverage_entry_id,
+        coverage_entry_ids=sorted(
+            {
+                coverage_id
+                for finding in subsumed
+                for coverage_id in (
+                    finding.coverage_entry_ids
+                    or (
+                        [finding.coverage_entry_id]
+                        if finding.coverage_entry_id is not None
+                        else []
+                    )
+                )
+            },
+            key=str,
+        ),
         canonical_finding_id=canonical_finding_id(
             f.raw_finding_id for f in subsumed if f.raw_finding_id
         ),

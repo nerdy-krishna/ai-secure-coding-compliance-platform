@@ -72,6 +72,14 @@ def render_sarif(result: AnalysisResultDetailResponse) -> str:
                 "originalUriBaseIds": {_URI_BASE_ID: {"uri": "file:///"}},
                 "properties": {
                     "sccapToolchainProvenance": result.toolchain_provenance,
+                    "sccapScannerCoverage": (
+                        result.scanner_coverage.model_dump(mode="json")
+                        if result.scanner_coverage is not None
+                        else {
+                            "overall_status": "unavailable",
+                            "warning": "Coverage manifest unavailable; zero findings are not proof of a clean scan.",
+                        }
+                    ),
                 },
                 "results": results,
             }

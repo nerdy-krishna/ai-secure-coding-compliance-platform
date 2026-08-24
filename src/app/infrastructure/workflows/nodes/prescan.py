@@ -32,6 +32,12 @@ from app.config.config import settings
 from app.core.schemas import VulnerabilityFinding
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.database.repositories.scanner_coverage_repo import (
+    CoverageOutcome,
+    CoveragePlanItem,
+    DEGRADED_COVERAGE_STATES,
+    ScannerCoverageRepository,
+)
 from app.infrastructure.database.repositories.approval_gate_repo import (
     ApprovalGateRepository,
     approval_gate_payload,
@@ -160,7 +166,11 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             scan_id,
             "DETERMINISTIC_PRESCAN",
             EV_COMPLETED,
-            {"files_total": 0, "message": "No submitted files to scan."},
+            {
+                "files_total": 0,
+                "coverage_status": "unavailable",
+                "message": "No submitted files to scan.",
+            },
         )
         return {}
 
@@ -173,8 +183,17 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     # reason so the user can see WHY a file wasn't scanned —
     # previously the cap silently dropped legitimate source files.
     eligible: Dict[str, str] = {}
+    coverage_plan: Dict[tuple[str, str], CoveragePlanItem] = {}
     for path, content in files.items():
-        if not scanners_for_file(path):
+        planned_scanners = scanners_for_file(path)
+        if not planned_scanners:
+            coverage_plan[("registry", path)] = CoveragePlanItem(
+                scanner_name="registry",
+                input_path=path,
+                status="unsupported",
+                reason_code="unsupported_file_type",
+                reason="No deterministic scanner supports this input type.",
+            )
             continue
         if not content:
             logger.debug(
@@ -182,6 +201,14 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 scan_id,
                 path,
             )
+            for scanner_name in planned_scanners:
+                coverage_plan[(scanner_name, path)] = CoveragePlanItem(
+                    scanner_name=scanner_name,
+                    input_path=path,
+                    status="skipped",
+                    reason_code="empty_input",
+                    reason="The input was empty.",
+                )
             continue
         size = len(content.encode("utf-8", "replace"))
         cap = MINIFIED_BYTE_LIMIT if is_minified(path) else PRESCAN_FILE_BYTE_LIMIT
@@ -193,8 +220,22 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 size,
                 cap,
             )
+            for scanner_name in planned_scanners:
+                coverage_plan[(scanner_name, path)] = CoveragePlanItem(
+                    scanner_name=scanner_name,
+                    input_path=path,
+                    status="truncated",
+                    reason_code="input_size_limit",
+                    reason="The input exceeded the deterministic scanner size limit.",
+                    details={"input_bytes": size, "limit_bytes": cap},
+                )
             continue
         eligible[path] = content
+        for scanner_name in planned_scanners:
+            coverage_plan[(scanner_name, path)] = CoveragePlanItem(
+                scanner_name=scanner_name,
+                input_path=path,
+            )
 
     if len(eligible) > PRESCAN_MAX_FILES:
         logger.warning(
@@ -202,9 +243,33 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             len(eligible),
             PRESCAN_MAX_FILES,
         )
-        eligible = dict(list(eligible.items())[:PRESCAN_MAX_FILES])
+        retained = dict(list(eligible.items())[:PRESCAN_MAX_FILES])
+        for path in set(eligible) - set(retained):
+            for scanner_name in scanners_for_file(path):
+                coverage_plan[(scanner_name, path)] = CoveragePlanItem(
+                    scanner_name=scanner_name,
+                    input_path=path,
+                    status="skipped",
+                    reason_code="prescan_file_limit",
+                    reason="The scan exceeded the deterministic prescan file-count limit.",
+                    details={"limit": PRESCAN_MAX_FILES},
+                )
+        eligible = retained
 
     if not eligible:
+        if coverage_plan:
+            try:
+                async with AsyncSessionLocal() as db:
+                    await ScannerCoverageRepository(db).plan(
+                        scan_id, coverage_plan.values()
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "deterministic_prescan: coverage plan persistence failed "
+                    "scan_id=%s err=%s",
+                    scan_id,
+                    exc,
+                )
         logger.info(
             "deterministic_prescan: no scanner-eligible files for scan %s; skipping",
             scan_id,
@@ -215,6 +280,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             EV_COMPLETED,
             {
                 "files_total": len(files),
+                "coverage_status": "degraded",
                 "message": "No files were eligible for the configured scanners.",
             },
         )
@@ -267,6 +333,42 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 _exc,
             )
 
+    for path in eligible:
+        if "semgrep" not in scanners_for_file(path):
+            continue
+        if path not in semgrep_eligible:
+            coverage_plan[("semgrep", path)] = CoveragePlanItem(
+                scanner_name="semgrep",
+                input_path=path,
+                status="skipped",
+                reason_code="file_classification_policy",
+                reason="Semgrep was skipped by file classification policy.",
+            )
+        elif not _semgrep_rules:
+            coverage_plan[("semgrep", path)] = CoveragePlanItem(
+                scanner_name="semgrep",
+                input_path=path,
+                status="skipped",
+                reason_code="no_selected_rules",
+                reason="No ingested Semgrep rules matched this input language.",
+            )
+
+    coverage_plan[("osv", "<repository>")] = CoveragePlanItem(
+        scanner_name="osv", input_path="<repository>"
+    )
+    try:
+        async with AsyncSessionLocal() as db:
+            coverage_entries = await ScannerCoverageRepository(db).plan(
+                scan_id, coverage_plan.values()
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "deterministic_prescan: coverage plan persistence failed scan_id=%s err=%s",
+            scan_id,
+            exc,
+        )
+        coverage_entries = {}
+
     # Single shared semaphore covers all SAST scanner subprocesses in
     # this prescan invocation (N9). Each scanner walks the staged tree
     # itself, so we get one subprocess.run call per scanner per scan,
@@ -275,6 +377,18 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     scanner_limit = _CONCURRENT_SCANNER_LIMIT
     native_reports: Dict[str, Any] = {}
     scanner_statuses: Dict[str, Dict[str, Any]] = {}
+    coverage_outcomes: List[CoverageOutcome] = [
+        CoverageOutcome(
+            scanner_name=item.scanner_name,
+            input_path=item.input_path,
+            status=item.status,
+            reason_code=item.reason_code,
+            reason=item.reason,
+            details=item.details,
+        )
+        for item in coverage_plan.values()
+        if item.status != "planned"
+    ]
     toolchain_provenance = copy.deepcopy(collect_runtime_provenance())
     semgrep_rule_provenance = build_semgrep_rule_provenance(
         _semgrep_rules, _semgrep_sources
@@ -451,6 +565,30 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                         "error_class": result.__class__.__name__,
                         "provenance": toolchain_provenance[scanner_name],
                     }
+                    final_status = (
+                        "timeout"
+                        if isinstance(result, (asyncio.TimeoutError, TimeoutError))
+                        or "timeout" in result.__class__.__name__.lower()
+                        else "failed"
+                    )
+                    for item in coverage_plan.values():
+                        if item.scanner_name == scanner_name and item.status == "planned":
+                            coverage_outcomes.append(
+                                CoverageOutcome(
+                                    scanner_name=scanner_name,
+                                    input_path=item.input_path,
+                                    status=final_status,
+                                    reason_code=f"scanner_{final_status}",
+                                    reason=(
+                                        "Scanner timed out before completing this input."
+                                        if final_status == "timeout"
+                                        else "Scanner failed before completing this input."
+                                    ),
+                                    provenance_status=toolchain_provenance[scanner_name][
+                                        "status"
+                                    ],
+                                )
+                            )
                     continue
                 if scanner_name == "osv":
                     # OSV returns (findings, bom_cyclonedx_dict).
@@ -481,6 +619,54 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     "native_report_available": scanner_name in native_reports,
                     "provenance": provenance,
                 }
+                report = native_reports.get(scanner_name)
+                report_truncated = bool(
+                    isinstance(report, dict)
+                    and (report.get("truncated") or report.get("available") is False)
+                )
+                scanner_inputs = [
+                    item.input_path
+                    for item in coverage_plan.values()
+                    if item.scanner_name == scanner_name and item.status == "planned"
+                ]
+                findings_by_path: Dict[str, int] = {}
+                scanner_findings = osv_findings if scanner_name == "osv" else result
+                for finding in scanner_findings:
+                    findings_by_path[finding.file_path] = (
+                        findings_by_path.get(finding.file_path, 0) + 1
+                    )
+                for input_path in scanner_inputs:
+                    input_findings = (
+                        finding_count
+                        if scanner_name == "osv"
+                        else findings_by_path.get(input_path, 0)
+                    )
+                    coverage_outcomes.append(
+                        CoverageOutcome(
+                            scanner_name=scanner_name,
+                            input_path=input_path,
+                            status=(
+                                "truncated"
+                                if report_truncated
+                                else "completed"
+                                if input_findings
+                                else "clean"
+                            ),
+                            reason_code=(
+                                "native_evidence_truncated" if report_truncated else None
+                            ),
+                            reason=(
+                                "Native scanner evidence exceeded its persistence bound."
+                                if report_truncated
+                                else None
+                            ),
+                            finding_count=input_findings,
+                            native_evidence_available=(
+                                scanner_name in native_reports and not report_truncated
+                            ),
+                            provenance_status=provenance["status"],
+                        )
+                    )
         logger.info(
             "deterministic_prescan: scan_id=%s eligible_files=%d findings=%d bom=%s",
             scan_id,
@@ -506,7 +692,41 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 "message": "Prescan failed; continuing with reduced deterministic coverage."
             },
         )
+        try:
+            failed_outcomes = [
+                CoverageOutcome(
+                    scanner_name=item.scanner_name,
+                    input_path=item.input_path,
+                    status="failed",
+                    reason_code="prescan_orchestration_failure",
+                    reason="Prescan orchestration failed before this input completed.",
+                )
+                for item in coverage_plan.values()
+                if item.status == "planned"
+            ]
+            async with AsyncSessionLocal() as db:
+                await ScannerCoverageRepository(db).record_outcomes(
+                    scan_id, [*coverage_outcomes, *failed_outcomes]
+                )
+        except Exception as coverage_exc:  # noqa: BLE001
+            logger.warning(
+                "deterministic_prescan: failed to persist crash coverage scan_id=%s: %s",
+                scan_id,
+                coverage_exc,
+            )
         return {"findings": [], "bom_cyclonedx": None}
+
+    try:
+        async with AsyncSessionLocal() as db:
+            coverage_entries = await ScannerCoverageRepository(db).record_outcomes(
+                scan_id, coverage_outcomes
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "deterministic_prescan: coverage outcome persistence failed scan_id=%s: %s",
+            scan_id,
+            exc,
+        )
 
     # Persist the BOM column eagerly so it survives the upcoming
     # interrupt(); LangGraph state writes happen via the checkpointer
@@ -538,11 +758,19 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 scan_id=scan_id,
                 artifact_type=ARTIFACT_TYPE_SCANNER_REPORTS,
                 payload={
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "scan_id": str(scan_id),
                     "reports": native_reports,
                     "scanner_statuses": scanner_statuses,
                     "toolchain_provenance": toolchain_provenance,
+                    "coverage_entry_ids": {
+                        scanner_name: sorted(
+                            str(entry.id)
+                            for (entry_scanner, _), entry in coverage_entries.items()
+                            if entry_scanner == scanner_name
+                        )
+                        for scanner_name in native_reports
+                    },
                 },
             )
     except Exception as exc:  # noqa: BLE001
@@ -567,6 +795,15 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
         finding.source_snapshot_hash = (
             finding.source_snapshot_hash or original_file_map.get(finding.file_path)
         )
+        coverage_entry = coverage_entries.get((source, finding.file_path))
+        if coverage_entry is None and source == "osv":
+            coverage_entry = coverage_entries.get(("osv", "<repository>"))
+        finding.coverage_entry_id = (
+            coverage_entry.id if coverage_entry is not None else None
+        )
+        finding.coverage_entry_ids = (
+            [coverage_entry.id] if coverage_entry is not None else []
+        )
     await _emit_scan_activity(
         scan_id,
         "DETERMINISTIC_PRESCAN",
@@ -578,10 +815,10 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             "coverage_status": (
                 "degraded"
                 if any(
-                    item.get("status") in {"degraded", "failed"}
-                    for item in scanner_statuses.values()
+                    entry.status in DEGRADED_COVERAGE_STATES
+                    for entry in coverage_entries.values()
                 )
-                else "completed"
+                else "complete"
             ),
         },
     )

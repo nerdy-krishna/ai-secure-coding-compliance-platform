@@ -1287,6 +1287,68 @@ const ResultsPage: React.FC = () => {
         </div>
       )}
 
+      {/* Finding counts and scanner coverage are independent signals. A
+          zero-finding result is labelled clean only when every planned
+          deterministic scanner/input completed. */}
+      <div
+        className="sccap-card"
+        style={{
+          borderColor: data.scanner_coverage?.is_complete
+            ? "var(--success)"
+            : "var(--medium)",
+          display: "grid",
+          gap: 8,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 700, color: "var(--fg)" }}>
+              Scanner coverage · {data.scanner_coverage?.overall_status ?? "unavailable"}
+            </div>
+            <div style={{ color: "var(--fg-muted)", fontSize: 12.5, marginTop: 3 }}>
+              {data.scanner_coverage?.is_complete
+                ? "Every planned deterministic scanner/input completed."
+                : "Coverage is incomplete. No findings does not mean this scan is clean."}
+            </div>
+          </div>
+          {data.scanner_coverage?.latest_policy_decision && (
+            <span className={
+              data.scanner_coverage.latest_policy_decision.outcome === "pass"
+                ? "chip chip-success"
+                : "chip chip-warn"
+            }>
+              Policy {data.scanner_coverage.latest_policy_decision.outcome}
+            </span>
+          )}
+        </div>
+        {data.scanner_coverage && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {Object.entries(data.scanner_coverage.counts)
+              .filter(([, count]) => count > 0)
+              .map(([state, count]) => (
+                <span key={state} className="chip">{state}: {count}</span>
+              ))}
+          </div>
+        )}
+        {!!data.scanner_coverage?.entries.some(
+          (entry) => !["completed", "clean"].includes(entry.status),
+        ) && (
+          <details style={{ fontSize: 12.5, color: "var(--fg-muted)" }}>
+            <summary>Review degraded scanner inputs</summary>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+              {data.scanner_coverage.entries
+                .filter((entry) => !["completed", "clean"].includes(entry.status))
+                .map((entry) => (
+                  <li key={entry.id}>
+                    <strong>{entry.scanner_name}</strong> · {entry.input_path} · {entry.status}
+                    {entry.reason ? ` — ${entry.reason}` : ""}
+                  </li>
+                ))}
+            </ul>
+          </details>
+        )}
+      </div>
+
       {remediation && (
         <div
           className="sccap-card"
@@ -1844,7 +1906,9 @@ const ResultsPage: React.FC = () => {
             }}
           >
             {allFindings.length === 0
-              ? "No findings in this scan."
+              ? data.scanner_coverage?.is_complete
+                ? "No findings in this scan; deterministic scanner coverage completed."
+                : "No findings are available, but scanner coverage is incomplete."
               : "Select a finding on the left."}
           </div>
         )}

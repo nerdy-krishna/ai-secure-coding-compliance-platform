@@ -1027,6 +1027,79 @@ async def download_scanner_reports(
 
 
 @router.get(
+    "/scans/{scan_id}/scanner-coverage",
+    response_model=api_models.ScannerCoverageManifestResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
+async def get_scanner_coverage(
+    scan_id: uuid.UUID,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    return await service.get_scanner_coverage(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+
+
+@router.post(
+    "/scans/{scan_id}/scanner-coverage/policy",
+    response_model=api_models.ScannerCoveragePolicyDecisionResponse,
+    dependencies=[Depends(require_permission(SCAN_APPROVE))],
+)
+async def evaluate_scanner_coverage_policy(
+    scan_id: uuid.UUID,
+    request: api_models.ScannerCoveragePolicyRequest,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    await service.get_scan_status(
+        scan_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+    from app.infrastructure.database.repositories.scanner_coverage_repo import (
+        ScannerCoverageRepository,
+    )
+
+    coverage_repo = ScannerCoverageRepository(service.repo.db)
+    decision = await coverage_repo.evaluate_policy(
+        scan_id,
+        failing_states=request.failing_states,
+        waive=request.waive,
+        audit_reason=request.audit_reason,
+        actor_user_id=user.id,
+        commit=False,
+    )
+    await service.repo.record_scan_event(
+        scan_id,
+        "COVERAGE_POLICY",
+        "COMPLETED",
+        details={
+            "outcome": decision.outcome,
+            "failing_states": decision.failing_states,
+            "matching_entry_count": len(decision.matching_entry_ids),
+            "audit_reason": decision.audit_reason,
+            "actor_user_id": user.id,
+        },
+        activity_kind="decision",
+        commit=False,
+    )
+    await service.repo.db.commit()
+    await service.repo.db.refresh(decision)
+    return api_models.ScannerCoveragePolicyDecisionResponse.model_validate(
+        coverage_repo.decision_payload(decision)
+    )
+
+
+@router.get(
     "/scans/{scan_id}/patch-plan",
     dependencies=[Depends(require_permission(SCAN_READ))],
 )

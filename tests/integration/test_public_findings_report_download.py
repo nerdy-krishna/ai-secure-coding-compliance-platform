@@ -177,15 +177,22 @@ class PublicFindingsReportDownloadIntegrationTests(unittest.IsolatedAsyncioTestC
 
         self.assertIn("Unsanitized query &lt;integration&gt;", responses["html"].text)
         self.assertIn("Deterministic scanner provenance", responses["html"].text)
+        self.assertIn("Scanner coverage", responses["html"].text)
         self.assertIn("1.95.0", responses["html"].text)
         csv_rows = list(csv.DictReader(io.StringIO(responses["csv"].text)))
-        self.assertEqual(len(csv_rows), 1)
-        self.assertEqual(csv_rows[0]["title"], self.finding_title)
-        self.assertEqual(csv_rows[0]["scanner_version"], "1.95.0")
-        self.assertEqual(csv_rows[0]["scanner_provenance_status"], "verified")
+        finding_rows = [row for row in csv_rows if row["record_type"] == "finding"]
+        self.assertEqual(len(finding_rows), 1)
+        self.assertEqual(finding_rows[0]["title"], self.finding_title)
+        self.assertEqual(finding_rows[0]["scanner_version"], "1.95.0")
+        self.assertEqual(finding_rows[0]["scanner_provenance_status"], "verified")
+        self.assertTrue(
+            any(row["record_type"] == "coverage" for row in csv_rows),
+            "CSV report must carry coverage truth independently from findings",
+        )
         self.assertTrue(responses["pdf"].content.startswith(b"%PDF-"))
         sarif = json.loads(responses["sarif"].content)
         self.assertEqual(sarif["version"], "2.1.0")
+        self.assertIn("sccapScannerCoverage", sarif["runs"][0]["properties"])
         self.assertEqual(
             sarif["runs"][0]["properties"]["sccapToolchainProvenance"]["semgrep"][
                 "binary"

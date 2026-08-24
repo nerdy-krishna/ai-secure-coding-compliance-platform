@@ -28,6 +28,7 @@ from app.core.services.report._common import (
     render_metadata_block,
     render_models_section,
     render_toolchain_section,
+    render_coverage_section,
     render_risk_panel,
     severity_color,
     severity_text_color,
@@ -148,6 +149,7 @@ def render_html(result: AnalysisResultDetailResponse) -> str:
         + render_risk_panel(data)
         + render_models_section(data)
         + render_toolchain_section(data)
+        + render_coverage_section(data)
         + f'<h2 class="section">Active findings ({len(data.active)})</h2>'
         + cards
         + render_compact_findings("Remediated", data.remediated)

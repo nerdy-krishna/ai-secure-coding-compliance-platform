@@ -100,4 +100,49 @@ describe("normalizeScanResult", () => {
     });
     expect(result.toolchain_provenance.malformed).toBeUndefined();
   });
+
+  it("keeps degraded scanner coverage independent from zero findings", () => {
+    const wire = {
+      status: "COMPLETED",
+      error_message: "",
+      project_id: "0c5c37a3-6a03-4b60-8991-3416780efe06",
+      project_name: "partial-coverage",
+      summary_report: null,
+      cross_file_validation: false,
+      deep_vendor_scan: false,
+      scan_type: "AUDIT",
+      disable_temperature: false,
+      has_resumable_artifacts: false,
+      toolchain_provenance: {},
+      scanner_coverage: {
+        attempt_id: "09db83ad-ef90-4f82-9957-54795a68c469",
+        overall_status: "degraded",
+        is_complete: false,
+        counts: { clean: 1, timeout: 1 },
+        entries: [
+          {
+            id: "665d7919-3452-4452-9415-d16b21002ad2",
+            scanner_name: "semgrep",
+            input_path: "src/app.py",
+            status: "timeout",
+            finding_count: 0,
+            native_evidence_available: false,
+            reason: "Scanner timed out.",
+          },
+        ],
+      },
+    } as unknown as Parameters<typeof normalizeScanResult>[0];
+
+    const result = normalizeScanResult(wire);
+
+    expect(result.scanner_coverage).toMatchObject({
+      overall_status: "degraded",
+      is_complete: false,
+      counts: { clean: 1, timeout: 1 },
+    });
+    expect(result.scanner_coverage?.entries[0]).toMatchObject({
+      scanner_name: "semgrep",
+      status: "timeout",
+    });
+  });
 });

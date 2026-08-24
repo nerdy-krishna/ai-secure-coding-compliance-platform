@@ -163,6 +163,28 @@ class ScanQueryService:
             )
         return await artifacts.resolve_payload(artifact, actor_user_id=user.id)
 
+    async def get_scanner_coverage(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> api_models.ScannerCoverageManifestResponse:
+        """Return the current attempt's per-scanner/per-input coverage truth."""
+        await self.get_scan_status(
+            scan_id,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        )
+        from app.infrastructure.database.repositories.scanner_coverage_repo import (
+            ScannerCoverageRepository,
+        )
+
+        payload = await ScannerCoverageRepository(self.repo.db).manifest(scan_id)
+        return api_models.ScannerCoverageManifestResponse.model_validate(payload)
+
     async def get_patch_plan(
         self,
         scan_id: uuid.UUID,
@@ -486,6 +508,28 @@ class ScanQueryService:
             scan_id
         )
 
+        scanner_coverage = None
+        if scan.current_attempt_id is not None:
+            try:
+                from app.infrastructure.database.repositories.scanner_coverage_repo import (
+                    ScannerCoverageRepository,
+                )
+
+                coverage_payload = await ScannerCoverageRepository(
+                    self.repo.db
+                ).manifest(scan_id)
+                scanner_coverage = (
+                    api_models.ScannerCoverageManifestResponse.model_validate(
+                        coverage_payload
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - legacy scans have no manifest
+                logger.warning(
+                    "scan-query: scanner coverage unavailable scan_id=%s: %s",
+                    scan_id,
+                    exc,
+                )
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             current_attempt_id=scan.current_attempt_id,
@@ -497,6 +541,7 @@ class ScanQueryService:
             fixed_code_map=fixed_code_map or None,
             source_counts=source_counts,
             toolchain_provenance=toolchain_provenance,
+            scanner_coverage=scanner_coverage,
             cost_details=scan.cost_details,
             active_approval_gate=(
                 api_models.ApprovalGateResponse.model_validate(active_gate)

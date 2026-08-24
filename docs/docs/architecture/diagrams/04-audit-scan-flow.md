@@ -72,7 +72,9 @@ sequenceDiagram
       W->>SC: semgrep_runner (180 s · DB-selected rules)
       W->>SC: gitleaks_runner (180 s · secret patterns)
       W->>SC: osv_runner (180 s · CycloneDX 1.5)
+      W->>DB: plan scanner_coverage_entries<br/>(one scanner/input row)
       SC-->>W: per-tool JSON findings + BOM
+      W->>DB: finalize clean/completed/skipped/failed/<br/>timeout/unsupported/truncated coverage
       W->>DB: scan.bom_cyclonedx (≤ 5 MB)
       W->>DB: insert scan_events (PRESCAN_ANALYSIS, COMPLETED)
     end
@@ -215,6 +217,8 @@ stateDiagram-v2
 | `checkpoints`      | per-node LangGraph snapshot (`thread_id=scan_id`)                         |
 | `llm_interactions` | one row per LLM call (prompt context redacted, cost, tokens, `expires_at`)|
 | `findings`         | bulk insert at end (CWE, CVSS, severity, source, `fixes` JSONB)           |
+| `scanner_coverage_entries` | per-attempt scanner/input plan and terminal coverage truth       |
+| `scanner_coverage_policy_decisions` | append-only fail/pass/waive decision and audit reason  |
 | `auth_audit_events`| append on prescan override (`PRESCAN_OVERRIDE_CRITICAL_SECRET`)            |
 
 ### Queues used

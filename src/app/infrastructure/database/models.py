@@ -533,6 +533,99 @@ class EvidenceManifest(Base):
     )
 
 
+class ScannerCoverageEntry(Base):
+    """Durable truth for one planned deterministic scanner/input pair."""
+
+    __tablename__ = "scanner_coverage_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id",
+            "scanner_name",
+            "input_path",
+            name="uq_scanner_coverage_attempt_scanner_input",
+        ),
+        sa.CheckConstraint(
+            "status IN ('planned', 'completed', 'clean', 'skipped', 'failed', "
+            "'timeout', 'unsupported', 'truncated')",
+            name="ck_scanner_coverage_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    scanner_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_path: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    reason_code: Mapped[Optional[str]] = mapped_column(String(64))
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    finding_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    native_evidence_available: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    provenance_status: Mapped[Optional[str]] = mapped_column(String(20))
+    details: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=sa.text("'{}'::jsonb")
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ScannerCoveragePolicyDecision(Base):
+    """Append-only policy evaluation or explicit degraded-coverage waiver."""
+
+    __tablename__ = "scanner_coverage_policy_decisions"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "outcome IN ('pass', 'fail', 'waived')",
+            name="ck_scanner_coverage_policy_outcome",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    attempt_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    failing_states: Mapped[List[str]] = mapped_column(JSONB, nullable=False)
+    matching_entry_ids: Mapped[List[str]] = mapped_column(JSONB, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    audit_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class EvidenceGovernanceEvent(Base):
     """Append-only audit record for evidence retention and access actions."""
 
@@ -766,6 +859,15 @@ class Finding(Base):
     )
     canonical_finding_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True), nullable=True, index=True
+    )
+    coverage_entry_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("scanner_coverage_entries.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    coverage_entry_ids: Mapped[Optional[List[uuid.UUID]]] = mapped_column(
+        PG_ARRAY(PG_UUID(as_uuid=True)), nullable=True
     )
     contributing_raw_finding_ids: Mapped[Optional[List[uuid.UUID]]] = mapped_column(
         PG_ARRAY(PG_UUID(as_uuid=True)), nullable=True

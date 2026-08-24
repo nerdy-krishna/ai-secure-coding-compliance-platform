@@ -181,6 +181,7 @@ class ReportData:
     source: str
     temperature: str
     toolchain_provenance: Dict[str, Any]
+    scanner_coverage: Dict[str, Any]
     exec_summary: str = field(default="")
 
 
@@ -293,6 +294,11 @@ def build_report_data(result: AnalysisResultDetailResponse) -> ReportData:
         source=_source_label(result),
         temperature=_temperature_label(result),
         toolchain_provenance=dict(result.toolchain_provenance or {}),
+        scanner_coverage=(
+            result.scanner_coverage.model_dump(mode="json")
+            if result.scanner_coverage is not None
+            else {}
+        ),
     )
     data.exec_summary = _exec_summary(data)
     return data
@@ -325,7 +331,57 @@ def _exec_summary(data: ReportData) -> str:
         f"The triage-adjusted risk score is {data.active_score:.1f} / 10 "
         f"(pre-triage {data.raw_score:.1f} / 10)."
     )
+    if data.scanner_coverage:
+        coverage_status = data.scanner_coverage.get("overall_status", "unavailable")
+        if coverage_status != "complete":
+            sentences.append(
+                "Deterministic scanner coverage was incomplete; an empty finding "
+                "set must not be interpreted as a clean scan."
+            )
     return " ".join(sentences)
+
+
+def render_coverage_section(data: ReportData) -> str:
+    """Render scanner coverage independently from finding counts."""
+    coverage = data.scanner_coverage
+    if not coverage:
+        return (
+            '<h2 class="section">Scanner coverage</h2>'
+            '<p class="exec">Coverage manifest unavailable for this legacy scan. '
+            "No finding result should be interpreted as proof of complete coverage.</p>"
+        )
+    overall = str(coverage.get("overall_status", "unavailable"))
+    counts = coverage.get("counts") or {}
+    count_text = " &middot; ".join(
+        f"{_e(state)}: {_e(count)}"
+        for state, count in sorted(counts.items())
+        if count
+    )
+    warning = (
+        "All planned deterministic scanner inputs completed."
+        if overall == "complete"
+        else "Coverage is degraded. A zero-finding result is not a clean bill of health."
+    )
+    entries = coverage.get("entries") or []
+    degraded_rows = [
+        entry
+        for entry in entries
+        if entry.get("status") not in {"completed", "clean"}
+    ]
+    rows = "".join(
+        '<li class="cf-row">'
+        f'<span class="cf-title">{_e(entry.get("scanner_name"))} &middot; '
+        f'{_e(entry.get("input_path"))} &middot; {_e(entry.get("status"))}</span>'
+        f'<span class="cf-note">{_e(entry.get("reason") or "No reason recorded")}</span>'
+        "</li>"
+        for entry in degraded_rows
+    )
+    degraded = f'<ul class="compact">{rows}</ul>' if rows else ""
+    return (
+        '<h2 class="section">Scanner coverage</h2>'
+        f'<p class="exec"><b>{_e(overall.upper())}</b> &middot; {count_text}<br>{_e(warning)}</p>'
+        f"{degraded}"
+    )
 
 
 def render_metadata_block(data: ReportData) -> str:
