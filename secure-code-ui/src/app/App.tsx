@@ -51,6 +51,7 @@ const SsoAuditPage = React.lazy(() => import("../pages/admin/SsoAuditPage"));
 const ScimTokensPage = React.lazy(() => import("../pages/admin/ScimTokensPage"));
 const TenantsPage = React.lazy(() => import("../pages/admin/TenantsPage"));
 const AuthorizationPage = React.lazy(() => import("../pages/admin/AuthorizationPage"));
+const IntegrationsPage = React.lazy(() => import("../pages/admin/IntegrationsPage"));
 const SecurityAdvisorPage = React.lazy(() => import("../pages/chat/SecurityAdvisorPage"));
 const CompliancePage = React.lazy(() => import("../pages/compliance/CompliancePage"));
 const SubmitPage = React.lazy(() => import("../pages/submission/SubmitPage"));
@@ -278,6 +279,7 @@ function AppContent() {
           <Route element={<FeatureRoute feature="scim" />}>
             <Route path="/admin/scim/tokens" element={routeContent(<ScimTokensPage />)} />
           </Route>
+          <Route path="/admin/integrations" element={routeContent(<IntegrationsPage />)} />
         </Route>
         <Route element={<RouteGuard requires="permission" anyPermission={["platform.tenant.manage"]} />}>
           <Route element={<FeatureRoute feature="multi_tenant" />}>

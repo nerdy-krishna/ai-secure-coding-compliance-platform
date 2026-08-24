@@ -1,0 +1,35 @@
+name: SCCAP policy
+on:
+  push:
+  pull_request:
+
+jobs:
+  sccap:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build immutable source archive
+        run: git archive --format=zip --output=sccap-source.zip "$GITHUB_SHA"
+      - name: Run persisted SCCAP policy
+        env:
+          SCCAP_BASE_URL: ${{ vars.SCCAP_BASE_URL }}
+          SCCAP_TOKEN: ${{ secrets.SCCAP_TOKEN }}
+          SCCAP_TRUSTED_CONTEXT: "true"
+          SCCAP_PROVIDER: github
+          SCCAP_COMMIT_SHA: ${{ github.sha }}
+          SCCAP_REF: ${{ github.ref }}
+          SCCAP_REPOSITORY: ${{ github.repository }}
+          SCCAP_PROJECT: ${{ github.event.repository.name }}
+          SCCAP_FRAMEWORKS: owasp-top-10
+          SCCAP_ARCHIVE: sccap-source.zip
+        run: ./scripts/sccap-ci-policy.sh
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always() && hashFiles('sccap.sarif') != ''
+        with:
+          sarif_file: sccap.sarif

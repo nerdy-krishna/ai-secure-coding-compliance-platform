@@ -1,0 +1,22 @@
+steps:
+  - checkout: self
+    persistCredentials: false
+  - script: git archive --format=zip --output=sccap-source.zip "$(Build.SourceVersion)"
+    displayName: Build immutable source archive
+  - script: ./scripts/sccap-ci-policy.sh
+    displayName: Run persisted SCCAP policy
+    condition: and(succeeded(), ne(variables['System.PullRequest.IsFork'], 'True'))
+    env:
+      SCCAP_BASE_URL: $(SCCAP_BASE_URL)
+      SCCAP_TOKEN: $(SCCAP_TOKEN)
+      SCCAP_TRUSTED_CONTEXT: "true"
+      SCCAP_PROVIDER: azure_devops
+      SCCAP_COMMIT_SHA: $(Build.SourceVersion)
+      SCCAP_REF: $(Build.SourceBranch)
+      SCCAP_REPOSITORY: $(Build.Repository.Name)
+      SCCAP_PROJECT: $(Build.Repository.Name)
+      SCCAP_FRAMEWORKS: owasp-top-10
+      SCCAP_ARCHIVE: sccap-source.zip
+  - publish: sccap.sarif
+    artifact: sccap-sarif
+    condition: always()

@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import (
@@ -42,6 +43,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.infrastructure.database import models as db_models
+from app.infrastructure.observability import record_metric
 from app.api.v1 import models as api_models
 from app.config.config import settings
 from app.infrastructure.auth.core import (
@@ -879,6 +881,20 @@ async def stream_scan_progress(
                         # legacy stage events.
                         "details": safe_event_details(e.details),
                     }
+                    if e.timestamp is not None:
+                        event_time = (
+                            e.timestamp
+                            if e.timestamp.tzinfo is not None
+                            else e.timestamp.replace(tzinfo=timezone.utc)
+                        )
+                        record_metric(
+                            "sccap.sse.freshness",
+                            max(
+                                0.0,
+                                (datetime.now(timezone.utc) - event_time).total_seconds(),
+                            ),
+                            {"scan.status": e.status},
+                        )
                     yield (
                         f"event: scan_event\n"
                         f"id: {e.id}\n"

@@ -3710,3 +3710,300 @@ class PushSubscription(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+# Task20 enterprise-integration aggregates are intentionally isolated at the
+# end of this module so concurrent database work can retain its existing model
+# ownership. Secrets are ciphertext; redacted delivery evidence is append-only.
+class IntegrationServicePrincipal(Base):
+    __tablename__ = "integration_service_principals"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "kind IN ('github_app', 'jira_cloud', 'siem_webhook')",
+            name="ck_integration_service_principal_kind",
+        ),
+        UniqueConstraint(
+            "tenant_id", "kind", "display_name", name="uq_integration_principal_name"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    secrets_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    secret_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.true())
+    created_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
+    )
+    revoked_by_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrationGrant(Base):
+    __tablename__ = "integration_grants"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "feature IN ('repository_contents_read', 'security_events_write', "
+            "'webhook_metadata_read', 'ticket_sync', "
+            "'siem_emit')",
+            name="ck_integration_grant_feature",
+        ),
+        sa.Index(
+            "uq_integration_grant_active_scope",
+            "principal_id",
+            "feature",
+            "scope_digest",
+            unique=True,
+            postgresql_where=sa.text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    principal_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integration_service_principals.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    feature: Mapped[str] = mapped_column(String(40), nullable=False)
+    scope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    scope_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    revoked_by_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class IntegrationInboundReceipt(Base):
+    """Append-only replay and idempotency receipt for connector webhooks."""
+
+    __tablename__ = "integration_inbound_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "principal_id", "source_event_id", name="uq_integration_receipt_source_event"
+        ),
+        UniqueConstraint(
+            "principal_id", "nonce", name="uq_integration_receipt_nonce"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    principal_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integration_service_principals.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    source_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    nonce: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(96), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrationOutbox(Base):
+    __tablename__ = "integration_outbox"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "state IN ('pending', 'delivering', 'retry', 'delivered', 'dead_letter')",
+            name="ck_integration_outbox_state",
+        ),
+        UniqueConstraint(
+            "tenant_id", "idempotency_key", name="uq_integration_outbox_idempotency"
+        ),
+        UniqueConstraint(
+            "principal_id",
+            "source_event_key",
+            name="uq_integration_outbox_source_event",
+        ),
+        sa.Index(
+            "ix_integration_outbox_due",
+            "next_attempt_at",
+            postgresql_where=sa.text("state IN ('pending', 'retry')"),
+        ),
+        sa.Index(
+            "ix_integration_outbox_expired_lease",
+            "lease_expires_at",
+            postgresql_where=sa.text("state = 'delivering'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    principal_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integration_service_principals.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(96), nullable=False)
+    envelope_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_event_key: Mapped[Optional[str]] = mapped_column(String(128))
+    nonce: Mapped[str] = mapped_column(String(128), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload_redacted: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="8")
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrationDeliveryAudit(Base):
+    """Append-only, bounded, redacted delivery evidence."""
+
+    __tablename__ = "integration_delivery_audit"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    outbox_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integration_outbox.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    principal_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integration_service_principals.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(24), nullable=False)
+    http_status: Mapped[Optional[int]] = mapped_column(Integer)
+    evidence_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    response_excerpt_redacted: Mapped[Optional[str]] = mapped_column(String(1024))
+    error_code: Mapped[Optional[str]] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrationFindingTicket(Base):
+    __tablename__ = "integration_finding_tickets"
+    __table_args__ = (
+        UniqueConstraint(
+            "principal_id",
+            "canonical_root_id",
+            name="uq_integration_ticket_canonical_root",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    principal_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integration_service_principals.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    canonical_root_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    external_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    external_url: Mapped[Optional[str]] = mapped_column(String(1024))
+    status: Mapped[str] = mapped_column(String(64), nullable=False)
+    waiver_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrationTicketHistory(Base):
+    """Append-only status and waiver-reopen history for an external ticket."""
+
+    __tablename__ = "integration_ticket_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    ticket_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("integration_finding_tickets.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    from_status: Mapped[Optional[str]] = mapped_column(String(64))
+    to_status: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(String(96), nullable=False)
+    event_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrationSourceSubmission(Base):
+    """Immutable CI provenance bound to one submitted scan and commit."""
+
+    __tablename__ = "integration_source_submissions"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "provider IN ('github', 'gitlab', 'azure_devops', 'bitbucket')",
+            name="ck_integration_source_submission_provider",
+        ),
+        UniqueConstraint("scan_id", name="uq_integration_source_submission_scan"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(24), nullable=False)
+    commit_sha: Mapped[str] = mapped_column(String(64), nullable=False)
+    ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    repository_slug: Mapped[str] = mapped_column(String(255), nullable=False)
+    trusted_context: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

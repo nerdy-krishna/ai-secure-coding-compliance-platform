@@ -1,0 +1,11 @@
+pipelines:
+  default:
+    - step:
+        name: SCCAP persisted policy
+        image: alpine:3.21
+        script:
+          - apk add --no-cache curl jq git
+          - git archive --format=zip --output=sccap-source.zip "$BITBUCKET_COMMIT"
+          - SCCAP_TRUSTED_CONTEXT=true SCCAP_PROVIDER=bitbucket SCCAP_COMMIT_SHA="$BITBUCKET_COMMIT" SCCAP_REF="refs/heads/$BITBUCKET_BRANCH" SCCAP_REPOSITORY="$BITBUCKET_REPO_FULL_NAME" SCCAP_PROJECT="$BITBUCKET_REPO_SLUG" SCCAP_ARCHIVE=sccap-source.zip ./scripts/sccap-ci-policy.sh
+        artifacts:
+          - sccap.sarif

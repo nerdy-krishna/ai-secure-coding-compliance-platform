@@ -36,6 +36,9 @@ from app.api.v1.routers.admin_provider_reconciliation import (
 )
 from app.api.v1.routers.usage_center import router as usage_center_router
 from app.api.v1.routers.finding_governance import router as finding_governance_router
+from app.api.v1.routers.admin_integrations import router as admin_integrations_router
+from app.api.v1.routers.integration_ci import router as integration_ci_router
+from app.api.v1.routers.integration_webhooks import router as integration_webhooks_router
 from app.api.v1.routers.admin_seed import router as admin_seed_router
 from app.api.v1.routers.dashboard import router as dashboard_router
 from app.api.v1.routers.push import router as push_router
@@ -643,6 +646,16 @@ async def lifespan(app: FastAPI):
         name="rule-foundry-sweeper",
     )
 
+    from app.infrastructure.messaging.integration_delivery_sweeper import (
+        run_integration_delivery_sweeper,
+    )
+
+    integration_delivery_stop = asyncio.Event()
+    integration_delivery_task = asyncio.create_task(
+        run_integration_delivery_sweeper(integration_delivery_stop),
+        name="integration-delivery-sweeper",
+    )
+
     # Optional provider billing reconciliation. Disabled connectors do no I/O.
     from app.infrastructure.messaging.provider_reconciliation_sweeper import (
         run_provider_reconciliation_sweeper,
@@ -687,6 +700,7 @@ async def lifespan(app: FastAPI):
     evidence_retention_stop.set()
     semgrep_sweeper_stop.set()
     rule_foundry_sweeper_stop.set()
+    integration_delivery_stop.set()
     provider_reconciliation_stop.set()
     stuck_scan_stop.set()
     if progress_bus is not None:
@@ -744,6 +758,13 @@ async def lifespan(app: FastAPI):
         rule_foundry_sweeper_task.cancel()
     except Exception as e:
         logger.warning(f"rule_foundry_sweeper shutdown error: {e}")
+    try:
+        await asyncio.wait_for(integration_delivery_task, timeout=5)
+    except asyncio.TimeoutError:
+        logger.warning("integration_delivery_sweeper did not stop within 5s; cancelling.")
+        integration_delivery_task.cancel()
+    except Exception as e:
+        logger.warning(f"integration_delivery_sweeper shutdown error: {e}")
     try:
         await asyncio.wait_for(provider_reconciliation_task, timeout=5)
     except asyncio.TimeoutError:
@@ -1124,6 +1145,9 @@ app.include_router(admin_provider_reconciliation_router, prefix="/api/v1")
 # Canonical self/group/tenant usage analytics and exact exports.
 app.include_router(usage_center_router, prefix="/api/v1")
 app.include_router(finding_governance_router, prefix="/api/v1")
+app.include_router(admin_integrations_router, prefix="/api/v1")
+app.include_router(integration_ci_router, prefix="/api/v1")
+app.include_router(integration_webhooks_router, prefix="/api/v1")
 # Cross-tenant findings list with source filter (sast-prescan-followups Group D1).
 app.include_router(admin_findings_router, prefix="/api/v1", tags=["Admin: Findings"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])

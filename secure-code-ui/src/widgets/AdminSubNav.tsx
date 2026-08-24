@@ -33,6 +33,7 @@ const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/smtp", label: "SMTP", feature: "email", permissions: [Permission.platformConfigManage] },
   { to: "/admin/sso/providers", label: "SSO", feature: "sso", permissions: [Permission.tenantPolicyManage] },
   { to: "/admin/scim/tokens", label: "SCIM tokens", feature: "scim", permissions: [Permission.servicePrincipalManage] },
+  { to: "/admin/integrations", label: "Integrations", permissions: [Permission.servicePrincipalManage] },
   { to: "/admin/sso/audit", label: "Auth audit", feature: "sso", permissions: [Permission.auditRead] },
   { to: "/admin/findings", label: "Findings", permissions: [Permission.auditRead] },
   { to: "/account/settings/llm", label: "LLM configs", permissions: [Permission.platformConfigManage] },

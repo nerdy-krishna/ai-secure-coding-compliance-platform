@@ -183,6 +183,7 @@ nav:
       - Scanner Coverage Manifests: operations/scanner-coverage.md
       - Governed AI Rule Foundry: operations/ai-rule-foundry.md
       - Provider Cost Reconciliation: operations/provider-cost-reconciliation.md
+      - Enterprise Integrations: operations/enterprise-integrations.md
       - Evidence-first Findings: operations/evidence-first-findings.md
       - Kubernetes Worker Pools: operations/kubernetes-worker-pools.md
       - Observability and SLOs: operations/observability-slos.md

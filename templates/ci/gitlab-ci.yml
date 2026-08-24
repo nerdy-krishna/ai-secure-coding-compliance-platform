@@ -1,0 +1,12 @@
+sccap-policy:
+  image: alpine:3.21
+  rules:
+    - if: '$CI_MERGE_REQUEST_SOURCE_PROJECT_ID == $CI_PROJECT_ID || $CI_PIPELINE_SOURCE != "merge_request_event"'
+  before_script:
+    - apk add --no-cache curl jq git
+  script:
+    - git archive --format=zip --output=sccap-source.zip "$CI_COMMIT_SHA"
+    - SCCAP_TRUSTED_CONTEXT=true SCCAP_PROVIDER=gitlab SCCAP_COMMIT_SHA="$CI_COMMIT_SHA" SCCAP_REF="refs/heads/$CI_COMMIT_REF_NAME" SCCAP_REPOSITORY="$CI_PROJECT_PATH" SCCAP_PROJECT="$CI_PROJECT_NAME" SCCAP_ARCHIVE=sccap-source.zip ./scripts/sccap-ci-policy.sh
+  artifacts:
+    when: always
+    paths: [sccap.sarif]

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -44,11 +45,14 @@ from app.infrastructure.database.repositories.scan_outbox_repo import (
 from app.infrastructure.database.repositories.scan_attempt_repo import (
     ScanAttemptRepository,
 )
+from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.infrastructure.observability import record_metric, span
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
 from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.framework_validation import validate_framework_selection
 from app.shared.lib.git import clone_repo_and_get_files, fetch_github_selected_files
+from app.shared.lib.integration_contract import IntegrationSourceProvenance
 
 logger = logging.getLogger(__name__)
 
@@ -138,11 +142,13 @@ class ScanSubmissionService:
         repo_url: Optional[str] = None,
         source_type: str = "upload",
         selected_files: Optional[List[str]] = None,
+        source_provenance: IntegrationSourceProvenance | None = None,
     ) -> db_models.Scan:
         """
         A private helper to process submission data, create all necessary DB records,
         and persist dispatch intent for the outbox sweeper.
         """
+        accepted_at = time.monotonic()
         # --- Input validation (V02.2.1) --------------------------------------
         if scan_type not in _VALID_SCAN_TYPES:
             raise HTTPException(
@@ -288,10 +294,37 @@ class ScanSubmissionService:
                 commit=False,
             )
 
+            # Authenticated CI provenance is part of the same aggregate/outbox
+            # transaction. It is an explicit validated value, never an
+            # arbitrary callback supplied by the API layer.
+            if source_provenance is not None:
+                if tenant_id != source_provenance.tenant_id:
+                    raise ValueError("CI source provenance tenant does not match scan tenant")
+                await IntegrationRepository(self.repo.db).record_source_submission(
+                    tenant_id=source_provenance.tenant_id,
+                    scan_id=scan.id,
+                    provider=source_provenance.provider,
+                    commit_sha=source_provenance.commit_sha.casefold(),
+                    ref=source_provenance.ref,
+                    repository_slug=source_provenance.repository_slug,
+                    trusted_context=source_provenance.trusted_context,
+                    actor_user_id=source_provenance.actor_user_id,
+                )
+
             # One commit makes Project/SourceCodeFile/Scan/Snapshot/Event/Outbox
             # visible together. RabbitMQ publication is deliberately outside the
             # request path and belongs exclusively to the outbox sweeper.
-            await self.repo.db.commit()
+            with span(
+                "sccap.api.scan_submission",
+                {"scan.id": scan.id, "scan.type": scan_type},
+                kind="server",
+            ):
+                await self.repo.db.commit()
+            record_metric(
+                "sccap.api.accepted_submission.duration",
+                time.monotonic() - accepted_at,
+                {"scan.type": scan_type},
+            )
             logger.info(
                 "scan-submission: durable dispatch intent committed",
                 extra={"correlation_id": correlation_id, "scan_id": str(scan.id)},

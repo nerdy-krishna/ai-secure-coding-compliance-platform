@@ -138,6 +138,19 @@ class Settings(BaseSettings):
     VAPID_PRIVATE_KEY: str = ""
     VAPID_SUBJECT: str = "mailto:admin@sccap.local"
 
+    # --- Enterprise integration egress policy (#20) ---
+    # Exact operator-owned host allowlist for Jira/SIEM destinations. GitHub's
+    # fixed api.github.com endpoint is built in. Tenant connector input may
+    # select a host from this list, but can never extend it.
+    INTEGRATION_OUTBOUND_ALLOWED_HOSTS: List[str] = Field(default_factory=list)
+    # Optional exact hostname -> IP pins. A pin avoids DNS entirely and is the
+    # only supported way to reach a private on-prem SIEM address. Loopback,
+    # link-local, multicast, unspecified, and reserved IPs remain prohibited.
+    INTEGRATION_OUTBOUND_HOST_PINS: dict[str, List[str]] = Field(default_factory=dict)
+    # Operators increment this deployment-controlled label with policy changes;
+    # connector rows persist it together with a content fingerprint for audit.
+    INTEGRATION_OUTBOUND_POLICY_REVISION: str = "1"
+
     ALLOWED_ORIGINS_STR: str = Field(alias="ALLOWED_ORIGINS")
 
     @property
@@ -460,6 +473,27 @@ class Settings(BaseSettings):
         if self.SMTP_TLS and self.SMTP_SSL:
             raise ValueError(
                 "SMTP_TLS and SMTP_SSL are mutually exclusive; set only one."
+            )
+        outbound_hosts = {
+            host.rstrip(".").casefold() for host in self.INTEGRATION_OUTBOUND_ALLOWED_HOSTS
+        }
+        if any(
+            not host
+            or "*" in host
+            or ":" in host
+            or "/" in host
+            or any(character.isspace() for character in host)
+            for host in outbound_hosts
+        ):
+            raise ValueError(
+                "INTEGRATION_OUTBOUND_ALLOWED_HOSTS must contain normalized exact hostnames"
+            )
+        pin_hosts = {
+            host.rstrip(".").casefold() for host in self.INTEGRATION_OUTBOUND_HOST_PINS
+        }
+        if not pin_hosts.issubset(outbound_hosts):
+            raise ValueError(
+                "INTEGRATION_OUTBOUND_HOST_PINS keys must be deployment-allowlisted hosts"
             )
         # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
         # When disabled the host URL is irrelevant — skip the check so
