@@ -606,6 +606,24 @@ class AtomicScanLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
+    async def test_cancelled_approval_cleans_parked_checkpoint_thread(self) -> None:
+        async with self._session() as db:
+            user, scan = await self._create_scan(
+                db, scan_status=STATUS_PENDING_PRESCAN_APPROVAL
+            )
+
+            with patch(
+                "app.core.services.scan.lifecycle._delete_checkpointer_thread",
+                new_callable=AsyncMock,
+            ) as cleanup:
+                await ScanLifecycleService(ScanRepository(db)).cancel_scan(
+                    scan.id,
+                    user,
+                    **self._scan_scope(user),
+                )
+
+            cleanup.assert_awaited_once_with(str(scan.id))
+
     async def test_late_worker_writes_cannot_overwrite_completed_scan(self) -> None:
         async with self._session() as db:
             _user, scan = await self._create_scan(db, scan_status=STATUS_COMPLETED)

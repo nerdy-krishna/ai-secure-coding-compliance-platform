@@ -81,6 +81,32 @@ _NO_RUNNING_WORK_CANCELLATION_STATUSES = {
 }
 
 
+async def _delete_checkpointer_thread(scan_id: str) -> None:
+    """Best-effort cleanup for a terminal scan with no live worker.
+
+    Approval-gate interrupts leave a durable LangGraph checkpoint after the
+    worker has returned. Cancelling one of those scans cannot rely on a future
+    worker pass to remove the thread, so delete it after the cancellation
+    transaction commits.
+    """
+    try:
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        if not settings.ASYNC_DATABASE_URL:
+            return
+        conn_str = settings.ASYNC_DATABASE_URL.replace(
+            "postgresql+asyncpg://", "postgresql://"
+        )
+        async with AsyncPostgresSaver.from_conn_string(conn_str) as checkpointer:
+            await checkpointer.adelete_thread(thread_id=scan_id)
+    except Exception:
+        logger.warning(
+            "scan: checkpointer cleanup failed after cancellation",
+            extra={"scan_id": scan_id},
+            exc_info=True,
+        )
+
+
 class ScanLifecycleService:
     """Post-creation scan transitions.
 
@@ -870,6 +896,8 @@ class ScanLifecycleService:
         logger.info(
             "scan: cancelled", extra={"scan_id": str(scan_id), "actor_user_id": user.id}
         )
+        if prior_status in _NO_RUNNING_WORK_CANCELLATION_STATUSES:
+            await _delete_checkpointer_thread(str(scan_id))
 
     async def set_finding_disposition(
         self,
