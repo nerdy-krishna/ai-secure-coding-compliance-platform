@@ -23,6 +23,7 @@ from app.infrastructure.database.models import (
     Framework,
     LLMConfiguration,
     Project,
+    RoleAssignment,
     Scan,
     ScanEvent,
     ScanOutbox,
@@ -30,6 +31,7 @@ from app.infrastructure.database.models import (
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.shared.lib.encryption import FernetEncrypt
+from app.shared.lib.permissions import DEVELOPER
 
 
 @dataclass(frozen=True)
@@ -78,15 +80,14 @@ async def _prepare(identity: ScenarioIdentity) -> None:
                 f"scenario user already exists for run {identity.run_id}"
             )
 
-        db.add(
-            User(
-                email=identity.email,
-                hashed_password=PasswordHelper().hash(identity.password),
-                is_active=True,
-                is_superuser=False,
-                is_verified=True,
-            )
+        user = User(
+            email=identity.email,
+            hashed_password=PasswordHelper().hash(identity.password),
+            is_active=True,
+            is_superuser=False,
+            is_verified=True,
         )
+        db.add(user)
         db.add(
             Framework(
                 name=identity.framework_name,
@@ -103,6 +104,14 @@ async def _prepare(identity: ScenarioIdentity) -> None:
                 ),
                 input_cost_per_million=0,
                 output_cost_per_million=0,
+            )
+        )
+        await db.flush()
+        db.add(
+            RoleAssignment(
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                role_key=DEVELOPER,
             )
         )
         await db.commit()

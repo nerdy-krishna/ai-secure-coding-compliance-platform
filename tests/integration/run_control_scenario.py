@@ -22,12 +22,14 @@ from app.infrastructure.database.models import (
     CodeSnapshot,
     Finding,
     Project,
+    RoleAssignment,
     Scan,
     ScanOutbox,
     ScanTask,
     User,
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.shared.lib.permissions import DEVELOPER
 from app.shared.lib.scan_status import STATUS_CANCELLED, STATUS_FAILED, STATUS_QUEUED
 from app.shared.lib.scan_task_status import STATUS_SCAN_TASK_COMPLETED
 
@@ -49,6 +51,13 @@ async def _create_fixtures() -> dict[str, object]:
         )
         db.add(user)
         await db.flush()
+        db.add(
+            RoleAssignment(
+                user_id=user.id,
+                tenant_id=user.tenant_id,
+                role_key=DEVELOPER,
+            )
+        )
 
         project = Project(
             user_id=user.id,
