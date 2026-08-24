@@ -195,7 +195,9 @@ def process_acs(
         elif isinstance(raw_expiry, (int, float)):
             replay_expires_at = datetime.fromtimestamp(raw_expiry, tz=timezone.utc)
         elif isinstance(raw_expiry, str) and raw_expiry:
-            replay_expires_at = datetime.fromisoformat(raw_expiry.replace("Z", "+00:00"))
+            replay_expires_at = datetime.fromisoformat(
+                raw_expiry.replace("Z", "+00:00")
+            )
         else:
             raise ValueError
     except (ValueError, OSError, OverflowError):

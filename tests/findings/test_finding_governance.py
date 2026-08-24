@@ -108,9 +108,7 @@ class FindingGovernanceExpiryAuditTests(unittest.IsolatedAsyncioTestCase):
         event = SimpleNamespace(id=1, waiver_id=waiver_id, action="expired")
         db = SimpleNamespace(
             scalar=AsyncMock(return_value=waiver),
-            scalars=AsyncMock(
-                return_value=SimpleNamespace(all=lambda: [event])
-            ),
+            scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: [event])),
         )
         repo = FindingGovernanceRepository(db)
         repo.record_expired_waivers = AsyncMock(return_value=1)

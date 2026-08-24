@@ -116,9 +116,7 @@ class FindingWaiverWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await db.execute(
-                delete(RoleAssignment).where(
-                    RoleAssignment.user_id.in_(self.user_ids)
-                )
+                delete(RoleAssignment).where(RoleAssignment.user_id.in_(self.user_ids))
             )
             await ScanRepository(db).delete_project(self.project_id)
             await db.execute(delete(User).where(User.id.in_(self.user_ids)))
@@ -149,9 +147,7 @@ class FindingWaiverWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
         requester = await self._headers(self.requester_email)
         approver = await self._headers(self.approver_email)
 
-        direct = await self.client.patch(
-            disposition_url, headers=requester, json=body
-        )
+        direct = await self.client.patch(disposition_url, headers=requester, json=body)
         self.assertEqual(direct.status_code, 409, direct.text)
         requested = await self.client.post(
             waiver_url,
@@ -181,9 +177,7 @@ class FindingWaiverWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
             json={**body, "note": "Different note"},
         )
         self.assertEqual(changed_payload.status_code, 409, changed_payload.text)
-        executed = await self.client.post(
-            execute_url, headers=requester, json=body
-        )
+        executed = await self.client.post(execute_url, headers=requester, json=body)
         self.assertEqual(executed.status_code, 200, executed.text)
         self.assertEqual(executed.json()["disposition"], "risk_accepted")
 

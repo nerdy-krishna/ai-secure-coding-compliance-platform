@@ -52,7 +52,9 @@ class ScanDetailVisibilityTests(unittest.TestCase):
         same_tenant = SimpleNamespace(user_id=20, tenant_id=self.tenant_id)
         other_tenant = SimpleNamespace(user_id=20, tenant_id=self.other_tenant_id)
         self.assertTrue(can_view_scan(same_tenant, self.user, tenant_id=self.tenant_id))
-        self.assertFalse(can_view_scan(other_tenant, self.user, tenant_id=self.tenant_id))
+        self.assertFalse(
+            can_view_scan(other_tenant, self.user, tenant_id=self.tenant_id)
+        )
 
 
 if __name__ == "__main__":

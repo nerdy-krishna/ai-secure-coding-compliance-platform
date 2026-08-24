@@ -111,7 +111,9 @@ class ReportHandoffConsumerTests(unittest.IsolatedAsyncioTestCase):
         )
         workflow = SimpleNamespace(
             aget_state=AsyncMock(return_value=snapshot),
-            checkpointer=SimpleNamespace(aget_tuple=AsyncMock(return_value=checkpoint_tuple)),
+            checkpointer=SimpleNamespace(
+                aget_tuple=AsyncMock(return_value=checkpoint_tuple)
+            ),
         )
 
         result = await consumer._wait_for_report_handoff_checkpoint(
@@ -120,7 +122,9 @@ class ReportHandoffConsumerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, ("checkpoint-7", False))
 
-    async def test_redelivery_after_node_checkpoint_continues_without_replay(self) -> None:
+    async def test_redelivery_after_node_checkpoint_continues_without_replay(
+        self,
+    ) -> None:
         identity = {
             "scan_id": str(uuid4()),
             "attempt_id": str(uuid4()),
@@ -143,7 +147,9 @@ class ReportHandoffConsumerTests(unittest.IsolatedAsyncioTestCase):
         )
         workflow = SimpleNamespace(
             aget_state=AsyncMock(return_value=snapshot),
-            checkpointer=SimpleNamespace(aget_tuple=AsyncMock(return_value=checkpoint_tuple)),
+            checkpointer=SimpleNamespace(
+                aget_tuple=AsyncMock(return_value=checkpoint_tuple)
+            ),
         )
 
         result = await consumer._wait_for_report_handoff_checkpoint(
@@ -309,12 +315,8 @@ class ReportHandoffConsumerTests(unittest.IsolatedAsyncioTestCase):
             consumer._ACTIVE_DELIVERIES.update(previous)
 
     async def test_crash_cancellation_leaves_delivery_unacknowledged(self) -> None:
-        message = SimpleNamespace(
-            ack=AsyncMock(), reject=AsyncMock(), processed=False
-        )
-        delivery = TrustedScanDelivery(
-            tenant_id=uuid4(), outbox_id=uuid4()
-        )
+        message = SimpleNamespace(ack=AsyncMock(), reject=AsyncMock(), processed=False)
+        delivery = TrustedScanDelivery(tenant_id=uuid4(), outbox_id=uuid4())
         with patch(
             "app.workers.consumer._run_workflow_for_scan",
             new=AsyncMock(side_effect=asyncio.CancelledError),

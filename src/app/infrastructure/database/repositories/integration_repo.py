@@ -70,7 +70,11 @@ class IntegrationRepository:
         )
 
     async def get_principal(
-        self, *, tenant_id: uuid.UUID, principal_id: uuid.UUID, active_only: bool = False
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        principal_id: uuid.UUID,
+        active_only: bool = False,
     ) -> db_models.IntegrationServicePrincipal | None:
         statement = select(db_models.IntegrationServicePrincipal).where(
             db_models.IntegrationServicePrincipal.id == principal_id,
@@ -94,7 +98,9 @@ class IntegrationRepository:
             db_models.IntegrationServicePrincipal.revoked_at.is_(None),
         )
         if kind:
-            statement = statement.where(db_models.IntegrationServicePrincipal.kind == kind)
+            statement = statement.where(
+                db_models.IntegrationServicePrincipal.kind == kind
+            )
         return await self.db.scalar(statement)
 
     async def revoke_principal(
@@ -136,7 +142,9 @@ class IntegrationRepository:
             .where(
                 db_models.IntegrationOutbox.tenant_id == tenant_id,
                 db_models.IntegrationOutbox.principal_id == principal_id,
-                db_models.IntegrationOutbox.state.in_(("pending", "retry", "delivering")),
+                db_models.IntegrationOutbox.state.in_(
+                    ("pending", "retry", "delivering")
+                ),
             )
             .values(state="dead_letter", last_error_code="principal_revoked")
         )
@@ -203,9 +211,7 @@ class IntegrationRepository:
         ]
         if event_type is not None:
             conditions.append(
-                db_models.IntegrationGrant.scope.contains(
-                    {"event_types": [event_type]}
-                )
+                db_models.IntegrationGrant.scope.contains({"event_types": [event_type]})
             )
         statement = select(db_models.IntegrationGrant.id).where(*conditions)
         if lock:
@@ -269,9 +275,7 @@ class IntegrationRepository:
         delivery_filters = [
             db_models.IntegrationOutbox.tenant_id == tenant_id,
             db_models.IntegrationOutbox.principal_id == principal_id,
-            db_models.IntegrationOutbox.state.in_(
-                ("pending", "retry", "delivering")
-            ),
+            db_models.IntegrationOutbox.state.in_(("pending", "retry", "delivering")),
         ]
         if event_types:
             delivery_filters.append(
@@ -334,14 +338,18 @@ class IntegrationRepository:
             select(db_models.IntegrationInboundReceipt).where(
                 db_models.IntegrationInboundReceipt.principal_id == principal_id,
                 or_(
-                    db_models.IntegrationInboundReceipt.source_event_id == source_event_id,
+                    db_models.IntegrationInboundReceipt.source_event_id
+                    == source_event_id,
                     db_models.IntegrationInboundReceipt.nonce == nonce,
                 ),
             )
         )
         if existing is None:
             raise RuntimeError("integration receipt conflict row disappeared")
-        if existing.source_event_id != source_event_id or existing.payload_digest != digest:
+        if (
+            existing.source_event_id != source_event_id
+            or existing.payload_digest != digest
+        ):
             raise ValueError("integration replay identity is bound to another payload")
         return existing, False
 
@@ -437,10 +445,14 @@ class IntegrationRepository:
                     .where(
                         or_(
                             and_(
-                                db_models.IntegrationOutbox.state.in_(("pending", "retry")),
+                                db_models.IntegrationOutbox.state.in_(
+                                    ("pending", "retry")
+                                ),
                                 db_models.IntegrationOutbox.next_attempt_at <= now,
                                 or_(
-                                    db_models.IntegrationOutbox.lease_expires_at.is_(None),
+                                    db_models.IntegrationOutbox.lease_expires_at.is_(
+                                        None
+                                    ),
                                     db_models.IntegrationOutbox.lease_expires_at <= now,
                                 ),
                             ),
@@ -569,7 +581,9 @@ class IntegrationRepository:
             event_type=row.event_type if required_feature == "siem_emit" else None,
             lock=True,
         ):
-            raise ValueError("required integration grant must be repaired before requeue")
+            raise ValueError(
+                "required integration grant must be repaired before requeue"
+            )
         row.state = "retry"
         row.attempts = 0
         row.next_attempt_at = now or datetime.now(timezone.utc)
@@ -603,7 +617,8 @@ class IntegrationRepository:
             select(db_models.IntegrationFindingTicket).where(
                 db_models.IntegrationFindingTicket.tenant_id == tenant_id,
                 db_models.IntegrationFindingTicket.principal_id == principal_id,
-                db_models.IntegrationFindingTicket.canonical_root_id == canonical_root_id,
+                db_models.IntegrationFindingTicket.canonical_root_id
+                == canonical_root_id,
             )
         )
 
@@ -641,9 +656,7 @@ class IntegrationRepository:
                 status=status,
                 waiver_expires_at=waiver_expires_at,
             )
-            .on_conflict_do_nothing(
-                constraint="uq_integration_ticket_canonical_root"
-            )
+            .on_conflict_do_nothing(constraint="uq_integration_ticket_canonical_root")
             .returning(db_models.IntegrationFindingTicket)
         )
         row = (await self.db.execute(statement)).scalar_one_or_none()
@@ -824,7 +837,9 @@ class IntegrationRepository:
                 idempotency_key=stable_idempotency_key(
                     "waiver-ticket", event.id, principal.id
                 ),
-                nonce=stable_idempotency_key("waiver-ticket-nonce", event.id, principal.id),
+                nonce=stable_idempotency_key(
+                    "waiver-ticket-nonce", event.id, principal.id
+                ),
                 occurred_at=event.created_at,
                 source_event_key=f"waiver:{event.id}",
                 payload={
@@ -833,13 +848,15 @@ class IntegrationRepository:
                     "severity": (finding.severity if finding is not None else None)
                     or "unknown",
                     "status": desired_status,
-                    "waiver_expires_at": waiver.expires_at.isoformat()
-                    if action == "granted"
-                    else None,
+                    "waiver_expires_at": (
+                        waiver.expires_at.isoformat() if action == "granted" else None
+                    ),
                     "reason": f"waiver_{action}",
-                    "authorized_view": f"/analysis/results/{waiver.scan_id}"
-                    if waiver.scan_id
-                    else "/analysis/history",
+                    "authorized_view": (
+                        f"/analysis/results/{waiver.scan_id}"
+                        if waiver.scan_id
+                        else "/analysis/history"
+                    ),
                 },
             )
             created_count += int(created)
@@ -871,9 +888,7 @@ class IntegrationRepository:
                 trusted_context=trusted_context,
                 created_by_user_id=actor_user_id,
             )
-            .on_conflict_do_nothing(
-                constraint="uq_integration_source_submission_scan"
-            )
+            .on_conflict_do_nothing(constraint="uq_integration_source_submission_scan")
             .returning(db_models.IntegrationSourceSubmission)
         )
         created = (await self.db.execute(statement)).scalar_one_or_none()

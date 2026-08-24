@@ -53,8 +53,9 @@ class HelmChartContractTests(unittest.TestCase):
                 container["envFrom"][0]["secretRef"]["name"], expected_secret
             )
         self.assertEqual(
-            deployments["contract-sccap-api"]["spec"]["template"]["spec"]
-            ["containers"][0]["image"],
+            deployments["contract-sccap-api"]["spec"]["template"]["spec"]["containers"][
+                0
+            ]["image"],
             "ghcr.io/nerdy-krishna/sccap-api:1.0.0",
         )
         for name in (
@@ -63,15 +64,14 @@ class HelmChartContractTests(unittest.TestCase):
             "contract-sccap-worker-report",
         ):
             self.assertEqual(
-                deployments[name]["spec"]["template"]["spec"]["containers"][0]
-                ["image"],
+                deployments[name]["spec"]["template"]["spec"]["containers"][0]["image"],
                 "ghcr.io/nerdy-krishna/sccap-worker:1.0.0",
             )
 
         migration = next(item for item in manifests if item["kind"] == "Job")
-        migration_env_from = migration["spec"]["template"]["spec"]["containers"][
-            0
-        ]["envFrom"]
+        migration_env_from = migration["spec"]["template"]["spec"]["containers"][0][
+            "envFrom"
+        ]
         self.assertEqual(
             migration_env_from,
             [{"secretRef": {"name": "sccap-migration-runtime"}}],
@@ -94,8 +94,9 @@ class HelmChartContractTests(unittest.TestCase):
         for item in scaled.values():
             self.assertEqual(len(item["spec"]["triggers"]), 2)
             self.assertEqual(
-                item["spec"]["advanced"]["horizontalPodAutoscalerConfig"]
-                ["behavior"]["scaleDown"]["stabilizationWindowSeconds"],
+                item["spec"]["advanced"]["horizontalPodAutoscalerConfig"]["behavior"][
+                    "scaleDown"
+                ]["stabilizationWindowSeconds"],
                 60,
             )
 
@@ -110,20 +111,25 @@ class HelmChartContractTests(unittest.TestCase):
                 for destination in rule.get("to", []):
                     self.assertNotEqual(destination.get("namespaceSelector"), {})
                 if any("podSelector" in item for item in rule.get("to", [])):
-                    self.assertTrue(rule.get("ports"), "same-namespace egress needs ports")
+                    self.assertTrue(
+                        rule.get("ports"), "same-namespace egress needs ports"
+                    )
         worker_policies = [
             item
             for item in policies
-            if item["spec"]["podSelector"]["matchLabels"]
-            ["app.kubernetes.io/component"].startswith("worker-")
+            if item["spec"]["podSelector"]["matchLabels"][
+                "app.kubernetes.io/component"
+            ].startswith("worker-")
         ]
         self.assertTrue(worker_policies)
         self.assertTrue(all(item["spec"]["ingress"] == [] for item in worker_policies))
 
     def test_unified_render_preserves_prefetch_five_bridge(self) -> None:
         manifests = _render(
-            "--set", "workerPools.splitEnabled=false",
-            "--set", "workerPools.unified.enabled=true",
+            "--set",
+            "workerPools.splitEnabled=false",
+            "--set",
+            "workerPools.unified.enabled=true",
         )
         deployment = next(
             item

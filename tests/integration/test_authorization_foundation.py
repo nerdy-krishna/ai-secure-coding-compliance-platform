@@ -117,9 +117,7 @@ class AuthorizationFoundationIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await db.execute(
-                delete(RoleAssignment).where(
-                    RoleAssignment.user_id.in_(self.user_ids)
-                )
+                delete(RoleAssignment).where(RoleAssignment.user_id.in_(self.user_ids))
             )
             await db.execute(delete(User).where(User.id.in_(self.user_ids)))
             await db.execute(delete(Tenant).where(Tenant.id == self.tenant_id))
@@ -147,7 +145,9 @@ class AuthorizationFoundationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             return row.id, digest, fingerprint
 
-    async def test_role_resolution_is_tenant_scoped_and_platform_is_explicit(self) -> None:
+    async def test_role_resolution_is_tenant_scoped_and_platform_is_explicit(
+        self,
+    ) -> None:
         async with AsyncSessionLocal() as db:
             requester = await db.get(User, self.requester_id)
             platform = await db.get(User, self.platform_id)
@@ -540,7 +540,9 @@ class TenantRlsIntegrationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             reset_principal(binding)
 
-    async def test_runtime_role_rejects_cross_tenant_write_and_parent_reference(self) -> None:
+    async def test_runtime_role_rejects_cross_tenant_write_and_parent_reference(
+        self,
+    ) -> None:
         binding = bind_principal(
             tenant_id=self.tenant_a_id,
             principal_kind="human",

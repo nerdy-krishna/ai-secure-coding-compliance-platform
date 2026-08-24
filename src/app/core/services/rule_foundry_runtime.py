@@ -17,8 +17,12 @@ from app.core.schemas import VulnerabilityFinding
 from app.core.services.rule_foundry_service import RuleFoundryService
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database import models as db_models
-from app.infrastructure.database.repositories.authorization_repo import AuthorizationRepository
-from app.infrastructure.database.repositories.rule_foundry_repo import RuleFoundryRepository
+from app.infrastructure.database.repositories.authorization_repo import (
+    AuthorizationRepository,
+)
+from app.infrastructure.database.repositories.rule_foundry_repo import (
+    RuleFoundryRepository,
+)
 from app.infrastructure.database.tenant_context import system_principal_task
 from app.infrastructure.signing.digest_signer import (
     AwsKmsDigestSigner,
@@ -125,14 +129,16 @@ async def load_active_rules(
         ):
             logger.error(
                 "rule_foundry.runtime.tenant_or_lineage_mismatch",
-                extra={"candidate_id": str(candidate.id), "deployment_id": str(deployment.id)},
+                extra={
+                    "candidate_id": str(candidate.id),
+                    "deployment_id": str(deployment.id),
+                },
             )
             continue
         if deployment.state == "shadow":
             versions = [(version, "shadow")]
         elif deployment.state == "promoted" or (
-            deployment.state == "review_required"
-            and deployment.promoted_at is not None
+            deployment.state == "review_required" and deployment.promoted_at is not None
         ):
             versions = [(version, "promoted")]
         else:
@@ -141,7 +147,9 @@ async def load_active_rules(
         # During vNext shadow, the explicitly carried prior signed version
         # remains operational until promotion or rollback.
         if deployment.state == "shadow" and deployment.prior_version_id is not None:
-            prior = await db.get(db_models.RuleFoundryVersion, deployment.prior_version_id)
+            prior = await db.get(
+                db_models.RuleFoundryVersion, deployment.prior_version_id
+            )
             if (
                 prior is not None
                 and prior.tenant_id == tenant_id
@@ -206,11 +214,7 @@ def retain_promoted_findings(
         for rule in rules
         if rule.mode == "promoted"
     }
-    return [
-        finding
-        for finding in findings
-        if finding.scanner_rule_id in promoted_ids
-    ]
+    return [finding for finding in findings if finding.scanner_rule_id in promoted_ids]
 
 
 def build_promoted_osv_findings(
@@ -286,9 +290,11 @@ def match_osv_components(
                 ecosystem.lower() == expected_ecosystem.lower()
                 or f"pkg:{expected_ecosystem.lower()}/" in purl.lower()
             )
-            if name == expected_name and ecosystem_matches and version in {
-                str(value) for value in affected.get("versions", [])
-            }:
+            if (
+                name == expected_name
+                and ecosystem_matches
+                and version in {str(value) for value in affected.get("versions", [])}
+            ):
                 matched.append({"name": name, "version": version, "purl": purl[:512]})
                 break
     return matched
@@ -334,7 +340,11 @@ async def record_shadow_observation_safely(
     try:
         async with AsyncSessionLocal() as db:
             scan = await db.get(db_models.Scan, scan_id)
-            if scan is None or scan.current_attempt_id is None or scan.tenant_id != rule.tenant_id:
+            if (
+                scan is None
+                or scan.current_attempt_id is None
+                or scan.tenant_id != rule.tenant_id
+            ):
                 return False
             service = RuleFoundryService(
                 repo=RuleFoundryRepository(db),
@@ -347,7 +357,9 @@ async def record_shadow_observation_safely(
                 scan_id=scan.id,
                 attempt_id=scan.current_attempt_id,
                 eligible_files=min(max(eligible_files, 0), 5000),
-                unexpected_matches=min(max(unexpected_matches, 0), eligible_files, 5000),
+                unexpected_matches=min(
+                    max(unexpected_matches, 0), eligible_files, 5000
+                ),
             )
             await db.commit()
         return True
@@ -396,7 +408,9 @@ async def record_promoted_degradation_safely(
                 )
             await db.commit()
         return True
-    except Exception:  # noqa: BLE001 - telemetry must not replace scan failure semantics
+    except (
+        Exception
+    ):  # noqa: BLE001 - telemetry must not replace scan failure semantics
         logger.warning(
             "rule_foundry.promoted_degradation_record_failed",
             extra={"scan_id": str(scan_id), "reason_code": reason_code[:64]},

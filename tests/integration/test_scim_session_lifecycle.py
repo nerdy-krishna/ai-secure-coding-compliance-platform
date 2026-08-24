@@ -73,9 +73,7 @@ class ScimSessionLifecycleIntegrationTests(unittest.IsolatedAsyncioTestCase):
             headers=headers,
             json={
                 "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
-                "Operations": [
-                    {"op": "replace", "path": "active", "value": "false"}
-                ],
+                "Operations": [{"op": "replace", "path": "active", "value": "false"}],
             },
         )
         self.assertEqual(deactivated.status_code, 200, deactivated.text)

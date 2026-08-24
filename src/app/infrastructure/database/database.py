@@ -72,6 +72,7 @@ from app.infrastructure.database.tenant_context import (  # noqa: E402
 
 install_tenant_context_hooks()
 
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI dependency that provides an asynchronous database session.

@@ -220,7 +220,8 @@ class RuleFoundryRepository:
             await self.db.execute(
                 select(
                     func.coalesce(
-                        func.sum(db_models.RuleFoundryShadowObservation.eligible_files), 0
+                        func.sum(db_models.RuleFoundryShadowObservation.eligible_files),
+                        0,
                     ),
                     func.coalesce(
                         func.sum(
@@ -230,7 +231,8 @@ class RuleFoundryRepository:
                     ),
                 ).where(
                     db_models.RuleFoundryShadowObservation.tenant_id == tenant_id,
-                    db_models.RuleFoundryShadowObservation.deployment_id == deployment_id,
+                    db_models.RuleFoundryShadowObservation.deployment_id
+                    == deployment_id,
                 )
             )
         ).one()
@@ -362,7 +364,9 @@ class RuleFoundryRepository:
                 details={
                     "trigger": "sustained_quality_threshold_breach",
                     "distinct_failed_scans": count,
-                    "window_hours": int(PROMOTED_FAILURE_WINDOW.total_seconds() // 3600),
+                    "window_hours": int(
+                        PROMOTED_FAILURE_WINDOW.total_seconds() // 3600
+                    ),
                 },
             )
             return True

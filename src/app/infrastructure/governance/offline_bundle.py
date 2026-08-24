@@ -126,7 +126,9 @@ def _read_member_limited(
     except KeyError as exc:
         raise OfflineBundleError("Offline bundle metadata is missing.") from exc
     if not member.isfile() or member.size > max_bytes:
-        raise OfflineBundleError("Offline bundle metadata exceeds the accepted size limit.")
+        raise OfflineBundleError(
+            "Offline bundle metadata exceeds the accepted size limit."
+        )
     stream = archive.extractfile(member)
     if stream is None:
         raise OfflineBundleError("Offline bundle metadata is unreadable.")
@@ -160,9 +162,7 @@ def _runtime_contract(entries: list[dict[str, Any]]) -> dict[str, Any]:
         if path.startswith("payload/rules/") and path.endswith(".toml")
     ]
     advisory_manifests = [
-        path
-        for path in paths
-        if path == "payload/advisory/snapshot.json"
+        path for path in paths if path == "payload/advisory/snapshot.json"
     ]
     advisory_databases = [
         path
@@ -187,9 +187,7 @@ def _runtime_contract(entries: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _validate_advisory_manifest(
-    body: bytes, entries: list[dict[str, Any]]
-) -> None:
+def _validate_advisory_manifest(body: bytes, entries: list[dict[str, Any]]) -> None:
     try:
         manifest = json.loads(body)
     except json.JSONDecodeError as exc:
@@ -222,13 +220,17 @@ def _validate_advisory_manifest(
             or item["size_bytes"] != entry["size"]
             or item["sha256"] != entry["sha256"]
         ):
-            raise OfflineBundleError("OSV snapshot manifest does not bind its database.")
+            raise OfflineBundleError(
+                "OSV snapshot manifest does not bind its database."
+            )
         observed.add(relative)
     if observed != set(expected):
         raise OfflineBundleError("OSV snapshot manifest does not bind every database.")
 
 
-def _signature_payload(signature: DigestSignature, manifest_digest: bytes) -> dict[str, Any]:
+def _signature_payload(
+    signature: DigestSignature, manifest_digest: bytes
+) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "manifest_sha256": manifest_digest.hex(),
@@ -265,8 +267,12 @@ async def build_bundle(
             digest, size = _hash_file(path)
             total_size += size
             if total_size > MAX_BUNDLE_BYTES:
-                raise OfflineBundleError("Offline bundle payload exceeds the safety cap.")
-            mode = 0o555 if component == "scanners" and os.access(path, os.X_OK) else 0o444
+                raise OfflineBundleError(
+                    "Offline bundle payload exceeds the safety cap."
+                )
+            mode = (
+                0o555 if component == "scanners" and os.access(path, os.X_OK) else 0o444
+            )
             entries.append(
                 {
                     "path": archive_path,
@@ -310,7 +316,9 @@ async def build_bundle(
         ]
     )
     if estimated_size > MAX_BUNDLE_BYTES:
-        raise OfflineBundleError("Offline bundle plus archive overhead exceeds the safety cap.")
+        raise OfflineBundleError(
+            "Offline bundle plus archive overhead exceeds the safety cap."
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output.name}.", suffix=".tmp", dir=output.parent
@@ -414,13 +422,17 @@ def _parse_signature(signature_bytes: bytes, manifest_digest: bytes) -> DigestSi
         raise OfflineBundleError("Offline bundle signature is invalid JSON.") from exc
     if not isinstance(body, dict) or canonical_json(body) != signature_bytes:
         raise OfflineBundleError("Offline bundle signature is not canonical JSON.")
-    if set(body) != {
-        "schema_version",
-        "manifest_sha256",
-        "signature_b64",
-        "algorithm",
-        "key_id",
-    } or body.get("schema_version") != 1:
+    if (
+        set(body)
+        != {
+            "schema_version",
+            "manifest_sha256",
+            "signature_b64",
+            "algorithm",
+            "key_id",
+        }
+        or body.get("schema_version") != 1
+    ):
         raise OfflineBundleError("Offline bundle signature metadata is malformed.")
     if body.get("manifest_sha256") != manifest_digest.hex():
         raise OfflineBundleError("Offline bundle manifest digest mismatch.")
@@ -440,8 +452,13 @@ async def verify_bundle(*, bundle: Path, signer: DigestSigner) -> VerifiedBundle
     with tarfile.open(bundle, mode="r:") as archive:
         members = archive.getmembers()
         if len(members) > MAX_FILES + 2:
-            raise OfflineBundleError("Offline bundle file count exceeds the safety cap.")
-        if any(not member.isfile() or member.issym() or member.islnk() for member in members):
+            raise OfflineBundleError(
+                "Offline bundle file count exceeds the safety cap."
+            )
+        if any(
+            not member.isfile() or member.issym() or member.islnk()
+            for member in members
+        ):
             raise OfflineBundleError("Offline bundles may contain regular files only.")
         names = [_safe_member_name(member.name).as_posix() for member in members]
         if len(names) != len(set(names)):
@@ -484,7 +501,9 @@ async def verify_bundle(*, bundle: Path, signer: DigestSigner) -> VerifiedBundle
             if size != entry["size"] or digest != entry["sha256"]:
                 raise OfflineBundleError("Offline bundle payload digest mismatch.")
         if observed_components != REQUIRED_COMPONENTS or set(names) != expected_names:
-            raise OfflineBundleError("Offline bundle members do not match the manifest.")
+            raise OfflineBundleError(
+                "Offline bundle members do not match the manifest."
+            )
     bundle_digest, _ = _hash_file(bundle)
     return VerifiedBundle(
         bundle_sha256=bundle_digest,
@@ -505,7 +524,9 @@ async def _verify_installed_release(
         or not metadata.is_dir()
         or stat.S_IMODE(metadata.stat().st_mode) != 0o555
     ):
-        raise OfflineBundleError("Installed offline bundle directory modes are invalid.")
+        raise OfflineBundleError(
+            "Installed offline bundle directory modes are invalid."
+        )
     for metadata_name in ("manifest.json", "signature.json"):
         metadata_path = metadata / metadata_name
         if (
@@ -513,7 +534,9 @@ async def _verify_installed_release(
             or not metadata_path.is_file()
             or stat.S_IMODE(metadata_path.stat().st_mode) != 0o444
         ):
-            raise OfflineBundleError("Installed offline bundle metadata modes are invalid.")
+            raise OfflineBundleError(
+                "Installed offline bundle metadata modes are invalid."
+            )
     manifest_bytes = _read_file_limited(
         metadata / "manifest.json", max_bytes=MAX_METADATA_BYTES
     )
@@ -549,13 +572,19 @@ async def _verify_installed_release(
     observed: set[str] = set()
     for path in release_root.rglob("*"):
         if path.is_symlink():
-            raise OfflineBundleError("Installed offline bundle cannot contain symlinks.")
+            raise OfflineBundleError(
+                "Installed offline bundle cannot contain symlinks."
+            )
         if path.is_dir() and stat.S_IMODE(path.stat().st_mode) != 0o555:
-            raise OfflineBundleError("Installed offline bundle directory modes are invalid.")
+            raise OfflineBundleError(
+                "Installed offline bundle directory modes are invalid."
+            )
         if path.is_file() and metadata not in path.parents:
             observed.add(path.relative_to(release_root).as_posix())
     if observed != expected:
-        raise OfflineBundleError("Installed offline bundle contains unexpected content.")
+        raise OfflineBundleError(
+            "Installed offline bundle contains unexpected content."
+        )
     return VerifiedBundle(
         bundle_sha256=release_root.name,
         manifest_sha256=manifest_digest.hex(),
@@ -591,9 +620,10 @@ async def _load_state(
         raise OfflineBundleError("Deployment state is invalid JSON.") from exc
     if not isinstance(envelope, dict) or canonical_json(envelope) != body:
         raise OfflineBundleError("Deployment state is not canonical JSON.")
-    if set(envelope) != {"schema_version", "ledger", "signature"} or envelope.get(
-        "schema_version"
-    ) != 1:
+    if (
+        set(envelope) != {"schema_version", "ledger", "signature"}
+        or envelope.get("schema_version") != 1
+    ):
         raise OfflineBundleError("Deployment state envelope is malformed.")
     ledger = envelope["ledger"]
     signature_body = envelope["signature"]
@@ -611,9 +641,10 @@ async def _load_state(
 
 
 def _validate_ledger(ledger: dict[str, Any]) -> None:
-    if set(ledger) != {"schema_version", "active", "history", "entries"} or ledger.get(
-        "schema_version"
-    ) != 1:
+    if (
+        set(ledger) != {"schema_version", "active", "history", "entries"}
+        or ledger.get("schema_version") != 1
+    ):
         raise OfflineBundleError("Deployment ledger is malformed.")
     active = ledger["active"]
     history = ledger["history"]
@@ -622,7 +653,9 @@ def _validate_ledger(ledger: dict[str, Any]) -> None:
         raise OfflineBundleError("Deployment ledger active release is invalid.")
     if (
         not isinstance(history, list)
-        or not all(isinstance(item, str) and _HEX_64.fullmatch(item) for item in history)
+        or not all(
+            isinstance(item, str) and _HEX_64.fullmatch(item) for item in history
+        )
         or not isinstance(entries, list)
         or not entries
     ):
@@ -660,7 +693,9 @@ def _validate_ledger(ledger: dict[str, Any]) -> None:
                 reconstructed_history.append(previous_active)
         else:
             if not reconstructed_history or reconstructed_history[-1] != entry["to"]:
-                raise OfflineBundleError("Deployment ledger rollback history is invalid.")
+                raise OfflineBundleError(
+                    "Deployment ledger rollback history is invalid."
+                )
             reconstructed_history.pop()
             if previous_active:
                 reconstructed_history = [
@@ -671,7 +706,9 @@ def _validate_ledger(ledger: dict[str, Any]) -> None:
         previous_hash = hashlib.sha256(canonical_json(entry)).hexdigest()
         previous_active = entry["to"]
     if previous_active != active or reconstructed_history != history:
-        raise OfflineBundleError("Deployment ledger active release does not match its chain.")
+        raise OfflineBundleError(
+            "Deployment ledger active release does not match its chain."
+        )
 
 
 def _verify_active_manifest_binding(
@@ -682,7 +719,9 @@ def _verify_active_manifest_binding(
         verified.bundle_sha256 != state["active"]
         or verified.manifest_sha256 != latest["release_manifest_sha256"]
     ):
-        raise OfflineBundleError("Active release does not match signed deployment state.")
+        raise OfflineBundleError(
+            "Active release does not match signed deployment state."
+        )
 
 
 async def _write_state(
@@ -723,12 +762,16 @@ def _next_ledger(
             history.append(current)
     else:
         if not history or history[-1] != target.bundle_sha256:
-            raise OfflineBundleError("Rollback target does not match deployment history.")
+            raise OfflineBundleError(
+                "Rollback target does not match deployment history."
+            )
         history.pop()
         if current:
             history = [item for item in history if item != current]
             history.append(current)
-    previous_hash = hashlib.sha256(canonical_json(entries[-1])).hexdigest() if entries else None
+    previous_hash = (
+        hashlib.sha256(canonical_json(entries[-1])).hexdigest() if entries else None
+    )
     entries.append(
         {
             "sequence": len(entries) + 1,
@@ -762,10 +805,14 @@ async def _install_release(
             metadata = temporary / ".sccap"
             metadata.mkdir(mode=0o700)
             (metadata / "manifest.json").write_bytes(
-                _read_member_limited(archive, "manifest.json", max_bytes=MAX_METADATA_BYTES)
+                _read_member_limited(
+                    archive, "manifest.json", max_bytes=MAX_METADATA_BYTES
+                )
             )
             (metadata / "signature.json").write_bytes(
-                _read_member_limited(archive, "signature.json", max_bytes=MAX_METADATA_BYTES)
+                _read_member_limited(
+                    archive, "signature.json", max_bytes=MAX_METADATA_BYTES
+                )
             )
             for entry in verified.manifest["entries"]:
                 member = archive.getmember(entry["path"])
@@ -780,11 +827,15 @@ async def _install_release(
                     while remaining:
                         chunk = stream.read(min(1024 * 1024, remaining))
                         if not chunk:
-                            raise OfflineBundleError("Offline bundle payload is truncated.")
+                            raise OfflineBundleError(
+                                "Offline bundle payload is truncated."
+                            )
                         output.write(chunk)
                         remaining -= len(chunk)
                     if stream.read(1):
-                        raise OfflineBundleError("Offline bundle payload exceeds manifest size.")
+                        raise OfflineBundleError(
+                            "Offline bundle payload exceeds manifest size."
+                        )
                 target.chmod(int(entry["mode"]))
         _finalize_release_permissions(temporary)
         await _verify_installed_release(release_root=temporary, signer=signer)
@@ -842,7 +893,9 @@ def _networkless_scanner_version(binary: Path, arguments: tuple[str, ...]) -> st
     try:
         interfaces = {path.name for path in NETWORK_INTERFACE_ROOT.iterdir()}
     except OSError as exc:
-        raise OfflineBundleError("Activation network isolation cannot be verified.") from exc
+        raise OfflineBundleError(
+            "Activation network isolation cannot be verified."
+        ) from exc
     if not interfaces or interfaces - {"lo"}:
         raise OfflineBundleError(
             "Activation manager is not running inside Compose network_mode none."
@@ -928,7 +981,9 @@ async def activate_bundle(
         )
         _verify_active_manifest_binding(previous, current_verified)
         if previous["active"] == verified.bundle_sha256:
-            _atomic_symlink(install_root / "current", Path("releases") / verified.bundle_sha256)
+            _atomic_symlink(
+                install_root / "current", Path("releases") / verified.bundle_sha256
+            )
             return verified
     ledger = _next_ledger(
         previous,
@@ -954,9 +1009,13 @@ async def rollback_bundle(
         raise OfflineBundleError("No signed deployment state is available.")
     current_link = install_root / "current"
     expected_link = Path("releases") / state["active"]
-    if not current_link.is_symlink() or Path(os.readlink(current_link)) != expected_link:
+    if (
+        not current_link.is_symlink()
+        or Path(os.readlink(current_link)) != expected_link
+    ):
         active_verified = await _verify_installed_release(
-            release_root=_safe_release_path(install_root, state["active"]), signer=signer
+            release_root=_safe_release_path(install_root, state["active"]),
+            signer=signer,
         )
         _verify_active_manifest_binding(state, active_verified)
         _atomic_symlink(current_link, expected_link)
@@ -1002,9 +1061,7 @@ async def resolve_active_bundle(
     return _runtime_paths(release_root, verified)
 
 
-def _runtime_paths(
-    release_root: Path, verified: VerifiedBundle
-) -> OfflineRuntimePaths:
+def _runtime_paths(release_root: Path, verified: VerifiedBundle) -> OfflineRuntimePaths:
     return OfflineRuntimePaths(
         release_sha256=verified.bundle_sha256,
         release_root=release_root,
@@ -1012,35 +1069,39 @@ def _runtime_paths(
         rules=release_root / "rules",
         advisory=release_root / "advisory",
         semgrep_binary=release_root.joinpath(
-            *PurePosixPath(
-                verified.manifest["runtime_contract"]["scanners"]["semgrep"]
-            ).relative_to("payload").parts
+            *PurePosixPath(verified.manifest["runtime_contract"]["scanners"]["semgrep"])
+            .relative_to("payload")
+            .parts
         ),
         gitleaks_binary=release_root.joinpath(
             *PurePosixPath(
                 verified.manifest["runtime_contract"]["scanners"]["gitleaks"]
-            ).relative_to("payload").parts
+            )
+            .relative_to("payload")
+            .parts
         ),
         osv_binary=release_root.joinpath(
             *PurePosixPath(
                 verified.manifest["runtime_contract"]["scanners"]["osv-scanner"]
-            ).relative_to("payload").parts
+            )
+            .relative_to("payload")
+            .parts
         ),
         semgrep_rule_roots=tuple(
-            release_root.joinpath(
-                *PurePosixPath(path).relative_to("payload").parts
-            )
+            release_root.joinpath(*PurePosixPath(path).relative_to("payload").parts)
             for path in verified.manifest["runtime_contract"]["semgrep_rule_roots"]
         ),
         gitleaks_config=release_root.joinpath(
-            *PurePosixPath(
-                verified.manifest["runtime_contract"]["gitleaks_configs"][0]
-            ).relative_to("payload").parts
+            *PurePosixPath(verified.manifest["runtime_contract"]["gitleaks_configs"][0])
+            .relative_to("payload")
+            .parts
         ),
         osv_advisory_root=release_root.joinpath(
             *PurePosixPath(
                 verified.manifest["runtime_contract"]["osv_advisory_roots"][0]
-            ).relative_to("payload").parts
+            )
+            .relative_to("payload")
+            .parts
         ),
     )
 

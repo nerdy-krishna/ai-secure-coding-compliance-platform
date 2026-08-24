@@ -47,7 +47,11 @@ class AdminFindingsAuthorizationIntegrationTests(unittest.IsolatedAsyncioTestCas
                     is_verified=True,
                     tenant_id=tenants[tenant_index].id,
                 )
-                for kind, tenant_index in (("auditor", 0), ("analyst", 0), ("foreign", 1))
+                for kind, tenant_index in (
+                    ("auditor", 0),
+                    ("analyst", 0),
+                    ("foreign", 1),
+                )
             ]
             db.add_all(users)
             await db.flush()

@@ -158,8 +158,7 @@ def _degrade_promoted_pack_coverage(
         outcome
         for outcome in coverage_outcomes
         if not (
-            outcome.scanner_name == scanner_name
-            and outcome.input_path in replacement
+            outcome.scanner_name == scanner_name and outcome.input_path in replacement
         )
     ]
     retained.extend(replacement.values())
@@ -408,10 +407,16 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                         registry_kind=_registry,
                     )
                     if _registry == "gitleaks":
-                        _foundry_promoted_gitleaks = [r for r in _active if r.mode == "promoted"]
-                        _foundry_shadow_gitleaks = [r for r in _active if r.mode == "shadow"]
+                        _foundry_promoted_gitleaks = [
+                            r for r in _active if r.mode == "promoted"
+                        ]
+                        _foundry_shadow_gitleaks = [
+                            r for r in _active if r.mode == "shadow"
+                        ]
                     else:
-                        _foundry_promoted_osv = [r for r in _active if r.mode == "promoted"]
+                        _foundry_promoted_osv = [
+                            r for r in _active if r.mode == "promoted"
+                        ]
                         _foundry_shadow_osv = [r for r in _active if r.mode == "shadow"]
     except Exception as _exc:  # noqa: BLE001 - tenant rules fail closed
         logger.warning(
@@ -667,7 +672,10 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                         else "failed"
                     )
                     for item in coverage_plan.values():
-                        if item.scanner_name == scanner_name and item.status == "planned":
+                        if (
+                            item.scanner_name == scanner_name
+                            and item.status == "planned"
+                        ):
                             coverage_outcomes.append(
                                 CoverageOutcome(
                                     scanner_name=scanner_name,
@@ -679,9 +687,9 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                                         if final_status == "timeout"
                                         else "Scanner failed before completing this input."
                                     ),
-                                    provenance_status=toolchain_provenance[scanner_name][
-                                        "status"
-                                    ],
+                                    provenance_status=toolchain_provenance[
+                                        scanner_name
+                                    ]["status"],
                                 )
                             )
                     continue
@@ -743,12 +751,12 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                             status=(
                                 "truncated"
                                 if report_truncated
-                                else "completed"
-                                if input_findings
-                                else "clean"
+                                else "completed" if input_findings else "clean"
                             ),
                             reason_code=(
-                                "native_evidence_truncated" if report_truncated else None
+                                "native_evidence_truncated"
+                                if report_truncated
+                                else None
                             ),
                             reason=(
                                 "Native scanner evidence exceeded its persistence bound."
@@ -791,7 +799,9 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                         foundry_dir,
                         foundry_original_paths,
                     ):
-                        materialized = [rule.as_semgrep_rule() for rule in foundry_rules]
+                        materialized = [
+                            rule.as_semgrep_rule() for rule in foundry_rules
+                        ]
                         async with _mat(materialized) as foundry_config:
                             return await run_semgrep(
                                 foundry_dir,
@@ -899,7 +909,9 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                             input_paths=set(eligible),
                             coverage_outcomes=coverage_outcomes,
                             scanner_statuses=scanner_statuses,
-                            provenance_status=toolchain_provenance["gitleaks"]["status"],
+                            provenance_status=toolchain_provenance["gitleaks"][
+                                "status"
+                            ],
                         )
                         await _emit_scan_activity(
                             scan_id,
@@ -990,8 +1002,8 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                         )
                 for foundry_rule in _foundry_shadow_osv:
                     try:
-                        eligible_components, matched_components = osv_observation_counts(
-                            foundry_rule, bom_cyclonedx
+                        eligible_components, matched_components = (
+                            osv_observation_counts(foundry_rule, bom_cyclonedx)
                         )
                         await record_shadow_observation_safely(
                             rule=foundry_rule,

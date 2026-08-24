@@ -200,9 +200,7 @@ def span(
             "server": SpanKind.SERVER,
         }.get(kind, SpanKind.INTERNAL)
         parent = (
-            TraceContextTextMapPropagator().extract(dict(carrier))
-            if carrier
-            else None
+            TraceContextTextMapPropagator().extract(dict(carrier)) if carrier else None
         )
         manager = _tracer.start_as_current_span(
             name,
@@ -213,9 +211,7 @@ def span(
             set_status_on_exception=False,
         )
     except Exception as exc:  # noqa: BLE001 - telemetry is fail-open
-        logger.debug(
-            "otel.span_failed", extra={"error_type": type(exc).__name__}
-        )
+        logger.debug("otel.span_failed", extra={"error_type": type(exc).__name__})
         yield None
         return
     with manager as current:

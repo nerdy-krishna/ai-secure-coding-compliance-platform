@@ -157,7 +157,9 @@ class OfflineBundleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OfflineBundleError):
             await verify_bundle(bundle=bundle, signer=self.signer)
 
-    async def test_verification_streams_bundle_instead_of_reading_it_whole(self) -> None:
+    async def test_verification_streams_bundle_instead_of_reading_it_whole(
+        self,
+    ) -> None:
         bundle, _ = await self._build("streamed.tar", "v1", 1)
         original = Path.read_bytes
 
@@ -169,7 +171,9 @@ class OfflineBundleTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(Path, "read_bytes", guarded):
             await verify_bundle(bundle=bundle, signer=self.signer)
 
-    async def test_invalid_manifest_signature_is_rejected_before_payload_hashing(self) -> None:
+    async def test_invalid_manifest_signature_is_rejected_before_payload_hashing(
+        self,
+    ) -> None:
         bundle, _ = await self._build("bad-signature.tar", "v1", 1)
 
         class RejectingVerifier:
@@ -179,7 +183,9 @@ class OfflineBundleTests(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(
             offline_bundle_module,
             "_hash_stream",
-            side_effect=AssertionError("payload must not be hashed before signature verification"),
+            side_effect=AssertionError(
+                "payload must not be hashed before signature verification"
+            ),
         ):
             with self.assertRaisesRegex(OfflineBundleError, "signature is invalid"):
                 await verify_bundle(bundle=bundle, signer=RejectingVerifier())
@@ -234,7 +240,9 @@ class OfflineBundleTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("signature_b64", state["signature"])
 
-    async def test_activation_smoke_checks_exact_nested_binaries_and_versions(self) -> None:
+    async def test_activation_smoke_checks_exact_nested_binaries_and_versions(
+        self,
+    ) -> None:
         install = self.root / "install"
         bundle, _ = await self._build("smoke.tar", "v1", 1)
         observed: list[tuple[str, tuple[str, ...]]] = []
@@ -329,7 +337,9 @@ class OfflineBundleTests(unittest.IsolatedAsyncioTestCase):
             scanner_smoke_runner=self._scanner_smoke,
         )
         state_path = install / "deployment-state.json"
-        state_path.write_bytes(state_path.read_bytes().replace(b'"active"', b'"activE"', 1))
+        state_path.write_bytes(
+            state_path.read_bytes().replace(b'"active"', b'"activE"', 1)
+        )
         with self.assertRaises(OfflineBundleError):
             await resolve_active_bundle(
                 install_root=install,
@@ -398,7 +408,9 @@ class OfflineBundleTests(unittest.IsolatedAsyncioTestCase):
             releases[2],
         )
 
-    async def test_resigned_inconsistent_history_and_manifest_binding_are_rejected(self) -> None:
+    async def test_resigned_inconsistent_history_and_manifest_binding_are_rejected(
+        self,
+    ) -> None:
         install = self.root / "install"
         bundle, _ = await self._build("ledger.tar", "v1", 1)
         await activate_bundle(
@@ -513,7 +525,9 @@ class PinnedPublicVerifierTests(unittest.IsolatedAsyncioTestCase):
                     private_key_path=link, public_key_sha256=fingerprint
                 )
 
-    async def test_rsa_public_key_verifies_without_kms_and_rejects_wrong_pin(self) -> None:
+    async def test_rsa_public_key_verifies_without_kms_and_rejects_wrong_pin(
+        self,
+    ) -> None:
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         public_key = private_key.public_key()
         pem = public_key.public_bytes(

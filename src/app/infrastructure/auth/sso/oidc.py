@@ -264,7 +264,11 @@ def _validate_discovery(
         "end_session_endpoint",
     ):
         value = discovery.get(field)
-        if value is None and field in {"authorization_endpoint", "token_endpoint", "jwks_uri"}:
+        if value is None and field in {
+            "authorization_endpoint",
+            "token_endpoint",
+            "jwks_uri",
+        }:
             raise ValueError(f"OIDC discovery missing {field!r}")
         if value is not None:
             try:
@@ -315,7 +319,9 @@ async def _decode_provider_jwt(
     algorithm = header.get("alg")
     kid = header.get("kid")
     if algorithm not in _OIDC_ALLOWED_ALGORITHMS or not isinstance(kid, str) or not kid:
-        raise ValueError(f"{error_label} uses an unsupported algorithm or missing key id")
+        raise ValueError(
+            f"{error_label} uses an unsupported algorithm or missing key id"
+        )
 
     jwks_uri = str(discovery["jwks_uri"])
     jwks = await _load_jwks(jwks_uri)
@@ -357,7 +363,9 @@ async def validate_logout_token(
     if header.get("typ") != "logout+jwt":
         raise ValueError("logout_token typ must be logout+jwt")
 
-    discovery = _validate_discovery(config, await _fetch_discovery(str(config.issuer_url)))
+    discovery = _validate_discovery(
+        config, await _fetch_discovery(str(config.issuer_url))
+    )
     claims = await _decode_provider_jwt(
         config,
         logout_token,

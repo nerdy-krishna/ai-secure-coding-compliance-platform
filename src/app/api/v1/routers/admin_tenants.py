@@ -131,7 +131,9 @@ class TenantEntryCreate(BaseModel):
     def normalize_reason(cls, value: str) -> str:
         normalized = value.strip()
         if len(normalized) < 10:
-            raise ValueError("reason must contain at least 10 non-whitespace characters")
+            raise ValueError(
+                "reason must contain at least 10 non-whitespace characters"
+            )
         return normalized
 
 

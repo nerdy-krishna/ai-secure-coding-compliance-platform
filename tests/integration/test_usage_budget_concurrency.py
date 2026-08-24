@@ -327,8 +327,7 @@ class UsageBudgetConcurrencyTests(unittest.IsolatedAsyncioTestCase):
                 threshold = await db.scalar(
                     select(db_models.UsageBudgetThresholdEvent).where(
                         db_models.UsageBudgetThresholdEvent.counter_id == counter.id,
-                        db_models.UsageBudgetThresholdEvent.dimension
-                        == "total_tokens",
+                        db_models.UsageBudgetThresholdEvent.dimension == "total_tokens",
                         db_models.UsageBudgetThresholdEvent.threshold_percent == 50,
                     )
                 )

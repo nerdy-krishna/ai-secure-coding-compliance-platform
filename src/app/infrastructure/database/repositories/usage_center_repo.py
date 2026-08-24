@@ -92,9 +92,7 @@ class UsageCenterRepository:
             )
         return clauses
 
-    def _reservation_clauses(
-        self, query: UsageQuery
-    ) -> list[sa.ColumnElement[bool]]:
+    def _reservation_clauses(self, query: UsageQuery) -> list[sa.ColumnElement[bool]]:
         reservation = db_models.UsageBudgetReservation
         clauses: list[sa.ColumnElement[bool]] = [
             reservation.tenant_id == query.tenant_id,
@@ -161,14 +159,26 @@ class UsageCenterRepository:
             func.coalesce(func.sum(event.input_tokens), 0).label("input_tokens"),
             func.coalesce(func.sum(event.output_tokens), 0).label("output_tokens"),
             func.coalesce(func.sum(event.total_tokens), 0).label("total_tokens"),
-            func.coalesce(func.sum(event.cache_read_tokens), 0).label("cache_read_tokens"),
-            func.coalesce(func.sum(event.cache_write_tokens), 0).label("cache_write_tokens"),
-            func.coalesce(func.sum(event.reasoning_tokens), 0).label("reasoning_tokens"),
+            func.coalesce(func.sum(event.cache_read_tokens), 0).label(
+                "cache_read_tokens"
+            ),
+            func.coalesce(func.sum(event.cache_write_tokens), 0).label(
+                "cache_write_tokens"
+            ),
+            func.coalesce(func.sum(event.reasoning_tokens), 0).label(
+                "reasoning_tokens"
+            ),
             func.coalesce(func.sum(event.request_count), 0).label("requests"),
             func.count(event.id).label("events"),
-            func.count(event.id).filter(event.cost_status == "unknown").label("unknown_events"),
-            func.count(event.id).filter(event.cost_status == "estimated").label("estimated_events"),
-            func.count(event.id).filter(event.cost_status == "reconciled").label("reconciled_events"),
+            func.count(event.id)
+            .filter(event.cost_status == "unknown")
+            .label("unknown_events"),
+            func.count(event.id)
+            .filter(event.cost_status == "estimated")
+            .label("estimated_events"),
+            func.count(event.id)
+            .filter(event.cost_status == "reconciled")
+            .label("reconciled_events"),
         ]
 
     @staticmethod
@@ -179,9 +189,7 @@ class UsageCenterRepository:
                 "reservation_estimated_cost"
             ),
             func.coalesce(
-                func.sum(reservation.estimated_usd).filter(
-                    reservation.state == "held"
-                ),
+                func.sum(reservation.estimated_usd).filter(reservation.state == "held"),
                 _ZERO,
             ).label("reserved_cost"),
             func.coalesce(
@@ -292,9 +300,8 @@ class UsageCenterRepository:
                 ),
                 isouter=True,
             )
-        grouped = (
-            base.where(*self._event_clauses(query), key.is_not(None))
-            .group_by(key)
+        grouped = base.where(*self._event_clauses(query), key.is_not(None)).group_by(
+            key
         )
         count = int(
             await self.db.scalar(select(func.count()).select_from(grouped.subquery()))
@@ -375,7 +382,9 @@ class UsageCenterRepository:
                     ),
                     target,
                 )
-                .order_by(policy.scope_kind, policy.window_kind, policy.created_at.desc())
+                .order_by(
+                    policy.scope_kind, policy.window_kind, policy.created_at.desc()
+                )
             )
         ).all()
         return [(row[0], row[1]) for row in rows]

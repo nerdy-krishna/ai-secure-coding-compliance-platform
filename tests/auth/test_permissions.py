@@ -60,7 +60,9 @@ class PermissionMatrixTests(unittest.TestCase):
         self.assertNotIn(AUDIT_READ, developer)
         self.assertNotIn(TENANT_POLICY_MANAGE, developer)
 
-    def test_rule_foundry_uses_stable_creator_reviewer_promoter_permissions(self) -> None:
+    def test_rule_foundry_uses_stable_creator_reviewer_promoter_permissions(
+        self,
+    ) -> None:
         security_approver = permissions_for_roles([SECURITY_APPROVER])
         developer = permissions_for_roles([DEVELOPER])
         auditor = permissions_for_roles([AUDITOR])

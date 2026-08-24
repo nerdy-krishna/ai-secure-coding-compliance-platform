@@ -176,9 +176,7 @@ class UsageCenterService:
             unknown_events=int(event_values.get("unknown_events") or 0),
             estimated_events=int(event_values.get("estimated_events") or 0),
             reconciled_events=int(event_values.get("reconciled_events") or 0),
-            reserved_requests=int(
-                reservation_values.get("reserved_requests") or 0
-            ),
+            reserved_requests=int(reservation_values.get("reserved_requests") or 0),
             cache_hit_rate=hit_rate,
         )
 
@@ -219,9 +217,7 @@ class UsageCenterService:
             query, dimension=dimension, page=page, page_size=page_size
         )
         return [
-            UsageBreakdownItem(
-                key=str(row.key), **self._totals(row).model_dump()
-            )
+            UsageBreakdownItem(key=str(row.key), **self._totals(row).model_dump())
             for row in rows
         ], count
 
@@ -237,9 +233,7 @@ class UsageCenterService:
         list[db_models.AuthorizationAuditEvent],
     ]:
         now = datetime.now(timezone.utc)
-        group_ids = await self.repo.user_group_ids(
-            tenant_id=tenant_id, user_id=user_id
-        )
+        group_ids = await self.repo.user_group_ids(tenant_id=tenant_id, user_id=user_id)
         rows = await self.repo.current_budget_rows(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -365,7 +359,9 @@ class UsageCenterService:
             values: list[tuple[Any, uuid.UUID | None]] = []
             if candidate_value is not None:
                 values.append((candidate_value, None))
-            model_name = "provider_requests" if dimension == "upstream_requests" else dimension
+            model_name = (
+                "provider_requests" if dimension == "upstream_requests" else dimension
+            )
             values.extend(
                 (getattr(policy, f"cap_{model_name}"), policy.id)
                 for policy in existing
@@ -383,7 +379,9 @@ class UsageCenterService:
             warnings.append(
                 "Multiple scopes apply; enforcement uses the strictest finite cap."
             )
-        if candidate.effective_from and candidate.effective_from > datetime.now(timezone.utc):
+        if candidate.effective_from and candidate.effective_from > datetime.now(
+            timezone.utc
+        ):
             warnings.append("This policy is scheduled and does not apply yet.")
         return {
             "candidate_scope": candidate.scope,

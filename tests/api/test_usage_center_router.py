@@ -66,9 +66,7 @@ class UsageCenterRouterTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["scope"], "self")
-        self.assertEqual(
-            response.json()["totals"]["actual_cost"], "0.123456789012"
-        )
+        self.assertEqual(response.json()["totals"]["actual_cost"], "0.123456789012")
         self.service.resolve_visibility.assert_awaited_once()
         self.service.summary.assert_awaited_once()
 

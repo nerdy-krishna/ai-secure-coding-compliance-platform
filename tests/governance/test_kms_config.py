@@ -36,3 +36,12 @@ class KmsConfigurationTests(unittest.TestCase):
                 EVIDENCE_KMS_KEY_ID="alias/current",
                 EVIDENCE_KMS_PREVIOUS_KEY_IDS=["not a kms id"],
             )
+
+    def test_blank_optional_key_identifier_is_not_configured(self) -> None:
+        configured = self._settings(
+            EVIDENCE_STORE_ENABLED=False,
+            EVIDENCE_KMS_KEY_ID="",
+            EVIDENCE_KMS_PREVIOUS_KEY_IDS=[],
+        )
+
+        self.assertEqual(configured.EVIDENCE_KMS_KEY_ID, "")

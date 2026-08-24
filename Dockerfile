@@ -257,9 +257,14 @@ RUN set -eux; \
 # BOM emission. The vulnerability DB is pre-warmed below so air-gapped
 # / restricted-egress deployments don't reach api.osv.dev at runtime.
 RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) OSV_ARCH="amd64"; OSV_SHA256="bb30c580afe5e757d3e959f4afd08a4795ea505ef84c46962b9a738aa573b41b" ;; \
+        arm64) OSV_ARCH="arm64"; OSV_SHA256="fa46ad2b3954db5d5335303d45de921613393285d9a93c140b63b40e35e9ce50" ;; \
+        *) echo "Unsupported OSV-Scanner target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
     curl -fsSL -o /usr/local/bin/osv-scanner \
-        "https://github.com/google/osv-scanner/releases/download/v2.3.5/osv-scanner_linux_amd64"; \
-    echo "bb30c580afe5e757d3e959f4afd08a4795ea505ef84c46962b9a738aa573b41b  /usr/local/bin/osv-scanner" | sha256sum --check --strict; \
+        "https://github.com/google/osv-scanner/releases/download/v2.3.5/osv-scanner_linux_${OSV_ARCH}"; \
+    echo "${OSV_SHA256}  /usr/local/bin/osv-scanner" | sha256sum --check --strict; \
     chmod 0755 /usr/local/bin/osv-scanner
 
 USER appuser

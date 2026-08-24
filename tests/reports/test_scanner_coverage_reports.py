@@ -89,9 +89,13 @@ class ScannerCoverageReportTests(unittest.TestCase):
         csv_header = render_csv(self.result).splitlines()[0]
         self.assertIn("baseline_state", csv_header)
         self.assertIn("finding_fingerprint", csv_header)
-        summary = next(row for row in csv_rows if row["record_type"] == "governance_summary")
+        summary = next(
+            row for row in csv_rows if row["record_type"] == "governance_summary"
+        )
         self.assertIn("fixed=1", summary["governance_state"])
-        fixed = next(row for row in csv_rows if row["record_type"] == "governance_lineage")
+        fixed = next(
+            row for row in csv_rows if row["record_type"] == "governance_lineage"
+        )
         self.assertEqual(fixed["governance_state"], "fixed")
         self.assertEqual(fixed["predecessor_finding_id"], "17")
 

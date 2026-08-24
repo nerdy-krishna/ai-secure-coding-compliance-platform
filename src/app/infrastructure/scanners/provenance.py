@@ -11,6 +11,7 @@ import functools
 import hashlib
 import json
 import os
+import platform
 import re
 import subprocess
 from pathlib import Path
@@ -58,6 +59,10 @@ _SCANNER_SPECS: Mapping[str, Mapping[str, Any]] = {
         "version_args": ("version",),
         "version": "8.21.2",
         "sha256": "50b742abd7daad8bbddb6301f3017efb680632d9a5b3b4d8f137b3aac250e359",
+        "sha256_by_machine": {
+            "aarch64": "b337056f2c68bef812b378f2841225f1e52f87a293fe0c457507634defdc6fb8",
+            "arm64": "b337056f2c68bef812b378f2841225f1e52f87a293fe0c457507634defdc6fb8",
+        },
         "config": _gitleaks_config_path,
         "config_sha256": "2ce9d818ed5aac0d9a36638a317284bd733c26d5069c980829335183397430bb",
     },
@@ -66,9 +71,21 @@ _SCANNER_SPECS: Mapping[str, Mapping[str, Any]] = {
         "version_args": ("--version",),
         "version": "2.3.5",
         "sha256": "bb30c580afe5e757d3e959f4afd08a4795ea505ef84c46962b9a738aa573b41b",
+        "sha256_by_machine": {
+            "aarch64": "fa46ad2b3954db5d5335303d45de921613393285d9a93c140b63b40e35e9ce50",
+            "arm64": "fa46ad2b3954db5d5335303d45de921613393285d9a93c140b63b40e35e9ce50",
+        },
         "configuration_identifier": "osv-scanner-default",
     },
 }
+
+
+def _expected_binary_sha256(
+    spec: Mapping[str, Any], *, machine: Optional[str] = None
+) -> str:
+    normalized_machine = (machine or platform.machine()).casefold()
+    architecture_hashes = spec.get("sha256_by_machine") or {}
+    return str(architecture_hashes.get(normalized_machine) or spec["sha256"])
 
 
 def sha256_file(path: Path) -> Optional[str]:
@@ -188,7 +205,8 @@ def collect_runtime_provenance() -> dict[str, dict[str, Any]]:
             detected_version=_detect_version(binary, spec["version_args"]),
             expected_version=spec["version"],
             expected_binary_sha256=os.getenv(
-                f"SCCAP_{scanner.upper()}_BINARY_SHA256", spec["sha256"]
+                f"SCCAP_{scanner.upper()}_BINARY_SHA256",
+                _expected_binary_sha256(spec),
             ),
             config_path=Path(config) if config else None,
             expected_config_sha256=os.getenv(

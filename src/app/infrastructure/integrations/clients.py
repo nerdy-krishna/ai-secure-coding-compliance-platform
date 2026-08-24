@@ -212,7 +212,9 @@ class GitHubAppClient:
         if len(commit_sha) not in (40, 64) or not all(
             ch in "0123456789abcdefABCDEF" for ch in commit_sha
         ):
-            raise IntegrationContractError("GitHub source requires an immutable commit SHA")
+            raise IntegrationContractError(
+                "GitHub source requires an immutable commit SHA"
+            )
 
     @staticmethod
     def app_jwt(*, app_id: str, private_key_pem: str, now: int | None = None) -> str:
@@ -235,7 +237,9 @@ class GitHubAppClient:
             "contents": "read",
             "security_events": "write",
         }
-        requested_permissions = {str(key): str(value) for key, value in permissions.items()}
+        requested_permissions = {
+            str(key): str(value) for key, value in permissions.items()
+        }
         if not requested_permissions or any(
             allowed_permissions.get(key) != value
             for key, value in requested_permissions.items()
@@ -335,10 +339,15 @@ class GitHubAppClient:
         self._validate_repository_identity(
             owner=owner, repository=repository, commit_sha=commit_sha
         )
-        if not re.fullmatch(r"refs/(?:heads|tags|pull)/[-A-Za-z0-9_./]+", ref) or ".." in ref:
+        if (
+            not re.fullmatch(r"refs/(?:heads|tags|pull)/[-A-Za-z0-9_./]+", ref)
+            or ".." in ref
+        ):
             raise IntegrationContractError("invalid GitHub SARIF ref")
         if len(sarif) > 10 * 1024 * 1024:
-            raise IntegrationContractError("SARIF upload exceeds GitHub's bounded payload")
+            raise IntegrationContractError(
+                "SARIF upload exceeds GitHub's bounded payload"
+            )
         url = f"{self.API_BASE}/repos/{quote(owner, safe='')}/{quote(repository, safe='')}/code-scanning/sarifs"
         encoded = base64.b64encode(sarif).decode("ascii")
         response = await _request(
@@ -374,12 +383,16 @@ class JiraCloudClient:
     ) -> None:
         host = (urlsplit(base_url).hostname or "").casefold()
         if host != allowed_host.casefold() or not host.endswith(".atlassian.net"):
-            raise IntegrationContractError("Jira Cloud host must be the configured atlassian.net tenant")
+            raise IntegrationContractError(
+                "Jira Cloud host must be the configured atlassian.net tenant"
+            )
         validate_https_endpoint(base_url, allowed_hosts=(allowed_host,))
         self.base_url = base_url.rstrip("/")
         self.allowed_host = allowed_host
         self.http = http
-        credential = base64.b64encode(f"{email}:{api_token}".encode("utf-8")).decode("ascii")
+        credential = base64.b64encode(f"{email}:{api_token}".encode("utf-8")).decode(
+            "ascii"
+        )
         self.headers = {
             "Authorization": f"Basic {credential}",
             "Accept": "application/json",
@@ -403,11 +416,15 @@ class JiraCloudClient:
             raise IntegrationContractError("Jira canonical label is not unique")
         issue = issues[0]
         fields = issue.get("fields") if isinstance(issue.get("fields"), Mapping) else {}
-        status = fields.get("status") if isinstance(fields.get("status"), Mapping) else {}
+        status = (
+            fields.get("status") if isinstance(fields.get("status"), Mapping) else {}
+        )
         key = issue.get("key")
         status_name = status.get("name")
         if not isinstance(key, str) or not isinstance(status_name, str):
-            raise IntegrationContractError("Jira search response omitted issue identity")
+            raise IntegrationContractError(
+                "Jira search response omitted issue identity"
+            )
         return key, status_name
 
     async def create_issue(
@@ -437,7 +454,9 @@ class JiraCloudClient:
                         "content": [
                             {
                                 "type": "paragraph",
-                                "content": [{"type": "text", "text": description[:2000]}],
+                                "content": [
+                                    {"type": "text", "text": description[:2000]}
+                                ],
                             }
                         ],
                     },
@@ -454,7 +473,9 @@ class JiraCloudClient:
         key = response.json().get("key") if response.status_code == 201 else None
         return result, key if isinstance(key, str) else None
 
-    async def transition_issue(self, *, issue_key: str, transition_id: str) -> DeliveryResult:
+    async def transition_issue(
+        self, *, issue_key: str, transition_id: str
+    ) -> DeliveryResult:
         response = await _request(
             self.http,
             "POST",
@@ -467,7 +488,9 @@ class JiraCloudClient:
             delivered=response.status_code == 204,
             retryable=response.status_code == 429 or response.status_code >= 500,
             http_status=response.status_code,
-            error_code=None if response.status_code == 204 else "jira_transition_rejected",
+            error_code=(
+                None if response.status_code == 204 else "jira_transition_rejected"
+            ),
             response_excerpt=_bounded_response(response),
         )
 
@@ -513,7 +536,9 @@ class SiemWebhookClient:
         )
 
 
-def verify_github_webhook_signature(*, secret: str, body: bytes, signature: str) -> None:
+def verify_github_webhook_signature(
+    *, secret: str, body: bytes, signature: str
+) -> None:
     if len(body) > 1024 * 1024:
         raise IntegrationContractError("GitHub webhook exceeds 1 MiB")
     if len(secret.encode("utf-8")) < 32 or not signature.startswith("sha256="):

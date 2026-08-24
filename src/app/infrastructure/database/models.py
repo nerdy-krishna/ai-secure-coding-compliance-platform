@@ -2921,7 +2921,9 @@ class RuleFoundryCandidate(Base):
         BIGINT, ForeignKey("findings.id", ondelete="SET NULL"), nullable=True
     )
     source_scan_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("scans.id", ondelete="SET NULL"), nullable=True
+        PG_UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="SET NULL"),
+        nullable=True,
     )
     source_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -2953,7 +2955,9 @@ class RuleFoundryCandidate(Base):
     promoter_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -2964,12 +2968,17 @@ class RuleFoundryCandidate(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "registry_kind", "stable_identity",
+            "tenant_id",
+            "registry_kind",
+            "stable_identity",
             name="uq_rule_foundry_candidate_identity",
         ),
         sa.CheckConstraint(
@@ -3005,7 +3014,9 @@ class RuleFoundrySemgrepCandidate(Base):
         primary_key=True,
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     rule: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -3019,7 +3030,9 @@ class RuleFoundryGitleaksCandidate(Base):
         primary_key=True,
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     rule: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -3033,7 +3046,9 @@ class RuleFoundryOsvCandidate(Base):
         primary_key=True,
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     advisory: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -3047,7 +3062,9 @@ class RuleFoundryVersion(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -3071,7 +3088,9 @@ class RuleFoundryVersion(Base):
 
     __table_args__ = (
         UniqueConstraint("candidate_id", "version", name="uq_rule_foundry_version"),
-        UniqueConstraint("tenant_id", "payload_sha256", name="uq_rule_foundry_payload_hash"),
+        UniqueConstraint(
+            "tenant_id", "payload_sha256", name="uq_rule_foundry_payload_hash"
+        ),
         sa.CheckConstraint("version > 0", name="ck_rule_foundry_version_positive"),
     )
 
@@ -3083,7 +3102,9 @@ class RuleFoundryDeployment(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -3137,7 +3158,9 @@ class RuleFoundryShadowObservation(Base):
         PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     deployment_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -3145,7 +3168,9 @@ class RuleFoundryShadowObservation(Base):
         nullable=False,
     )
     scan_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("scans.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("scans.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     attempt_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -3160,7 +3185,9 @@ class RuleFoundryShadowObservation(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("deployment_id", "attempt_id", name="uq_rule_foundry_shadow_attempt"),
+        UniqueConstraint(
+            "deployment_id", "attempt_id", name="uq_rule_foundry_shadow_attempt"
+        ),
         sa.CheckConstraint(
             "eligible_files >= 0 AND eligible_files <= 5000 AND "
             "unexpected_matches >= 0 AND unexpected_matches <= eligible_files",
@@ -3176,7 +3203,9 @@ class RuleFoundryEvent(Base):
 
     id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -3188,7 +3217,9 @@ class RuleFoundryEvent(Base):
         ForeignKey("user.id", ondelete="SET NULL"), nullable=True
     )
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
-    details: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    details: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -3902,7 +3933,9 @@ class IntegrationServicePrincipal(Base):
     )
     secrets_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     secret_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.true())
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.true()
+    )
     created_by_user_id: Mapped[int] = mapped_column(
         ForeignKey("user.id", ondelete="RESTRICT"), nullable=False
     )
@@ -3963,11 +3996,11 @@ class IntegrationInboundReceipt(Base):
     __tablename__ = "integration_inbound_receipts"
     __table_args__ = (
         UniqueConstraint(
-            "principal_id", "source_event_id", name="uq_integration_receipt_source_event"
+            "principal_id",
+            "source_event_id",
+            name="uq_integration_receipt_source_event",
         ),
-        UniqueConstraint(
-            "principal_id", "nonce", name="uq_integration_receipt_nonce"
-        ),
+        UniqueConstraint("principal_id", "nonce", name="uq_integration_receipt_nonce"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -3985,7 +4018,9 @@ class IntegrationInboundReceipt(Base):
     nonce: Mapped[str] = mapped_column(String(128), nullable=False)
     event_type: Mapped[str] = mapped_column(String(96), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -4030,20 +4065,30 @@ class IntegrationOutbox(Base):
         index=True,
     )
     event_type: Mapped[str] = mapped_column(String(96), nullable=False)
-    envelope_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    envelope_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1"
+    )
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
     source_event_key: Mapped[Optional[str]] = mapped_column(String(128))
     nonce: Mapped[str] = mapped_column(String(128), nullable=False)
-    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     payload_redacted: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending"
+    )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="8")
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="8"
+    )
     next_attempt_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_error_code: Mapped[Optional[str]] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
@@ -4063,7 +4108,9 @@ class IntegrationDeliveryAudit(Base):
         ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     outbox_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("integration_outbox.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("integration_outbox.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     principal_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("integration_service_principals.id", ondelete="RESTRICT"),
@@ -4105,7 +4152,9 @@ class IntegrationFindingTicket(Base):
     external_key: Mapped[str] = mapped_column(String(128), nullable=False)
     external_url: Mapped[Optional[str]] = mapped_column(String(1024))
     status: Mapped[str] = mapped_column(String(64), nullable=False)
-    waiver_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    waiver_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

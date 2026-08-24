@@ -367,10 +367,7 @@ async def admin_update_user(
     if target is None:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    if (
-        update.is_superuser is not None
-        and update.is_superuser != target.is_superuser
-    ):
+    if update.is_superuser is not None and update.is_superuser != target.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Legacy superuser state cannot be changed through tenant administration.",
@@ -468,7 +465,9 @@ async def request_admin_user_role_change(
             approver_permission=IDENTITY_MANAGE,
             target_type="user_role_change",
             target_fingerprint_value=fingerprint,
-            payload_digest_value=payload_digest(_role_change_payload(payload.role_keys)),
+            payload_digest_value=payload_digest(
+                _role_change_payload(payload.role_keys)
+            ),
             idempotency_key=idempotency_key,
             expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
@@ -526,9 +525,10 @@ async def admin_update_user_roles(
 
     repo = AuthorizationRepository(session)
     fingerprint = _role_change_fingerprint(tenant_id=tenant_id, user_id=target.id)
-    requires_approval = (
-        await repo.separation_of_duties_mode(tenant_id=tenant_id) == "critical"
-        and _is_privilege_elevation(current=current, desired=payload.role_keys)
+    requires_approval = await repo.separation_of_duties_mode(
+        tenant_id=tenant_id
+    ) == "critical" and _is_privilege_elevation(
+        current=current, desired=payload.role_keys
     )
     approver_id: int | None = None
     outcome = "allowed"

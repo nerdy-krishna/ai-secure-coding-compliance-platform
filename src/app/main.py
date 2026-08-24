@@ -38,7 +38,9 @@ from app.api.v1.routers.usage_center import router as usage_center_router
 from app.api.v1.routers.finding_governance import router as finding_governance_router
 from app.api.v1.routers.admin_integrations import router as admin_integrations_router
 from app.api.v1.routers.integration_ci import router as integration_ci_router
-from app.api.v1.routers.integration_webhooks import router as integration_webhooks_router
+from app.api.v1.routers.integration_webhooks import (
+    router as integration_webhooks_router,
+)
 from app.api.v1.routers.admin_seed import router as admin_seed_router
 from app.api.v1.routers.dashboard import router as dashboard_router
 from app.api.v1.routers.push import router as push_router
@@ -589,7 +591,9 @@ async def lifespan(app: FastAPI):
 
         _SEMGREP_CONFIG_DEFAULTS = {
             "semgrep_ingestion.global_enabled": {"value": True},
-            "semgrep_ingestion.workdir": {"value": "/tmp/sccap-semgrep-rules"},  # nosec B108 — configurable default, not a tmpfile call
+            "semgrep_ingestion.workdir": {
+                "value": "/tmp/sccap-semgrep-rules"
+            },  # nosec B108 — configurable default, not a tmpfile call
             "semgrep_ingestion.sweep_interval_seconds": {"value": 900},
             "semgrep_ingestion.max_rules_per_scan": {"value": 5000},
             "semgrep_ingestion.allowed_licenses": {
@@ -760,7 +764,9 @@ async def lifespan(app: FastAPI):
     try:
         await asyncio.wait_for(integration_delivery_task, timeout=5)
     except asyncio.TimeoutError:
-        logger.warning("integration_delivery_sweeper did not stop within 5s; cancelling.")
+        logger.warning(
+            "integration_delivery_sweeper did not stop within 5s; cancelling."
+        )
         integration_delivery_task.cancel()
     except Exception as e:
         logger.warning(f"integration_delivery_sweeper shutdown error: {e}")

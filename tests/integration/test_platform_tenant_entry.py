@@ -92,9 +92,7 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         async with AsyncSessionLocal() as db:
             await db.execute(
-                delete(RoleAssignment).where(
-                    RoleAssignment.user_id.in_(self.user_ids)
-                )
+                delete(RoleAssignment).where(RoleAssignment.user_id.in_(self.user_ids))
             )
             await db.execute(delete(User).where(User.id.in_(self.user_ids)))
             await db.execute(delete(Tenant).where(Tenant.id.in_(self.tenant_ids)))
@@ -110,7 +108,9 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
-    async def test_step_up_grant_selects_one_tenant_and_stales_immediately(self) -> None:
+    async def test_step_up_grant_selects_one_tenant_and_stales_immediately(
+        self,
+    ) -> None:
         entry_endpoint = "/api/v1/admin/tenants/entry"
         entry_reason = "Investigating a tenant security incident"
         admin_headers = await self._headers("admin")
@@ -140,9 +140,7 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "/api/v1/admin/logs/level", headers=owner_headers
         )
         self.assertEqual(global_config.status_code, 200, global_config.text)
-        no_entry = await self.client.get(
-            "/api/v1/admin/users", headers=owner_headers
-        )
+        no_entry = await self.client.get("/api/v1/admin/users", headers=owner_headers)
         self.assertEqual(no_entry.status_code, 403, no_entry.text)
         tenant_admin_users = await self.client.get(
             "/api/v1/admin/users", headers=admin_headers
@@ -185,7 +183,9 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "/api/v1/admin/users",
             headers={**admin_headers, "X-SCCAP-Tenant-Entry": token},
         )
-        self.assertEqual(mismatched_principal.status_code, 403, mismatched_principal.text)
+        self.assertEqual(
+            mismatched_principal.status_code, 403, mismatched_principal.text
+        )
         tampered = await self.client.get(
             "/api/v1/admin/users",
             headers={**owner_headers, "X-SCCAP-Tenant-Entry": f"{token}x"},
@@ -204,8 +204,7 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 (
                     await db.scalars(
                         select(RoleAssignment.role_key).where(
-                            RoleAssignment.user_id
-                            == self.users["target-member"][0]
+                            RoleAssignment.user_id == self.users["target-member"][0]
                         )
                     )
                 ).all()
@@ -225,8 +224,7 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async with AsyncSessionLocal() as db:
             audit_row = await db.scalar(
                 select(AuthorizationAuditEvent).where(
-                    AuthorizationAuditEvent.principal_id
-                    == str(self.users["owner"][0]),
+                    AuthorizationAuditEvent.principal_id == str(self.users["owner"][0]),
                     AuthorizationAuditEvent.resource_type == "tenant_entry",
                     AuthorizationAuditEvent.outcome == "allowed",
                 )
@@ -236,8 +234,7 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(str(self.target_tenant_id), audit_row.target_fingerprint)
             reason_row = await db.scalar(
                 select(AuthorizationAuditEvent).where(
-                    AuthorizationAuditEvent.principal_id
-                    == str(self.users["owner"][0]),
+                    AuthorizationAuditEvent.principal_id == str(self.users["owner"][0]),
                     AuthorizationAuditEvent.resource_type == "tenant_entry_reason",
                     AuthorizationAuditEvent.outcome == "allowed",
                 )

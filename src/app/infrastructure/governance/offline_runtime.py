@@ -34,7 +34,9 @@ def _sha256_file(path: Path, *, max_bytes: int) -> str:
         while chunk := stream.read(1024 * 1024):
             size += len(chunk)
             if size > max_bytes:
-                raise RuntimeError(f"Verified runtime file exceeds its limit: {path.name}")
+                raise RuntimeError(
+                    f"Verified runtime file exceeds its limit: {path.name}"
+                )
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -53,21 +55,13 @@ async def configure_offline_runtime_from_environment(
         return None
     install_root = Path(configured_root).resolve(strict=True)
     release_verifier = PinnedRsaPublicKeyDigestVerifier(
-        public_key_path=Path(
-            _required(env, "OFFLINE_BUNDLE_RELEASE_PUBLIC_KEY")
-        ),
-        public_key_sha256=_required(
-            env, "OFFLINE_BUNDLE_RELEASE_PUBLIC_KEY_SHA256"
-        ),
+        public_key_path=Path(_required(env, "OFFLINE_BUNDLE_RELEASE_PUBLIC_KEY")),
+        public_key_sha256=_required(env, "OFFLINE_BUNDLE_RELEASE_PUBLIC_KEY_SHA256"),
         expected_key_id=_required(env, "OFFLINE_BUNDLE_RELEASE_KEY_ID"),
     )
     state_verifier = PinnedEd25519PublicKeyDigestVerifier(
-        public_key_path=Path(
-            _required(env, "OFFLINE_BUNDLE_DEPLOYMENT_PUBLIC_KEY")
-        ),
-        public_key_sha256=_required(
-            env, "OFFLINE_BUNDLE_DEPLOYMENT_PUBLIC_KEY_SHA256"
-        ),
+        public_key_path=Path(_required(env, "OFFLINE_BUNDLE_DEPLOYMENT_PUBLIC_KEY")),
+        public_key_sha256=_required(env, "OFFLINE_BUNDLE_DEPLOYMENT_PUBLIC_KEY_SHA256"),
     )
     paths = await resolve_active_bundle(
         install_root=install_root,

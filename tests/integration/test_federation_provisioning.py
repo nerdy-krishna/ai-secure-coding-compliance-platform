@@ -91,7 +91,9 @@ class FederationProvisioningIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     (User.tenant_id == self.tenant_id) | (User.id == self.owner_id)
                 )
             )
-            await db.execute(delete(SsoProvider).where(SsoProvider.id == self.provider_id))
+            await db.execute(
+                delete(SsoProvider).where(SsoProvider.id == self.provider_id)
+            )
             await db.execute(delete(Tenant).where(Tenant.id == self.tenant_id))
             await db.commit()
         await engine.dispose()

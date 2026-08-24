@@ -139,7 +139,9 @@ async def domain_is_verified_for_provider(
     if provider.tenant_id is None:
         return False
     normalized = normalize_domain(domain)
-    allowed = {normalize_domain(value) for value in provider.allowed_email_domains or []}
+    allowed = {
+        normalize_domain(value) for value in provider.allowed_email_domains or []
+    }
     if normalized not in allowed:
         return False
     match = await db.scalar(

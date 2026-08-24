@@ -107,7 +107,9 @@ class UsageCenterServiceTests(unittest.IsolatedAsyncioTestCase):
     def test_cursor_round_trip_and_rejects_invalid_value(self) -> None:
         created_at = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
         event_id = uuid4()
-        self.assertEqual(decode_cursor(encode_cursor(created_at, event_id)), (created_at, event_id))
+        self.assertEqual(
+            decode_cursor(encode_cursor(created_at, event_id)), (created_at, event_id)
+        )
         with self.assertRaises(UsageScopeError):
             decode_cursor("not-a-cursor")
 

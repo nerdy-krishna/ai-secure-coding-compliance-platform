@@ -252,9 +252,7 @@ class ScimTenantIsolationIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(foreign_revoke.status_code, 404, foreign_revoke.text)
 
         async with AsyncSessionLocal() as db:
-            provisioned = await db.scalar(
-                select(User).where(User.id == int(user_a_id))
-            )
+            provisioned = await db.scalar(select(User).where(User.id == int(user_a_id)))
             self.assertEqual(provisioned.tenant_id, self.tenant_ids[0])
             role = await db.scalar(
                 select(RoleAssignment).where(

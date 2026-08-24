@@ -122,12 +122,8 @@ class ScannerCoveragePersistenceTests(unittest.IsolatedAsyncioTestCase):
             row = await db.scalar(
                 select(db_models.Finding).where(db_models.Finding.id == finding.id)
             )
-            self.assertEqual(
-                row.coverage_entry_id, entries[("bandit", "app.py")].id
-            )
-            self.assertEqual(
-                row.coverage_entry_ids, [entries[("bandit", "app.py")].id]
-            )
+            self.assertEqual(row.coverage_entry_id, entries[("bandit", "app.py")].id)
+            self.assertEqual(row.coverage_entry_ids, [entries[("bandit", "app.py")].id])
 
             failed = await coverage.evaluate_policy(
                 self.scan_id,

@@ -37,9 +37,7 @@ def render_patch_export(payload: dict[str, Any]) -> str:
     lines.append("#")
     for file_plan in artifact.files:
         lines.extend(_commented_physical_lines(f"File: {file_plan.file_path}"))
-        lines.extend(
-            _commented_physical_lines(f"Candidate state: {file_plan.status}")
-        )
+        lines.extend(_commented_physical_lines(f"Candidate state: {file_plan.status}"))
         for requirement in file_plan.requirements:
             lines.extend(
                 _commented_physical_lines(f"Candidate: {requirement.candidate_id}")
@@ -65,9 +63,7 @@ def render_patch_export(payload: dict[str, Any]) -> str:
         for file_plan in artifact.files
         if file_plan.status != "planned" and file_plan.unified_diff
     ]
-    lines.extend(
-        _commented_physical_lines("--- BEGIN APPLY-READY UNIFIED DIFF ---")
-    )
+    lines.extend(_commented_physical_lines("--- BEGIN APPLY-READY UNIFIED DIFF ---"))
     lines.append("#")
     if not apply_ready:
         lines.append("# No validated apply-ready hunks are present.")

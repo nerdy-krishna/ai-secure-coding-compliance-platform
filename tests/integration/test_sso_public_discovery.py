@@ -69,7 +69,9 @@ class PublicSsoDiscoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         await self.client.aclose()
         async with AsyncSessionLocal() as db:
-            await db.execute(delete(SsoProvider).where(SsoProvider.id.in_(self.provider_ids)))
+            await db.execute(
+                delete(SsoProvider).where(SsoProvider.id.in_(self.provider_ids))
+            )
             await db.execute(
                 delete(TenantVerifiedDomain).where(
                     TenantVerifiedDomain.tenant_id.in_(self.tenant_ids)
@@ -110,4 +112,3 @@ class PublicSsoDiscoveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(unknown.status_code, 200, unknown.text)
         self.assertEqual(unknown.json()["providers"], [])
-

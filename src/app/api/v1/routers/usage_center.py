@@ -73,7 +73,9 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _range(from_at: datetime | None, to_at: datetime | None) -> tuple[datetime, datetime]:
+def _range(
+    from_at: datetime | None, to_at: datetime | None
+) -> tuple[datetime, datetime]:
     end = _utc(to_at) if to_at is not None else datetime.now(timezone.utc)
     start = _utc(from_at) if from_at is not None else end - timedelta(days=30)
     if start >= end:
@@ -357,9 +359,7 @@ async def export_usage(
     records = [
         {
             field: (
-                str(getattr(row, field))
-                if getattr(row, field) is not None
-                else None
+                str(getattr(row, field)) if getattr(row, field) is not None else None
             )
             for field in fields
         }

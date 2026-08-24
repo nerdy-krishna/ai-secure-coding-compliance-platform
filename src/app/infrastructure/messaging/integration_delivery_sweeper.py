@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 import httpx
 
 from app.infrastructure.database.database import AsyncSessionLocal
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 from app.infrastructure.database.tenant_context import system_principal_task
 from app.infrastructure.integrations.clients import (
     DeliveryResult,

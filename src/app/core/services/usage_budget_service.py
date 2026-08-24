@@ -116,9 +116,7 @@ def _coerce_amounts(value: BudgetAmounts | Mapping[str, Any] | Any) -> BudgetAmo
         "usd",
         source.get(
             "upper_bound_usd",
-            source.get(
-                "upper_bound_estimated_cost", source.get("upper_bound_cost", 0)
-            ),
+            source.get("upper_bound_estimated_cost", source.get("upper_bound_cost", 0)),
         ),
     )
     return BudgetAmounts(
@@ -262,9 +260,7 @@ class UsageBudgetService:
             return None
         reservation_id = _reservation_id(reservation)
         if usage_event_id is not None:
-            return await self.repo.settle(
-                reservation_id, usage_event_id, commit=commit
-            )
+            return await self.repo.settle(reservation_id, usage_event_id, commit=commit)
         if provider_called:
             await self.repo.mark_accounting_unknown(
                 reservation_id,
@@ -272,9 +268,7 @@ class UsageBudgetService:
                 commit=commit,
             )
             return None
-        await self.repo.release(
-            reservation_id, "provider_not_called", commit=commit
-        )
+        await self.repo.release(reservation_id, "provider_not_called", commit=commit)
         return None
 
     async def release_logical_call(

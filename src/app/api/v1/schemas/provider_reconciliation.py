@@ -45,7 +45,9 @@ class ConnectorUpdate(BaseModel):
     lookback_minutes: int = Field(default=180, ge=0, le=10080)
     poll_interval_minutes: int = Field(default=60, ge=15, le=10080)
 
-    _validate_projects = field_validator("project_ids")(ConnectorCreate.validate_projects.__func__)
+    _validate_projects = field_validator("project_ids")(
+        ConnectorCreate.validate_projects.__func__
+    )
 
 
 class ConnectorRead(BaseModel):

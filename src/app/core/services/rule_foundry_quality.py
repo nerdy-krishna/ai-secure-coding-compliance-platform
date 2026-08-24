@@ -35,7 +35,9 @@ class CandidateQualityEvaluator(Protocol):
 class SandboxQualityEvaluator:
     """Runs candidate fixtures locally; callers supply a trusted baseline metric."""
 
-    def __init__(self, *, baseline_median_ms: Decimal, timeout_seconds: int = 20) -> None:
+    def __init__(
+        self, *, baseline_median_ms: Decimal, timeout_seconds: int = 20
+    ) -> None:
         if baseline_median_ms <= 0:
             raise ValueError("Rule Foundry baseline median must be positive.")
         self.baseline_median_ms = baseline_median_ms
@@ -57,7 +59,9 @@ class SandboxQualityEvaluator:
                 for fixture in fixtures.get(category, []):
                     started = time.perf_counter_ns()
                     identities = await self._execute(registry_kind, payload, fixture)
-                    elapsed_ms = Decimal(time.perf_counter_ns() - started) / Decimal(1_000_000)
+                    elapsed_ms = Decimal(time.perf_counter_ns() - started) / Decimal(
+                        1_000_000
+                    )
                     durations.append(elapsed_ms)
                     key = f"{category}:{fixture['name']}"
                     output[key] = sorted(identities)
@@ -66,7 +70,9 @@ class SandboxQualityEvaluator:
 
         hashes = tuple(
             hashlib.sha256(
-                json.dumps(output, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                json.dumps(output, sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8"
+                )
             ).hexdigest()
             for output in run_outputs
         )
@@ -79,7 +85,8 @@ class SandboxQualityEvaluator:
             1
             for fixture in churn
             if all(
-                output.get(f"churn:{fixture['name']}") == first.get(f"churn:{fixture['name']}")
+                output.get(f"churn:{fixture['name']}")
+                == first.get(f"churn:{fixture['name']}")
                 for output in run_outputs[1:]
             )
         )
@@ -88,13 +95,14 @@ class SandboxQualityEvaluator:
         return QualityMetrics(
             vulnerable_total=len(vulnerable),
             vulnerable_detected=sum(
-                bool(first.get(f"vulnerable:{item['name']}"))
-                for item in vulnerable
+                bool(first.get(f"vulnerable:{item['name']}")) for item in vulnerable
             ),
             fixed_total=len(fixed),
             fixed_clean=sum(not first.get(f"fixed:{item['name']}") for item in fixed),
             negative_total=len(negative),
-            negative_clean=sum(not first.get(f"negative:{item['name']}") for item in negative),
+            negative_clean=sum(
+                not first.get(f"negative:{item['name']}") for item in negative
+            ),
             duplicate_stable_identities=duplicate_count,
             deterministic_run_hashes=hashes,
             performance_fixture_count=len(fixtures.get("performance", [])),
@@ -126,7 +134,9 @@ class SandboxQualityEvaluator:
             target.write_text(str(fixture["content"]), encoding="utf-8")
             config = root / "rule.yaml"
             rule = dict(payload)
-            config.write_text(yaml.safe_dump({"rules": [rule]}, sort_keys=True), encoding="utf-8")
+            config.write_text(
+                yaml.safe_dump({"rules": [rule]}, sort_keys=True), encoding="utf-8"
+            )
             raw = await self._run_process(
                 os.getenv("SEMGREP_BINARY", "/usr/local/bin/semgrep"),
                 "--config",
@@ -138,9 +148,13 @@ class SandboxQualityEvaluator:
             try:
                 result = json.loads(raw)
             except json.JSONDecodeError as exc:
-                raise QualityEvaluationError("Semgrep sandbox returned invalid JSON.") from exc
+                raise QualityEvaluationError(
+                    "Semgrep sandbox returned invalid JSON."
+                ) from exc
             if result.get("errors"):
-                raise QualityEvaluationError("Semgrep rejected the candidate rule or fixture.")
+                raise QualityEvaluationError(
+                    "Semgrep rejected the candidate rule or fixture."
+                )
             return [
                 _match_identity(str(item.get("check_id", "")), item)
                 for item in result.get("results", [])
@@ -156,7 +170,9 @@ class SandboxQualityEvaluator:
             root = Path(tmp)
             source_root = root / "source"
             source_root.mkdir(mode=0o700)
-            target = source_root / f"fixture{_language_suffix(str(fixture['language']))}"
+            target = (
+                source_root / f"fixture{_language_suffix(str(fixture['language']))}"
+            )
             target.write_text(str(fixture["content"]), encoding="utf-8")
             report = root / "report.json"
             config = root / "gitleaks.toml"
@@ -196,7 +212,9 @@ class SandboxQualityEvaluator:
             try:
                 findings = json.loads(report.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
-                raise QualityEvaluationError("Gitleaks sandbox returned invalid JSON.") from exc
+                raise QualityEvaluationError(
+                    "Gitleaks sandbox returned invalid JSON."
+                ) from exc
             return [
                 hashlib.sha256(
                     (
@@ -217,7 +235,9 @@ class SandboxQualityEvaluator:
         try:
             package = json.loads(str(fixture["content"]))
         except json.JSONDecodeError as exc:
-            raise QualityEvaluationError("OSV fixture content must be package JSON.") from exc
+            raise QualityEvaluationError(
+                "OSV fixture content must be package JSON."
+            ) from exc
         name = str(package.get("name", ""))
         ecosystem = str(package.get("ecosystem", ""))
         version = str(package.get("version", ""))
@@ -237,7 +257,9 @@ class SandboxQualityEvaluator:
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError as exc:
-            raise QualityEvaluationError("Required sandbox scanner is unavailable.") from exc
+            raise QualityEvaluationError(
+                "Required sandbox scanner is unavailable."
+            ) from exc
         try:
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(), timeout=self.timeout_seconds
@@ -245,7 +267,9 @@ class SandboxQualityEvaluator:
         except TimeoutError as exc:
             process.kill()
             await process.wait()
-            raise QualityEvaluationError("Candidate sandbox execution timed out.") from exc
+            raise QualityEvaluationError(
+                "Candidate sandbox execution timed out."
+            ) from exc
         if process.returncode and not allow_nonzero:
             raise QualityEvaluationError(
                 f"Candidate sandbox execution failed with exit code {process.returncode}: "

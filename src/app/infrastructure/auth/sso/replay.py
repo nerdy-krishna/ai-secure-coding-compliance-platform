@@ -37,9 +37,7 @@ async def claim_message_once(
             message_hash=message_hash,
             expires_at=expires_at,
         )
-        .on_conflict_do_nothing(
-            constraint="uq_federation_replay_provider_kind_message"
-        )
+        .on_conflict_do_nothing(constraint="uq_federation_replay_provider_kind_message")
         .returning(db_models.FederationReplayMarker.id)
     )
     return result.scalar_one_or_none() is not None

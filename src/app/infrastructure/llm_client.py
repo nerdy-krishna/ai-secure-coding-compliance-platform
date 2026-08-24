@@ -127,9 +127,7 @@ async def _reserve_usage_budget(
             or (legacy_input_rate > 0 and legacy_output_rate > 0)
             or Decimal(str(estimate.get("upper_bound_estimated_cost") or 0)) > 0
         )
-        return await UsageBudgetService(
-            UsageBudgetRepository(db)
-        ).reserve_logical_call(
+        return await UsageBudgetService(UsageBudgetRepository(db)).reserve_logical_call(
             context,
             config.id,
             estimate,

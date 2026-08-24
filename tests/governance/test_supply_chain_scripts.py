@@ -56,9 +56,7 @@ class SupplyChainScriptTests(unittest.TestCase):
                     "bom-ref": "pkg:pypi/semgrep@1.95.0",
                 },
             ],
-            "dependencies": [
-                {"ref": "pkg:pypi/semgrep@1.95.0", "dependsOn": []}
-            ],
+            "dependencies": [{"ref": "pkg:pypi/semgrep@1.95.0", "dependsOn": []}],
         }
         api = sbom.build(
             raw,

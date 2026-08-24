@@ -58,7 +58,9 @@ async def require_foundry_read(
     if not permissions.intersection(
         {AUDIT_READ, RULE_CANDIDATE_CREATE, RULE_CANDIDATE_REVIEW, RULE_PROMOTE}
     ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied."
+        )
     return permissions
 
 
@@ -135,7 +137,9 @@ async def _read_candidate(
                     "created_at",
                 )
             },
-            "latest_version": SignedVersionRead.model_validate(version) if version else None,
+            "latest_version": (
+                SignedVersionRead.model_validate(version) if version else None
+            ),
             "active_deployment": deployment_read,
         }
     )
@@ -218,9 +222,7 @@ async def get_candidate(
     _permissions: frozenset[str] = Depends(require_foundry_read),
 ) -> CandidateRead:
     repo = RuleFoundryRepository(db)
-    candidate = await repo.get_candidate(
-        tenant_id=tenant_id, candidate_id=candidate_id
-    )
+    candidate = await repo.get_candidate(tenant_id=tenant_id, candidate_id=candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="Candidate not found.")
     return await _read_candidate(repo, candidate)

@@ -38,7 +38,9 @@ from app.infrastructure.database.repositories.authorization_repo import (
     AuthorizationRepository,
     target_fingerprint,
 )
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 from app.infrastructure.integrations.clients import configured_pinned_http_client
 from app.shared.lib.integration_contract import IntegrationContractError
 from app.shared.lib.permissions import AUDIT_READ, SERVICE_PRINCIPAL_MANAGE
@@ -83,7 +85,10 @@ async def list_principals(
     tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     repo: IntegrationRepository = Depends(_repo),
 ) -> list[PrincipalRead]:
-    return [PrincipalRead.model_validate(row) for row in await repo.list_principals(tenant_id=tenant_id)]
+    return [
+        PrincipalRead.model_validate(row)
+        for row in await repo.list_principals(tenant_id=tenant_id)
+    ]
 
 
 @router.post(
@@ -105,7 +110,8 @@ async def create_principal(
             display_name=payload.display_name,
             config=payload.config,
             secret_values={
-                key: value.get_secret_value() for key, value in payload.secret_values.items()
+                key: value.get_secret_value()
+                for key, value in payload.secret_values.items()
             },
             actor_user_id=user.id,
         )
@@ -120,7 +126,9 @@ async def create_principal(
         await repo.db.commit()
     except IntegrityError:
         await repo.db.rollback()
-        raise HTTPException(status_code=409, detail="Integration name already exists.") from None
+        raise HTTPException(
+            status_code=409, detail="Integration name already exists."
+        ) from None
     except IntegrationContractError as exc:
         await repo.db.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from None
@@ -168,7 +176,9 @@ async def list_grants(
         raise HTTPException(status_code=404, detail="Integration principal not found.")
     return [
         GrantRead.model_validate(row)
-        for row in await repo.list_grants(tenant_id=tenant_id, principal_id=principal_id)
+        for row in await repo.list_grants(
+            tenant_id=tenant_id, principal_id=principal_id
+        )
     ]
 
 
@@ -203,7 +213,9 @@ async def create_grant(
         )
         await repo.db.commit()
     except LookupError:
-        raise HTTPException(status_code=404, detail="Integration principal not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Integration principal not found."
+        ) from None
     except IntegrationContractError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     return GrantRead.model_validate(row)
@@ -427,11 +439,15 @@ async def download_github_source(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from None
     except (httpx.HTTPError, IntegrationContractError) as exc:
-        raise HTTPException(status_code=502, detail="GitHub source retrieval failed.") from exc
+        raise HTTPException(
+            status_code=502, detail="GitHub source retrieval failed."
+        ) from exc
     return Response(
         archive,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="github-{payload.commit_sha}.zip"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="github-{payload.commit_sha}.zip"'
+        },
     )
 
 
@@ -481,7 +497,9 @@ async def upload_github_sarif(
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from None
     except (httpx.HTTPError, IntegrationContractError) as exc:
-        raise HTTPException(status_code=502, detail="GitHub SARIF upload failed.") from exc
+        raise HTTPException(
+            status_code=502, detail="GitHub SARIF upload failed."
+        ) from exc
     if not delivered.delivered:
         raise HTTPException(status_code=502, detail="GitHub rejected the SARIF upload.")
     return {"delivered": True, "status": delivered.http_status}

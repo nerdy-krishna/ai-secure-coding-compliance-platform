@@ -468,9 +468,21 @@ def render_remediation_section(data: ReportData) -> str:
         file_blocks.append(
             f'<div class="finding"><h3>{_e(file_plan.get("file_path"))}</h3>'
             f'<div class="loc">Candidate state: {_e(file_plan.get("status"))}</div>'
-            + (f'<ul class="compact">{"".join(requirements)}</ul>' if requirements else "")
-            + (f'<div class="label">Validation evidence</div><ul class="compact">{checks}</ul>' if checks else "")
-            + (f'<div class="label">Persisted unified diff</div><pre>{_e(diff)}</pre>' if diff else "")
+            + (
+                f'<ul class="compact">{"".join(requirements)}</ul>'
+                if requirements
+                else ""
+            )
+            + (
+                f'<div class="label">Validation evidence</div><ul class="compact">{checks}</ul>'
+                if checks
+                else ""
+            )
+            + (
+                f'<div class="label">Persisted unified diff</div><pre>{_e(diff)}</pre>'
+                if diff
+                else ""
+            )
             + "</div>"
         )
     summary = (

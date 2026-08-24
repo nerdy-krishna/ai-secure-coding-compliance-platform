@@ -122,7 +122,10 @@ class OpenAIOrganizationBillingClient:
                         cost_micro_usd=0,
                         external_id=item.get("id")
                         or _stable_item_id(
-                            "usage", bucket.get("start_time"), bucket.get("end_time"), item
+                            "usage",
+                            bucket.get("start_time"),
+                            bucket.get("end_time"),
+                            item,
                         ),
                         metadata={
                             "provider_bucket_start": provider_bucket_start.isoformat(),
@@ -134,7 +137,9 @@ class OpenAIOrganizationBillingClient:
             for item in bucket.get("results", ()):
                 amount = item.get("amount") or {}
                 value = amount.get("value", 0) if isinstance(amount, dict) else amount
-                currency = amount.get("currency", "usd") if isinstance(amount, dict) else "usd"
+                currency = (
+                    amount.get("currency", "usd") if isinstance(amount, dict) else "usd"
+                )
                 micro_usd = _micro_usd(value)
                 line_item = str(item.get("line_item") or "")
                 rows.append(
@@ -148,7 +153,10 @@ class OpenAIOrganizationBillingClient:
                         currency=currency,
                         cost_micro_usd=micro_usd,
                         external_id=_stable_item_id(
-                            "cost", bucket.get("start_time"), bucket.get("end_time"), item
+                            "cost",
+                            bucket.get("start_time"),
+                            bucket.get("end_time"),
+                            item,
                         ),
                         kind=(
                             "credit"

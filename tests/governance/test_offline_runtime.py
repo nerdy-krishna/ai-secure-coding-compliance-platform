@@ -73,12 +73,22 @@ class OfflineRuntimeBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 result = await configure_offline_runtime_from_environment(environment)
             self.assertEqual(result, paths)
             resolve.assert_awaited_once()
-            self.assertEqual(environment["SEMGREP_BINARY"], str(scanner_paths["semgrep"]))
-            self.assertEqual(environment["SEMGREP_OFFLINE_RULE_ROOT"], str(release / "rules"))
-            self.assertEqual(environment["GITLEAKS_CONFIG_PATH"], str(paths.gitleaks_config))
-            self.assertEqual(environment["OSV_OFFLINE_SNAPSHOT_DIR"], str(paths.advisory))
+            self.assertEqual(
+                environment["SEMGREP_BINARY"], str(scanner_paths["semgrep"])
+            )
+            self.assertEqual(
+                environment["SEMGREP_OFFLINE_RULE_ROOT"], str(release / "rules")
+            )
+            self.assertEqual(
+                environment["GITLEAKS_CONFIG_PATH"], str(paths.gitleaks_config)
+            )
+            self.assertEqual(
+                environment["OSV_OFFLINE_SNAPSHOT_DIR"], str(paths.advisory)
+            )
 
-    async def test_opt_in_with_incomplete_trust_configuration_fails_closed(self) -> None:
+    async def test_opt_in_with_incomplete_trust_configuration_fails_closed(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(RuntimeError, "RELEASE_PUBLIC_KEY"):
                 await configure_offline_runtime_from_environment(
@@ -114,9 +124,7 @@ class OfflineScannerResolutionTests(unittest.IsolatedAsyncioTestCase):
         ):
             record = provenance.collect_runtime_provenance()["bandit"]
         provenance.collect_runtime_provenance.cache_clear()
-        self.assertEqual(
-            record["configuration_identifier"], "bandit-default-plugins@1"
-        )
+        self.assertEqual(record["configuration_identifier"], "bandit-default-plugins@1")
 
     def test_gitleaks_command_uses_verified_dynamic_config(self) -> None:
         completed = subprocess.CompletedProcess([], 0, "", "")
@@ -138,12 +146,14 @@ class OfflineScannerResolutionTests(unittest.IsolatedAsyncioTestCase):
             )
         command = run.call_args.args[0]
         self.assertEqual(command[0], "/verified/scanners/gitleaks")
-        self.assertEqual(command[command.index("--config") + 1], "/verified/rules/gitleaks.toml")
-
-    async def test_semgrep_uses_verified_offline_rule_root_when_database_is_empty(self) -> None:
-        completed = subprocess.CompletedProcess(
-            [], 0, '{"results":[],"errors":[]}', ""
+        self.assertEqual(
+            command[command.index("--config") + 1], "/verified/rules/gitleaks.toml"
         )
+
+    async def test_semgrep_uses_verified_offline_rule_root_when_database_is_empty(
+        self,
+    ) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"results":[],"errors":[]}', "")
         with (
             mock.patch.dict(
                 os.environ,
@@ -163,10 +173,10 @@ class OfflineScannerResolutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(findings, [])
         self.assertEqual(to_thread.call_args.args[2], Path("/verified/rules"))
 
-    async def test_semgrep_offline_rules_override_database_materialization(self) -> None:
-        completed = subprocess.CompletedProcess(
-            [], 0, '{"results":[],"errors":[]}', ""
-        )
+    async def test_semgrep_offline_rules_override_database_materialization(
+        self,
+    ) -> None:
+        completed = subprocess.CompletedProcess([], 0, '{"results":[],"errors":[]}', "")
         with (
             mock.patch.dict(
                 os.environ,

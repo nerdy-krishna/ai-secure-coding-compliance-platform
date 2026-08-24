@@ -22,7 +22,9 @@ class DigestSignature:
 class DigestSigner(Protocol):
     async def sign_sha256(self, digest: bytes) -> DigestSignature: ...
 
-    async def verify_sha256(self, digest: bytes, signature: DigestSignature) -> bool: ...
+    async def verify_sha256(
+        self, digest: bytes, signature: DigestSignature
+    ) -> bool: ...
 
 
 class AwsKmsDigestSigner:

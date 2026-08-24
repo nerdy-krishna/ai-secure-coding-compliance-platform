@@ -25,7 +25,9 @@ class ProviderReconciliationRouterTests(unittest.TestCase):
         )
         self.app = FastAPI()
         self.app.include_router(router, prefix="/api/v1")
-        self.app.dependency_overrides[get_current_user_tenant_id] = lambda: self.tenant_id
+        self.app.dependency_overrides[get_current_user_tenant_id] = (
+            lambda: self.tenant_id
+        )
         self.app.dependency_overrides[_repo] = lambda: self.repo
         self.client = TestClient(self.app)
 
@@ -33,7 +35,9 @@ class ProviderReconciliationRouterTests(unittest.TestCase):
         self.client.close()
 
     def test_auditor_reads_unconfigured_summary(self) -> None:
-        self.app.dependency_overrides[get_current_permissions] = lambda: frozenset({AUDIT_READ})
+        self.app.dependency_overrides[get_current_permissions] = lambda: frozenset(
+            {AUDIT_READ}
+        )
         response = self.client.get("/api/v1/admin/usage-reconciliation/summary")
         self.assertEqual(200, response.status_code, response.text)
         self.assertEqual("not_configured", response.json()["status"])

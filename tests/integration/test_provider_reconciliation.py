@@ -10,7 +10,9 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.services.provider_reconciliation_service import ProviderReconciliationService
+from app.core.services.provider_reconciliation_service import (
+    ProviderReconciliationService,
+)
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import engine
 from app.infrastructure.database.repositories.provider_reconciliation_repo import (
@@ -79,7 +81,9 @@ class ProviderReconciliationPersistenceTests(unittest.IsolatedAsyncioTestCase):
             self.tenant_id = tenant.id
             self.connector_id = connector.id
             self.user_id = user.id
-            self.assertNotIn(b"fixture-read-only-secret-key", connector.credentials_encrypted)
+            self.assertNotIn(
+                b"fixture-read-only-secret-key", connector.credentials_encrypted
+            )
 
     async def asyncTearDown(self) -> None:
         await self.outer_transaction.rollback()
@@ -113,8 +117,12 @@ class ProviderReconciliationPersistenceTests(unittest.IsolatedAsyncioTestCase):
         )
         async with self._session() as db:
             repo = ProviderReconciliationRepository(db)
-            service = ProviderReconciliationService(repo, client_factory=lambda *_: fixture)
-            before = await db.scalar(select(func.count()).select_from(db_models.LLMUsageEvent))
+            service = ProviderReconciliationService(
+                repo, client_factory=lambda *_: fixture
+            )
+            before = await db.scalar(
+                select(func.count()).select_from(db_models.LLMUsageEvent)
+            )
             arguments = dict(
                 connector_id=self.connector_id,
                 tenant_id=self.tenant_id,
@@ -126,7 +134,9 @@ class ProviderReconciliationPersistenceTests(unittest.IsolatedAsyncioTestCase):
             )
             first = await service.run(**arguments)
             second = await service.run(**arguments)
-            after = await db.scalar(select(func.count()).select_from(db_models.LLMUsageEvent))
+            after = await db.scalar(
+                select(func.count()).select_from(db_models.LLMUsageEvent)
+            )
             run_count = await db.scalar(
                 select(func.count()).select_from(db_models.ProviderReconciliationRun)
             )
@@ -136,7 +146,9 @@ class ProviderReconciliationPersistenceTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             alert_count = await db.scalar(
-                select(func.count()).select_from(db_models.ProviderReconciliationAlertOutbox)
+                select(func.count()).select_from(
+                    db_models.ProviderReconciliationAlertOutbox
+                )
             )
             self.assertEqual(first.id, second.id)
             self.assertEqual(1, fixture.calls)

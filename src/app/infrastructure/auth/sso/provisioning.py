@@ -338,9 +338,7 @@ async def provision_or_link_oidc(
     tenant_id = provider.tenant_id
     norm_email = _normalize_email(email)
     repo = SsoProviderRepository(session)
-    existing_link = await repo.find_oauth_account(
-        provider.id, sub, tenant_id=tenant_id
-    )
+    existing_link = await repo.find_oauth_account(provider.id, sub, tenant_id=tenant_id)
     if existing_link is not None:
         # Returning user — no further checks (the link was vetted on creation).
         result = await session.execute(
@@ -561,9 +559,7 @@ async def provision_or_link_saml(
         idp_groups = [g for g in raw if isinstance(g, str)]
 
     repo = SsoProviderRepository(session)
-    existing = await repo.find_saml_subject(
-        provider.id, name_id, tenant_id=tenant_id
-    )
+    existing = await repo.find_saml_subject(provider.id, name_id, tenant_id=tenant_id)
     if existing is not None:
         # Update session_index for SLO.
         if session_index != existing.session_index:

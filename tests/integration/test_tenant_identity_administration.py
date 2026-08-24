@@ -88,9 +88,7 @@ class TenantIdentityAdministrationIntegrationTests(unittest.IsolatedAsyncioTestC
                 ).all()
             )
             await db.execute(
-                delete(RoleAssignment).where(
-                    RoleAssignment.user_id.in_(all_user_ids)
-                )
+                delete(RoleAssignment).where(RoleAssignment.user_id.in_(all_user_ids))
             )
             await db.execute(delete(User).where(User.id.in_(all_user_ids)))
             await db.execute(delete(Tenant).where(Tenant.id.in_(self.tenant_ids)))

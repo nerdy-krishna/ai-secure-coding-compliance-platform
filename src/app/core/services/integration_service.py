@@ -15,7 +15,9 @@ from sqlalchemy import select
 
 from app.config.config import settings
 from app.infrastructure.database import models as db_models
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 from app.infrastructure.integrations.clients import (
     DeliveryResult,
     GitHubAppClient,
@@ -76,8 +78,10 @@ def _bounded_text(value: object, *, field: str, maximum: int) -> str:
     if not isinstance(value, (str, int)) or isinstance(value, bool):
         raise IntegrationContractError(f"{field} must be text")
     normalized = str(value).strip()
-    if not normalized or len(normalized) > maximum or any(
-        ord(character) < 32 for character in normalized
+    if (
+        not normalized
+        or len(normalized) > maximum
+        or any(ord(character) < 32 for character in normalized)
     ):
         raise IntegrationContractError(f"{field} is empty, malformed, or too long")
     return normalized
@@ -92,7 +96,9 @@ def _require_allowed_keys(
 ) -> None:
     keys = set(config)
     if keys - allowed:
-        raise IntegrationContractError(f"{kind} configuration contains an unknown field")
+        raise IntegrationContractError(
+            f"{kind} configuration contains an unknown field"
+        )
     if required - keys:
         raise IntegrationContractError(f"{kind} configuration is incomplete")
 
@@ -105,14 +111,13 @@ def _require_exact_keys(
 
 def _normalize_status_mapping(value: object) -> dict[str, dict[str, str]]:
     if not isinstance(value, Mapping) or not 1 <= len(value) <= 32:
-        raise IntegrationContractError("Jira status mapping must contain 1 to 32 entries")
+        raise IntegrationContractError(
+            "Jira status mapping must contain 1 to 32 entries"
+        )
     normalized: dict[str, dict[str, str]] = {}
     for raw_status, raw_entry in value.items():
         status = _bounded_text(raw_status, field="Jira status", maximum=64)
-        if (
-            not isinstance(raw_entry, Mapping)
-            or set(raw_entry) != {"transition_id"}
-        ):
+        if not isinstance(raw_entry, Mapping) or set(raw_entry) != {"transition_id"}:
             raise IntegrationContractError(
                 "each Jira status mapping entry must contain only transition_id"
             )
@@ -140,7 +145,9 @@ def _normalize_grant_scope(
         )
         expected = f"{principal.config['owner']}/{principal.config['repository']}"
         if repository.casefold() != expected.casefold():
-            raise IntegrationContractError("GitHub grant scope does not match the connector")
+            raise IntegrationContractError(
+                "GitHub grant scope does not match the connector"
+            )
         return {"repository": expected}
     if principal.kind == "jira_cloud":
         _require_exact_keys(scope, frozenset({"project_key"}), kind="Jira grant")
@@ -148,7 +155,9 @@ def _normalize_grant_scope(
             scope["project_key"], field="project_key scope", maximum=20
         )
         if project_key != principal.config["project_key"]:
-            raise IntegrationContractError("Jira grant scope does not match the connector")
+            raise IntegrationContractError(
+                "Jira grant scope does not match the connector"
+            )
         return {"project_key": project_key}
     _require_exact_keys(scope, frozenset({"event_types"}), kind="SIEM grant")
     event_types = scope["event_types"]
@@ -156,8 +165,7 @@ def _normalize_grant_scope(
         not isinstance(event_types, list)
         or not 1 <= len(event_types) <= 32
         or any(
-            not isinstance(event_type, str)
-            or not _EVENT_TYPE_RE.fullmatch(event_type)
+            not isinstance(event_type, str) or not _EVENT_TYPE_RE.fullmatch(event_type)
             for event_type in event_types
         )
     ):
@@ -190,7 +198,9 @@ class IntegrationService:
             or len(value.encode("utf-8")) > 64 * 1024
             for value in secret_values.values()
         ):
-            raise IntegrationContractError("integration secrets must be non-empty and bounded")
+            raise IntegrationContractError(
+                "integration secrets must be non-empty and bounded"
+            )
         if kind == "github_app" and not secret_values["private_key_pem"].startswith(
             "-----BEGIN"
         ):
@@ -202,9 +212,13 @@ class IntegrationService:
                 else secret_values["signing_secret"]
             )
             if len(signing_key.encode("utf-8")) < 32:
-                raise IntegrationContractError("webhook signing secret must contain 32 bytes")
+                raise IntegrationContractError(
+                    "webhook signing secret must contain 32 bytes"
+                )
         if any(not isinstance(key, str) for key in config):
-            raise IntegrationContractError("integration configuration keys must be strings")
+            raise IntegrationContractError(
+                "integration configuration keys must be strings"
+            )
         if kind == "github_app":
             _require_exact_keys(config, _GITHUB_CONFIG_KEYS, kind="GitHub App")
             safe_config = {
@@ -217,13 +231,14 @@ class IntegrationService:
                     config["repository"], field="repository", maximum=100
                 ),
             }
-            if not safe_config["app_id"].isdigit() or not safe_config[
-                "installation_id"
-            ].isdigit():
-                raise IntegrationContractError("GitHub App identifiers must be decimal")
-            if not _GITHUB_NAME_RE.fullmatch(safe_config["owner"]) or not _GITHUB_NAME_RE.fullmatch(
-                safe_config["repository"]
+            if (
+                not safe_config["app_id"].isdigit()
+                or not safe_config["installation_id"].isdigit()
             ):
+                raise IntegrationContractError("GitHub App identifiers must be decimal")
+            if not _GITHUB_NAME_RE.fullmatch(
+                safe_config["owner"]
+            ) or not _GITHUB_NAME_RE.fullmatch(safe_config["repository"]):
                 raise IntegrationContractError("invalid GitHub repository identity")
             safe_config["api_host"] = "api.github.com"
             selected_host = "api.github.com"
@@ -269,15 +284,23 @@ class IntegrationService:
             base_url = str(safe_config.get("base_url") or "")
             allowed_host = str(safe_config.get("allowed_host") or "").casefold()
             actual_host = (urlsplit(base_url).hostname or "").casefold()
-            if actual_host != allowed_host or not allowed_host.endswith(".atlassian.net"):
+            if actual_host != allowed_host or not allowed_host.endswith(
+                ".atlassian.net"
+            ):
                 raise IntegrationContractError(
                     "Jira base URL must match the explicit atlassian.net allowlist host"
                 )
             validate_https_endpoint(base_url, allowed_hosts=(allowed_host,))
             selected_host = allowed_host
             parsed_base = urlsplit(base_url)
-            if parsed_base.path not in ("", "/") or parsed_base.query or parsed_base.fragment:
-                raise IntegrationContractError("Jira base URL must not include a path or query")
+            if (
+                parsed_base.path not in ("", "/")
+                or parsed_base.query
+                or parsed_base.fragment
+            ):
+                raise IntegrationContractError(
+                    "Jira base URL must not include a path or query"
+                )
             if not _JIRA_PROJECT_RE.fullmatch(safe_config["project_key"]):
                 raise IntegrationContractError("invalid Jira project key")
             mapping = safe_config.get("status_mapping")
@@ -301,7 +324,9 @@ class IntegrationService:
             endpoint = str(safe_config.get("endpoint") or "")
             allowed_host = str(safe_config.get("allowed_host") or "").casefold()
             if (urlsplit(endpoint).hostname or "").casefold() != allowed_host:
-                raise IntegrationContractError("SIEM endpoint must match its explicit allowlist host")
+                raise IntegrationContractError(
+                    "SIEM endpoint must match its explicit allowlist host"
+                )
             validate_https_endpoint(endpoint, allowed_hosts=(allowed_host,))
             selected_host = allowed_host
         deployment_hosts = {
@@ -326,7 +351,9 @@ class IntegrationService:
             selected_host,
             ",".join(selected_pins) or "public-dns",
         )
-        return safe_config, {str(key): str(value) for key, value in secret_values.items()}
+        return safe_config, {
+            str(key): str(value) for key, value in secret_values.items()
+        }
 
     async def create_principal(
         self,
@@ -405,7 +432,9 @@ class IntegrationService:
         )
         if principal is None:
             raise LookupError("integration principal not found")
-        if required_feature not in FEATURES_BY_KIND[principal.kind] or not await self.repo.has_active_grant(
+        if required_feature not in FEATURES_BY_KIND[
+            principal.kind
+        ] or not await self.repo.has_active_grant(
             tenant_id=tenant_id,
             principal_id=principal_id,
             feature=required_feature,
@@ -498,9 +527,9 @@ class IntegrationService:
                 "title": title[:255],
                 "severity": severity[:16],
                 "status": status[:64],
-                "waiver_expires_at": waiver_expires_at.isoformat()
-                if waiver_expires_at
-                else None,
+                "waiver_expires_at": (
+                    waiver_expires_at.isoformat() if waiver_expires_at else None
+                ),
                 "reason": reason[:96],
                 "authorized_view": authorized_view[:1024],
             },
@@ -543,7 +572,9 @@ class IntegrationService:
             raise IntegrationContractError("GitHub webhook body must be JSON") from exc
         if not isinstance(raw, Mapping):
             raise IntegrationContractError("GitHub webhook body must be an object")
-        repository = raw.get("repository") if isinstance(raw.get("repository"), Mapping) else {}
+        repository = (
+            raw.get("repository") if isinstance(raw.get("repository"), Mapping) else {}
+        )
         expected_repository = (
             f"{principal.config['owner']}/{principal.config['repository']}".casefold()
         )

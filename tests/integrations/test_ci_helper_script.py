@@ -18,8 +18,8 @@ class CiHelperScriptTests(unittest.TestCase):
             curl = root / "curl"
             curl.write_text(
                 "#!/bin/sh\n"
-                "printf '%s\\n' \"$@\" >> \"$CURL_LOG\"\n"
-                "case \"$*\" in\n"
+                'printf \'%s\\n\' "$@" >> "$CURL_LOG"\n'
+                'case "$*" in\n'
                 "  *'/ci/submissions'*) printf '%s' '{\"scan_id\":\"scan-1\"}' ;;\n"
                 "  *'/policy'*) printf '%s' '{\"terminal\":true,\"outcome\":\"pass\"}' ;;\n"
                 "esac\n",
@@ -28,7 +28,7 @@ class CiHelperScriptTests(unittest.TestCase):
             jq = root / "jq"
             jq.write_text(
                 "#!/bin/sh\n"
-                "case \"$*\" in\n"
+                'case "$*" in\n'
                 "  *'.scan_id'*) printf '%s\\n' 'scan-1' ;;\n"
                 "  *'.terminal'*) printf '%s\\n' 'true' ;;\n"
                 "  *'.outcome'*) printf '%s\\n' 'pass' ;;\n"

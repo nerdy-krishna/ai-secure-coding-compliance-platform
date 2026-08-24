@@ -135,7 +135,9 @@ class RuleFoundryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertFalse(emitted)
 
-    async def test_all_registry_payloads_require_valid_signature_and_tenant(self) -> None:
+    async def test_all_registry_payloads_require_valid_signature_and_tenant(
+        self,
+    ) -> None:
         signer = LocalTestDigestSigner()
         tenant_id = uuid4()
         payloads = {
@@ -214,7 +216,9 @@ class RuleFoundryRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(overdue_shadow, [])
 
-    async def test_runtime_rejects_cross_tenant_rows_even_with_valid_signature(self) -> None:
+    async def test_runtime_rejects_cross_tenant_rows_even_with_valid_signature(
+        self,
+    ) -> None:
         signer = LocalTestDigestSigner()
         requested_tenant = uuid4()
         foreign_tenant = uuid4()
@@ -257,7 +261,9 @@ class RuleFoundryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(rules, [])
 
-    def test_shadow_findings_are_excluded_and_promoted_provenance_survives(self) -> None:
+    def test_shadow_findings_are_excluded_and_promoted_provenance_survives(
+        self,
+    ) -> None:
         promoted = self._rule(mode="promoted")
         shadow = self._rule(mode="shadow")
 
@@ -306,9 +312,7 @@ class RuleFoundryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         promoted_osv = self._rule(
             registry_kind="osv", mode="promoted", payload=osv_payload
         )
-        shadow_osv = self._rule(
-            registry_kind="osv", mode="shadow", payload=osv_payload
-        )
+        shadow_osv = self._rule(registry_kind="osv", mode="shadow", payload=osv_payload)
         osv_findings = build_promoted_osv_findings(
             [promoted_osv, shadow_osv],
             {
@@ -349,9 +353,7 @@ class RuleFoundryRuntimeTests(unittest.IsolatedAsyncioTestCase):
             }
             for index in range(99)
         )
-        eligible, unexpected = osv_observation_counts(
-            rule, {"components": components}
-        )
+        eligible, unexpected = osv_observation_counts(rule, {"components": components})
         self.assertEqual((eligible, unexpected), (100, 1))
         assert_shadow_gate(
             eligible_files=eligible,

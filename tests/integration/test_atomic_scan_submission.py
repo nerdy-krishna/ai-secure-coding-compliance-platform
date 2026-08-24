@@ -15,7 +15,9 @@ from app.infrastructure.database.database import engine
 from app.infrastructure.database.repositories.scan_outbox_repo import (
     ScanOutboxRepository,
 )
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.shared.lib.integration_contract import IntegrationSourceProvenance
 from tests.integration.support import integration_test
@@ -123,7 +125,9 @@ class AtomicScanSubmissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(outbox_rows), 1)
             self.assertIsNone(outbox_rows[0].published_at)
             self.assertEqual(outbox_rows[0].payload["scan_id"], str(scan.id))
-            self.assertEqual(outbox_rows[0].payload["outbox_id"], str(outbox_rows[0].id))
+            self.assertEqual(
+                outbox_rows[0].payload["outbox_id"], str(outbox_rows[0].id)
+            )
             self.assertEqual(outbox_rows[0].payload["tenant_id"], str(scan.tenant_id))
             self.assertTrue(
                 outbox_rows[0].payload["correlation_id"].startswith("test-")
@@ -152,7 +156,9 @@ class AtomicScanSubmissionTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             outbox = await db.scalar(
-                select(db_models.ScanOutbox).where(db_models.ScanOutbox.scan_id == scan.id)
+                select(db_models.ScanOutbox).where(
+                    db_models.ScanOutbox.scan_id == scan.id
+                )
             )
             self.assertIsNotNone(source)
             self.assertEqual(source.commit_sha, "a" * 40)
@@ -183,9 +189,13 @@ class AtomicScanSubmissionTests(unittest.IsolatedAsyncioTestCase):
             ), patch(
                 "app.core.services.scan.submission.validate_framework_selection",
                 new=AsyncMock(return_value=None),
-            ), patch("app.core.services.scan.submission.logger"):
+            ), patch(
+                "app.core.services.scan.submission.logger"
+            ):
                 with self.assertRaisesRegex(RuntimeError, "provenance failure"):
-                    await ScanSubmissionService(ScanRepository(db))._process_and_launch_scan(
+                    await ScanSubmissionService(
+                        ScanRepository(db)
+                    )._process_and_launch_scan(
                         project_name=project_name,
                         user_id=self.user_id,
                         files_data=[
@@ -269,9 +279,7 @@ class AtomicScanSubmissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_report_handoff_redelivery_reuses_one_outbox_identity(self) -> None:
         async with self._session() as db:
-            scan = await self._submit(
-                db, f"handoff-{uuid4()}", "print('handoff')\n"
-            )
+            scan = await self._submit(db, f"handoff-{uuid4()}", "print('handoff')\n")
             repository = ScanOutboxRepository(db)
             key = f"report-handoff:{scan.current_attempt_id}"
             payload = {

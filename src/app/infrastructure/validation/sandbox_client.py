@@ -47,7 +47,7 @@ def _write_atomic(path: Path, payload: dict) -> None:
         temporary = Path(handle.name)
     # The client and spool daemon share only gid 1001. The validation child
     # runs as gid 1002 and cannot traverse the spool directory.
-    os.chmod(temporary, 0o660)
+    os.chmod(temporary, 0o660)  # nosec B103 - the spool daemon requires group access
     os.replace(temporary, path)
 
 

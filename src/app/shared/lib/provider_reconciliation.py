@@ -170,9 +170,9 @@ def merge_slices(rows: Iterable[UsageSlice]) -> dict[str, UsageSlice]:
             kind=(
                 "credit"
                 if previous.kind == "credit" or row.kind == "credit"
-                else "cost"
-                if previous.kind == "cost" or row.kind == "cost"
-                else "usage"
+                else (
+                    "cost" if previous.kind == "cost" or row.kind == "cost" else "usage"
+                )
             ),
             late_arrival=previous.late_arrival or row.late_arrival,
             duplicate_count=previous.duplicate_count + row.duplicate_count,
@@ -214,14 +214,21 @@ def compare_usage(
         provider_cost = theirs.cost_micro_usd if theirs else 0
         variance = provider_cost - ours_cost
         pct_limit = int(
-            (Decimal(abs(provider_cost)) * percentage_tolerance / Decimal("100"))
-            .to_integral_value()
+            (
+                Decimal(abs(provider_cost)) * percentage_tolerance / Decimal("100")
+            ).to_integral_value()
         )
         within = abs(variance) <= max(absolute_tolerance_micro_usd, pct_limit)
         token_delta = {
             category: (theirs.tokens.get(category, 0) if theirs else 0)
             - (ours.tokens.get(category, 0) if ours else 0)
-            for category in ("input", "output", "cache_read", "cache_write", "reasoning")
+            for category in (
+                "input",
+                "output",
+                "cache_read",
+                "cache_write",
+                "reasoning",
+            )
         }
 
         if theirs and (theirs.kind == "credit" or theirs.cost_micro_usd < 0):
@@ -250,10 +257,19 @@ def compare_usage(
                 provider=theirs,
                 variance_micro_usd=variance,
                 within_tolerance=within,
-                details={"token_delta": token_delta, "tolerance_micro_usd": max(absolute_tolerance_micro_usd, pct_limit)},
+                details={
+                    "token_delta": token_delta,
+                    "tolerance_micro_usd": max(absolute_tolerance_micro_usd, pct_limit),
+                },
             )
         )
     return comparisons
 
 
-__all__ = ["Comparison", "UsageSlice", "compare_usage", "merge_slices", "opaque_dimension"]
+__all__ = [
+    "Comparison",
+    "UsageSlice",
+    "compare_usage",
+    "merge_slices",
+    "opaque_dimension",
+]

@@ -74,7 +74,9 @@ class IntegrationSourceProvenance:
         if self.provider not in {"github", "gitlab", "azure_devops", "bitbucket"}:
             raise IntegrationContractError("unsupported CI source provider")
         if not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", self.commit_sha):
-            raise IntegrationContractError("CI source requires a full immutable commit SHA")
+            raise IntegrationContractError(
+                "CI source requires a full immutable commit SHA"
+            )
         if not re.fullmatch(r"refs/(?:heads|tags|pull)/[-A-Za-z0-9_./]+", self.ref):
             raise IntegrationContractError("invalid CI source ref")
         if ".." in self.ref or not re.fullmatch(
@@ -82,7 +84,9 @@ class IntegrationSourceProvenance:
         ):
             raise IntegrationContractError("invalid CI repository identity")
         if not self.trusted_context or self.actor_user_id <= 0:
-            raise IntegrationContractError("CI source provenance requires a trusted actor")
+            raise IntegrationContractError(
+                "CI source provenance requires a trusted actor"
+            )
 
 
 def _is_denied_key(key: object) -> bool:
@@ -232,15 +236,24 @@ def payload_digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
 
 
-def validate_https_endpoint(url: str, *, allowed_hosts: Sequence[str]) -> tuple[str, int]:
+def validate_https_endpoint(
+    url: str, *, allowed_hosts: Sequence[str]
+) -> tuple[str, int]:
     """Validate a connector URL before DNS resolution or external I/O."""
 
     try:
         parsed = urlsplit(url)
     except ValueError as exc:
         raise IntegrationContractError("invalid integration endpoint") from exc
-    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
-        raise IntegrationContractError("integration endpoint must be credential-free HTTPS")
+    if (
+        parsed.scheme != "https"
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+    ):
+        raise IntegrationContractError(
+            "integration endpoint must be credential-free HTTPS"
+        )
     host = (parsed.hostname or "").rstrip(".").casefold()
     normalized_hosts = {item.rstrip(".").casefold() for item in allowed_hosts}
     if not host or host not in normalized_hosts:
@@ -319,7 +332,9 @@ async def resolve_integration_endpoint(
         try:
             ip = ipaddress.ip_address(address)
         except ValueError as exc:
-            raise IntegrationContractError("integration endpoint returned an invalid IP") from exc
+            raise IntegrationContractError(
+                "integration endpoint returned an invalid IP"
+            ) from exc
         prohibited = (
             ip.is_loopback
             or ip.is_link_local
@@ -328,7 +343,9 @@ async def resolve_integration_endpoint(
             or ip.is_reserved
         )
         if prohibited or (not explicitly_pinned and not ip.is_global):
-            raise IntegrationContractError("integration endpoint resolved to a non-public address")
+            raise IntegrationContractError(
+                "integration endpoint resolved to a non-public address"
+            )
         validated.append(ip)
     selected = sorted(validated, key=lambda item: (item.version, int(item)))[0]
     return ResolvedIntegrationEndpoint(hostname=host, port=port, address=str(selected))

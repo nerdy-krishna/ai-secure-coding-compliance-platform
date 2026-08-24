@@ -26,9 +26,7 @@ from tests.integration.support import integration_test
 
 
 @integration_test
-class DestructiveIdentityWorkflowIntegrationTests(
-    unittest.IsolatedAsyncioTestCase
-):
+class DestructiveIdentityWorkflowIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         suffix = uuid4().hex[:12]
         self.suffix = suffix
@@ -176,7 +174,9 @@ class DestructiveIdentityWorkflowIntegrationTests(
         self.assertEqual(approved.status_code, 200, approved.text)
         return request_id
 
-    async def test_provider_delete_and_token_revoke_require_distinct_actor(self) -> None:
+    async def test_provider_delete_and_token_revoke_require_distinct_actor(
+        self,
+    ) -> None:
         admin_a = await self._headers("admin-a")
         admin_b = await self._headers("admin-b")
         foreign = await self._headers("foreign")

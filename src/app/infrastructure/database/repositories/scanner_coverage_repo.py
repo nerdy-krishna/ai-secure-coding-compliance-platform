@@ -39,11 +39,7 @@ def summarize_coverage(entries: Sequence[Any]) -> dict[str, Any]:
     degraded = sum(counts[state] for state in DEGRADED_COVERAGE_STATES)
     return {
         "overall_status": (
-            "unavailable"
-            if not entries
-            else "degraded"
-            if degraded
-            else "complete"
+            "unavailable" if not entries else "degraded" if degraded else "complete"
         ),
         "is_complete": bool(entries) and degraded == 0,
         "counts": counts,
@@ -123,9 +119,7 @@ class ScannerCoverageRepository:
                     details=item.details,
                     started_at=datetime.now(timezone.utc),
                     completed_at=(
-                        datetime.now(timezone.utc)
-                        if item.status != "planned"
-                        else None
+                        datetime.now(timezone.utc) if item.status != "planned" else None
                     ),
                 )
                 .on_conflict_do_nothing(
@@ -151,7 +145,9 @@ class ScannerCoverageRepository:
         now = datetime.now(timezone.utc)
         for outcome in outcomes:
             if outcome.status not in COVERAGE_STATES - {"planned"}:
-                raise ValueError(f"Invalid final scanner coverage state: {outcome.status}")
+                raise ValueError(
+                    f"Invalid final scanner coverage state: {outcome.status}"
+                )
             entry = existing.get((outcome.scanner_name, outcome.input_path))
             if entry is None:
                 raise LookupError(

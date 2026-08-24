@@ -63,7 +63,9 @@ class UsageBudgetPolicyCreate(BaseModel):
     def normalize_reason(cls, value: str) -> str:
         normalized = value.strip()
         if len(normalized) < 10:
-            raise ValueError("reason must contain at least 10 non-whitespace characters")
+            raise ValueError(
+                "reason must contain at least 10 non-whitespace characters"
+            )
         return normalized
 
     @field_validator("effective_from", "effective_to")
@@ -88,13 +90,21 @@ class UsageBudgetPolicyCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope_and_policy(self) -> "UsageBudgetPolicyCreate":
-        if self.scope == "tenant" and (self.group_id is not None or self.user_id is not None):
+        if self.scope == "tenant" and (
+            self.group_id is not None or self.user_id is not None
+        ):
             raise ValueError("tenant scope cannot include a group_id or user_id")
-        if self.scope == "group" and (self.group_id is None or self.user_id is not None):
+        if self.scope == "group" and (
+            self.group_id is None or self.user_id is not None
+        ):
             raise ValueError("group scope requires only group_id")
         if self.scope == "user" and (self.user_id is None or self.group_id is not None):
             raise ValueError("user scope requires only user_id")
-        if self.effective_from and self.effective_to and self.effective_to <= self.effective_from:
+        if (
+            self.effective_from
+            and self.effective_to
+            and self.effective_to <= self.effective_from
+        ):
             raise ValueError("effective_to must be after effective_from")
         if self.unknown_price_action == "token_only" and all(
             value is None
@@ -124,7 +134,9 @@ class UsageBudgetPolicyDisable(BaseModel):
     def normalize_reason(cls, value: str) -> str:
         normalized = value.strip()
         if len(normalized) < 10:
-            raise ValueError("reason must contain at least 10 non-whitespace characters")
+            raise ValueError(
+                "reason must contain at least 10 non-whitespace characters"
+            )
         return normalized
 
 
@@ -210,7 +222,9 @@ class UsageBudgetOverrideCreate(BaseModel):
     def normalize_reason(cls, value: str) -> str:
         normalized = value.strip()
         if len(normalized) < 10:
-            raise ValueError("reason must contain at least 10 non-whitespace characters")
+            raise ValueError(
+                "reason must contain at least 10 non-whitespace characters"
+            )
         return normalized
 
     @field_validator("expires_at")

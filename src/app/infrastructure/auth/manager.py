@@ -47,7 +47,9 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         from app.shared.lib.permissions import ANALYST, PLATFORM_OWNER
 
         role_key = PLATFORM_OWNER if user.is_superuser else ANALYST
-        role_tenant_id = None if user.is_superuser else effective_tenant_id(user.tenant_id)
+        role_tenant_id = (
+            None if user.is_superuser else effective_tenant_id(user.tenant_id)
+        )
         session = self.user_db.session
         with principal_scope(
             tenant_id=None,
@@ -59,9 +61,11 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
             existing = await session.scalar(
                 select(RoleAssignment.id).where(
                     RoleAssignment.user_id == user.id,
-                    RoleAssignment.tenant_id.is_(None)
-                    if role_tenant_id is None
-                    else RoleAssignment.tenant_id == role_tenant_id,
+                    (
+                        RoleAssignment.tenant_id.is_(None)
+                        if role_tenant_id is None
+                        else RoleAssignment.tenant_id == role_tenant_id
+                    ),
                     RoleAssignment.role_key == role_key,
                 )
             )

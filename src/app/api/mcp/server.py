@@ -392,9 +392,10 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
         if bool(payload.files) == bool(payload.repo_url):
             raise ValueError("Provide exactly one of `files` or `repo_url`.")
 
-        async with _authorized_session(
-            any_permission=frozenset({SCAN_SUBMIT})
-        ) as (session, authorization):
+        async with _authorized_session(any_permission=frozenset({SCAN_SUBMIT})) as (
+            session,
+            authorization,
+        ):
             user = authorization.user
             logger.info(
                 "mcp.tool.invoke",
@@ -498,9 +499,10 @@ async def sccap_submit_scan(payload: SubmitScanInput) -> Dict[str, Any]:
 async def sccap_get_scan_status(scan_id: str) -> Dict[str, Any]:
     """Get the current status of a scan."""
     try:
-        async with _authorized_session(
-            any_permission=frozenset({SCAN_READ})
-        ) as (session, authorization):
+        async with _authorized_session(any_permission=frozenset({SCAN_READ})) as (
+            session,
+            authorization,
+        ):
             user = authorization.user
             logger.info(
                 "mcp.tool.invoke",
@@ -543,9 +545,10 @@ async def sccap_get_scan_result(scan_id: str) -> Dict[str, Any]:
     """Fetch the final findings + summary for a completed scan. Returns
     an error dict if the scan is still running."""
     try:
-        async with _authorized_session(
-            any_permission=frozenset({SCAN_READ})
-        ) as (session, authorization):
+        async with _authorized_session(any_permission=frozenset({SCAN_READ})) as (
+            session,
+            authorization,
+        ):
             user = authorization.user
             logger.info(
                 "mcp.tool.invoke",

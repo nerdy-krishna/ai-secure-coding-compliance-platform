@@ -1,7 +1,9 @@
 # src/app/config/config.py
 import math
 import re
+import tempfile
 import urllib.parse
+from pathlib import Path
 from typing import List, Literal, Optional
 
 from pydantic import SecretStr, field_validator, model_validator, Field
@@ -16,6 +18,7 @@ _KMS_KEY_ID_PATTERN = re.compile(
     r"(?:key/[0-9a-fA-F-]{36}|alias/[A-Za-z0-9/_-]{1,256})"
     r")$"
 )
+_WORKER_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "sccap-worker"
 
 
 def _valid_kms_key_id(value: str) -> bool:
@@ -297,8 +300,8 @@ class Settings(BaseSettings):
     WORKER_POOL: Literal["unified", "scanner", "llm", "report"] = "unified"
     WORKER_PREFETCH_COUNT: int = Field(default=5, ge=1, le=20)
     WORKER_DRAIN_TIMEOUT_SECONDS: int = Field(default=570, ge=1, le=570)
-    WORKER_DRAIN_FILE: str = "/tmp/sccap-worker/drain-requested"
-    WORKER_DRAINED_FILE: str = "/tmp/sccap-worker/drained"
+    WORKER_DRAIN_FILE: str = str(_WORKER_RUNTIME_ROOT / "drain-requested")
+    WORKER_DRAINED_FILE: str = str(_WORKER_RUNTIME_ROOT / "drained")
     REPORT_HANDOFF_READY_TIMEOUT_SECONDS: int = Field(default=15, ge=1, le=60)
 
     # --- Concurrency limits (per-lane / per-workflow-node semaphores) ---
@@ -500,7 +503,7 @@ class Settings(BaseSettings):
                 self.EVIDENCE_KMS_KEY_ID,
                 *self.EVIDENCE_KMS_PREVIOUS_KEY_IDS,
             ]
-            if key_id is not None
+            if key_id
         ]
         if any(not _valid_kms_key_id(key_id) for key_id in configured_kms_ids):
             raise ValueError(

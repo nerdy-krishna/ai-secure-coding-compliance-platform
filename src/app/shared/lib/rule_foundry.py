@@ -82,7 +82,10 @@ def decide_representability(
 
 def assert_quality_gates(metrics: QualityMetrics) -> None:
     failures: list[str] = []
-    if metrics.vulnerable_total < 1 or metrics.vulnerable_detected != metrics.vulnerable_total:
+    if (
+        metrics.vulnerable_total < 1
+        or metrics.vulnerable_detected != metrics.vulnerable_total
+    ):
         failures.append("vulnerable fixtures must be detected at 100%")
     if metrics.fixed_total < 1 or metrics.fixed_clean != metrics.fixed_total:
         failures.append("fixed fixtures must be clean at 100%")
@@ -95,7 +98,10 @@ def assert_quality_gates(metrics: QualityMetrics) -> None:
         failures.append("output must be deterministic across three runs")
     if metrics.performance_fixture_count < 1:
         failures.append("at least one performance fixture is required")
-    if metrics.churn_fixture_count < 1 or metrics.churn_stable != metrics.churn_fixture_count:
+    if (
+        metrics.churn_fixture_count < 1
+        or metrics.churn_stable != metrics.churn_fixture_count
+    ):
         failures.append("all churn fixtures must preserve stable identity")
     if metrics.baseline_median_ms <= 0:
         failures.append("baseline median must be positive")

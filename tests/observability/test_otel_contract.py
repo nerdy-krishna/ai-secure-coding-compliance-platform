@@ -82,9 +82,7 @@ class OTelAsgiContractTests(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
         }
-        with patch(
-            "app.infrastructure.observability.asgi.span", side_effect=capture
-        ):
+        with patch("app.infrastructure.observability.asgi.span", side_effect=capture):
             await TracedASGIApp(inner)(scope, receive, send)
 
         self.assertTrue(observed["attributes"]["auth.present"])

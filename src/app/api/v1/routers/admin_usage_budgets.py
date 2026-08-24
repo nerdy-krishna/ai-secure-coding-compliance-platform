@@ -194,7 +194,9 @@ async def _validate_target(
             )
         )
         if found is None:
-            raise HTTPException(status_code=404, detail="Budget group target not found.")
+            raise HTTPException(
+                status_code=404, detail="Budget group target not found."
+            )
     if payload.user_id is not None:
         found = await db.scalar(
             select(db_models.User.id).where(
@@ -407,10 +409,9 @@ async def list_counters(
     dependencies=[Depends(require_permission(AUDIT_READ))],
 )
 async def list_reservations(
-    reservation_state: Literal[
-        "held", "settled", "released", "expired", "accounting_unknown"
-    ]
-    | None = Query(default=None, alias="state"),
+    reservation_state: (
+        Literal["held", "settled", "released", "expired", "accounting_unknown"] | None
+    ) = Query(default=None, alias="state"),
     limit: int = Query(default=200, ge=1, le=1000),
     tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     repo: UsageBudgetRepository = Depends(_budget_repo),
@@ -474,9 +475,7 @@ async def request_override(
     repo: UsageBudgetRepository = Depends(_budget_repo),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    await _validate_override_target(
-        db, repo, tenant_id=tenant_id, payload=payload
-    )
+    await _validate_override_target(db, repo, tenant_id=tenant_id, payload=payload)
     authz = AuthorizationRepository(db)
     if await authz.separation_of_duties_mode(tenant_id=tenant_id) != "critical":
         raise HTTPException(
@@ -503,9 +502,7 @@ async def request_override(
             target_fingerprint_value=fingerprint,
             payload_digest_value=payload_digest(canonical),
             idempotency_key=idempotency_key,
-            expires_at=min(
-                payload.expires_at, now + timedelta(hours=24)
-            ),
+            expires_at=min(payload.expires_at, now + timedelta(hours=24)),
         )
     except AuthorizationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -537,9 +534,7 @@ async def create_override(
     repo: UsageBudgetRepository = Depends(_budget_repo),
     db: AsyncSession = Depends(get_db),
 ) -> UsageBudgetOverrideRead:
-    await _validate_override_target(
-        db, repo, tenant_id=tenant_id, payload=payload
-    )
+    await _validate_override_target(db, repo, tenant_id=tenant_id, payload=payload)
     now = datetime.now(timezone.utc)
     if payload.expires_at <= now or payload.expires_at > now + timedelta(hours=24):
         raise HTTPException(

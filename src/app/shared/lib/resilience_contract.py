@@ -168,7 +168,9 @@ class CapacityRun(ContractModel):
                 f"{self.profile} must be {expected_files} files/{expected_bytes} bytes"
             )
         if len(self.saturation.tenant_progress_units) != self.concurrent_tenants:
-            raise ValueError("tenant progress must contain exactly one entry per tenant")
+            raise ValueError(
+                "tenant progress must contain exactly one entry per tenant"
+            )
         if self.provider_mode == ProviderMode.LIVE_BUDGETED_SMOKE:
             if self.live_provider_budget_usd is None:
                 raise ValueError("live provider smoke requires a positive budget")
@@ -324,7 +326,9 @@ def evaluate_suite(suite: ResilienceEvidenceSuite) -> AcceptanceResult:
     observations: dict[str, float | int | str] = {}
 
     expected_matrix = {
-        (profile, tenants) for profile in WorkloadProfile for tenants in CONCURRENT_TENANTS
+        (profile, tenants)
+        for profile in WorkloadProfile
+        for tenants in CONCURRENT_TENANTS
     }
     fixture_runs = {
         (run.profile, run.concurrent_tenants): run
@@ -365,15 +369,11 @@ def evaluate_suite(suite: ResilienceEvidenceSuite) -> AcceptanceResult:
             "accepted_persistence_p95": _p95(
                 representative.latencies.accepted_persistence_seconds
             ),
-            "queue_to_start_p95": _p95(
-                representative.latencies.queue_to_start_seconds
-            ),
+            "queue_to_start_p95": _p95(representative.latencies.queue_to_start_seconds),
             "approval_resume_p95": _p95(
                 representative.latencies.approval_resume_seconds
             ),
-            "sse_freshness_p95": _p95(
-                representative.latencies.sse_freshness_seconds
-            ),
+            "sse_freshness_p95": _p95(representative.latencies.sse_freshness_seconds),
             "terminal_success_ratio": (
                 representative.latencies.terminal_successes
                 / representative.latencies.terminal_eligible
@@ -405,9 +405,7 @@ def evaluate_suite(suite: ResilienceEvidenceSuite) -> AcceptanceResult:
         progress = list(saturation.tenant_progress_units.values())
         fairness = _jain_fairness(progress)
         label = f"maximum/{maximum.concurrent_tenants}"
-        observations[
-            f"maximum_{maximum.concurrent_tenants}_jain_fairness"
-        ] = fairness
+        observations[f"maximum_{maximum.concurrent_tenants}_jain_fairness"] = fairness
         if saturation.process_oom_kills or saturation.pod_oom_kills:
             failures.append(f"{label} observed an OOM kill")
         if saturation.queue_depth_peak > saturation.queue_capacity_messages:
@@ -424,9 +422,7 @@ def evaluate_suite(suite: ResilienceEvidenceSuite) -> AcceptanceResult:
     failure_by_scenario = {run.scenario: run for run in suite.failure_runs}
     missing_failures = sorted(set(FailureScenario) - failure_by_scenario.keys())
     if missing_failures:
-        failures.append(
-            "missing failure scenarios: " + ", ".join(missing_failures)
-        )
+        failures.append("missing failure scenarios: " + ", ".join(missing_failures))
     for scenario, run in failure_by_scenario.items():
         if not all(
             (

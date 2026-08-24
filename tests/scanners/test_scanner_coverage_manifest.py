@@ -79,7 +79,10 @@ class ScannerCoverageManifestTests(unittest.TestCase):
             )
 
         merged = _merge_cluster(
-            [finding("services/a.lock", first_id), finding("services/b.lock", second_id)]
+            [
+                finding("services/a.lock", first_id),
+                finding("services/b.lock", second_id),
+            ]
         )
 
         self.assertEqual(set(merged.coverage_entry_ids), {first_id, second_id})

@@ -79,7 +79,9 @@ class RuleFoundryPolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_exact_quality_boundaries(self) -> None:
         assert_quality_gates(passing_metrics())
         with self.assertRaises(RuleFoundryPolicyError):
-            assert_quality_gates(passing_metrics(candidate_median_ms=Decimal("200.001")))
+            assert_quality_gates(
+                passing_metrics(candidate_median_ms=Decimal("200.001"))
+            )
         with self.assertRaises(RuleFoundryPolicyError):
             assert_quality_gates(passing_metrics(p95_file_ms=Decimal("500")))
         with self.assertRaises(RuleFoundryPolicyError):
@@ -105,9 +107,7 @@ class RuleFoundryPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(digest_a, digest_b)
         signer = LocalTestDigestSigner()
         signature = await signer.sign_sha256(bytes.fromhex(digest_a))
-        self.assertTrue(
-            await signer.verify_sha256(bytes.fromhex(digest_a), signature)
-        )
+        self.assertTrue(await signer.verify_sha256(bytes.fromhex(digest_a), signature))
         self.assertFalse(
             await signer.verify_sha256(hashlib.sha256(b"changed").digest(), signature)
         )
@@ -117,7 +117,9 @@ class RuleFoundryPolicyTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(QualityEvaluationError, "unavailable"):
             await evaluator._run_process("/definitely-not-a-rule-scanner")
 
-    async def test_gitleaks_scans_only_fixture_source_not_generated_config(self) -> None:
+    async def test_gitleaks_scans_only_fixture_source_not_generated_config(
+        self,
+    ) -> None:
         evaluator = SandboxQualityEvaluator(baseline_median_ms=Decimal("100"))
         observed_args: tuple[str, ...] = ()
 

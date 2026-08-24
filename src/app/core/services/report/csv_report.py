@@ -92,7 +92,9 @@ def render_csv(result: AnalysisResultDetailResponse) -> str:
                     "predecessor_finding_id": item.get("predecessor_finding_id", ""),
                     "attempt_id": item.get("attempt_id", ""),
                     "dataflow": str(item.get("dataflow", {})),
-                    "evidence_object_ids": "; ".join(item.get("evidence_object_ids", [])),
+                    "evidence_object_ids": "; ".join(
+                        item.get("evidence_object_ids", [])
+                    ),
                 }
             )
     for finding in collect_findings(result):

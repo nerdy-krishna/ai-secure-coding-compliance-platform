@@ -73,15 +73,23 @@ async def submit_ci_archive(
             detail="CI submission credentials are not owned by the selected tenant.",
         )
     if not _FULL_OBJECT_ID.fullmatch(commit_sha):
-        raise HTTPException(status_code=400, detail="A full immutable commit SHA is required.")
-    if not _REF.fullmatch(ref) or ".." in ref or not _REPOSITORY.fullmatch(
-        repository_slug
+        raise HTTPException(
+            status_code=400, detail="A full immutable commit SHA is required."
+        )
+    if (
+        not _REF.fullmatch(ref)
+        or ".." in ref
+        or not _REPOSITORY.fullmatch(repository_slug)
     ):
-        raise HTTPException(status_code=400, detail="Invalid immutable source provenance.")
+        raise HTTPException(
+            status_code=400, detail="Invalid immutable source provenance."
+        )
     filename = archive_file.filename or ""
     if not filename or any(value in filename for value in ("/", "\\", "\x00")):
         raise HTTPException(status_code=400, detail="Invalid archive filename.")
-    selected_frameworks = [value.strip() for value in frameworks.split(",") if value.strip()]
+    selected_frameworks = [
+        value.strip() for value in frameworks.split(",") if value.strip()
+    ]
     if not selected_frameworks or len(selected_frameworks) > 50:
         raise HTTPException(status_code=400, detail="Invalid framework selection.")
 
@@ -179,7 +187,9 @@ async def persisted_ci_policy(
         policy_version_id=evaluation.policy_version_id if evaluation else None,
         outcome=evaluation.outcome if evaluation else None,
         coverage_complete=evaluation.coverage_complete if evaluation else None,
-        report_url=f"/api/v1/scans/{scan_id}/report?format=sarif"
-        if terminal and evaluation
-        else None,
+        report_url=(
+            f"/api/v1/scans/{scan_id}/report?format=sarif"
+            if terminal and evaluation
+            else None
+        ),
     )

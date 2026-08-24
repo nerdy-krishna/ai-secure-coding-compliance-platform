@@ -45,7 +45,9 @@ from app.infrastructure.database.repositories.scan_outbox_repo import (
 from app.infrastructure.database.repositories.scan_attempt_repo import (
     ScanAttemptRepository,
 )
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.observability import record_metric, span
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
@@ -299,7 +301,9 @@ class ScanSubmissionService:
             # arbitrary callback supplied by the API layer.
             if source_provenance is not None:
                 if tenant_id != source_provenance.tenant_id:
-                    raise ValueError("CI source provenance tenant does not match scan tenant")
+                    raise ValueError(
+                        "CI source provenance tenant does not match scan tenant"
+                    )
                 await IntegrationRepository(self.repo.db).record_source_submission(
                     tenant_id=source_provenance.tenant_id,
                     scan_id=scan.id,

@@ -917,7 +917,9 @@ async def stream_scan_progress(
                             "sccap.sse.freshness",
                             max(
                                 0.0,
-                                (datetime.now(timezone.utc) - event_time).total_seconds(),
+                                (
+                                    datetime.now(timezone.utc) - event_time
+                                ).total_seconds(),
                             ),
                             {"scan.status": e.status},
                         )
@@ -1332,9 +1334,7 @@ async def request_finding_waiver(
         visible_user_ids=visible_user_ids,
         tenant_id=tenant_id,
     )
-    return action_request_to_read(
-        row, actor_user_id=user.id, permissions=permissions
-    )
+    return action_request_to_read(row, actor_user_id=user.id, permissions=permissions)
 
 
 @router.post(

@@ -309,7 +309,10 @@ class FindingGovernancePersistenceTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertNotEqual(restarted.id, first_attempt_id)
                 self.assertTrue(
-                    all(row.attempt_id == restarted.id for row in current_attempt_records)
+                    all(
+                        row.attempt_id == restarted.id
+                        for row in current_attempt_records
+                    )
                 )
                 history = await repo.lineage_history_for_scan(current.id)
                 self.assertEqual(

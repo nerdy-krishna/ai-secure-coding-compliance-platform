@@ -246,7 +246,9 @@ async def get_workflow() -> Any:
 
 async def close_workflow_resources() -> None:
     """Close graph resources without making worker extras an API test dependency."""
-    from app.infrastructure.workflows.worker_graph import close_workflow_resources as close
+    from app.infrastructure.workflows.worker_graph import (
+        close_workflow_resources as close,
+    )
 
     await close()
 
@@ -280,9 +282,7 @@ def _track_delivery(coro: Any) -> None:
         try:
             completed.result()
         except Exception as exc:
-            logger.error(
-                "WORKER: delivery task failed (%s)", type(exc).__name__
-            )
+            logger.error("WORKER: delivery task failed (%s)", type(exc).__name__)
 
     task.add_done_callback(_done)
 
@@ -345,8 +345,7 @@ async def _wait_for_report_handoff_checkpoint(
             and "report_handoff" not in next_nodes
             and "report_handoff" in completed_stages
             and str(values.get("scan_id") or "") == str(expected["scan_id"] or "")
-            and str(values.get("attempt_id") or "")
-            == str(expected["attempt_id"] or "")
+            and str(values.get("attempt_id") or "") == str(expected["attempt_id"] or "")
             and str(values.get("report_handoff_outbox_id") or "")
             == str(expected["outbox_id"] or "")
         ):
@@ -759,8 +758,8 @@ async def _run_workflow_for_scan(
             report_handoff_checkpoint_id is not None
             and not report_handoff_already_advanced
             and (
-            advanced_checkpoint_id is None
-            or advanced_checkpoint_id == report_handoff_checkpoint_id
+                advanced_checkpoint_id is None
+                or advanced_checkpoint_id == report_handoff_checkpoint_id
             )
         ):
             raise ReportHandoffNotReady(
@@ -1416,8 +1415,7 @@ async def _async_main() -> None:
     async with AsyncSessionLocal() as db:
         await verify_database_role_posture(
             db,
-            enforce=str(getattr(settings, "ENVIRONMENT", "")).lower()
-            == "production",
+            enforce=str(getattr(settings, "ENVIRONMENT", "")).lower() == "production",
         )
 
     # Hydrate the feature-flag cache (modular setup — #104) so any

@@ -72,9 +72,7 @@ def _certificate_pem(common_name: str) -> str:
 
 def _certificate_material(common_name: str) -> tuple[str, str]:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subject = issuer = x509.Name(
-        [x509.NameAttribute(NameOID.COMMON_NAME, common_name)]
-    )
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
     now = datetime.now(timezone.utc)
     cert = (
         x509.CertificateBuilder()
@@ -102,7 +100,9 @@ class OidcBoundaryTests(unittest.IsolatedAsyncioTestCase):
     def test_discovery_is_pinned_to_issuer_and_public_https_endpoints(self) -> None:
         config = _oidc_config()
         with self.assertRaisesRegex(ValueError, "issuer does not match"):
-            oidc._validate_discovery(config, {**_discovery(), "issuer": "https://evil.test"})
+            oidc._validate_discovery(
+                config, {**_discovery(), "issuer": "https://evil.test"}
+            )
         with self.assertRaisesRegex(ValueError, "unsafe jwks_uri"):
             oidc._validate_discovery(
                 config,
@@ -120,8 +120,12 @@ class OidcBoundaryTests(unittest.IsolatedAsyncioTestCase):
             "iat": now,
             "exp": now + timedelta(minutes=5),
         }
-        old_token = jwt.encode(base_claims, old_key, algorithm="RS256", headers={"kid": "old"})
-        new_token = jwt.encode(base_claims, new_key, algorithm="RS256", headers={"kid": "new"})
+        old_token = jwt.encode(
+            base_claims, old_key, algorithm="RS256", headers={"kid": "old"}
+        )
+        new_token = jwt.encode(
+            base_claims, new_key, algorithm="RS256", headers={"kid": "new"}
+        )
         fetch = AsyncMock(side_effect=[{"keys": [old_jwk]}, {"keys": [new_jwk]}])
         with patch.object(oidc, "_fetch_jwks", fetch):
             await oidc._decode_provider_jwt(
@@ -141,7 +145,9 @@ class OidcBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claims["sub"], "subject-1")
         self.assertEqual(fetch.await_count, 2)
 
-    async def test_backchannel_logout_requires_typed_signed_event_without_nonce(self) -> None:
+    async def test_backchannel_logout_requires_typed_signed_event_without_nonce(
+        self,
+    ) -> None:
         key, jwk = _rsa_fixture("logout-key")
         now = datetime.now(timezone.utc)
         claims = {
@@ -159,7 +165,9 @@ class OidcBoundaryTests(unittest.IsolatedAsyncioTestCase):
             headers={"kid": "logout-key", "typ": "logout+jwt"},
         )
         with (
-            patch.object(oidc, "_fetch_discovery", AsyncMock(return_value=_discovery())),
+            patch.object(
+                oidc, "_fetch_discovery", AsyncMock(return_value=_discovery())
+            ),
             patch.object(oidc, "_fetch_jwks", AsyncMock(return_value={"keys": [jwk]})),
         ):
             decoded = await oidc.validate_logout_token(_oidc_config(), token, now=now)
@@ -173,7 +181,9 @@ class OidcBoundaryTests(unittest.IsolatedAsyncioTestCase):
         )
         oidc._jwks_cache.clear()
         with (
-            patch.object(oidc, "_fetch_discovery", AsyncMock(return_value=_discovery())),
+            patch.object(
+                oidc, "_fetch_discovery", AsyncMock(return_value=_discovery())
+            ),
             patch.object(oidc, "_fetch_jwks", AsyncMock(return_value={"keys": [jwk]})),
             self.assertRaisesRegex(ValueError, "must not contain nonce"),
         ):

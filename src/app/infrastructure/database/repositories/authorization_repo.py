@@ -218,9 +218,8 @@ class AuthorizationRepository:
             raise AuthorizationDeniedError("action request not found")
         now = datetime.now(timezone.utc)
         if row.status != "pending":
-            if (
-                row.approver_user_id == approver_user_id
-                and row.status == ("approved" if approved else "rejected")
+            if row.approver_user_id == approver_user_id and row.status == (
+                "approved" if approved else "rejected"
             ):
                 return row
             raise AuthorizationConflictError("action request already decided")

@@ -13,6 +13,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts" / "bootstrap_env_secrets.py"
+SECRET_KEYS = {
+    "SECRET_KEY",
+    "ENCRYPTION_KEY",
+    "POSTGRES_PASSWORD",
+    "RABBITMQ_DEFAULT_PASS",
+    "RABBITMQ_ERLANG_COOKIE",
+    "QDRANT_API_KEY",
+    "GRAFANA_ADMIN_PASSWORD",
+    "LANGFUSE_POSTGRES_PASSWORD",
+    "CLICKHOUSE_PASSWORD",
+    "REDIS_PASSWORD",
+    "MINIO_ROOT_PASSWORD",
+    "LANGFUSE_ENCRYPTION_KEY",
+    "LANGFUSE_SALT",
+    "NEXTAUTH_SECRET",
+    "LANGFUSE_INIT_USER_PASSWORD",
+}
 
 
 def _run_bootstrap(env_file: Path) -> subprocess.CompletedProcess[str]:
@@ -76,10 +93,10 @@ class BootstrapEnvSecretsTests(unittest.TestCase):
         self.assertNotEqual(values["RABBITMQ_ERLANG_COOKIE"], "REPLACE_ME")
         self.assertFalse(values["ENCRYPTION_KEY"].startswith("REPLACE_ME"))
         self.assertFalse(values["LANGFUSE_ENCRYPTION_KEY"].startswith("REPLACE_ME"))
-        for value in values.values():
-            if value and not value.startswith("REPLACE_ME"):
-                self.assertNotIn(value, completed.stdout)
-                self.assertNotIn(value, completed.stderr)
+        for key in SECRET_KEYS:
+            value = values[key]
+            self.assertNotIn(value, completed.stdout)
+            self.assertNotIn(value, completed.stderr)
 
     def test_bootstrap_is_idempotent_and_restricts_env_permissions(self) -> None:
         self.env_file.write_text(

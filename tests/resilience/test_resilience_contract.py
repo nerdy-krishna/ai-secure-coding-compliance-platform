@@ -98,16 +98,14 @@ def _capacity(
             artifact_download_operations=tenants,
             artifact_download_digest_failures=0,
             deterministic_scanner_fixture=True,
-            deterministic_provider_fixture=(
-                mode == ProviderMode.DETERMINISTIC_FIXTURE
-            ),
+            deterministic_provider_fixture=(mode == ProviderMode.DETERMINISTIC_FIXTURE),
         ),
-        live_provider_budget_usd=5.0
-        if mode == ProviderMode.LIVE_BUDGETED_SMOKE
-        else None,
-        live_provider_actual_usd=1.0
-        if mode == ProviderMode.LIVE_BUDGETED_SMOKE
-        else None,
+        live_provider_budget_usd=(
+            5.0 if mode == ProviderMode.LIVE_BUDGETED_SMOKE else None
+        ),
+        live_provider_actual_usd=(
+            1.0 if mode == ProviderMode.LIVE_BUDGETED_SMOKE else None
+        ),
     )
 
 
@@ -226,11 +224,18 @@ class ResilienceAcceptanceTests(unittest.TestCase):
 
         self.assertFalse(result.passed)
         self.assertTrue(
-            any("missing deterministic capacity runs" in item for item in result.failures)
+            any(
+                "missing deterministic capacity runs" in item
+                for item in result.failures
+            )
         )
-        self.assertTrue(any("missing failure scenarios" in item for item in result.failures))
+        self.assertTrue(
+            any("missing failure scenarios" in item for item in result.failures)
+        )
 
-    def test_unknown_fields_and_duplicate_scenarios_fail_schema_validation(self) -> None:
+    def test_unknown_fields_and_duplicate_scenarios_fail_schema_validation(
+        self,
+    ) -> None:
         payload = _suite().model_dump(mode="json")
         payload["unreviewed_override"] = True
         with self.assertRaises(ValidationError):
@@ -254,10 +259,7 @@ class ResilienceAcceptanceTests(unittest.TestCase):
                 item["name"]: (item["file_count"], item["uncompressed_bytes"])
                 for item in catalog["capacity"]["profiles"]
             },
-            {
-                profile.value: values
-                for profile, values in WORKLOADS.items()
-            },
+            {profile.value: values for profile, values in WORKLOADS.items()},
         )
         self.assertEqual(
             {item["scenario"]: item["expected"] for item in catalog["failures"]},

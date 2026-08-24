@@ -9,7 +9,9 @@ from uuid import uuid4
 from app.api.v1.schemas.rule_foundry import ReviewDecision
 from app.core.services.rule_foundry_service import RuleFoundryService
 from app.infrastructure.database import models as db_models
-from app.infrastructure.database.repositories.rule_foundry_repo import RuleFoundryRepository
+from app.infrastructure.database.repositories.rule_foundry_repo import (
+    RuleFoundryRepository,
+)
 from app.infrastructure.signing.digest_signer import LocalTestDigestSigner
 from app.shared.lib.rule_foundry import canonical_digest
 from tests.unit.test_rule_foundry_policy import passing_metrics
@@ -128,24 +130,40 @@ class RuleFoundryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         _encoded, v1_digest = canonical_digest(v1_payload)
         v1_signature = await signer.sign_sha256(bytes.fromhex(v1_digest))
         v1 = SimpleNamespace(
-            id=uuid4(), tenant_id=tenant_id, candidate_id=candidate_id, version=1,
-            canonical_payload=v1_payload, payload_sha256=v1_digest,
+            id=uuid4(),
+            tenant_id=tenant_id,
+            candidate_id=candidate_id,
+            version=1,
+            canonical_payload=v1_payload,
+            payload_sha256=v1_digest,
             signature=v1_signature.signature_b64,
             signature_algorithm=v1_signature.algorithm,
             signing_key_id=v1_signature.key_id,
         )
         candidate = SimpleNamespace(
-            id=candidate_id, tenant_id=tenant_id, status="promoted",
-            static_representable=True, registry_kind="semgrep",
-            creator_user_id=10, reviewer_user_id=11, promoter_user_id=12,
-            normalized_evidence={"lineage": "kept"}, fixtures={"vulnerable": [{}]},
+            id=candidate_id,
+            tenant_id=tenant_id,
+            status="promoted",
+            static_representable=True,
+            registry_kind="semgrep",
+            creator_user_id=10,
+            reviewer_user_id=11,
+            promoter_user_id=12,
+            normalized_evidence={"lineage": "kept"},
+            fixtures={"vulnerable": [{}]},
             expires_at=datetime.now(timezone.utc) + timedelta(days=1),
-            reviewed_at=None, promoted_at=datetime.now(timezone.utc),
+            reviewed_at=None,
+            promoted_at=datetime.now(timezone.utc),
         )
         v1_deployment = db_models.RuleFoundryDeployment(
-            id=uuid4(), tenant_id=tenant_id, candidate_id=candidate_id,
-            version_id=v1.id, prior_version_id=None, state="promoted",
-            actor_user_id=12, promoted_at=datetime.now(timezone.utc),
+            id=uuid4(),
+            tenant_id=tenant_id,
+            candidate_id=candidate_id,
+            version_id=v1.id,
+            prior_version_id=None,
+            state="promoted",
+            actor_user_id=12,
+            promoted_at=datetime.now(timezone.utc),
         )
         repo = _Repo(candidate, v1, v1_deployment)
         service = RuleFoundryService(
@@ -156,16 +174,25 @@ class RuleFoundryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await service.mark_review_required(
-            tenant_id=tenant_id, actor_user_id=12, candidate_id=candidate_id,
-            trigger="tool_incompatibility", reason="Semgrep compatibility changed",
+            tenant_id=tenant_id,
+            actor_user_id=12,
+            candidate_id=candidate_id,
+            trigger="tool_incompatibility",
+            reason="Semgrep compatibility changed",
         )
         await service.review_candidate(
-            tenant_id=tenant_id, actor_user_id=11, candidate_id=candidate_id,
-            decision=ReviewDecision(approved=True, reason="v2 fixtures independently reviewed"),
+            tenant_id=tenant_id,
+            actor_user_id=11,
+            candidate_id=candidate_id,
+            decision=ReviewDecision(
+                approved=True, reason="v2 fixtures independently reviewed"
+            ),
         )
         v2 = repo.versions[-1]
         await service.start_shadow(
-            tenant_id=tenant_id, actor_user_id=12, candidate_id=candidate_id,
+            tenant_id=tenant_id,
+            actor_user_id=12,
+            candidate_id=candidate_id,
             reason="shadow v2",
         )
         self.assertEqual(repo.active.version_id, v2.id)
@@ -173,12 +200,16 @@ class RuleFoundryLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(v1_deployment.state, "superseded")
 
         await service.promote(
-            tenant_id=tenant_id, actor_user_id=12, candidate_id=candidate_id,
+            tenant_id=tenant_id,
+            actor_user_id=12,
+            candidate_id=candidate_id,
             reason="shadow gate passed",
         )
         self.assertEqual(repo.active.state, "promoted")
         await service.rollback(
-            tenant_id=tenant_id, actor_user_id=12, candidate_id=candidate_id,
+            tenant_id=tenant_id,
+            actor_user_id=12,
+            candidate_id=candidate_id,
             reason="unexpected post-promotion regression",
         )
         self.assertEqual(repo.active.version_id, v1.id)

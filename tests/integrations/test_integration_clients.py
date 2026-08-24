@@ -45,7 +45,9 @@ class _ChunkStream(httpx.AsyncByteStream):
 
 
 class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
-    async def test_github_webhook_rejects_repository_outside_connector_scope(self) -> None:
+    async def test_github_webhook_rejects_repository_outside_connector_scope(
+        self,
+    ) -> None:
         import hashlib
         import hmac
 
@@ -65,9 +67,9 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
             has_active_grant=AsyncMock(return_value=True),
             record_inbound_receipt=AsyncMock(),
         )
-        signature = "sha256=" + hmac.new(
-            secret.encode(), body, hashlib.sha256
-        ).hexdigest()
+        signature = (
+            "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        )
 
         with self.assertRaisesRegex(IntegrationContractError, "grant scope"):
             await IntegrationService(repo).accept_github_webhook(
@@ -295,10 +297,14 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
                     permissions={"contents": "write"},
                 )
 
-    async def test_github_operation_never_mints_token_without_active_grant(self) -> None:
+    async def test_github_operation_never_mints_token_without_active_grant(
+        self,
+    ) -> None:
         repo = SimpleNamespace(
             get_principal=AsyncMock(
-                return_value=SimpleNamespace(kind="github_app", secrets_encrypted=b"unused")
+                return_value=SimpleNamespace(
+                    kind="github_app", secrets_encrypted=b"unused"
+                )
             ),
             has_active_grant=AsyncMock(return_value=False),
         )
@@ -311,11 +317,15 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
                     http=http,
                 )
 
-    async def test_github_archive_allows_only_codeload_hop_and_strips_token(self) -> None:
+    async def test_github_archive_allows_only_codeload_hop_and_strips_token(
+        self,
+    ) -> None:
         observed: list[tuple[str, str | None]] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
-            observed.append((request.headers["Host"], request.headers.get("Authorization")))
+            observed.append(
+                (request.headers["Host"], request.headers.get("Authorization"))
+            )
             if request.headers["Host"] == "api.github.com":
                 return httpx.Response(
                     302,
@@ -344,7 +354,9 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-    async def test_github_archive_rejects_unapproved_redirect_and_abbreviated_sha(self) -> None:
+    async def test_github_archive_rejects_unapproved_redirect_and_abbreviated_sha(
+        self,
+    ) -> None:
         requests = 0
 
         def handler(_request: httpx.Request) -> httpx.Response:
@@ -374,9 +386,12 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(requests, 1)
 
-    async def test_github_archive_incremental_cap_handles_missing_or_lying_length(self) -> None:
+    async def test_github_archive_incremental_cap_handles_missing_or_lying_length(
+        self,
+    ) -> None:
         for headers in ({}, {"content-length": "4"}):
             with self.subTest(headers=headers):
+
                 def handler(_request: httpx.Request) -> httpx.Response:
                     return httpx.Response(
                         200,
@@ -396,7 +411,10 @@ class IntegrationClientTests(unittest.IsolatedAsyncioTestCase):
                             commit_sha="a" * 64,
                             token="secret",
                         )
-    async def test_transport_pins_first_resolution_and_preserves_tls_hostname(self) -> None:
+
+    async def test_transport_pins_first_resolution_and_preserves_tls_hostname(
+        self,
+    ) -> None:
         resolutions = 0
         observed: dict[str, object] = {}
 

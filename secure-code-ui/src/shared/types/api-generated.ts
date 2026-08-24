@@ -1981,6 +1981,263 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/integrations/principals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Principals */
+        get: operations["list_principals_api_v1_admin_integrations_principals_get"];
+        put?: never;
+        /** Create Principal */
+        post: operations["create_principal_api_v1_admin_integrations_principals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/principals/{principal_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Principal */
+        post: operations["revoke_principal_api_v1_admin_integrations_principals__principal_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/principals/{principal_id}/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Grants */
+        get: operations["list_grants_api_v1_admin_integrations_principals__principal_id__grants_get"];
+        put?: never;
+        /** Create Grant */
+        post: operations["create_grant_api_v1_admin_integrations_principals__principal_id__grants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/principals/{principal_id}/grants/{grant_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Grant */
+        post: operations["revoke_grant_api_v1_admin_integrations_principals__principal_id__grants__grant_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/principals/{principal_id}/policy-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enqueue Policy Event */
+        post: operations["enqueue_policy_event_api_v1_admin_integrations_principals__principal_id__policy_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/principals/{principal_id}/ticket-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enqueue Ticket Event */
+        post: operations["enqueue_ticket_event_api_v1_admin_integrations_principals__principal_id__ticket_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deliveries */
+        get: operations["list_deliveries_api_v1_admin_integrations_deliveries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/deliveries/{outbox_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Delivery */
+        post: operations["retry_delivery_api_v1_admin_integrations_deliveries__outbox_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/delivery-audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Delivery Audit */
+        get: operations["list_delivery_audit_api_v1_admin_integrations_delivery_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/tickets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Tickets */
+        get: operations["list_tickets_api_v1_admin_integrations_tickets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/principals/{principal_id}/github/source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download Github Source */
+        post: operations["download_github_source_api_v1_admin_integrations_principals__principal_id__github_source_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrations/principals/{principal_id}/github/sarif": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Github Sarif */
+        post: operations["upload_github_sarif_api_v1_admin_integrations_principals__principal_id__github_sarif_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/ci/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Ci Archive */
+        post: operations["submit_ci_archive_api_v1_integrations_ci_submissions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/ci/scans/{scan_id}/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Persisted Ci Policy */
+        get: operations["persisted_ci_policy_api_v1_integrations_ci_scans__scan_id__policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/webhooks/github/{tenant_id}/{principal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Receive Github Webhook */
+        post: operations["receive_github_webhook_api_v1_integrations_webhooks_github__tenant_id___principal_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/findings": {
         parameters: {
             query?: never;
@@ -2172,6 +2429,143 @@ export interface paths {
          * @description Replace one tenant user's roles, enforcing critical-mode elevation SoD.
          */
         patch: operations["admin_update_user_roles_api_v1_admin_users__user_id__roles_patch"];
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Candidates */
+        get: operations["list_candidates_api_v1_admin_rule_sources_foundry_candidates_get"];
+        put?: never;
+        /** Create Candidate */
+        post: operations["create_candidate_api_v1_admin_rule_sources_foundry_candidates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/candidates/{candidate_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Candidate */
+        get: operations["get_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/candidates/{candidate_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Candidate */
+        post: operations["review_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/candidates/{candidate_id}/shadow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Shadow */
+        post: operations["start_shadow_api_v1_admin_rule_sources_foundry_candidates__candidate_id__shadow_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/candidates/{candidate_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote Candidate */
+        post: operations["promote_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/candidates/{candidate_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Candidate */
+        post: operations["rollback_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/candidates/{candidate_id}/review-required": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Review Required */
+        post: operations["mark_review_required_api_v1_admin_rule_sources_foundry_candidates__candidate_id__review_required_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/rule-sources/foundry/expire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Expire Candidates */
+        post: operations["expire_candidates_api_v1_admin_rule_sources_foundry_expire_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/admin/rule-sources/settings": {
@@ -4140,10 +4534,7 @@ export interface components {
         Body_ingest_documents_api_v1_admin_rag_ingest_post: {
             /** Framework Name */
             framework_name: string;
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
         };
         /** Body_ingest_security_standard_api_v1_admin_rag_ingest_standards__standard_type__post */
@@ -4155,10 +4546,7 @@ export interface components {
         };
         /** Body_preview_archive_files_api_v1_scans_preview_archive_post */
         Body_preview_archive_files_api_v1_scans_preview_archive_post: {
-            /**
-             * Archive File
-             * Format: binary
-             */
+            /** Archive File */
             archive_file: string;
         };
         /** Body_reset_forgot_password_api_v1_auth_forgot_password_post */
@@ -4178,10 +4566,7 @@ export interface components {
         };
         /** Body_start_preprocessing_job_api_v1_admin_rag_preprocess_start_post */
         Body_start_preprocessing_job_api_v1_admin_rag_preprocess_start_post: {
-            /**
-             * File
-             * Format: binary
-             */
+            /** File */
             file: string;
             /**
              * Llm Config Id
@@ -4200,6 +4585,38 @@ export interface components {
              * @default false
              */
             raw_content_retention_consent: boolean;
+        };
+        /** Body_submit_ci_archive_api_v1_integrations_ci_submissions_post */
+        Body_submit_ci_archive_api_v1_integrations_ci_submissions_post: {
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "github" | "gitlab" | "azure_devops" | "bitbucket";
+            /** Commit Sha */
+            commit_sha: string;
+            /** Ref */
+            ref: string;
+            /** Repository Slug */
+            repository_slug: string;
+            /** Trusted Context */
+            trusted_context: boolean;
+            /** Project Name */
+            project_name: string;
+            /** Frameworks */
+            frameworks: string;
+            /** Archive File */
+            archive_file: string;
+            /**
+             * Scan Type
+             * @default AUDIT
+             * @enum {string}
+             */
+            scan_type: "AUDIT" | "SUGGEST" | "REMEDIATE";
+            /** Reasoning Llm Config Id */
+            reasoning_llm_config_id?: string | null;
+            /** Utility Llm Config Id */
+            utility_llm_config_id?: string | null;
         };
         /** BudgetAmountsRead */
         BudgetAmountsRead: {
@@ -4322,6 +4739,107 @@ export interface components {
              */
             note?: string | null;
         };
+        /** CandidateCreate */
+        CandidateCreate: {
+            /** Finding Id */
+            finding_id: number;
+            /**
+             * Predicate Kind
+             * @enum {string}
+             */
+            predicate_kind: "ast" | "taint" | "dependency_advisory" | "secret_pattern" | "semantic_runtime";
+            /** Bounded */
+            bounded: boolean;
+            /**
+             * Uses Project Specific Names
+             * @default false
+             */
+            uses_project_specific_names: boolean;
+            /**
+             * Requires Hidden Runtime State
+             * @default false
+             */
+            requires_hidden_runtime_state: boolean;
+            /** Proposed Rule */
+            proposed_rule?: {
+                [key: string]: unknown;
+            } | null;
+            fixtures?: components["schemas"]["RuleFixturePack"] | null;
+        };
+        /** CandidatePage */
+        CandidatePage: {
+            /** Items */
+            items: components["schemas"]["CandidateRead"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /** CandidateRead */
+        CandidateRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Source Finding Id */
+            source_finding_id: number | null;
+            /**
+             * Registry Kind
+             * @enum {string}
+             */
+            registry_kind: "semgrep" | "gitleaks" | "osv" | "ai_dataflow";
+            /**
+             * Predicate Kind
+             * @enum {string}
+             */
+            predicate_kind: "ast" | "taint" | "dependency_advisory" | "secret_pattern" | "semantic_runtime";
+            /** Static Representable */
+            static_representable: boolean;
+            /** Non Representable Reason */
+            non_representable_reason: string | null;
+            /** Stable Identity */
+            stable_identity: string;
+            /** Status */
+            status: string;
+            /** Severity */
+            severity: string;
+            /** Cwe */
+            cwe: string | null;
+            /** Normalized Evidence */
+            normalized_evidence: {
+                [key: string]: unknown;
+            };
+            /** Creator User Id */
+            creator_user_id: number | null;
+            /** Reviewer User Id */
+            reviewer_user_id: number | null;
+            /** Promoter User Id */
+            promoter_user_id: number | null;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Promoted At */
+            promoted_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            latest_version?: components["schemas"]["SignedVersionRead"] | null;
+            active_deployment?: components["schemas"]["DeploymentRead"] | null;
+        };
         /** ChatMessageResponse */
         ChatMessageResponse: {
             /** Id */
@@ -4376,6 +4894,50 @@ export interface components {
             frameworks: string[] | null;
             /** Created At */
             created_at: string;
+        };
+        /** CiPolicyRead */
+        CiPolicyRead: {
+            /**
+             * Scan Id
+             * Format: uuid
+             */
+            scan_id: string;
+            /** Status */
+            status: string;
+            /** Terminal */
+            terminal: boolean;
+            /** Policy Evaluation Id */
+            policy_evaluation_id?: string | null;
+            /** Policy Version Id */
+            policy_version_id?: string | null;
+            /** Outcome */
+            outcome?: ("pass" | "fail") | null;
+            /** Coverage Complete */
+            coverage_complete?: boolean | null;
+            /** Report Url */
+            report_url?: string | null;
+        };
+        /** CiSubmissionRead */
+        CiSubmissionRead: {
+            /**
+             * Scan Id
+             * Format: uuid
+             */
+            scan_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "github" | "gitlab" | "azure_devops" | "bitbucket";
+            /** Commit Sha */
+            commit_sha: string;
+            /** Ref */
+            ref: string;
         };
         /** ConnectorCreate */
         ConnectorCreate: {
@@ -4557,6 +5119,76 @@ export interface components {
             ssl: boolean;
             /** Password */
             password: string;
+        };
+        /** DeliveryAuditRead */
+        DeliveryAuditRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Outbox Id
+             * Format: uuid
+             */
+            outbox_id: string;
+            /**
+             * Principal Id
+             * Format: uuid
+             */
+            principal_id: string;
+            /** Attempt */
+            attempt: number;
+            /** Outcome */
+            outcome: string;
+            /** Http Status */
+            http_status: number | null;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Response Excerpt Redacted */
+            response_excerpt_redacted: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** DeploymentRead */
+        DeploymentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Prior Version Id */
+            prior_version_id: string | null;
+            /** State */
+            state: string;
+            /** Shadow Started At */
+            shadow_started_at: string | null;
+            /** Review Due At */
+            review_due_at: string | null;
+            /** Promoted At */
+            promoted_at: string | null;
+            /** Ended At */
+            ended_at: string | null;
+            /**
+             * Eligible Files
+             * @default 0
+             */
+            eligible_files: number;
+            /**
+             * Unexpected Matches
+             * @default 0
+             */
+            unexpected_matches: number;
         };
         /** DomainChallengeRead */
         DomainChallengeRead: {
@@ -5014,6 +5646,39 @@ export interface components {
             /** Items */
             items: components["schemas"]["FindingTrendBucketResponse"][];
         };
+        /** FindingTicketRead */
+        FindingTicketRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Principal Id
+             * Format: uuid
+             */
+            principal_id: string;
+            /** Canonical Root Id */
+            canonical_root_id: string;
+            /** External Key */
+            external_key: string;
+            /** External Url */
+            external_url: string | null;
+            /** Status */
+            status: string;
+            /** Waiver Expires At */
+            waiver_expires_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** FindingTrendBucketResponse */
         FindingTrendBucketResponse: {
             /**
@@ -5166,6 +5831,78 @@ export interface components {
         GitRepoPreviewRequest: {
             /** Repo Url */
             repo_url: string;
+        };
+        /** GithubSarifRequest */
+        GithubSarifRequest: {
+            /**
+             * Scan Id
+             * Format: uuid
+             */
+            scan_id: string;
+            /** Commit Sha */
+            commit_sha: string;
+            /** Ref */
+            ref: string;
+        };
+        /** GithubSourceRequest */
+        GithubSourceRequest: {
+            /** Commit Sha */
+            commit_sha: string;
+        };
+        /** GithubWebhookReceiptRead */
+        GithubWebhookReceiptRead: {
+            /**
+             * Receipt Id
+             * Format: uuid
+             */
+            receipt_id: string;
+            /** Duplicate */
+            duplicate: boolean;
+            /** Event Type */
+            event_type: string;
+        };
+        /** GrantCreate */
+        GrantCreate: {
+            /**
+             * Feature
+             * @enum {string}
+             */
+            feature: "repository_contents_read" | "security_events_write" | "webhook_metadata_read" | "ticket_sync" | "siem_emit";
+            /** Scope */
+            scope: {
+                [key: string]: unknown;
+            };
+        };
+        /** GrantRead */
+        GrantRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Principal Id
+             * Format: uuid
+             */
+            principal_id: string;
+            /**
+             * Feature
+             * @enum {string}
+             */
+            feature: "repository_contents_read" | "security_events_write" | "webhook_metadata_read" | "ticket_sync" | "siem_emit";
+            /** Scope */
+            scope: {
+                [key: string]: unknown;
+            };
+            /** Scope Digest */
+            scope_digest: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -5602,6 +6339,43 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** OutboxRead */
+        OutboxRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Principal Id
+             * Format: uuid
+             */
+            principal_id: string;
+            /** Event Type */
+            event_type: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** State */
+            state: string;
+            /** Attempts */
+            attempts: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
+            /** Delivered At */
+            delivered_at: string | null;
+            /** Last Error Code */
+            last_error_code: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** OverallRiskScoreResponse */
         OverallRiskScoreResponse: {
             /**
@@ -5658,6 +6432,14 @@ export interface components {
              * @constant
              */
             separation_of_duties_mode: "off";
+        };
+        /** PolicyEventRequest */
+        PolicyEventRequest: {
+            /**
+             * Scan Id
+             * Format: uuid
+             */
+            scan_id: string;
         };
         /** PreferencesBody */
         PreferencesBody: {
@@ -5743,6 +6525,64 @@ export interface components {
              * @default false
              */
             has_critical_secret: boolean;
+        };
+        /** PrincipalCreate */
+        PrincipalCreate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "github_app" | "jira_cloud" | "siem_webhook";
+            /** Display Name */
+            display_name: string;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Secret Values */
+            secret_values: {
+                [key: string]: string;
+            };
+        };
+        /** PrincipalRead */
+        PrincipalRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "github_app" | "jira_cloud" | "siem_webhook";
+            /** Display Name */
+            display_name: string;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Enabled */
+            enabled: boolean;
+            /** Secret Fingerprint */
+            secret_fingerprint: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** ProjectHistoryItem */
         ProjectHistoryItem: {
@@ -6320,6 +7160,23 @@ export interface components {
              */
             llm_config_id: string;
         };
+        /** ReviewDecision */
+        ReviewDecision: {
+            /** Approved */
+            approved: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** ReviewRequiredRequest */
+        ReviewRequiredRequest: {
+            /** Reason */
+            reason: string;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "tool_incompatibility" | "sustained_quality_breach";
+        };
         /** RevocationResult */
         RevocationResult: {
             /** Revoked */
@@ -6329,6 +7186,28 @@ export interface components {
         RevokeFindingWaiverRequest: {
             /** Reason */
             reason: string;
+        };
+        /** RuleFixture */
+        RuleFixture: {
+            /** Name */
+            name: string;
+            /** Language */
+            language: string;
+            /** Content */
+            content: string;
+        };
+        /** RuleFixturePack */
+        RuleFixturePack: {
+            /** Vulnerable */
+            vulnerable: components["schemas"]["RuleFixture"][];
+            /** Fixed */
+            fixed: components["schemas"]["RuleFixture"][];
+            /** Negative */
+            negative: components["schemas"]["RuleFixture"][];
+            /** Performance */
+            performance: components["schemas"]["RuleFixture"][];
+            /** Churn */
+            churn: components["schemas"]["RuleFixture"][];
         };
         /** RuleRead */
         RuleRead: {
@@ -7024,6 +7903,31 @@ export interface components {
              */
             INFORMATIONAL: number;
         };
+        /** SignedVersionRead */
+        SignedVersionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Payload Sha256 */
+            payload_sha256: string;
+            /** Signature Algorithm */
+            signature_algorithm: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /** Quality Metrics */
+            quality_metrics: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** SmtpProfilesResponse */
         SmtpProfilesResponse: {
             /** Active Id */
@@ -7295,6 +8199,28 @@ export interface components {
             session_concurrency_limit?: number | null;
             /** Session Concurrency Mode */
             session_concurrency_mode?: string | null;
+        };
+        /** TicketSyncRequest */
+        TicketSyncRequest: {
+            /** Canonical Root Id */
+            canonical_root_id: string;
+            /** Title */
+            title: string;
+            /** Severity */
+            severity: string;
+            /** Status */
+            status: string;
+            /** Waiver Expires At */
+            waiver_expires_at?: string | null;
+            /** Reason */
+            reason: string;
+            /** Authorized View */
+            authorized_view: string;
+        };
+        /** TransitionRequest */
+        TransitionRequest: {
+            /** Reason */
+            reason: string;
         };
         /** UpdateSmtpProfileRequest */
         UpdateSmtpProfileRequest: {
@@ -8299,6 +9225,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
         /** VulnerabilityFindingResponse */
         VulnerabilityFindingResponse: {
@@ -12209,6 +13139,550 @@ export interface operations {
             };
         };
     };
+    list_principals_api_v1_admin_integrations_principals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrincipalRead"][];
+                };
+            };
+        };
+    };
+    create_principal_api_v1_admin_integrations_principals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrincipalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrincipalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_principal_api_v1_admin_integrations_principals__principal_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_grants_api_v1_admin_integrations_principals__principal_id__grants_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_grant_api_v1_admin_integrations_principals__principal_id__grants_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GrantCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_grant_api_v1_admin_integrations_principals__principal_id__grants__grant_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_policy_event_api_v1_admin_integrations_principals__principal_id__policy_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_ticket_event_api_v1_admin_integrations_principals__principal_id__ticket_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deliveries_api_v1_admin_integrations_deliveries_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_delivery_api_v1_admin_integrations_deliveries__outbox_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                outbox_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboxRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_delivery_audit_api_v1_admin_integrations_delivery_audit_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryAuditRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tickets_api_v1_admin_integrations_tickets_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingTicketRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_github_source_api_v1_admin_integrations_principals__principal_id__github_source_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GithubSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_github_sarif_api_v1_admin_integrations_principals__principal_id__github_sarif_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GithubSarifRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_ci_archive_api_v1_integrations_ci_submissions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_submit_ci_archive_api_v1_integrations_ci_submissions_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiSubmissionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    persisted_ci_policy_api_v1_integrations_ci_scans__scan_id__policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CiPolicyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    receive_github_webhook_api_v1_integrations_webhooks_github__tenant_id___principal_id__post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Hub-Signature-256": string;
+                "X-GitHub-Delivery": string;
+                "X-GitHub-Event": string;
+            };
+            path: {
+                tenant_id: string;
+                principal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GithubWebhookReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_admin_findings_api_v1_admin_findings_get: {
         parameters: {
             query?: {
@@ -12585,6 +14059,300 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_candidates_api_v1_admin_rule_sources_foundry_candidates_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidatePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_candidate_api_v1_admin_rule_sources_foundry_candidates_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidateCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_shadow_api_v1_admin_rule_sources_foundry_candidates__candidate_id__shadow_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__promote_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_candidate_api_v1_admin_rule_sources_foundry_candidates__candidate_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_review_required_api_v1_admin_rule_sources_foundry_candidates__candidate_id__review_required_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewRequiredRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    expire_candidates_api_v1_admin_rule_sources_foundry_expire_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
                 };
             };
         };

@@ -159,9 +159,7 @@ class PublicScannerReportDownloadIntegrationTests(unittest.IsolatedAsyncioTestCa
             await ScanRepository(db).delete_project(self.project_id)
             await db.execute(
                 delete(RoleAssignment).where(
-                    RoleAssignment.user_id.in_(
-                        [self.user_id, self.attacker_user_id]
-                    )
+                    RoleAssignment.user_id.in_([self.user_id, self.attacker_user_id])
                 )
             )
             await db.execute(delete(User).where(User.id == self.user_id))

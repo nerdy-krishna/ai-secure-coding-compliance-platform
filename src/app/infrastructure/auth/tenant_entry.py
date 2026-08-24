@@ -27,7 +27,9 @@ class TenantEntryClaims(TypedDict):
 
 def _secret() -> str:
     value = settings.SECRET_KEY
-    return value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
+    return (
+        value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
+    )
 
 
 def _serializer() -> URLSafeTimedSerializer:

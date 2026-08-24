@@ -28,9 +28,7 @@ class TenantSsoAdministrationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             "http://127.0.0.1:8000",
         ).rstrip("/")
         async with AsyncSessionLocal() as db:
-            own_tenant = Tenant(
-                slug=f"sso-own-{suffix}", display_name="SSO Own Tenant"
-            )
+            own_tenant = Tenant(slug=f"sso-own-{suffix}", display_name="SSO Own Tenant")
             foreign_tenant = Tenant(
                 slug=f"sso-foreign-{suffix}", display_name="SSO Foreign Tenant"
             )

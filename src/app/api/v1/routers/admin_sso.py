@@ -444,9 +444,7 @@ async def request_provider_deletion(
             status_code=409,
             detail="A distinct-actor request is only used in critical mode.",
         )
-    fingerprint = _provider_fingerprint(
-        tenant_id=tenant_id, provider_id=provider_id
-    )
+    fingerprint = _provider_fingerprint(tenant_id=tenant_id, provider_id=provider_id)
     try:
         action = await authz.create_action_request(
             tenant_id=tenant_id,
@@ -504,9 +502,7 @@ async def delete_provider(
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
     authz = AuthorizationRepository(db)
-    fingerprint = _provider_fingerprint(
-        tenant_id=tenant_id, provider_id=provider_id
-    )
+    fingerprint = _provider_fingerprint(tenant_id=tenant_id, provider_id=provider_id)
     requires_approval = (
         await authz.separation_of_duties_mode(tenant_id=tenant_id) == "critical"
     )

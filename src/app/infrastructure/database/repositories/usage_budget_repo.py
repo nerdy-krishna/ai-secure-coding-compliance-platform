@@ -201,7 +201,9 @@ class UsageBudgetRepository:
             rag_id = context.rag_job_id or operation_id
             found = (
                 await self.db.execute(
-                    select(db_models.User.tenant_id, db_models.RAGPreprocessingJob.user_id)
+                    select(
+                        db_models.User.tenant_id, db_models.RAGPreprocessingJob.user_id
+                    )
                     .join(
                         db_models.User,
                         db_models.User.id == db_models.RAGPreprocessingJob.user_id,
@@ -219,7 +221,9 @@ class UsageBudgetRepository:
         actor_user_id = context.actor_user_id or owner_user_id
         if actor_user_id is not None:
             actor_tenant = await self.db.scalar(
-                select(db_models.User.tenant_id).where(db_models.User.id == actor_user_id)
+                select(db_models.User.tenant_id).where(
+                    db_models.User.id == actor_user_id
+                )
             )
             if actor_tenant != tenant_id:
                 raise ValueError("usage actor is outside the operation tenant")
@@ -413,8 +417,8 @@ class UsageBudgetRepository:
         avoiding unrelated tenant/user provisioning side effects.
         """
         logical_policy_id = uuid.UUID(
-            hashlib.md5(  # noqa: S324 - deterministic identifier, not security
-                f"{tenant_id}:default-scan-usd".encode()
+            hashlib.md5(
+                f"{tenant_id}:default-scan-usd".encode(), usedforsecurity=False
             ).hexdigest()
         )
         await self.db.execute(
@@ -432,9 +436,7 @@ class UsageBudgetRepository:
                 reason="System default preserving the legacy per-scan estimate ceiling",
                 created_by_user_id=created_by_user_id,
             )
-            .on_conflict_do_nothing(
-                index_elements=["logical_policy_id", "version"]
-            )
+            .on_conflict_do_nothing(index_elements=["logical_policy_id", "version"])
         )
         policy = await self.db.scalar(
             select(db_models.UsageBudgetPolicy).where(
@@ -528,9 +530,11 @@ class UsageBudgetRepository:
         group_id = values["target_group_id"]
         user_id = values["target_user_id"]
         tenant_id = values["tenant_id"]
-        if (scope == "tenant" and (group_id is not None or user_id is not None)) or (
-            scope == "group" and (group_id is None or user_id is not None)
-        ) or (scope == "user" and (user_id is None or group_id is not None)):
+        if (
+            (scope == "tenant" and (group_id is not None or user_id is not None))
+            or (scope == "group" and (group_id is None or user_id is not None))
+            or (scope == "user" and (user_id is None or group_id is not None))
+        ):
             raise ValueError("budget policy scope target is inconsistent")
         if scope == "group":
             found = await self.db.scalar(
@@ -558,7 +562,9 @@ class UsageBudgetRepository:
         if values["unknown_price_action"] == "token_only":
             token_caps = caps[:5]
             if not any(value is not None for value in token_caps):
-                raise ValueError("token-only unknown pricing requires a finite token cap")
+                raise ValueError(
+                    "token-only unknown pricing requires a finite token cap"
+                )
 
     async def reserve(
         self, request: BudgetReservationRequest, *, commit: bool = True
@@ -681,7 +687,9 @@ class UsageBudgetRepository:
         increments: dict[uuid.UUID, BudgetAmounts] = {}
         for policy in policies:
             counter = counter_by_policy[policy.id]
-            overrides = await self._active_override_allowance(policy.id, counter.window_key, now)
+            overrides = await self._active_override_allowance(
+                policy.id, counter.window_key, now
+            )
             parent_allocation = parent_allocations.get(counter.id)
             remaining_parent = parent_remaining.get(counter.id)
             increment_values: dict[str, int | Decimal] = {}
@@ -693,9 +701,7 @@ class UsageBudgetRepository:
                     and parent_allocation is not None
                     and remaining_parent is not None
                 ):
-                    increment = max(
-                        requested - getattr(remaining_parent, dimension), 0
-                    )
+                    increment = max(requested - getattr(remaining_parent, dimension), 0)
                 increment_values[dimension] = increment
                 cap = getattr(policy, f"cap_{dimension}")
                 if cap is None:
@@ -809,24 +815,36 @@ class UsageBudgetRepository:
             ).all()
         )
         child_ids = [row.id for row in children]
-        child_allocations = list(
-            (
-                await self.db.scalars(
-                    select(db_models.UsageBudgetAllocation).where(
-                        db_models.UsageBudgetAllocation.reservation_id.in_(child_ids)
+        child_allocations = (
+            list(
+                (
+                    await self.db.scalars(
+                        select(db_models.UsageBudgetAllocation).where(
+                            db_models.UsageBudgetAllocation.reservation_id.in_(
+                                child_ids
+                            )
+                        )
                     )
-                )
-            ).all()
-        ) if child_ids else []
-        settlements = list(
-            (
-                await self.db.scalars(
-                    select(db_models.UsageBudgetSettlement).where(
-                        db_models.UsageBudgetSettlement.reservation_id.in_(child_ids)
+                ).all()
+            )
+            if child_ids
+            else []
+        )
+        settlements = (
+            list(
+                (
+                    await self.db.scalars(
+                        select(db_models.UsageBudgetSettlement).where(
+                            db_models.UsageBudgetSettlement.reservation_id.in_(
+                                child_ids
+                            )
+                        )
                     )
-                )
-            ).all()
-        ) if child_ids else []
+                ).all()
+            )
+            if child_ids
+            else []
+        )
         child_by_id = {row.id: row for row in children}
         settlement_by_reservation = {row.reservation_id: row for row in settlements}
         consumed: dict[uuid.UUID, dict[str, int | Decimal]] = {}
@@ -862,7 +880,9 @@ class UsageBudgetRepository:
     ) -> BudgetAmounts:
         columns = [
             sa.func.coalesce(
-                sa.func.sum(getattr(db_models.UsageBudgetOverride, f"allowance_{name}")),
+                sa.func.sum(
+                    getattr(db_models.UsageBudgetOverride, f"allowance_{name}")
+                ),
                 0,
             ).label(name)
             for name in DIMENSIONS
@@ -928,10 +948,8 @@ class UsageBudgetRepository:
         if reservation.state != "held":
             replay = await self.db.scalar(
                 select(db_models.UsageBudgetSettlement).where(
-                    db_models.UsageBudgetSettlement.usage_event_id
-                    == usage_event_id,
-                    db_models.UsageBudgetSettlement.reservation_id
-                    == reservation_id,
+                    db_models.UsageBudgetSettlement.usage_event_id == usage_event_id,
+                    db_models.UsageBudgetSettlement.reservation_id == reservation_id,
                 )
             )
             if replay is not None:
@@ -960,8 +978,7 @@ class UsageBudgetRepository:
             (
                 await self.db.scalars(
                     select(db_models.UsageBudgetAllocation).where(
-                        db_models.UsageBudgetAllocation.reservation_id
-                        == reservation_id
+                        db_models.UsageBudgetAllocation.reservation_id == reservation_id
                     )
                 )
             ).all()
@@ -1090,8 +1107,7 @@ class UsageBudgetRepository:
             (
                 await self.db.scalars(
                     select(db_models.UsageBudgetAllocation).where(
-                        db_models.UsageBudgetAllocation.reservation_id
-                        == reservation.id
+                        db_models.UsageBudgetAllocation.reservation_id == reservation.id
                     )
                 )
             ).all()
@@ -1112,8 +1128,16 @@ class UsageBudgetRepository:
             allocation = by_counter[counter.id]
             for dimension in DIMENSIONS:
                 held = getattr(allocation, f"held_{dimension}")
-                setattr(counter, f"held_{dimension}", getattr(counter, f"held_{dimension}") - held)
-                setattr(counter, f"spent_{dimension}", getattr(counter, f"spent_{dimension}") + held)
+                setattr(
+                    counter,
+                    f"held_{dimension}",
+                    getattr(counter, f"held_{dimension}") - held,
+                )
+                setattr(
+                    counter,
+                    f"spent_{dimension}",
+                    getattr(counter, f"spent_{dimension}") + held,
+                )
         reservation.state = "accounting_unknown"
         reservation.release_reason = reason[:100]
         reservation.finalized_at = datetime.now(timezone.utc)
@@ -1131,8 +1155,7 @@ class UsageBudgetRepository:
             (
                 await self.db.scalars(
                     select(db_models.UsageBudgetAllocation).where(
-                        db_models.UsageBudgetAllocation.reservation_id
-                        == reservation.id
+                        db_models.UsageBudgetAllocation.reservation_id == reservation.id
                     )
                 )
             ).all()
@@ -1197,9 +1220,7 @@ class UsageBudgetRepository:
                 current = getattr(counter, f"held_{dimension}")
                 release_amount = getattr(allocation, f"held_{dimension}")
                 if has_children:
-                    release_amount = getattr(
-                        parent_remaining[counter.id], dimension
-                    )
+                    release_amount = getattr(parent_remaining[counter.id], dimension)
                 setattr(
                     counter,
                     f"held_{dimension}",
@@ -1259,7 +1280,9 @@ class UsageBudgetRepository:
         commit: bool = True,
     ) -> int:
         attempt_id = await self.db.scalar(
-            select(db_models.Scan.current_attempt_id).where(db_models.Scan.id == scan_id)
+            select(db_models.Scan.current_attempt_id).where(
+                db_models.Scan.id == scan_id
+            )
         )
         if attempt_id is None:
             return 0
@@ -1479,8 +1502,7 @@ class UsageBudgetRepository:
                 await self.db.scalars(
                     select(db_models.UsageBudgetNotificationOutbox)
                     .where(
-                        db_models.UsageBudgetNotificationOutbox.tenant_id
-                        == tenant_id,
+                        db_models.UsageBudgetNotificationOutbox.tenant_id == tenant_id,
                         db_models.UsageBudgetNotificationOutbox.state == "pending",
                     )
                     .order_by(db_models.UsageBudgetNotificationOutbox.created_at)
@@ -1504,9 +1526,9 @@ class UsageBudgetRepository:
         return list(
             (
                 await self.db.scalars(
-                    query.order_by(db_models.UsageBudgetCounter.window_start.desc()).limit(
-                        max(1, min(limit, 1000))
-                    )
+                    query.order_by(
+                        db_models.UsageBudgetCounter.window_start.desc()
+                    ).limit(max(1, min(limit, 1000)))
                 )
             ).all()
         )
@@ -1526,9 +1548,9 @@ class UsageBudgetRepository:
         return list(
             (
                 await self.db.scalars(
-                    query.order_by(db_models.UsageBudgetReservation.created_at.desc()).limit(
-                        max(1, min(limit, 1000))
-                    )
+                    query.order_by(
+                        db_models.UsageBudgetReservation.created_at.desc()
+                    ).limit(max(1, min(limit, 1000)))
                 )
             ).all()
         )

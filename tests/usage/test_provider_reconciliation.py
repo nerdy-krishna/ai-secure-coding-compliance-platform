@@ -90,14 +90,18 @@ class ProviderReconciliationClassificationTests(unittest.TestCase):
         self.assertEqual("price_catalog_mismatch", price.classification)
 
     def test_token_category_mismatch_precedes_price_mismatch(self):
-        result = self.compare([usage()], [usage(cache_read_tokens=0, cost_micro_usd=3000)])
+        result = self.compare(
+            [usage()], [usage(cache_read_tokens=0, cost_micro_usd=3000)]
+        )
         self.assertEqual("token_category_mismatch", result.classification)
 
 
 class ProviderPaginationTests(unittest.IsolatedAsyncioTestCase):
     async def test_openai_fixture_combines_usage_and_cost_endpoints(self):
         def handler(request: httpx.Request) -> httpx.Response:
-            self.assertEqual("Bearer read-only-admin-key", request.headers["Authorization"])
+            self.assertEqual(
+                "Bearer read-only-admin-key", request.headers["Authorization"]
+            )
             if request.url.path.endswith("/usage/completions"):
                 payload = {
                     "data": [
@@ -173,7 +177,9 @@ class ProviderPaginationTests(unittest.IsolatedAsyncioTestCase):
                 ProviderPage(rows=(), next_cursor="next"),
             ]
         )
-        with self.assertRaisesRegex(ProviderBillingUnavailable, "pagination_incomplete"):
+        with self.assertRaisesRegex(
+            ProviderBillingUnavailable, "pagination_incomplete"
+        ):
             await fetch_all_pages(client, window_start=START, window_end=END)
 
 
@@ -196,7 +202,9 @@ class FixtureRepository:
             tenant_id=uuid.uuid4(),
             provider="openai",
             provider_project_ids=[],
-            credentials_encrypted=encrypt_credentials({"api_key": "fixture-read-only-key"}),
+            credentials_encrypted=encrypt_credentials(
+                {"api_key": "fixture-read-only-key"}
+            ),
             enabled=True,
             absolute_tolerance_micro_usd=10,
             percentage_tolerance=Decimal("1"),

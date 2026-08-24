@@ -118,7 +118,9 @@ class ScanOutboxRepository:
         if attempt_id is not None:
             prepared.setdefault("attempt_id", str(attempt_id))
         if str(prepared.get("attempt_id") or "") != str(attempt_id or ""):
-            raise RuntimeError("handoff attempt does not match the current scan attempt")
+            raise RuntimeError(
+                "handoff attempt does not match the current scan attempt"
+            )
         inject_trace_context(prepared)
         inserted_id = (
             await self.db.execute(

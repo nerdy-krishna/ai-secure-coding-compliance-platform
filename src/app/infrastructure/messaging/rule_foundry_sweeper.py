@@ -35,10 +35,11 @@ async def apply_due_lifecycle_transitions(
     expired = 0
     review_required = 0
     for candidate in candidates:
-        if (
-            candidate.expires_at <= now
-            and candidate.status in {"pending_review", "approved", "rejected"}
-        ):
+        if candidate.expires_at <= now and candidate.status in {
+            "pending_review",
+            "approved",
+            "rejected",
+        }:
             candidate.status = "expired"
             await repo.add_event(
                 candidate=candidate,
@@ -135,9 +136,7 @@ async def run_rule_foundry_sweeper(stop_event: asyncio.Event) -> None:
         except Exception:
             logger.error("rule_foundry_sweeper.tick_failed", exc_info=True)
         try:
-            await asyncio.wait_for(
-                stop_event.wait(), timeout=SWEEP_INTERVAL_SECONDS
-            )
+            await asyncio.wait_for(stop_event.wait(), timeout=SWEEP_INTERVAL_SECONDS)
         except asyncio.TimeoutError:
             continue
     logger.info("rule_foundry_sweeper.stopped")

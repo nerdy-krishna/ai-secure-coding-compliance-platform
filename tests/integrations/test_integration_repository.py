@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, Mock
 
 from sqlalchemy.dialects import postgresql
 
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 
 
 class _ScalarRows:
@@ -51,7 +53,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("integration_grants.scope @>", lookup_sql)
         self.assertIn("FOR SHARE", lookup_sql)
 
-    async def test_single_grant_revoke_is_tenant_scoped_and_terminalizes_only_feature(self) -> None:
+    async def test_single_grant_revoke_is_tenant_scoped_and_terminalizes_only_feature(
+        self,
+    ) -> None:
         now = datetime.now(timezone.utc)
         tenant_id = uuid.uuid4()
         principal_id = uuid.uuid4()
@@ -94,7 +98,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         audit = db.add.call_args.args[0]
         self.assertEqual(audit.error_code, "grant_revoked")
 
-    async def test_single_grant_revoke_is_idempotent_and_cross_tenant_safe(self) -> None:
+    async def test_single_grant_revoke_is_idempotent_and_cross_tenant_safe(
+        self,
+    ) -> None:
         revoked = SimpleNamespace(
             feature="siem_emit",
             revoked_at=datetime.now(timezone.utc),
@@ -125,7 +131,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         db.execute.assert_not_awaited()
         db.flush.assert_not_awaited()
 
-    async def test_grant_revoked_delivery_cannot_requeue_until_feature_is_regranted(self) -> None:
+    async def test_grant_revoked_delivery_cannot_requeue_until_feature_is_regranted(
+        self,
+    ) -> None:
         tenant_id = uuid.uuid4()
         principal_id = uuid.uuid4()
         delivery = SimpleNamespace(
@@ -156,7 +164,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         )
         db.flush.assert_not_awaited()
 
-    async def test_expired_delivering_lease_is_reclaimed_after_worker_crash(self) -> None:
+    async def test_expired_delivering_lease_is_reclaimed_after_worker_crash(
+        self,
+    ) -> None:
         now = datetime.now(timezone.utc)
         crashed = SimpleNamespace(
             state="delivering",
@@ -181,7 +191,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("integration_outbox.state = :state_", reclaim_sql)
         self.assertIn("integration_outbox.lease_expires_at <=", reclaim_sql)
 
-    async def test_expired_lease_at_attempt_limit_records_dead_letter_audit(self) -> None:
+    async def test_expired_lease_at_attempt_limit_records_dead_letter_audit(
+        self,
+    ) -> None:
         now = datetime.now(timezone.utc)
         expired = SimpleNamespace(
             id=uuid.uuid4(),
@@ -203,7 +215,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(audit.outcome, "dead_letter")
         self.assertEqual(audit.error_code, "lease_expired_max_attempts")
 
-    async def test_canonical_ticket_conflict_returns_existing_without_duplicate_history(self) -> None:
+    async def test_canonical_ticket_conflict_returns_existing_without_duplicate_history(
+        self,
+    ) -> None:
         existing = SimpleNamespace(id=uuid.uuid4(), external_key="SEC-42")
         db = SimpleNamespace(
             execute=AsyncMock(return_value=_ExecuteRows(scalar=None)),
@@ -225,7 +239,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(returned, existing)
         db.add.assert_not_called()
 
-    async def test_expired_waiver_enqueues_idempotent_reopen_for_existing_principal(self) -> None:
+    async def test_expired_waiver_enqueues_idempotent_reopen_for_existing_principal(
+        self,
+    ) -> None:
         now = datetime.now(timezone.utc)
         tenant_id = uuid.uuid4()
         principal_id = uuid.uuid4()
@@ -249,7 +265,10 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         db = SimpleNamespace(
             scalars=AsyncMock(return_value=_ScalarRows([waiver])),
             execute=AsyncMock(
-                side_effect=[_ExecuteRows(), _ExecuteRows([(event, waiver, principal, finding)])]
+                side_effect=[
+                    _ExecuteRows(),
+                    _ExecuteRows([(event, waiver, principal, finding)]),
+                ]
             ),
             flush=AsyncMock(),
         )
@@ -264,7 +283,9 @@ class IntegrationRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["status"], "open")
         self.assertEqual(payload["reason"], "waiver_expired")
         self.assertIsNone(payload["waiver_expires_at"])
-        self.assertEqual(repo.enqueue.await_args.kwargs["source_event_key"], "waiver:91")
+        self.assertEqual(
+            repo.enqueue.await_args.kwargs["source_event_key"], "waiver:91"
+        )
         materialization_sql = str(db.execute.await_args_list[1].args[0])
         self.assertIn("NOT (EXISTS", materialization_sql)
         self.assertIn("finding_waiver_events.id ASC", materialization_sql)

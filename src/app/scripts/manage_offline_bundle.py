@@ -26,7 +26,9 @@ from app.infrastructure.signing.public_key_verifier import (
 def _build_signer() -> AwsKmsDigestSigner:
     key_id = os.environ.get("GOVERNANCE_SIGNING_KMS_KEY_ID", "").strip()
     if not key_id:
-        raise RuntimeError("GOVERNANCE_SIGNING_KMS_KEY_ID is required for bundle build.")
+        raise RuntimeError(
+            "GOVERNANCE_SIGNING_KMS_KEY_ID is required for bundle build."
+        )
     return AwsKmsDigestSigner(
         key_id=key_id,
         region=os.environ.get("GOVERNANCE_SIGNING_KMS_REGION", "us-east-1"),

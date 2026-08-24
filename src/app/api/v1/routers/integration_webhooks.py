@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.schemas.integrations import GithubWebhookReceiptRead
 from app.core.services.integration_service import IntegrationService
 from app.infrastructure.database.database import get_db
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 from app.infrastructure.database.tenant_context import (
     apply_session_context,
     principal_scope,
@@ -25,7 +27,9 @@ MAX_WEBHOOK_BYTES = 1024 * 1024
 
 async def _bounded_body(request: Request) -> bytes:
     content_length = request.headers.get("content-length")
-    if content_length and (not content_length.isdigit() or int(content_length) > MAX_WEBHOOK_BYTES):
+    if content_length and (
+        not content_length.isdigit() or int(content_length) > MAX_WEBHOOK_BYTES
+    ):
         raise HTTPException(status_code=413, detail="Webhook payload too large.")
     body = bytearray()
     async for chunk in request.stream():
@@ -71,13 +75,19 @@ async def receive_github_webhook(
             await db.commit()
         except LookupError:
             await db.rollback()
-            raise HTTPException(status_code=404, detail="Webhook endpoint not found.") from None
+            raise HTTPException(
+                status_code=404, detail="Webhook endpoint not found."
+            ) from None
         except PermissionError:
             await db.rollback()
-            raise HTTPException(status_code=403, detail="Webhook feature is disabled.") from None
+            raise HTTPException(
+                status_code=403, detail="Webhook feature is disabled."
+            ) from None
         except (IntegrationContractError, ValueError):
             await db.rollback()
-            raise HTTPException(status_code=401, detail="Webhook authentication failed.") from None
+            raise HTTPException(
+                status_code=401, detail="Webhook authentication failed."
+            ) from None
     return GithubWebhookReceiptRead(
         receipt_id=receipt.id,
         duplicate=not created,

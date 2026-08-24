@@ -51,7 +51,9 @@ class IntegrationCiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provenance.commit_sha, "a" * 40)
         self.assertTrue(provenance.trusted_context)
 
-    async def test_untrusted_submission_is_rejected_before_secret_backed_work(self) -> None:
+    async def test_untrusted_submission_is_rejected_before_secret_backed_work(
+        self,
+    ) -> None:
         service = SimpleNamespace(create_scan_from_archive=AsyncMock())
         with self.assertRaises(HTTPException) as raised:
             await submit_ci_archive(

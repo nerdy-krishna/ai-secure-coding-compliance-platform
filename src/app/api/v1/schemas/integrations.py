@@ -129,7 +129,9 @@ class GithubSourceRequest(BaseModel):
 class GithubSarifRequest(BaseModel):
     scan_id: uuid.UUID
     commit_sha: str = Field(pattern=r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
-    ref: str = Field(pattern=r"^refs/(heads|tags|pull)/[-A-Za-z0-9_./]+$", max_length=255)
+    ref: str = Field(
+        pattern=r"^refs/(heads|tags|pull)/[-A-Za-z0-9_./]+$", max_length=255
+    )
 
 
 class GithubWebhookReceiptRead(BaseModel):

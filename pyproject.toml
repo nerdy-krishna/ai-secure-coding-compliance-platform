@@ -16,13 +16,14 @@ aio-pika = ">=9.5.5,<10.0.0"
 alembic = ">=1.16.1,<2.0.0"
 anthropic = ">=0.96.0,<1.0.0"
 asyncpg = ">=0.30.0,<0.31.0"
-cryptography = "^46.0.7"
+cryptography = ">=50.0.0,<51.0.0"
+defusedxml = ">=0.7.1,<1.0.0"
 email-validator = ">=2.2.0,<3.0.0" # Useful for FastAPI Users
 # Range widened from `<0.116.0` to allow starlette ≥ 0.47.2 (CVE
 # fixes — GHSA-2c2j-9gv5-cj73 / GHSA-7f5h-v6xp-fcq8). FastAPI 0.115
 # pinned starlette `<0.47.0`; 0.116+ relaxes that.
-fastapi = ">=0.115.9,<0.121.0"
-fastapi-mail = ">=1.5.9,<1.6.0"
+fastapi = ">=0.141.1,<0.142.0"
+fastapi-mail = ">=1.6.8,<1.7.0"
 # Bumped 14.x → 15.x for GHSA-5j53-63w8-8625 (the 14.x line pins
 # pyjwt = 2.10.1 and python-multipart = 0.0.20 as exact versions,
 # blocking three more transitive CVE fixes; 15.x relaxes both).
@@ -52,7 +53,7 @@ litellm = "^1.83.0"
 # validation-retry. No extras — the provider SDKs (openai, anthropic,
 # google-genai) are already present via LangChain; we only need the
 # core Agent class + pydantic_ai.models.{openai,anthropic,google} classes.
-pydantic-ai = "^1.86.1"
+pydantic-ai = ">=1.106.0,<2.0.0"
 # Phase I.4 — FastMCP server exposing scan/advisor/remediation tools to
 # external agents (Claude Code, Cursor, other MCP clients). Mounted on
 # the same FastAPI app; shares JWT auth with the REST API via a

@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.infrastructure.database import models as db_models
-from app.infrastructure.database.repositories.integration_repo import IntegrationRepository
+from app.infrastructure.database.repositories.integration_repo import (
+    IntegrationRepository,
+)
 from app.infrastructure.integrations.clients import (
     DeliveryResult,
     JiraCloudClient,
@@ -157,7 +159,9 @@ class IntegrationDeliveryDispatcher:
                     event_id=row.id,
                     waiver_expires_at=None,
                 )
-            return DeliveryResult(True, False, 200, response_excerpt='{"status":"unchanged"}')
+            return DeliveryResult(
+                True, False, 200, response_excerpt='{"status":"unchanged"}'
+            )
         transitioned = await client.transition_issue(
             issue_key=ticket.external_key,
             transition_id=str(entry["transition_id"]),

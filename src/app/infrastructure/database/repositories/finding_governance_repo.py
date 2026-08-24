@@ -153,9 +153,7 @@ class FindingGovernanceRepository:
             unmatched_previous = sorted(
                 previous_groups.get(fingerprint, []), key=self._occurrence_sort_key
             )
-            matched: list[
-                tuple[db_models.Finding, str, db_models.Finding | None]
-            ] = []
+            matched: list[tuple[db_models.Finding, str, db_models.Finding | None]] = []
             unmatched_current: list[db_models.Finding] = []
             for finding in current_occurrences:
                 exact_key = self._occurrence_site_key(finding)
@@ -332,12 +330,14 @@ class FindingGovernanceRepository:
                 "source_snapshot_hash": source.source_snapshot_hash,
             },
             "producer_provenance": {
-                "raw_finding_id": str(source.raw_finding_id)
-                if source.raw_finding_id
-                else None,
-                "canonical_finding_id": str(source.canonical_finding_id)
-                if source.canonical_finding_id
-                else None,
+                "raw_finding_id": (
+                    str(source.raw_finding_id) if source.raw_finding_id else None
+                ),
+                "canonical_finding_id": (
+                    str(source.canonical_finding_id)
+                    if source.canonical_finding_id
+                    else None
+                ),
                 "contributing_raw_finding_ids": [
                     str(value) for value in source.contributing_raw_finding_ids or []
                 ],
@@ -360,7 +360,9 @@ class FindingGovernanceRepository:
     ) -> list[db_models.FindingLineageRecord]:
         """Return the current attempt projection used by results and reports."""
         current_attempt_id = await self.db.scalar(
-            select(db_models.Scan.current_attempt_id).where(db_models.Scan.id == scan_id)
+            select(db_models.Scan.current_attempt_id).where(
+                db_models.Scan.id == scan_id
+            )
         )
         attempt_clause = (
             db_models.FindingLineageRecord.attempt_id == current_attempt_id

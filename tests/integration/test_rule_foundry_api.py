@@ -75,8 +75,12 @@ class RuleFoundryApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await db.flush()
             db.add_all(
                 [
-                    RoleAssignment(user_id=creator.id, tenant_id=tenant_a.id, role_key=DEVELOPER),
-                    RoleAssignment(user_id=auditor.id, tenant_id=tenant_a.id, role_key=AUDITOR),
+                    RoleAssignment(
+                        user_id=creator.id, tenant_id=tenant_a.id, role_key=DEVELOPER
+                    ),
+                    RoleAssignment(
+                        user_id=auditor.id, tenant_id=tenant_a.id, role_key=AUDITOR
+                    ),
                     RoleAssignment(
                         user_id=foreign_auditor.id,
                         tenant_id=tenant_b.id,
@@ -183,7 +187,9 @@ class RuleFoundryApiIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
-    async def test_nonrepresentable_candidate_is_tenant_scoped_and_not_promotable(self) -> None:
+    async def test_nonrepresentable_candidate_is_tenant_scoped_and_not_promotable(
+        self,
+    ) -> None:
         created = await self.client.post(
             "/api/v1/admin/rule-sources/foundry/candidates",
             headers=await self._headers("creator"),

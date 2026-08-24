@@ -108,16 +108,18 @@ class Ed25519FileDigestSigner:
 
     algorithm = "ED25519-SHA256-DIGEST"
 
-    def __init__(
-        self, *, private_key_path: Path, public_key_sha256: str
-    ) -> None:
+    def __init__(self, *, private_key_path: Path, public_key_sha256: str) -> None:
         if not _HEX_64.fullmatch(public_key_sha256):
-            raise ValueError("A lowercase SHA-256 deployment-key fingerprint is required.")
+            raise ValueError(
+                "A lowercase SHA-256 deployment-key fingerprint is required."
+            )
         private_key = serialization.load_pem_private_key(
             _read_key(private_key_path, private=True), password=None
         )
         if not isinstance(private_key, ed25519.Ed25519PrivateKey):
-            raise ValueError("Deployment ledger signing requires an Ed25519 private key.")
+            raise ValueError(
+                "Deployment ledger signing requires an Ed25519 private key."
+            )
         public_key = private_key.public_key()
         if _public_key_fingerprint(public_key) != public_key_sha256:
             raise ValueError("Deployment signing key fingerprint mismatch.")
@@ -129,7 +131,9 @@ class Ed25519FileDigestSigner:
         if len(digest) != hashlib.sha256().digest_size:
             raise ValueError("Expected a SHA-256 digest.")
         return DigestSignature(
-            signature_b64=base64.b64encode(self.private_key.sign(digest)).decode("ascii"),
+            signature_b64=base64.b64encode(self.private_key.sign(digest)).decode(
+                "ascii"
+            ),
             algorithm=self.algorithm,
             key_id=self.key_id,
         )
@@ -155,10 +159,14 @@ class PinnedEd25519PublicKeyDigestVerifier:
 
     def __init__(self, *, public_key_path: Path, public_key_sha256: str) -> None:
         if not _HEX_64.fullmatch(public_key_sha256):
-            raise ValueError("A lowercase SHA-256 deployment-key fingerprint is required.")
+            raise ValueError(
+                "A lowercase SHA-256 deployment-key fingerprint is required."
+            )
         public_key = serialization.load_pem_public_key(_read_key(public_key_path))
         if not isinstance(public_key, ed25519.Ed25519PublicKey):
-            raise ValueError("Deployment ledger verification requires an Ed25519 public key.")
+            raise ValueError(
+                "Deployment ledger verification requires an Ed25519 public key."
+            )
         if _public_key_fingerprint(public_key) != public_key_sha256:
             raise ValueError("Deployment verification key fingerprint mismatch.")
         self.public_key = public_key

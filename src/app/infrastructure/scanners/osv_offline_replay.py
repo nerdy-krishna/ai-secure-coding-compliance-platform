@@ -232,7 +232,7 @@ def advisory_provenance() -> dict[str, Any]:
 def _subprocess_environment(snapshot: OfflineOSVSnapshot) -> dict[str, str]:
     """Provide only non-secret runtime settings; proxy credentials are omitted."""
     return {
-        "HOME": "/tmp",
+        "HOME": tempfile.gettempdir(),
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",

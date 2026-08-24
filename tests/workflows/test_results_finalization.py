@@ -82,9 +82,7 @@ class FinalReportTransactionTests(unittest.IsolatedAsyncioTestCase):
         release_budget.assert_awaited_once_with(
             terminal_session, scan_id, reason="scan_completed"
         )
-        governance_repo.materialize_scan.assert_awaited_once_with(
-            scan_id, commit=False
-        )
+        governance_repo.materialize_scan.assert_awaited_once_with(scan_id, commit=False)
         governance_repo.evaluate_scan_policy.assert_awaited_once_with(
             scan_id, commit=False, idempotent=True
         )

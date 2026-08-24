@@ -139,7 +139,9 @@ class UsageBudgetServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.repo.mark_accounting_unknown.assert_not_awaited()
 
-    async def test_scan_gate_uses_attempt_identity_and_non_request_windows(self) -> None:
+    async def test_scan_gate_uses_attempt_identity_and_non_request_windows(
+        self,
+    ) -> None:
         scan_id = uuid4()
         attempt_id = uuid4()
         reservation_id = uuid4()

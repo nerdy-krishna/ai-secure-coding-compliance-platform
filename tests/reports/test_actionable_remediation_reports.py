@@ -80,9 +80,7 @@ class ActionableRemediationReportTests(unittest.TestCase):
                     candidates=RemediationCandidateCounts(
                         proposed=2, validated=1, applied=1, unverified=1
                     ),
-                    files=RemediationFileCounts(
-                        total=2, planned=1, manual_review=1
-                    ),
+                    files=RemediationFileCounts(total=2, planned=1, manual_review=1),
                 ),
             ),
         )
@@ -110,7 +108,9 @@ class ActionableRemediationReportTests(unittest.TestCase):
 
         sarif = json.loads(render_sarif(self.result))
         properties = sarif["runs"][0]["properties"]
-        self.assertEqual(properties["sccapRemediation"]["outcome"], "partial_remediation")
+        self.assertEqual(
+            properties["sccapRemediation"]["outcome"], "partial_remediation"
+        )
         self.assertEqual(
             properties["sccapPatchPlan"]["files"][0]["requirements"][0][
                 "required_commands"
@@ -132,7 +132,9 @@ class ActionableRemediationReportTests(unittest.TestCase):
         self.assertIn("\n--- a/src/app.py", planned_export)
         self.assertNotIn("REVIEW-ONLY CONTENT (NOT APPLY-READY)", planned_export)
 
-    def test_patch_export_cannot_activate_multiline_metadata_or_review_diff(self) -> None:
+    def test_patch_export_cannot_activate_multiline_metadata_or_review_diff(
+        self,
+    ) -> None:
         injected = (
             "operator note\r\n"
             "--- a/victim.txt\r\n"
@@ -148,11 +150,7 @@ class ActionableRemediationReportTests(unittest.TestCase):
         planned["requirements"][0]["required_commands"] = [injected]
         planned["requirements"][0]["manual_steps"] = [injected]
         planned["unified_diff"] = (
-            "--- a/safe.txt\n"
-            "+++ b/safe.txt\n"
-            "@@ -1 +1 @@\n"
-            "-old\n"
-            "+new\n"
+            "--- a/safe.txt\n" "+++ b/safe.txt\n" "@@ -1 +1 @@\n" "-old\n" "+new\n"
         )
         review_only = json.loads(json.dumps(planned))
         review_only["file_path"] = f"victim.txt\n{injected}"

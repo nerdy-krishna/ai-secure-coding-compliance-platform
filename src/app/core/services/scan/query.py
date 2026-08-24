@@ -1012,9 +1012,7 @@ class ScanQueryService:
                     target_suffix = (
                         "merged"
                         if merged_by_agent.get(agent, 0) > 0
-                        else "dropped"
-                        if dropped_by_agent.get(agent, 0) > 0
-                        else "pass"
+                        else "dropped" if dropped_by_agent.get(agent, 0) > 0 else "pass"
                     )
                     for src, scnt in sast_by_source.items():
                         share = max(

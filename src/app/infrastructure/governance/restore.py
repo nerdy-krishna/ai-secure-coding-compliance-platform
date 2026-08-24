@@ -830,11 +830,14 @@ class RestoreVerifier:
             )
             or 0
         )
+        checkpoint_count_queries = {
+            "checkpoints": text("SELECT count(*) FROM checkpoints"),
+            "checkpoint_blobs": text("SELECT count(*) FROM checkpoint_blobs"),
+            "checkpoint_writes": text("SELECT count(*) FROM checkpoint_writes"),
+        }
         counts = {
-            table: int(
-                (await self.db.scalar(text(f"SELECT count(*) FROM {table}"))) or 0
-            )
-            for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
+            table: int((await self.db.scalar(query)) or 0)
+            for table, query in checkpoint_count_queries.items()
         }
         invalid_payloads = int(
             (

@@ -69,8 +69,7 @@ class FindingGovernanceService:
             select(db_models.FindingPolicyEvaluation)
             .where(
                 db_models.FindingPolicyEvaluation.scan_id == scan_id,
-                db_models.FindingPolicyEvaluation.attempt_id
-                == scan.current_attempt_id,
+                db_models.FindingPolicyEvaluation.attempt_id == scan.current_attempt_id,
             )
             .order_by(db_models.FindingPolicyEvaluation.created_at.desc())
             .limit(1)
@@ -83,8 +82,7 @@ class FindingGovernanceService:
                 await self.repo.db.scalars(
                     select(db_models.FindingWaiver).where(
                         db_models.FindingWaiver.scan_id == scan_id,
-                        db_models.FindingWaiver.expires_at
-                        > datetime.now(timezone.utc),
+                        db_models.FindingWaiver.expires_at > datetime.now(timezone.utc),
                         db_models.FindingWaiver.id.not_in(revoked),
                     )
                 )

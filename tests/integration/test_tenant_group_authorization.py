@@ -93,9 +93,7 @@ class TenantGroupAuthorizationIntegrationTests(unittest.IsolatedAsyncioTestCase)
                 delete(UserGroup).where(UserGroup.tenant_id.in_(self.tenant_ids))
             )
             await db.execute(
-                delete(RoleAssignment).where(
-                    RoleAssignment.user_id.in_(self.user_ids)
-                )
+                delete(RoleAssignment).where(RoleAssignment.user_id.in_(self.user_ids))
             )
             await db.execute(delete(User).where(User.id.in_(self.user_ids)))
             await db.execute(delete(Tenant).where(Tenant.id.in_(self.tenant_ids)))

@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import re
 import tomllib
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Mapping
+
+from defusedxml import ElementTree as ET
 
 from app.shared.lib.patch_planner import PatchValidationCheck
 

@@ -180,9 +180,7 @@ class ScanLifecycleService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="A distinct authorized approver is required.",
                 )
-        elif not (
-            has_self_approval and sod_mode == "off" and scan.user_id == user.id
-        ):
+        elif not (has_self_approval and sod_mode == "off" and scan.user_id == user.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to decide this scan gate.",
@@ -844,9 +842,7 @@ class ScanLifecycleService:
                     commit=False,
                 )
             await self.gates.close_active(scan_id, state="cancelled", commit=False)
-            await release_scan_budget(
-                self.repo.db, scan_id, reason="scan_cancelled"
-            )
+            await release_scan_budget(self.repo.db, scan_id, reason="scan_cancelled")
             attempt = await ScanAttemptRepository(self.repo.db).mark_current_terminal(
                 scan_id, status="cancelled", commit=False
             )
@@ -988,7 +984,9 @@ class ScanLifecycleService:
         )
         finding = await self.repo.get_finding(finding_id)
         if finding is None or finding.scan_id != scan_id:
-            raise HTTPException(status_code=404, detail="Finding not found for this scan.")
+            raise HTTPException(
+                status_code=404, detail="Finding not found for this scan."
+            )
         try:
             fd.validate_transition(
                 finding.disposition or fd.DEFAULT_DISPOSITION,

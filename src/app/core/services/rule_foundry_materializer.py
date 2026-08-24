@@ -19,7 +19,7 @@ async def materialize_gitleaks_rules(
     root = Path(tempfile.mkdtemp(prefix="sccap_foundry_gitleaks_"))
     config = root / "rules.toml"
     try:
-        lines = ["title = \"SCCAP signed tenant Rule Foundry pack\""]
+        lines = ['title = "SCCAP signed tenant Rule Foundry pack"']
         for active in rules:
             rule = active.as_gitleaks_rule()
             lines.extend(

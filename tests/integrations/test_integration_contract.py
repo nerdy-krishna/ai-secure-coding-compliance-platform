@@ -76,7 +76,9 @@ class IntegrationContractTests(unittest.IsolatedAsyncioTestCase):
                 payload={},
             )
 
-    def test_delayed_retry_has_fresh_signature_window_and_stable_event_identity(self) -> None:
+    def test_delayed_retry_has_fresh_signature_window_and_stable_event_identity(
+        self,
+    ) -> None:
         occurred_at = datetime.fromtimestamp(1_787_000_000, timezone.utc)
         first = build_envelope(
             event_id="11111111-1111-4111-8111-111111111111",
@@ -124,14 +126,18 @@ class IntegrationContractTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         serialized = canonical_json_bytes(payload)
-        self.assertEqual(payload, {"finding_id": "opaque", "nested": {"status": "open"}})
+        self.assertEqual(
+            payload, {"finding_id": "opaque", "nested": {"status": "open"}}
+        )
         self.assertNotIn(b"do not emit", serialized)
 
     def test_retry_is_exponential_and_capped(self) -> None:
         self.assertEqual([retry_delay_seconds(i) for i in range(1, 5)], [5, 10, 20, 40])
         self.assertEqual(retry_delay_seconds(100), 3600)
 
-    def test_endpoint_validation_rejects_userinfo_ports_ips_and_non_allowlist(self) -> None:
+    def test_endpoint_validation_rejects_userinfo_ports_ips_and_non_allowlist(
+        self,
+    ) -> None:
         self.assertEqual(
             validate_https_endpoint(
                 "https://events.example.com/v1", allowed_hosts=("events.example.com",)

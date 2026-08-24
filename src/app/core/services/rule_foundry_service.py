@@ -77,7 +77,9 @@ class RuleFoundryService:
         if finding is None:
             raise RuleFoundryNotFoundError("Confirmed finding not found.")
         if finding.disposition != "confirmed":
-            raise RuleFoundryStateError("Only human-confirmed findings may enter the foundry.")
+            raise RuleFoundryStateError(
+                "Only human-confirmed findings may enter the foundry."
+            )
         if (finding.source or "agent").lower() in DETERMINISTIC_SOURCES:
             raise RuleFoundryStateError(
                 "The foundry accepts AI-only findings, not scanner findings."
@@ -106,7 +108,9 @@ class RuleFoundryService:
         )
         evidence = _normalized_evidence(finding, lineage)
         identity_payload = proposed_rule or {
-            "finding": str(finding.canonical_finding_id or finding.raw_finding_id or finding.id),
+            "finding": str(
+                finding.canonical_finding_id or finding.raw_finding_id or finding.id
+            ),
             "reason": decision.reason,
         }
         now = datetime.now(timezone.utc)
@@ -127,7 +131,9 @@ class RuleFoundryService:
             severity=str(finding.severity or "medium").lower(),
             cwe=finding.cwe,
             normalized_evidence=evidence,
-            fixtures=payload.fixtures.model_dump(mode="json") if payload.fixtures else {},
+            fixtures=(
+                payload.fixtures.model_dump(mode="json") if payload.fixtures else {}
+            ),
             creator_user_id=actor_user_id,
             expires_at=candidate_expiry(now),
             created_at=now,
@@ -159,10 +165,14 @@ class RuleFoundryService:
         if candidate.status not in {"pending_review", "review_required", "rolled_back"}:
             raise RuleFoundryStateError("Candidate is not awaiting review.")
         if not candidate.static_representable:
-            raise RuleFoundryStateError("AI/data-flow checks cannot be promoted as static rules.")
+            raise RuleFoundryStateError(
+                "AI/data-flow checks cannot be promoted as static rules."
+            )
         sod_mode = await self.authz_repo.separation_of_duties_mode(tenant_id=tenant_id)
         if sod_mode == "critical" and candidate.creator_user_id == actor_user_id:
-            raise RuleFoundryDeniedError("Critical candidates require a distinct reviewer.")
+            raise RuleFoundryDeniedError(
+                "Critical candidates require a distinct reviewer."
+            )
 
         now = datetime.now(timezone.utc)
         candidate.reviewer_user_id = actor_user_id
@@ -253,7 +263,9 @@ class RuleFoundryService:
         candidate = await self._candidate(tenant_id, candidate_id, lock=True)
         self._expire_if_due(candidate)
         if candidate.status != "approved":
-            raise RuleFoundryStateError("Only an approved signed version may enter shadow.")
+            raise RuleFoundryStateError(
+                "Only an approved signed version may enter shadow."
+            )
         await self._assert_promoter(candidate, tenant_id, actor_user_id)
         active = await self.repo.active_deployment(
             tenant_id=tenant_id, candidate_id=candidate.id, lock=True
@@ -262,7 +274,9 @@ class RuleFoundryService:
         now = datetime.now(timezone.utc)
         if active is not None:
             if active.state != "review_required":
-                raise RuleFoundryStateError("Candidate already has an active deployment.")
+                raise RuleFoundryStateError(
+                    "Candidate already has an active deployment."
+                )
             # The signed prior version remains the operational fallback while
             # vNext is shadowed; one active deployment row keeps the pointer
             # transition serialized and the prior version explicit.
@@ -296,7 +310,10 @@ class RuleFoundryService:
             action="shadow_started",
             actor_user_id=actor_user_id,
             reason=reason,
-            details={"deployment_id": str(deployment.id), "version_id": str(version.id)},
+            details={
+                "deployment_id": str(deployment.id),
+                "version_id": str(version.id),
+            },
         )
         return candidate
 
@@ -314,7 +331,9 @@ class RuleFoundryService:
             tenant_id=tenant_id, candidate_id=candidate.id, lock=True
         )
         if deployment is None or deployment.state != "shadow":
-            raise RuleFoundryStateError("Candidate does not have an active shadow version.")
+            raise RuleFoundryStateError(
+                "Candidate does not have an active shadow version."
+            )
         now = datetime.now(timezone.utc)
         if deployment.review_due_at is not None and deployment.review_due_at <= now:
             deployment.state = "review_required"
@@ -324,9 +343,7 @@ class RuleFoundryService:
             tenant_id=tenant_id, deployment_id=deployment.id
         )
         try:
-            assert_shadow_gate(
-                eligible_files=eligible, unexpected_matches=unexpected
-            )
+            assert_shadow_gate(eligible_files=eligible, unexpected_matches=unexpected)
         except RuleFoundryPolicyError as exc:
             raise RuleFoundryStateError(str(exc)) from exc
         deployment.state = "promoted"
@@ -357,10 +374,14 @@ class RuleFoundryService:
             tenant_id=tenant_id, candidate_id=candidate.id, lock=True
         )
         if active is None or active.state not in {"promoted", "review_required"}:
-            raise RuleFoundryStateError("Candidate has no promoted version to roll back.")
+            raise RuleFoundryStateError(
+                "Candidate has no promoted version to roll back."
+            )
         if active.prior_version_id is None:
             raise RuleFoundryStateError("Candidate has no prior signed version.")
-        prior = await self.repo.db.get(db_models.RuleFoundryVersion, active.prior_version_id)
+        prior = await self.repo.db.get(
+            db_models.RuleFoundryVersion, active.prior_version_id
+        )
         if prior is None or prior.tenant_id != tenant_id:
             raise RuleFoundryStateError("Prior signed version is unavailable.")
         await self._verify_version(prior)
@@ -482,7 +503,9 @@ class RuleFoundryService:
         actor_user_id: int,
     ) -> None:
         if candidate.creator_user_id == actor_user_id:
-            raise RuleFoundryDeniedError("Creators may not promote their own candidates.")
+            raise RuleFoundryDeniedError(
+                "Creators may not promote their own candidates."
+            )
         if (
             await self.authz_repo.separation_of_duties_mode(tenant_id=tenant_id)
             == "critical"
@@ -497,7 +520,9 @@ class RuleFoundryService:
             raise RuleFoundryStateError("Rule Foundry KMS signing is not configured.")
         _encoded, recomputed = canonical_digest(version.canonical_payload)
         if not hmac.compare_digest(recomputed, version.payload_sha256):
-            raise RuleFoundryStateError("Signed rule payload digest does not match its content.")
+            raise RuleFoundryStateError(
+                "Signed rule payload digest does not match its content."
+            )
         valid = await self.signer.verify_sha256(
             bytes.fromhex(version.payload_sha256),
             DigestSignature(
@@ -511,12 +536,15 @@ class RuleFoundryService:
 
     @staticmethod
     def _expire_if_due(candidate: db_models.RuleFoundryCandidate) -> None:
-        if (
-            candidate.status in {"pending_review", "approved", "rejected"}
-            and candidate.expires_at <= datetime.now(timezone.utc)
-        ):
+        if candidate.status in {
+            "pending_review",
+            "approved",
+            "rejected",
+        } and candidate.expires_at <= datetime.now(timezone.utc):
             candidate.status = "expired"
-            raise RuleFoundryStateError("Candidate expired after 30 days without promotion.")
+            raise RuleFoundryStateError(
+                "Candidate expired after 30 days without promotion."
+            )
 
 
 def _validate_registry_payload(registry_kind: str, payload: Mapping[str, Any]) -> None:
@@ -524,8 +552,12 @@ def _validate_registry_payload(registry_kind: str, payload: Mapping[str, Any]) -
         required = ("id", "languages", "message", "severity")
         if any(not payload.get(key) for key in required):
             raise RuleFoundryStateError("Semgrep rule is missing required fields.")
-        if not any(key in payload for key in ("pattern", "patterns", "pattern-either", "mode")):
-            raise RuleFoundryStateError("Semgrep rule requires a bounded pattern or mode.")
+        if not any(
+            key in payload for key in ("pattern", "patterns", "pattern-either", "mode")
+        ):
+            raise RuleFoundryStateError(
+                "Semgrep rule requires a bounded pattern or mode."
+            )
     elif registry_kind == "gitleaks":
         if not payload.get("id") or not payload.get("regex"):
             raise RuleFoundryStateError("Gitleaks rule requires id and regex.")
@@ -533,7 +565,9 @@ def _validate_registry_payload(registry_kind: str, payload: Mapping[str, Any]) -
             raise RuleFoundryStateError("Gitleaks regex exceeds 5,000 characters.")
     elif registry_kind == "osv":
         if not payload.get("id") or not isinstance(payload.get("affected"), list):
-            raise RuleFoundryStateError("OSV advisory requires id and affected entries.")
+            raise RuleFoundryStateError(
+                "OSV advisory requires id and affected entries."
+            )
         if any(not item.get("versions") for item in payload["affected"]):
             raise RuleFoundryStateError(
                 "Initial OSV foundry support requires bounded affected version lists."
@@ -547,9 +581,13 @@ def _normalized_evidence(
     return {
         "finding": {
             "id": finding.id,
-            "raw_finding_id": str(finding.raw_finding_id) if finding.raw_finding_id else None,
+            "raw_finding_id": (
+                str(finding.raw_finding_id) if finding.raw_finding_id else None
+            ),
             "canonical_finding_id": (
-                str(finding.canonical_finding_id) if finding.canonical_finding_id else None
+                str(finding.canonical_finding_id)
+                if finding.canonical_finding_id
+                else None
             ),
             "scan_id": str(finding.scan_id),
             "source_snapshot_hash": finding.source_snapshot_hash,
@@ -563,7 +601,9 @@ def _normalized_evidence(
         },
         "lineage": {
             "id": str(lineage.id) if lineage else None,
-            "attempt_id": str(lineage.attempt_id) if lineage and lineage.attempt_id else None,
+            "attempt_id": (
+                str(lineage.attempt_id) if lineage and lineage.attempt_id else None
+            ),
             "fingerprint": lineage.fingerprint if lineage else None,
             "exact_ranges": lineage.exact_ranges if lineage else [],
             "dataflow": lineage.dataflow if lineage else {},

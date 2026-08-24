@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import argparse
 import os
+import tempfile
 import time
 from pathlib import Path
 
 from app.config.config import settings
 
+_WORKER_RUNTIME_ROOT = (Path(tempfile.gettempdir()) / "sccap-worker").resolve()
+
 
 def _safe_runtime_path(raw: str) -> Path:
-    path = Path(raw)
-    if not path.is_absolute() or not str(path).startswith("/tmp/sccap-worker/"):
-        raise ValueError("worker drain files must stay under /tmp/sccap-worker/")
+    path = Path(raw).resolve()
+    if path.parent != _WORKER_RUNTIME_ROOT:
+        raise ValueError(f"worker drain files must stay under {_WORKER_RUNTIME_ROOT}/")
     return path
 
 
@@ -46,7 +49,9 @@ def main() -> int:
     )
     args = parser.parse_args()
     timeout = max(1, min(int(args.timeout), 570))
-    return os.EX_OK if request_drain(wait=args.wait, timeout=timeout) else os.EX_TEMPFAIL
+    return (
+        os.EX_OK if request_drain(wait=args.wait, timeout=timeout) else os.EX_TEMPFAIL
+    )
 
 
 if __name__ == "__main__":

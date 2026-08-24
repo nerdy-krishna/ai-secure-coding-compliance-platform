@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 from app.core.services.semgrep_ingestion.parser import semgrep_rule_content_hash
 from app.infrastructure.scanners.provenance import (
+    _SCANNER_SPECS,
+    _expected_binary_sha256,
     SemgrepRuleBindingError,
     build_scanner_provenance,
     build_semgrep_rule_provenance,
@@ -14,6 +16,20 @@ from app.infrastructure.scanners.provenance import (
 
 
 class ScannerProvenanceContracts(unittest.TestCase):
+    def test_architecture_specific_native_binary_digests(self) -> None:
+        self.assertEqual(
+            _expected_binary_sha256(_SCANNER_SPECS["gitleaks"], machine="aarch64"),
+            "b337056f2c68bef812b378f2841225f1e52f87a293fe0c457507634defdc6fb8",
+        )
+        self.assertEqual(
+            _expected_binary_sha256(_SCANNER_SPECS["osv"], machine="arm64"),
+            "fa46ad2b3954db5d5335303d45de921613393285d9a93c140b63b40e35e9ce50",
+        )
+        self.assertEqual(
+            _expected_binary_sha256(_SCANNER_SPECS["osv"], machine="x86_64"),
+            "bb30c580afe5e757d3e959f4afd08a4795ea505ef84c46962b9a738aa573b41b",
+        )
+
     def test_binary_and_config_digests_are_verified(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             binary = Path(tmp) / "scanner"

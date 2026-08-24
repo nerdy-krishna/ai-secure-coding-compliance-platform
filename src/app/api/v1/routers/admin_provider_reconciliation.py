@@ -74,7 +74,9 @@ async def list_connectors(
     tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     repo: ProviderReconciliationRepository = Depends(_repo),
 ) -> list[ConnectorRead]:
-    return [_connector_read(row) for row in await repo.list_connectors(tenant_id=tenant_id)]
+    return [
+        _connector_read(row) for row in await repo.list_connectors(tenant_id=tenant_id)
+    ]
 
 
 @router.post(
@@ -108,7 +110,9 @@ async def create_connector(
         await repo.db.commit()
     except IntegrityError:
         await repo.db.rollback()
-        raise HTTPException(status_code=409, detail="Connector name already exists.") from None
+        raise HTTPException(
+            status_code=409, detail="Connector name already exists."
+        ) from None
     return _connector_read(row)
 
 
@@ -154,7 +158,9 @@ async def update_connector(
 async def run_connector(
     connector_id: uuid.UUID,
     payload: ReconciliationRunRequest,
-    idempotency_key: str = Header(..., alias="X-Idempotency-Key", min_length=8, max_length=128),
+    idempotency_key: str = Header(
+        ..., alias="X-Idempotency-Key", min_length=8, max_length=128
+    ),
     tenant_id: uuid.UUID = Depends(get_current_user_tenant_id),
     user: db_models.User = Depends(current_active_user),
     repo: ProviderReconciliationRepository = Depends(_repo),
@@ -190,7 +196,9 @@ async def get_summary(
     row = await repo.summary(tenant_id=tenant_id)
     if row is None:
         connectors = await repo.list_connectors(tenant_id=tenant_id)
-        return ReconciliationSummaryRead(status="never_run" if connectors else "not_configured")
+        return ReconciliationSummaryRead(
+            status="never_run" if connectors else "not_configured"
+        )
     return ReconciliationSummaryRead(
         last_reconciliation_at=row.completed_at,
         status=row.status,
