@@ -1795,6 +1795,238 @@ class UsageBudgetNotificationOutbox(Base):
     )
 
 
+class ProviderBillingConnector(Base):
+    """Optional tenant-scoped, read-only provider billing connection.
+
+    The credential envelope is Fernet encrypted and is never exposed through a
+    response schema.  The provider-side principal is expected to have usage/cost
+    read permissions only.
+    """
+
+    __tablename__ = "provider_billing_connectors"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "provider IN ('openai')", name="ck_provider_billing_connector_provider"
+        ),
+        sa.CheckConstraint(
+            "absolute_tolerance_micro_usd >= 0",
+            name="ck_provider_billing_connector_absolute_tolerance",
+        ),
+        sa.CheckConstraint(
+            "percentage_tolerance >= 0 AND percentage_tolerance <= 100",
+            name="ck_provider_billing_connector_percentage_tolerance",
+        ),
+        sa.CheckConstraint(
+            "lookback_minutes BETWEEN 0 AND 10080",
+            name="ck_provider_billing_connector_lookback",
+        ),
+        sa.CheckConstraint(
+            "poll_interval_minutes BETWEEN 15 AND 10080",
+            name="ck_provider_billing_connector_poll",
+        ),
+        UniqueConstraint(
+            "tenant_id", "provider", "display_name", name="uq_provider_billing_connector_name"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    credentials_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    provider_project_ids: Mapped[list[str]] = mapped_column(
+        PG_ARRAY(String(255)), nullable=False, server_default="{}"
+    )
+    verified_scopes: Mapped[list[str]] = mapped_column(
+        PG_ARRAY(String(100)), nullable=False, server_default="{}"
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.false())
+    absolute_tolerance_micro_usd: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="1000"
+    )
+    percentage_tolerance: Mapped[Decimal] = mapped_column(
+        sa.Numeric(7, 4), nullable=False, server_default="1.0000"
+    )
+    lookback_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="180")
+    poll_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
+    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProviderReconciliationRun(Base):
+    """Append-only outcome for one connector/window invocation."""
+
+    __tablename__ = "provider_reconciliation_runs"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_provider_reconciliation_run_key"),
+        sa.CheckConstraint(
+            "status IN ('completed', 'failed')",
+            name="ck_provider_reconciliation_run_status",
+        ),
+        sa.CheckConstraint(
+            "window_end > window_start", name="ck_provider_reconciliation_run_window"
+        ),
+        sa.CheckConstraint(
+            "trigger_kind IN ('manual', 'scheduled')",
+            name="ck_provider_reconciliation_run_trigger",
+        ),
+        sa.CheckConstraint(
+            "coverage_percent >= 0 AND coverage_percent <= 100",
+            name="ck_provider_reconciliation_run_coverage",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("provider_billing_connectors.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    trigger_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    canonical_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    provider_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    variance_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    unresolved_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    coverage_percent: Mapped[Decimal] = mapped_column(
+        sa.Numeric(7, 4), nullable=False, server_default="0"
+    )
+    compared_dimensions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    unresolved_dimensions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    provider_pages: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error_code: Mapped[Optional[str]] = mapped_column(String(64))
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ProviderReconciliationEvidence(Base):
+    """Immutable normalized comparison evidence for a run dimension."""
+
+    __tablename__ = "provider_reconciliation_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "dimension_key", name="uq_provider_reconciliation_evidence_dimension"
+        ),
+        sa.CheckConstraint(
+            "classification IN ('matched', 'missing_event', 'duplicate_event', "
+            "'token_category_mismatch', 'price_catalog_mismatch', "
+            "'provider_adjustment_credit', 'timing_lag', 'unresolved')",
+            name="ck_provider_reconciliation_evidence_classification",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("provider_reconciliation_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    dimension_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    classification: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    canonical_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    provider_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    variance_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    within_tolerance: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    canonical_tokens: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    provider_tokens: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    normalized_dimensions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    provider_item_ids: Mapped[list[str]] = mapped_column(
+        PG_ARRAY(String(255)), nullable=False, server_default="{}"
+    )
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProviderReconciliationAdjustment(Base):
+    """Append-only provider adjustment; intentionally separate from usage totals."""
+
+    __tablename__ = "provider_reconciliation_adjustments"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "kind IN ('provider_adjustment_credit', 'timing_lag')",
+            name="ck_provider_reconciliation_adjustment_kind",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("provider_reconciliation_runs.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    evidence_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("provider_reconciliation_evidence.id", ondelete="RESTRICT"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    amount_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="USD")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ProviderReconciliationAlertOutbox(Base):
+    """Durable operator-facing alert created atomically with a discrepant run."""
+
+    __tablename__ = "provider_reconciliation_alert_outbox"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_provider_reconciliation_alert_run"),
+        sa.CheckConstraint(
+            "state IN ('pending', 'published', 'failed')",
+            name="ck_provider_reconciliation_alert_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("provider_reconciliation_runs.id", ondelete="RESTRICT"), nullable=False
+    )
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     id: Mapped[uuid.UUID] = mapped_column(
