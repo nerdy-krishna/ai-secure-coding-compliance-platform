@@ -19,6 +19,7 @@ from app.infrastructure.database.models import (
     FrameworkAgentMapping,
     LLMConfiguration,
     Project,
+    RoleAssignment,
     ScanEvent,
     ScanOutbox,
     User,
@@ -26,6 +27,7 @@ from app.infrastructure.database.models import (
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.messaging.publisher import publish_message
 from app.shared.lib.encryption import FernetEncrypt
+from app.shared.lib.permissions import DEVELOPER
 
 
 BASE_URL = os.getenv("SCCAP_INTEGRATION_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -118,6 +120,14 @@ async def main() -> None:
             output_cost_per_million=0,
         )
         db.add_all([user, llm])
+        await db.flush()
+        db.add(
+            RoleAssignment(
+                user_id=user.id,
+                tenant_id=None,
+                role_key=DEVELOPER,
+            )
+        )
         await db.commit()
         await db.refresh(llm)
         llm_id = llm.id
