@@ -178,6 +178,9 @@ nav:
       - Identity and Session Recovery: operations/identity-session-recovery.md
       - Tenant Authorization Rollout: operations/tenant-authorization-rollout.md
       - Usage Budget Enforcement: operations/usage-budget-enforcement.md
+      - Usage and Budget Center: operations/usage-and-budget-center.md
+      - Scanner Coverage Manifests: operations/scanner-coverage.md
+      - Provider Cost Reconciliation: operations/provider-cost-reconciliation.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

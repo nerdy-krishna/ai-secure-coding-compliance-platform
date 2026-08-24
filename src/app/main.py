@@ -31,6 +31,10 @@ from app.api.v1.routers.admin_smtp import router as admin_smtp_router
 from app.api.v1.routers.admin_findings import router as admin_findings_router
 from app.api.v1.routers.admin_groups import router as admin_groups_router
 from app.api.v1.routers.admin_usage_budgets import router as admin_usage_budgets_router
+from app.api.v1.routers.admin_provider_reconciliation import (
+    router as admin_provider_reconciliation_router,
+)
+from app.api.v1.routers.usage_center import router as usage_center_router
 from app.api.v1.routers.admin_seed import router as admin_seed_router
 from app.api.v1.routers.dashboard import router as dashboard_router
 from app.api.v1.routers.push import router as push_router
@@ -628,6 +632,17 @@ async def lifespan(app: FastAPI):
         name="semgrep-sync-sweeper",
     )
 
+    # Optional provider billing reconciliation. Disabled connectors do no I/O.
+    from app.infrastructure.messaging.provider_reconciliation_sweeper import (
+        run_provider_reconciliation_sweeper,
+    )
+
+    provider_reconciliation_stop = asyncio.Event()
+    provider_reconciliation_task = asyncio.create_task(
+        run_provider_reconciliation_sweeper(provider_reconciliation_stop),
+        name="provider-reconciliation-sweeper",
+    )
+
     # --- Start the scan-progress LISTEN/NOTIFY bus (§3.10a) ---
     # Replaces the per-SSE-client 1 Hz Postgres poll with a single
     # LISTEN connection per app process that fans out scan-status /
@@ -660,6 +675,7 @@ async def lifespan(app: FastAPI):
     retention_sweeper_stop.set()
     evidence_retention_stop.set()
     semgrep_sweeper_stop.set()
+    provider_reconciliation_stop.set()
     stuck_scan_stop.set()
     if progress_bus is not None:
         try:
@@ -709,6 +725,15 @@ async def lifespan(app: FastAPI):
         semgrep_sweeper_task.cancel()
     except Exception as e:
         logger.warning(f"semgrep_sync_sweeper shutdown error: {e}")
+    try:
+        await asyncio.wait_for(provider_reconciliation_task, timeout=5)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "provider_reconciliation_sweeper did not stop within 5s; cancelling."
+        )
+        provider_reconciliation_task.cancel()
+    except Exception as e:
+        logger.warning(f"provider_reconciliation_sweeper shutdown error: {e}")
     try:
         await asyncio.wait_for(stuck_scan_task, timeout=5)
     except asyncio.TimeoutError:
@@ -1076,6 +1101,9 @@ _include_if_enabled(
 )
 # Tenant budget policy administration and ledger-backed usage inspection.
 app.include_router(admin_usage_budgets_router, prefix="/api/v1")
+app.include_router(admin_provider_reconciliation_router, prefix="/api/v1")
+# Canonical self/group/tenant usage analytics and exact exports.
+app.include_router(usage_center_router, prefix="/api/v1")
 # Cross-tenant findings list with source filter (sast-prescan-followups Group D1).
 app.include_router(admin_findings_router, prefix="/api/v1", tags=["Admin: Findings"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])

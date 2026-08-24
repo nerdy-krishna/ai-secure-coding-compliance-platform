@@ -33,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "compliance", label: "Compliance", match: "/compliance", to: "/compliance", feature: "compliance" },
   { id: "advisor", label: "Advisor", match: "/advisor", to: "/advisor", feature: "chat" },
   { id: "history", label: "History", match: "/account/history", to: "/account/history" },
+  { id: "usage", label: "Usage", match: "/usage", to: "/usage" },
 ];
 
 export const TopNav: React.FC = () => {

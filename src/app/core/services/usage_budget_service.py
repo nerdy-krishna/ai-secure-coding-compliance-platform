@@ -191,6 +191,15 @@ class UsageBudgetService:
                 None,
             )
             if blocking is not None:
+                await self.repo.record_denial(
+                    tenant_id=attribution.tenant_id,
+                    actor_user_id=attribution.actor_user_id,
+                    operation_kind=context.operation_kind,
+                    request_key=context.idempotency_key,
+                    policy_id=blocking.id,
+                    reason_code=BUDGET_PRICE_UNKNOWN,
+                    commit=commit,
+                )
                 raise BudgetExceededError(
                     code=BUDGET_PRICE_UNKNOWN,
                     snapshot=BudgetFailureSnapshot(

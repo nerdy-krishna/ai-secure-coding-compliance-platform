@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.infrastructure.database import models as db_models
+from app.config.logging_config import correlation_id_var
 from app.infrastructure.database.repositories.llm_usage_repo import LLMUsageContext
 
 
@@ -129,6 +130,36 @@ class UsageBudgetRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def record_denial(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        actor_user_id: int | None,
+        operation_kind: str,
+        request_key: str,
+        policy_id: uuid.UUID,
+        reason_code: str,
+        commit: bool,
+    ) -> None:
+        """Append a privacy-safe admission denial for affected-user views."""
+        self.db.add(
+            db_models.AuthorizationAuditEvent(
+                tenant_id=tenant_id,
+                principal_kind="human" if actor_user_id is not None else "system",
+                principal_id=str(actor_user_id or "budget-worker"),
+                permission="usage.consume",
+                resource_type=f"usage_budget_{operation_kind}",
+                target_fingerprint=hashlib.sha256(
+                    f"{policy_id}:{request_key}".encode()
+                ).hexdigest(),
+                outcome="denied",
+                reason_code=reason_code,
+                correlation_id=correlation_id_var.get(),
+            )
+        )
+        if commit:
+            await self.db.commit()
 
     async def resolve_attribution(self, context: LLMUsageContext) -> BudgetAttribution:
         try:
@@ -676,8 +707,15 @@ class UsageBudgetRepository:
                     - getattr(counter, f"held_{dimension}")
                 )
                 if increment > available:
-                    if commit:
-                        await self.db.commit()
+                    await self.record_denial(
+                        tenant_id=request.tenant_id,
+                        actor_user_id=request.actor_user_id,
+                        operation_kind=request.operation_kind,
+                        request_key=request.request_key,
+                        policy_id=policy.id,
+                        reason_code="budget_hard_limit_exceeded",
+                        commit=commit,
+                    )
                     return BudgetReservationDecision(
                         allowed=False,
                         denial=BudgetDenial(

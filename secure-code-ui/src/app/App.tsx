@@ -19,6 +19,7 @@ import AppearanceSettingsPage from "../pages/account/AppearanceSettingsPage";
 import DashboardPage from "../pages/account/DashboardPage";
 import SecuritySettingsPage from "../pages/account/SecuritySettingsPage";
 import SubmissionHistoryPage from "../pages/account/SubmissionHistoryPage";
+import UsagePage from "../pages/account/UsagePage";
 import AdminFindingsPage from "../pages/admin/AdminFindingsPage";
 import FeaturesPage from "../pages/admin/FeaturesPage";
 import SystemConfigTab from "../pages/admin/SystemConfigTab";
@@ -205,6 +206,7 @@ function AppContent() {
             <Route path="/compliance" element={<CompliancePage />} />
           </Route>
           <Route path="/account/history" element={<SubmissionHistoryPage />} />
+          <Route path="/usage" element={<UsagePage />} />
           <Route
             path="/account/settings/appearance"
             element={<AppearanceSettingsPage />}

@@ -223,7 +223,7 @@ export interface paths {
          *     EventSource cannot send Authorization headers, so the frontend
          *     POSTs here (with the regular Bearer header), gets back a token,
          *     and appends it to the stream URL as `?access_token=…`. The token
-         *     is audience-tagged "sse:scan-stream", scan-id-bound, and 60s-TTL —
+         *     is audience-tagged "sse:scan-stream", tenant/scan-bound, and 60s-TTL —
          *     it cannot be substituted for a regular access token at any other
          *     endpoint, and cannot be replayed against a different scan.
          *
@@ -331,6 +331,40 @@ export interface paths {
         get: operations["download_scanner_reports_api_v1_scans__scan_id__scanner_reports_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans/{scan_id}/scanner-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Scanner Coverage */
+        get: operations["get_scanner_coverage_api_v1_scans__scan_id__scanner_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/scans/{scan_id}/scanner-coverage/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate Scanner Coverage Policy */
+        post: operations["evaluate_scanner_coverage_policy_api_v1_scans__scan_id__scanner_coverage_policy_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -660,7 +694,7 @@ export interface paths {
          *     request. The result is pruned to dependency-consistency, persisted as
          *     ``features.*`` rows, and mirrored into ``SystemConfigCache`` (live).
          *
-         *     Disabling ``multi_user`` is destructive: every non-superuser account is
+         *     Disabling ``multi_user`` is destructive: every non-platform account is
          *     *deactivated* (data preserved, login blocked). It therefore requires
          *     ``confirm_destructive=true`` — an unconfirmed request is rejected 409 with
          *     the affected-account count. Re-enabling ``multi_user`` reactivates exactly
@@ -1428,6 +1462,383 @@ export interface paths {
         post?: never;
         /** Remove Member */
         delete: operations["remove_member_api_v1_admin_user_groups__group_id__members__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Policies */
+        get: operations["list_policies_api_v1_admin_usage_budgets_policies_get"];
+        put?: never;
+        /** Create Policy */
+        post: operations["create_policy_api_v1_admin_usage_budgets_policies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/policies/{policy_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace Policy */
+        put: operations["replace_policy_api_v1_admin_usage_budgets_policies__policy_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/policies/{policy_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Policy */
+        post: operations["disable_policy_api_v1_admin_usage_budgets_policies__policy_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/counters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Counters */
+        get: operations["list_counters_api_v1_admin_usage_budgets_counters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/reservations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reservations */
+        get: operations["list_reservations_api_v1_admin_usage_budgets_reservations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/threshold-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Threshold Events */
+        get: operations["list_threshold_events_api_v1_admin_usage_budgets_threshold_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Overrides */
+        get: operations["list_overrides_api_v1_admin_usage_budgets_overrides_get"];
+        put?: never;
+        /** Create Override */
+        post: operations["create_override_api_v1_admin_usage_budgets_overrides_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-budgets/override-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Override */
+        post: operations["request_override_api_v1_admin_usage_budgets_override_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-reconciliation/connectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Connectors */
+        get: operations["list_connectors_api_v1_admin_usage_reconciliation_connectors_get"];
+        put?: never;
+        /** Create Connector */
+        post: operations["create_connector_api_v1_admin_usage_reconciliation_connectors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-reconciliation/connectors/{connector_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update Connector */
+        put: operations["update_connector_api_v1_admin_usage_reconciliation_connectors__connector_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-reconciliation/connectors/{connector_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Connector */
+        post: operations["run_connector_api_v1_admin_usage_reconciliation_connectors__connector_id__runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-reconciliation/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Summary */
+        get: operations["get_summary_api_v1_admin_usage_reconciliation_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-reconciliation/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_api_v1_admin_usage_reconciliation_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-reconciliation/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_v1_admin_usage_reconciliation_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/usage-reconciliation/runs/{run_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Evidence */
+        get: operations["list_evidence_api_v1_admin_usage_reconciliation_runs__run_id__evidence_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage Summary */
+        get: operations["usage_summary_api_v1_usage_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage Trends */
+        get: operations["usage_trends_api_v1_usage_trends_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/breakdowns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage Breakdown */
+        get: operations["usage_breakdown_api_v1_usage_breakdowns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage Events */
+        get: operations["usage_events_api_v1_usage_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Usage */
+        get: operations["export_usage_api_v1_usage_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Usage Budgets */
+        get: operations["usage_budgets_api_v1_usage_budgets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/policy-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Usage Policy */
+        post: operations["preview_usage_policy_api_v1_usage_policy_preview_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3260,6 +3671,7 @@ export interface components {
             toolchain_provenance?: {
                 [key: string]: unknown;
             };
+            scanner_coverage?: components["schemas"]["ScannerCoverageManifestResponse"] | null;
             /** Cost Details */
             cost_details?: {
                 [key: string]: unknown;
@@ -3640,6 +4052,81 @@ export interface components {
              */
             raw_content_retention_consent: boolean;
         };
+        /** BudgetAmountsRead */
+        BudgetAmountsRead: {
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Uncached Input Tokens
+             * @default 0
+             */
+            uncached_input_tokens: number;
+            /**
+             * Billable Tokens
+             * @default 0
+             */
+            billable_tokens: number;
+            /** Usd */
+            usd?: string | null;
+            /**
+             * Upstream Requests
+             * @default 0
+             */
+            upstream_requests: number;
+        };
+        /**
+         * BudgetCaps
+         * @description Hard limits for every canonical usage dimension.
+         */
+        "BudgetCaps-Input": {
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Uncached Input Tokens */
+            uncached_input_tokens?: number | null;
+            /** Billable Tokens */
+            billable_tokens?: number | null;
+            /** Usd */
+            usd?: number | string | null;
+            /** Upstream Requests */
+            upstream_requests?: number | null;
+        };
+        /**
+         * BudgetCaps
+         * @description Hard limits for every canonical usage dimension.
+         */
+        "BudgetCaps-Output": {
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Uncached Input Tokens */
+            uncached_input_tokens?: number | null;
+            /** Billable Tokens */
+            billable_tokens?: number | null;
+            /** Usd */
+            usd?: string | null;
+            /** Upstream Requests */
+            upstream_requests?: number | null;
+        };
         /**
          * BulkFindingDispositionClearRequest
          * @description Body of the bulk disposition-delete (PRD #96) — superuser-only.
@@ -3740,6 +4227,122 @@ export interface components {
             frameworks: string[] | null;
             /** Created At */
             created_at: string;
+        };
+        /** ConnectorCreate */
+        ConnectorCreate: {
+            /**
+             * Provider
+             * @constant
+             */
+            provider: "openai";
+            /** Display Name */
+            display_name: string;
+            credentials: components["schemas"]["ProviderCredentialInput"];
+            /** Project Ids */
+            project_ids?: string[];
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Absolute Tolerance Micro Usd
+             * @default 1000
+             */
+            absolute_tolerance_micro_usd: number;
+            /**
+             * Percentage Tolerance
+             * @default 1
+             */
+            percentage_tolerance: number | string;
+            /**
+             * Lookback Minutes
+             * @default 180
+             */
+            lookback_minutes: number;
+            /**
+             * Poll Interval Minutes
+             * @default 60
+             */
+            poll_interval_minutes: number;
+        };
+        /** ConnectorRead */
+        ConnectorRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Provider */
+            provider: string;
+            /** Display Name */
+            display_name: string;
+            /** Project Ids */
+            project_ids: string[];
+            /** Verified Scopes */
+            verified_scopes: string[];
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Credentials Configured
+             * @default true
+             */
+            credentials_configured: boolean;
+            /** Absolute Tolerance Micro Usd */
+            absolute_tolerance_micro_usd: number;
+            /** Percentage Tolerance */
+            percentage_tolerance: string;
+            /** Lookback Minutes */
+            lookback_minutes: number;
+            /** Poll Interval Minutes */
+            poll_interval_minutes: number;
+            /** Next Run At */
+            next_run_at: string | null;
+            /** Last Run At */
+            last_run_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** ConnectorUpdate */
+        ConnectorUpdate: {
+            credentials?: components["schemas"]["ProviderCredentialInput"] | null;
+            /** Project Ids */
+            project_ids?: string[];
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Absolute Tolerance Micro Usd
+             * @default 1000
+             */
+            absolute_tolerance_micro_usd: number;
+            /**
+             * Percentage Tolerance
+             * @default 1
+             */
+            percentage_tolerance: number | string;
+            /**
+             * Lookback Minutes
+             * @default 180
+             */
+            lookback_minutes: number;
+            /**
+             * Poll Interval Minutes
+             * @default 60
+             */
+            poll_interval_minutes: number;
         };
         /**
          * ConsolidationStats
@@ -4924,6 +5527,14 @@ export interface components {
              */
             jit_policy: string;
         };
+        /** ProviderCredentialInput */
+        ProviderCredentialInput: {
+            /**
+             * Api Key
+             * Format: password
+             */
+            api_key: string;
+        };
         /** ProviderRead */
         ProviderRead: {
             /**
@@ -5044,6 +5655,157 @@ export interface components {
             processed_documents?: components["schemas"]["EnrichedDocument"][] | null;
             /** Error Message */
             error_message?: string | null;
+        };
+        /** ReconciliationEvidenceRead */
+        ReconciliationEvidenceRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Dimension Key */
+            dimension_key: string;
+            /** Classification */
+            classification: string;
+            /** Canonical Micro Usd */
+            canonical_micro_usd: number;
+            /** Provider Micro Usd */
+            provider_micro_usd: number;
+            /** Variance Micro Usd */
+            variance_micro_usd: number;
+            /** Within Tolerance */
+            within_tolerance: boolean;
+            /** Canonical Tokens */
+            canonical_tokens: {
+                [key: string]: number;
+            };
+            /** Provider Tokens */
+            provider_tokens: {
+                [key: string]: number;
+            };
+            /** Normalized Dimensions */
+            normalized_dimensions: {
+                [key: string]: unknown;
+            };
+            /** Provider Item Ids */
+            provider_item_ids: string[];
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ReconciliationRunRead */
+        ReconciliationRunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Connector Id
+             * Format: uuid
+             */
+            connector_id: string;
+            /**
+             * Window Start
+             * Format: date-time
+             */
+            window_start: string;
+            /**
+             * Window End
+             * Format: date-time
+             */
+            window_end: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "completed" | "failed";
+            /** Trigger Kind */
+            trigger_kind: string;
+            /** Canonical Micro Usd */
+            canonical_micro_usd: number;
+            /** Provider Micro Usd */
+            provider_micro_usd: number;
+            /** Variance Micro Usd */
+            variance_micro_usd: number;
+            /** Unresolved Micro Usd */
+            unresolved_micro_usd: number;
+            /** Coverage Percent */
+            coverage_percent: string;
+            /** Compared Dimensions */
+            compared_dimensions: number;
+            /** Unresolved Dimensions */
+            unresolved_dimensions: number;
+            /** Provider Pages */
+            provider_pages: number;
+            /** Error Code */
+            error_code: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+        };
+        /** ReconciliationRunRequest */
+        ReconciliationRunRequest: {
+            /**
+             * Window Start
+             * Format: date-time
+             */
+            window_start: string;
+            /**
+             * Window End
+             * Format: date-time
+             */
+            window_end: string;
+        };
+        /** ReconciliationSummaryRead */
+        ReconciliationSummaryRead: {
+            /** Last Reconciliation At */
+            last_reconciliation_at?: string | null;
+            /**
+             * Status
+             * @default not_configured
+             */
+            status: string;
+            /**
+             * Coverage Percent
+             * @default 0
+             */
+            coverage_percent: string;
+            /**
+             * Variance Micro Usd
+             * @default 0
+             */
+            variance_micro_usd: number;
+            /**
+             * Unresolved Micro Usd
+             * @default 0
+             */
+            unresolved_micro_usd: number;
+            /**
+             * Unresolved Dimensions
+             * @default 0
+             */
+            unresolved_dimensions: number;
+            /** Run Id */
+            run_id?: string | null;
         };
         /** RegisterBeginRequest */
         RegisterBeginRequest: {
@@ -5459,6 +6221,107 @@ export interface components {
              * @enum {string}
              */
             mode: "resume" | "restart";
+        };
+        /** ScannerCoverageEntryResponse */
+        ScannerCoverageEntryResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Scanner Name */
+            scanner_name: string;
+            /** Input Path */
+            input_path: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "planned" | "completed" | "clean" | "skipped" | "failed" | "timeout" | "unsupported" | "truncated";
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Finding Count
+             * @default 0
+             */
+            finding_count: number;
+            /**
+             * Native Evidence Available
+             * @default false
+             */
+            native_evidence_available: boolean;
+            /** Provenance Status */
+            provenance_status?: string | null;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            };
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+        };
+        /** ScannerCoverageManifestResponse */
+        ScannerCoverageManifestResponse: {
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Overall Status
+             * @enum {string}
+             */
+            overall_status: "unavailable" | "complete" | "degraded";
+            /** Is Complete */
+            is_complete: boolean;
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Entries */
+            entries: components["schemas"]["ScannerCoverageEntryResponse"][];
+            latest_policy_decision?: components["schemas"]["ScannerCoveragePolicyDecisionResponse"] | null;
+        };
+        /** ScannerCoveragePolicyDecisionResponse */
+        ScannerCoveragePolicyDecisionResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "pass" | "fail" | "waived";
+            /** Failing States */
+            failing_states: string[];
+            /** Matching Entry Ids */
+            matching_entry_ids: string[];
+            /** Audit Reason */
+            audit_reason: string;
+            /** Actor User Id */
+            actor_user_id?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ScannerCoveragePolicyRequest */
+        ScannerCoveragePolicyRequest: {
+            /** Failing States */
+            failing_states: ("planned" | "completed" | "clean" | "skipped" | "failed" | "timeout" | "unsupported" | "truncated")[];
+            /**
+             * Waive
+             * @default false
+             */
+            waive: boolean;
+            /** Audit Reason */
+            audit_reason: string;
         };
         /** ScimEmail */
         ScimEmail: {
@@ -6023,6 +6886,854 @@ export interface components {
             /** Password */
             password?: string | null;
         };
+        /** UsageBreakdownItem */
+        UsageBreakdownItem: {
+            /**
+             * Actual Cost
+             * @default 0
+             */
+            actual_cost: string;
+            /**
+             * Estimated Cost
+             * @default 0
+             */
+            estimated_cost: string;
+            /**
+             * Reconciled Cost
+             * @default 0
+             */
+            reconciled_cost: string;
+            /**
+             * Reserved Cost
+             * @default 0
+             */
+            reserved_cost: string;
+            /**
+             * Variance
+             * @default 0
+             */
+            variance: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Write Tokens
+             * @default 0
+             */
+            cache_write_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+            /**
+             * Events
+             * @default 0
+             */
+            events: number;
+            /**
+             * Unknown Events
+             * @default 0
+             */
+            unknown_events: number;
+            /**
+             * Estimated Events
+             * @default 0
+             */
+            estimated_events: number;
+            /**
+             * Reconciled Events
+             * @default 0
+             */
+            reconciled_events: number;
+            /**
+             * Reserved Requests
+             * @default 0
+             */
+            reserved_requests: number;
+            /**
+             * Cache Hit Rate
+             * @default 0
+             */
+            cache_hit_rate: string;
+            /**
+             * Currency
+             * @default USD
+             */
+            currency: string;
+            /** Key */
+            key: string;
+        };
+        /** UsageBreakdownResponse */
+        UsageBreakdownResponse: {
+            /**
+             * Dimension
+             * @enum {string}
+             */
+            dimension: "operation" | "project" | "scan" | "stage" | "agent" | "provider" | "model" | "account" | "group";
+            /** Items */
+            items: components["schemas"]["UsageBreakdownItem"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
+        };
+        /** UsageBudgetCounterRead */
+        UsageBudgetCounterRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Policy Id
+             * Format: uuid
+             */
+            policy_id: string;
+            /** Window Key */
+            window_key: string;
+            /** Window Start */
+            window_start?: string | null;
+            /** Window End */
+            window_end?: string | null;
+            spent: components["schemas"]["BudgetAmountsRead"];
+            held: components["schemas"]["BudgetAmountsRead"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** UsageBudgetOverrideCreate */
+        UsageBudgetOverrideCreate: {
+            /**
+             * Policy Id
+             * Format: uuid
+             */
+            policy_id: string;
+            /** Window Key */
+            window_key: string;
+            allowance: components["schemas"]["BudgetCaps-Input"];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Reason */
+            reason: string;
+            /** Action Request Id */
+            action_request_id?: string | null;
+        };
+        /** UsageBudgetOverrideRead */
+        UsageBudgetOverrideRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Policy Id
+             * Format: uuid
+             */
+            policy_id: string;
+            /** Window Key */
+            window_key: string;
+            allowance: components["schemas"]["BudgetAmountsRead"];
+            /** Reason */
+            reason: string;
+            /** Created By User Id */
+            created_by_user_id: number;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** UsageBudgetPolicyCreate */
+        UsageBudgetPolicyCreate: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "tenant" | "group" | "user";
+            /** Group Id */
+            group_id?: string | null;
+            /** User Id */
+            user_id?: number | null;
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "request" | "scan" | "day" | "month";
+            /** Llm Config Id */
+            llm_config_id?: string | null;
+            /** Stage */
+            stage?: string | null;
+            caps: components["schemas"]["BudgetCaps-Input"];
+            /**
+             * Soft Thresholds
+             * @default [
+             *       80,
+             *       95
+             *     ]
+             */
+            soft_thresholds: number[];
+            /**
+             * Unknown Price Action
+             * @default deny
+             * @enum {string}
+             */
+            unknown_price_action: "deny" | "token_only";
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective To */
+            effective_to?: string | null;
+            /** Reason */
+            reason: string;
+        };
+        /** UsageBudgetPolicyDisable */
+        UsageBudgetPolicyDisable: {
+            /** Reason */
+            reason: string;
+        };
+        /** UsageBudgetPolicyRead */
+        UsageBudgetPolicyRead: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "tenant" | "group" | "user";
+            /** Group Id */
+            group_id?: string | null;
+            /** User Id */
+            user_id?: number | null;
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "request" | "scan" | "day" | "month";
+            /** Llm Config Id */
+            llm_config_id?: string | null;
+            /** Stage */
+            stage?: string | null;
+            caps: components["schemas"]["BudgetCaps-Output"];
+            /**
+             * Soft Thresholds
+             * @default [
+             *       80,
+             *       95
+             *     ]
+             */
+            soft_thresholds: number[];
+            /**
+             * Unknown Price Action
+             * @default deny
+             * @enum {string}
+             */
+            unknown_price_action: "deny" | "token_only";
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective To */
+            effective_to?: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Logical Policy Id
+             * Format: uuid
+             */
+            logical_policy_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Version */
+            version: number;
+            /** Previous Version Id */
+            previous_version_id?: string | null;
+            /** Created By User Id */
+            created_by_user_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** UsageBudgetPolicyReplace */
+        UsageBudgetPolicyReplace: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "tenant" | "group" | "user";
+            /** Group Id */
+            group_id?: string | null;
+            /** User Id */
+            user_id?: number | null;
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "request" | "scan" | "day" | "month";
+            /** Llm Config Id */
+            llm_config_id?: string | null;
+            /** Stage */
+            stage?: string | null;
+            caps: components["schemas"]["BudgetCaps-Input"];
+            /**
+             * Soft Thresholds
+             * @default [
+             *       80,
+             *       95
+             *     ]
+             */
+            soft_thresholds: number[];
+            /**
+             * Unknown Price Action
+             * @default deny
+             * @enum {string}
+             */
+            unknown_price_action: "deny" | "token_only";
+            /** Effective From */
+            effective_from?: string | null;
+            /** Effective To */
+            effective_to?: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** UsageBudgetReservationRead */
+        UsageBudgetReservationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Actor User Id */
+            actor_user_id: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "held" | "settled" | "released" | "expired" | "accounting_unknown";
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Request Key */
+            request_key?: string | null;
+            /** Scan Attempt Id */
+            scan_attempt_id?: string | null;
+            /** Llm Config Id */
+            llm_config_id?: string | null;
+            /** Stage */
+            stage?: string | null;
+            estimate: components["schemas"]["BudgetAmountsRead"];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** UsageBudgetStateRead */
+        UsageBudgetStateRead: {
+            /**
+             * Policy Id
+             * Format: uuid
+             */
+            policy_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "tenant" | "group" | "user";
+            /** Target Group Id */
+            target_group_id: string | null;
+            /** Target User Id */
+            target_user_id: number | null;
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "request" | "scan" | "day" | "month";
+            /** Window Key */
+            window_key: string | null;
+            /** Window Start */
+            window_start: string | null;
+            /** Window End */
+            window_end: string | null;
+            /** Stage */
+            stage: string | null;
+            caps: components["schemas"]["BudgetCaps-Output"];
+            /** Spent Usd */
+            spent_usd: string;
+            /** Held Usd */
+            held_usd: string;
+            /** Remaining Usd */
+            remaining_usd: string | null;
+            /** Spent Total Tokens */
+            spent_total_tokens: number;
+            /** Held Total Tokens */
+            held_total_tokens: number;
+            /** Remaining Total Tokens */
+            remaining_total_tokens: number | null;
+            /** Utilization Percent */
+            utilization_percent: string;
+            /**
+             * Threshold State
+             * @enum {string}
+             */
+            threshold_state: "normal" | "warning" | "critical" | "exhausted";
+        };
+        /** UsageBudgetStatusResponse */
+        UsageBudgetStatusResponse: {
+            /** States */
+            states: components["schemas"]["UsageBudgetStateRead"][];
+            /** Recent Thresholds */
+            recent_thresholds: {
+                [key: string]: string | number;
+            }[];
+            /** Recent Denials */
+            recent_denials: {
+                [key: string]: string;
+            }[];
+        };
+        /** UsageBudgetThresholdEventRead */
+        UsageBudgetThresholdEventRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Policy Id
+             * Format: uuid
+             */
+            policy_id: string;
+            /**
+             * Counter Id
+             * Format: uuid
+             */
+            counter_id: string;
+            /** Dimension */
+            dimension: string;
+            /** Threshold Percent */
+            threshold_percent: number;
+            /** Observed */
+            observed: string;
+            /** Effective Cap */
+            effective_cap: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** UsageEventRead */
+        UsageEventRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Operation Kind
+             * @enum {string}
+             */
+            operation_kind: "scan" | "chat" | "rag";
+            /** Operation Id */
+            operation_id: string;
+            /** Scan Id */
+            scan_id: string | null;
+            /** Stage */
+            stage: string;
+            /** Agent Name */
+            agent_name: string;
+            /** User Id */
+            user_id: number | null;
+            /** Group Ids */
+            group_ids: string[];
+            /** Provider */
+            provider: string;
+            /** Requested Model */
+            requested_model: string;
+            /** Resolved Models */
+            resolved_models: string[];
+            /** Request Count */
+            request_count: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Write Tokens */
+            cache_write_tokens: number;
+            /** Reasoning Tokens */
+            reasoning_tokens: number;
+            /**
+             * Usage Source
+             * @enum {string}
+             */
+            usage_source: "provider" | "estimated" | "reconciled";
+            /**
+             * Quality State
+             * @enum {string}
+             */
+            quality_state: "exact" | "normalized" | "estimated" | "unknown";
+            /**
+             * Cost Status
+             * @enum {string}
+             */
+            cost_status: "exact" | "estimated" | "unknown" | "reconciled";
+            /** Currency */
+            currency: string | null;
+            /** Total Cost */
+            total_cost: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** UsageEventsResponse */
+        UsageEventsResponse: {
+            /** Items */
+            items: components["schemas"]["UsageEventRead"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** UsagePolicyPreviewRequest */
+        UsagePolicyPreviewRequest: {
+            policy: components["schemas"]["UsageBudgetPolicyCreate"];
+        };
+        /** UsagePolicyPreviewResponse */
+        UsagePolicyPreviewResponse: {
+            /**
+             * Candidate Scope
+             * @enum {string}
+             */
+            candidate_scope: "tenant" | "group" | "user";
+            /** Matching Policy Ids */
+            matching_policy_ids: string[];
+            /** Precedence */
+            precedence: string[];
+            effective_caps: components["schemas"]["BudgetCaps-Output"];
+            /** Strictest Policy Ids */
+            strictest_policy_ids: {
+                [key: string]: string | null;
+            };
+            /** Warnings */
+            warnings: string[];
+        };
+        /** UsageSummaryResponse */
+        UsageSummaryResponse: {
+            /**
+             * From At
+             * Format: date-time
+             */
+            from_at: string;
+            /**
+             * To At
+             * Format: date-time
+             */
+            to_at: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "self" | "group" | "tenant";
+            totals: components["schemas"]["UsageTotals"];
+        };
+        /** UsageTotals */
+        UsageTotals: {
+            /**
+             * Actual Cost
+             * @default 0
+             */
+            actual_cost: string;
+            /**
+             * Estimated Cost
+             * @default 0
+             */
+            estimated_cost: string;
+            /**
+             * Reconciled Cost
+             * @default 0
+             */
+            reconciled_cost: string;
+            /**
+             * Reserved Cost
+             * @default 0
+             */
+            reserved_cost: string;
+            /**
+             * Variance
+             * @default 0
+             */
+            variance: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Write Tokens
+             * @default 0
+             */
+            cache_write_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+            /**
+             * Events
+             * @default 0
+             */
+            events: number;
+            /**
+             * Unknown Events
+             * @default 0
+             */
+            unknown_events: number;
+            /**
+             * Estimated Events
+             * @default 0
+             */
+            estimated_events: number;
+            /**
+             * Reconciled Events
+             * @default 0
+             */
+            reconciled_events: number;
+            /**
+             * Reserved Requests
+             * @default 0
+             */
+            reserved_requests: number;
+            /**
+             * Cache Hit Rate
+             * @default 0
+             */
+            cache_hit_rate: string;
+            /**
+             * Currency
+             * @default USD
+             */
+            currency: string;
+        };
+        /** UsageTrendPoint */
+        UsageTrendPoint: {
+            /**
+             * Actual Cost
+             * @default 0
+             */
+            actual_cost: string;
+            /**
+             * Estimated Cost
+             * @default 0
+             */
+            estimated_cost: string;
+            /**
+             * Reconciled Cost
+             * @default 0
+             */
+            reconciled_cost: string;
+            /**
+             * Reserved Cost
+             * @default 0
+             */
+            reserved_cost: string;
+            /**
+             * Variance
+             * @default 0
+             */
+            variance: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Total Tokens
+             * @default 0
+             */
+            total_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Write Tokens
+             * @default 0
+             */
+            cache_write_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+            /**
+             * Events
+             * @default 0
+             */
+            events: number;
+            /**
+             * Unknown Events
+             * @default 0
+             */
+            unknown_events: number;
+            /**
+             * Estimated Events
+             * @default 0
+             */
+            estimated_events: number;
+            /**
+             * Reconciled Events
+             * @default 0
+             */
+            reconciled_events: number;
+            /**
+             * Reserved Requests
+             * @default 0
+             */
+            reserved_requests: number;
+            /**
+             * Cache Hit Rate
+             * @default 0
+             */
+            cache_hit_rate: string;
+            /**
+             * Currency
+             * @default USD
+             */
+            currency: string;
+            /**
+             * Bucket
+             * Format: date-time
+             */
+            bucket: string;
+        };
+        /** UsageTrendsResponse */
+        UsageTrendsResponse: {
+            /**
+             * From At
+             * Format: date-time
+             */
+            from_at: string;
+            /**
+             * To At
+             * Format: date-time
+             */
+            to_at: string;
+            /**
+             * Interval
+             * @enum {string}
+             */
+            interval: "hour" | "day" | "week" | "month";
+            /** Points */
+            points: components["schemas"]["UsageTrendPoint"][];
+        };
         /** UserGroupCreate */
         UserGroupCreate: {
             /** Name */
@@ -6164,6 +7875,10 @@ export interface components {
         VulnerabilityFindingResponse: {
             /** Id */
             id: number;
+            /** Coverage Entry Id */
+            coverage_entry_id?: string | null;
+            /** Coverage Entry Ids */
+            coverage_entry_ids?: string[];
             /** Raw Finding Id */
             raw_finding_id?: string | null;
             /** Canonical Finding Id */
@@ -6779,6 +8494,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scanner_coverage_api_v1_scans__scan_id__scanner_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScannerCoverageManifestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evaluate_scanner_coverage_policy_api_v1_scans__scan_id__scanner_coverage_policy_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScannerCoveragePolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScannerCoveragePolicyDecisionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8851,6 +10632,860 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_policies_api_v1_admin_usage_budgets_policies_get: {
+        parameters: {
+            query?: {
+                include_disabled?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetPolicyRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_policy_api_v1_admin_usage_budgets_policies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageBudgetPolicyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetPolicyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_policy_api_v1_admin_usage_budgets_policies__policy_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageBudgetPolicyReplace"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetPolicyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_policy_api_v1_admin_usage_budgets_policies__policy_id__disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                policy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageBudgetPolicyDisable"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetPolicyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_counters_api_v1_admin_usage_budgets_counters_get: {
+        parameters: {
+            query?: {
+                policy_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetCounterRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_reservations_api_v1_admin_usage_budgets_reservations_get: {
+        parameters: {
+            query?: {
+                state?: ("held" | "settled" | "released" | "expired" | "accounting_unknown") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetReservationRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_threshold_events_api_v1_admin_usage_budgets_threshold_events_get: {
+        parameters: {
+            query?: {
+                policy_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetThresholdEventRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_overrides_api_v1_admin_usage_budgets_overrides_get: {
+        parameters: {
+            query?: {
+                policy_id?: string | null;
+                active_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetOverrideRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_override_api_v1_admin_usage_budgets_overrides_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageBudgetOverrideCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetOverrideRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_override_api_v1_admin_usage_budgets_override_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsageBudgetOverrideCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_connectors_api_v1_admin_usage_reconciliation_connectors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorRead"][];
+                };
+            };
+        };
+    };
+    create_connector_api_v1_admin_usage_reconciliation_connectors_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_connector_api_v1_admin_usage_reconciliation_connectors__connector_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_connector_api_v1_admin_usage_reconciliation_connectors__connector_id__runs_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Idempotency-Key": string;
+            };
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReconciliationRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_summary_api_v1_admin_usage_reconciliation_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationSummaryRead"];
+                };
+            };
+        };
+    };
+    list_runs_api_v1_admin_usage_reconciliation_runs_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationRunRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_api_v1_admin_usage_reconciliation_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationRunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_evidence_api_v1_admin_usage_reconciliation_runs__run_id__evidence_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationEvidenceRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_summary_api_v1_usage_summary_get: {
+        parameters: {
+            query?: {
+                from_at?: string | null;
+                to_at?: string | null;
+                user_id?: number | null;
+                group_id?: string | null;
+                project_id?: string | null;
+                scan_id?: string | null;
+                operation_kind?: ("scan" | "chat" | "rag") | null;
+                operation_id?: string | null;
+                stage?: string | null;
+                agent_name?: string | null;
+                provider?: string | null;
+                model?: string | null;
+                llm_config_id?: string | null;
+                cost_status?: ("exact" | "estimated" | "unknown" | "reconciled") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_trends_api_v1_usage_trends_get: {
+        parameters: {
+            query?: {
+                interval?: "hour" | "day" | "week" | "month";
+                from_at?: string | null;
+                to_at?: string | null;
+                user_id?: number | null;
+                group_id?: string | null;
+                project_id?: string | null;
+                scan_id?: string | null;
+                operation_kind?: ("scan" | "chat" | "rag") | null;
+                operation_id?: string | null;
+                stage?: string | null;
+                agent_name?: string | null;
+                provider?: string | null;
+                model?: string | null;
+                llm_config_id?: string | null;
+                cost_status?: ("exact" | "estimated" | "unknown" | "reconciled") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageTrendsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_breakdown_api_v1_usage_breakdowns_get: {
+        parameters: {
+            query?: {
+                dimension?: "operation" | "project" | "scan" | "stage" | "agent" | "provider" | "model" | "account" | "group";
+                page?: number;
+                page_size?: number;
+                from_at?: string | null;
+                to_at?: string | null;
+                user_id?: number | null;
+                group_id?: string | null;
+                project_id?: string | null;
+                scan_id?: string | null;
+                operation_kind?: ("scan" | "chat" | "rag") | null;
+                operation_id?: string | null;
+                stage?: string | null;
+                agent_name?: string | null;
+                provider?: string | null;
+                model?: string | null;
+                llm_config_id?: string | null;
+                cost_status?: ("exact" | "estimated" | "unknown" | "reconciled") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBreakdownResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_events_api_v1_usage_events_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                from_at?: string | null;
+                to_at?: string | null;
+                user_id?: number | null;
+                group_id?: string | null;
+                project_id?: string | null;
+                scan_id?: string | null;
+                operation_kind?: ("scan" | "chat" | "rag") | null;
+                operation_id?: string | null;
+                stage?: string | null;
+                agent_name?: string | null;
+                provider?: string | null;
+                model?: string | null;
+                llm_config_id?: string | null;
+                cost_status?: ("exact" | "estimated" | "unknown" | "reconciled") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageEventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_usage_api_v1_usage_export_get: {
+        parameters: {
+            query?: {
+                format?: "csv" | "json";
+                from_at?: string | null;
+                to_at?: string | null;
+                user_id?: number | null;
+                group_id?: string | null;
+                project_id?: string | null;
+                scan_id?: string | null;
+                operation_kind?: ("scan" | "chat" | "rag") | null;
+                operation_id?: string | null;
+                stage?: string | null;
+                agent_name?: string | null;
+                provider?: string | null;
+                model?: string | null;
+                llm_config_id?: string | null;
+                cost_status?: ("exact" | "estimated" | "unknown" | "reconciled") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    usage_budgets_api_v1_usage_budgets_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageBudgetStatusResponse"];
+                };
+            };
+        };
+    };
+    preview_usage_policy_api_v1_usage_policy_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsagePolicyPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsagePolicyPreviewResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

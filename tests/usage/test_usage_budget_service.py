@@ -45,6 +45,7 @@ class UsageBudgetServiceTests(unittest.IsolatedAsyncioTestCase):
             release=AsyncMock(return_value=True),
             mark_accounting_unknown=AsyncMock(return_value=True),
             ensure_default_scan_policy=AsyncMock(),
+            record_denial=AsyncMock(),
         )
         self.service = UsageBudgetService(self.repo)
 
@@ -76,6 +77,7 @@ class UsageBudgetServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.code, BUDGET_PRICE_UNKNOWN)
         self.assertEqual(raised.exception.snapshot.policy_id, policy_id)
         self.repo.reserve.assert_not_awaited()
+        self.repo.record_denial.assert_awaited_once()
 
     async def test_repository_denial_becomes_stable_error(self) -> None:
         policy_id = uuid4()
