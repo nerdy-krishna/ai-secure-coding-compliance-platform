@@ -110,8 +110,7 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as session:
         await verify_database_role_posture(
             session,
-            enforce=str(getattr(settings, "ENVIRONMENT", "")).lower()
-            == "production",
+            enforce=str(getattr(settings, "ENVIRONMENT", "")).lower() == "production",
         )
 
     # Lifespan-health observability (V14.1.2): announce hydration entry at
@@ -1024,9 +1023,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 @app.exception_handler(SessionLimitExceeded)
-async def session_limit_exception_handler(
-    request: Request, exc: SessionLimitExceeded
-):
+async def session_limit_exception_handler(request: Request, exc: SessionLimitExceeded):
     return JSONResponse(
         status_code=status.HTTP_409_CONFLICT,
         content={

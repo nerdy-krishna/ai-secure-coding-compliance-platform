@@ -1840,23 +1840,57 @@ class UsageBudgetCounter(Base):
         index=True,
     )
     window_key: Mapped[str] = mapped_column(String(512), nullable=False)
-    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    spent_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    held_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    spent_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    held_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    spent_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    held_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    spent_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    held_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    spent_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    held_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    spent_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False, server_default="0")
-    held_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False, server_default="0")
-    spent_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    held_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    spent_input_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    held_input_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    spent_output_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    held_output_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    spent_total_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    held_total_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    spent_uncached_input_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    held_uncached_input_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    spent_billable_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    held_billable_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    spent_usd: Mapped[Decimal] = mapped_column(
+        sa.Numeric(30, 12), nullable=False, server_default="0"
+    )
+    held_usd: Mapped[Decimal] = mapped_column(
+        sa.Numeric(30, 12), nullable=False, server_default="0"
+    )
+    spent_provider_requests: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    held_provider_requests: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class UsageBudgetReservation(Base):
@@ -1865,24 +1899,43 @@ class UsageBudgetReservation(Base):
     __tablename__ = "usage_budget_reservations"
     __table_args__ = (
         sa.CheckConstraint(
-            "state IN ('held', 'settled', 'released', 'expired', "
-            "'accounting_unknown')",
+            "state IN ('held', 'settled', 'released', 'expired', 'accounting_unknown')",
             name="ck_usage_budget_reservations_state",
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
-    idempotency_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(512), nullable=False, unique=True
+    )
     operation_kind: Mapped[str] = mapped_column(String(32), nullable=False)
-    actor_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
-    group_ids: Mapped[list[uuid.UUID]] = mapped_column(PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False, server_default="{}")
+    actor_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), nullable=True
+    )
+    group_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        PG_ARRAY(PG_UUID(as_uuid=True)), nullable=False, server_default="{}"
+    )
     request_key: Mapped[str] = mapped_column(String(512), nullable=False)
-    scan_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True)
-    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True)
+    scan_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
+    )
     stage: Mapped[str] = mapped_column(String(100), nullable=False)
-    parent_reservation_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"), nullable=True, index=True)
-    state: Mapped[str] = mapped_column(String(20), nullable=False, server_default="held")
+    parent_reservation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    state: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="held"
+    )
     estimated_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     estimated_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     estimated_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
@@ -1890,8 +1943,12 @@ class UsageBudgetReservation(Base):
     estimated_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     estimated_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
     estimated_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     finalized_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     release_reason: Mapped[Optional[str]] = mapped_column(String(100))
 
@@ -1901,13 +1958,27 @@ class UsageBudgetAllocation(Base):
 
     __tablename__ = "usage_budget_allocations"
     __table_args__ = (
-        UniqueConstraint("reservation_id", "counter_id", name="uq_usage_budget_allocation"),
+        UniqueConstraint(
+            "reservation_id", "counter_id", name="uq_usage_budget_allocation"
+        ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
-    reservation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"), nullable=False, index=True)
-    counter_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_counters.id", ondelete="RESTRICT"), nullable=False, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    reservation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    counter_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_counters.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     held_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     held_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     held_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
@@ -1915,7 +1986,9 @@ class UsageBudgetAllocation(Base):
     held_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     held_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
     held_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class UsageBudgetSettlement(Base):
@@ -1923,10 +1996,22 @@ class UsageBudgetSettlement(Base):
 
     __tablename__ = "usage_budget_settlements"
 
-    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
-    reservation_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"), nullable=False, unique=True)
-    usage_event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("llm_usage_events.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    reservation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_reservations.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    usage_event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("llm_usage_events.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
     actual_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     actual_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     actual_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
@@ -1934,8 +2019,12 @@ class UsageBudgetSettlement(Base):
     actual_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False)
     actual_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False)
     actual_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    overrun: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    overrun: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class UsageBudgetOverride(Base):
@@ -1943,26 +2032,56 @@ class UsageBudgetOverride(Base):
 
     __tablename__ = "usage_budget_overrides"
     __table_args__ = (
-        sa.CheckConstraint("expires_at > effective_from", name="ck_usage_budget_overrides_interval"),
+        sa.CheckConstraint(
+            "expires_at > effective_from", name="ck_usage_budget_overrides_interval"
+        ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True)
-    policy_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("usage_budget_policies.id", ondelete="RESTRICT"), nullable=False, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("usage_budget_policies.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     window_key: Mapped[str] = mapped_column(String(512), nullable=False)
-    allowance_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    allowance_output_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    allowance_total_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    allowance_uncached_input_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    allowance_billable_tokens: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    allowance_usd: Mapped[Decimal] = mapped_column(sa.Numeric(30, 12), nullable=False, server_default="0")
-    allowance_provider_requests: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    allowance_input_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    allowance_output_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    allowance_total_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    allowance_uncached_input_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    allowance_billable_tokens: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    allowance_usd: Mapped[Decimal] = mapped_column(
+        sa.Numeric(30, 12), nullable=False, server_default="0"
+    )
+    allowance_provider_requests: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     # Validated by the tenant-reference trigger when the immutable row is added.
     created_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class UsageBudgetThresholdEvent(Base):
@@ -2074,7 +2193,10 @@ class ProviderBillingConnector(Base):
             name="ck_provider_billing_connector_poll",
         ),
         UniqueConstraint(
-            "tenant_id", "provider", "display_name", name="uq_provider_billing_connector_name"
+            "tenant_id",
+            "provider",
+            "display_name",
+            name="uq_provider_billing_connector_name",
         ),
     )
 
@@ -2093,16 +2215,24 @@ class ProviderBillingConnector(Base):
     verified_scopes: Mapped[list[str]] = mapped_column(
         PG_ARRAY(String(100)), nullable=False, server_default="{}"
     )
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=sa.false())
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.false()
+    )
     absolute_tolerance_micro_usd: Mapped[int] = mapped_column(
         BIGINT, nullable=False, server_default="1000"
     )
     percentage_tolerance: Mapped[Decimal] = mapped_column(
         sa.Numeric(7, 4), nullable=False, server_default="1.0000"
     )
-    lookback_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="180")
-    poll_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    lookback_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="180"
+    )
+    poll_interval_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="60"
+    )
+    next_run_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
     last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -2148,24 +2278,46 @@ class ProviderReconciliationRun(Base):
         index=True,
     )
     idempotency_key: Mapped[str] = mapped_column(String(512), nullable=False)
-    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    window_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     trigger_kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    canonical_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    provider_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    variance_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
-    unresolved_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False, server_default="0")
+    canonical_micro_usd: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    provider_micro_usd: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    variance_micro_usd: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
+    unresolved_micro_usd: Mapped[int] = mapped_column(
+        BIGINT, nullable=False, server_default="0"
+    )
     coverage_percent: Mapped[Decimal] = mapped_column(
         sa.Numeric(7, 4), nullable=False, server_default="0"
     )
-    compared_dimensions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    unresolved_dimensions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    provider_pages: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    compared_dimensions: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    unresolved_dimensions: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    provider_pages: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
     error_code: Mapped[Optional[str]] = mapped_column(String(64))
     created_by_user_id: Mapped[Optional[int]] = mapped_column(Integer)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
 
 
 class ProviderReconciliationEvidence(Base):
@@ -2174,7 +2326,9 @@ class ProviderReconciliationEvidence(Base):
     __tablename__ = "provider_reconciliation_evidence"
     __table_args__ = (
         UniqueConstraint(
-            "run_id", "dimension_key", name="uq_provider_reconciliation_evidence_dimension"
+            "run_id",
+            "dimension_key",
+            name="uq_provider_reconciliation_evidence_dimension",
         ),
         sa.CheckConstraint(
             "classification IN ('matched', 'missing_event', 'duplicate_event', "
@@ -2207,7 +2361,9 @@ class ProviderReconciliationEvidence(Base):
     provider_item_ids: Mapped[list[str]] = mapped_column(
         PG_ARRAY(String(255)), nullable=False, server_default="{}"
     )
-    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    details: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default="{}"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -2231,14 +2387,19 @@ class ProviderReconciliationAdjustment(Base):
         ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("provider_reconciliation_runs.id", ondelete="RESTRICT"), nullable=False, index=True
+        ForeignKey("provider_reconciliation_runs.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     evidence_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("provider_reconciliation_evidence.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("provider_reconciliation_evidence.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
     amount_micro_usd: Mapped[int] = mapped_column(BIGINT, nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="USD")
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, server_default="USD"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -2263,11 +2424,14 @@ class ProviderReconciliationAlertOutbox(Base):
         ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     run_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("provider_reconciliation_runs.id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("provider_reconciliation_runs.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     severity: Mapped[str] = mapped_column(String(16), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    state: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending"
+    )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     error: Mapped[Optional[str]] = mapped_column(Text)
@@ -3215,9 +3379,7 @@ class AuthorizationAuditEvent(Base):
     principal_id: Mapped[str] = mapped_column(String(128), nullable=False)
     permission: Mapped[str] = mapped_column(String(96), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    target_fingerprint: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True
-    )
+    target_fingerprint: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     outcome: Mapped[str] = mapped_column(String(16), nullable=False)
     reason_code: Mapped[str] = mapped_column(String(64), nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)
