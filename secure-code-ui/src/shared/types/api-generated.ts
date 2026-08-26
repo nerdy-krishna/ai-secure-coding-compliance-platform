@@ -4527,6 +4527,8 @@ export interface components {
             pasted_code?: string | null;
             /** Pasted Filename */
             pasted_filename?: string | null;
+            /** Pasted Language */
+            pasted_language?: string | null;
             /** Selected Files */
             selected_files?: string | null;
         };

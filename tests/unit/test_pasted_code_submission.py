@@ -41,6 +41,63 @@ class PastedCodeSubmissionTests(unittest.IsolatedAsyncioTestCase):
             project_name="example",
         )
 
+    async def test_uses_selected_language_to_store_a_filename_with_extension(
+        self,
+    ) -> None:
+        service = self._service()
+
+        await service.create_scan_from_pasted_code(
+            code="console.log('hello');\n",
+            filename=" frontend/widget ",
+            language="typescript",
+            project_name="example",
+        )
+
+        submitted = service._process_and_launch_scan.await_args.kwargs  # type: ignore[attr-defined]
+        self.assertEqual(submitted["files_data"][0]["path"], "frontend/widget.ts")
+        self.assertEqual(submitted["files_data"][0]["language"], "typescript")
+
+    async def test_auto_detects_pasted_python_and_adds_its_extension(self) -> None:
+        service = self._service()
+
+        await service.create_scan_from_pasted_code(
+            code="def greet(name):\n    return f'Hello {name}'\n",
+            filename="greeting",
+            language="auto",
+            project_name="example",
+        )
+
+        submitted = service._process_and_launch_scan.await_args.kwargs  # type: ignore[attr-defined]
+        self.assertEqual(submitted["files_data"][0]["path"], "greeting.py")
+        self.assertEqual(submitted["files_data"][0]["language"], "python")
+
+    async def test_auto_detects_cpp_before_the_general_c_include_pattern(self) -> None:
+        service = self._service()
+
+        await service.create_scan_from_pasted_code(
+            code='#include <iostream>\nint main() { std::cout << "Hi"; }\n',
+            filename="greeting",
+            language="auto",
+            project_name="example",
+        )
+
+        submitted = service._process_and_launch_scan.await_args.kwargs  # type: ignore[attr-defined]
+        self.assertEqual(submitted["files_data"][0]["path"], "greeting.cpp")
+        self.assertEqual(submitted["files_data"][0]["language"], "cpp")
+
+    async def test_rejects_unsupported_pasted_language(self) -> None:
+        service = self._service()
+
+        with self.assertRaises(HTTPException) as raised:
+            await service.create_scan_from_pasted_code(
+                code="print('hello')\n",
+                filename="snippet",
+                language="made-up-language",
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        service._process_and_launch_scan.assert_not_awaited()  # type: ignore[attr-defined]
+
     async def test_rejects_empty_or_nul_pasted_code(self) -> None:
         for code in ("", " \n\t", "print('ok')\x00"):
             with self.subTest(code=repr(code)):
@@ -114,6 +171,7 @@ class PastedCodeSubmissionTests(unittest.IsolatedAsyncioTestCase):
             archive_file=None,
             pasted_code="print('router')\n",
             pasted_filename="snippet.py",
+            pasted_language="python",
             selected_files=None,
         )
 
@@ -122,6 +180,7 @@ class PastedCodeSubmissionTests(unittest.IsolatedAsyncioTestCase):
         submitted = service.create_scan_from_pasted_code.await_args.kwargs
         self.assertEqual(submitted["code"], "print('router')\n")
         self.assertEqual(submitted["filename"], "snippet.py")
+        self.assertEqual(submitted["language"], "python")
         service.create_scan_from_uploads.assert_not_awaited()
         service.create_scan_from_git.assert_not_awaited()
         service.create_scan_from_archive.assert_not_awaited()

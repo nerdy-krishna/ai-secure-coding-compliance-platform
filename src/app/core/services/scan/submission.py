@@ -66,6 +66,57 @@ MAX_TOTAL_BYTES: int = 200 * 1024 * 1024  # 200 MB aggregate
 MAX_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB per file
 MAX_PATH_LEN: int = 1_024
 
+# Canonical storage suffixes for the pasted-code language picker. The user can
+# provide a simple file name; the selected (or detected) language supplies the
+# extension used by scanners and language-aware workflow routing.
+PASTED_CODE_LANGUAGE_EXTENSIONS: dict[str, str] = {
+    "python": ".py",
+    "javascript": ".js",
+    "typescript": ".ts",
+    "java": ".java",
+    "csharp": ".cs",
+    "c": ".c",
+    "cpp": ".cpp",
+    "go": ".go",
+    "rust": ".rs",
+    "ruby": ".rb",
+    "php": ".php",
+    "kotlin": ".kt",
+    "swift": ".swift",
+    "scala": ".scala",
+    "shell": ".sh",
+    "powershell": ".ps1",
+    "perl": ".pl",
+    "r": ".r",
+    "lua": ".lua",
+    "dart": ".dart",
+    "elixir": ".ex",
+    "erlang": ".erl",
+    "haskell": ".hs",
+    "clojure": ".clj",
+    "fsharp": ".fs",
+    "visualbasic": ".vb",
+    "objectivec": ".m",
+    "objectivecpp": ".mm",
+    "groovy": ".groovy",
+    "solidity": ".sol",
+    "sql": ".sql",
+    "graphql": ".graphql",
+    "html": ".html",
+    "css": ".css",
+    "scss": ".scss",
+    "vue": ".vue",
+    "svelte": ".svelte",
+    "yaml": ".yaml",
+    "json": ".json",
+    "xml": ".xml",
+    "toml": ".toml",
+    "markdown": ".md",
+    "terraform": ".tf",
+    "text": ".txt",
+}
+_PASTED_CODE_LANGUAGE_CHOICES = frozenset(PASTED_CODE_LANGUAGE_EXTENSIONS) | {"auto"}
+
 # ---------------------------------------------------------------------------
 # Input-validation allow-lists (V02.2.1)
 # ---------------------------------------------------------------------------
@@ -101,6 +152,50 @@ def _redact_repo_url(url: str) -> str:
         return urlunsplit(clean)
     except Exception:
         return "<redacted>"
+
+
+def _detect_pasted_code_language(code: str, filename: str) -> str:
+    """Return a conservative language classification for pasted source code."""
+    filename_language = get_language_from_filename(filename)
+    if filename_language:
+        return filename_language
+
+    stripped = code.lstrip()
+    if stripped.startswith("<?php"):
+        return "php"
+    if stripped.startswith("#!"):
+        if "powershell" in stripped.partition("\n")[0].lower():
+            return "powershell"
+        return "shell"
+
+    detectors: tuple[tuple[str, str], ...] = (
+        (r"(?m)^\s*(?:def|class|from|import)\s+[A-Za-z_]", "python"),
+        (r"(?m)^\s*(?:interface|type)\s+[A-Za-z_$]", "typescript"),
+        (r"(?:\bconst\b|\blet\b|\bfunction\b|=>|console\.)", "javascript"),
+        (r"(?m)^\s*(?:package\s+[\w.]+;|public\s+class\s+)", "java"),
+        (r"(?m)^\s*(?:using\s+System|namespace\s+[\w.]+)", "csharp"),
+        (r"(?m)^\s*package\s+[\w.]+\s*$|\bfunc\s+\w+\(", "go"),
+        (r"(?m)^\s*(?:fn\s+\w+|use\s+\w+::)", "rust"),
+        (r"(?:std::|#include\s*<iostream>)", "cpp"),
+        (r"(?m)^\s*(?:#include\s*<.*>|int\s+main\s*\()", "c"),
+        (r"(?m)^\s*(?:SELECT|INSERT|UPDATE|DELETE|CREATE\s+TABLE)\b", "sql"),
+        (r"(?m)^\s*(?:query|mutation|fragment)\s+\w+", "graphql"),
+    )
+    for pattern, language in detectors:
+        if re.search(pattern, code, flags=re.IGNORECASE):
+            return language
+    return "text"
+
+
+def _filename_for_pasted_language(filename: str, language: str) -> str:
+    """Keep a matching suffix, otherwise replace or append a canonical one."""
+    if get_language_from_filename(filename) == language:
+        return filename
+
+    parent, separator, leaf = filename.rpartition("/")
+    stem = leaf.rsplit(".", 1)[0] if "." in leaf and not leaf.startswith(".") else leaf
+    stored_leaf = f"{stem}{PASTED_CODE_LANGUAGE_EXTENSIONS[language]}"
+    return f"{parent}{separator}{stored_leaf}" if separator else stored_leaf
 
 
 class ScanSubmissionService:
@@ -442,7 +537,7 @@ class ScanSubmissionService:
         )
 
     async def create_scan_from_pasted_code(
-        self, *, code: str, filename: str, **kwargs
+        self, *, code: str, filename: str, language: str = "auto", **kwargs
     ) -> db_models.Scan:
         """Handles one source file entered directly in the submission form."""
         normalized_filename = filename.strip()
@@ -470,6 +565,21 @@ class ScanSubmissionService:
                 detail="Pasted code must not be empty.",
             )
 
+        normalized_language = language.strip().lower()
+        if normalized_language not in _PASTED_CODE_LANGUAGE_CHOICES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="pasted_language must be 'auto' or a supported language.",
+            )
+        resolved_language = (
+            _detect_pasted_code_language(code, normalized_filename)
+            if normalized_language == "auto"
+            else normalized_language
+        )
+        stored_filename = _filename_for_pasted_language(
+            normalized_filename, resolved_language
+        )
+
         code_size = len(code.encode("utf-8"))
         if code_size > MAX_FILE_BYTES:
             raise HTTPException(
@@ -482,16 +592,18 @@ class ScanSubmissionService:
 
         logger.info(
             "scan-submission: from pasted code",
-            extra={"filename": normalized_filename, "content_bytes": code_size},
+            extra={
+                "filename": stored_filename,
+                "language": resolved_language,
+                "content_bytes": code_size,
+            },
         )
         return await self._process_and_launch_scan(
             files_data=[
                 {
-                    "path": normalized_filename,
+                    "path": stored_filename,
                     "content": code,
-                    "language": (
-                        get_language_from_filename(normalized_filename) or "unknown"
-                    ),
+                    "language": resolved_language,
                 }
             ],
             source_type="paste",

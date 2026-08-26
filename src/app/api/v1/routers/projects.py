@@ -9,7 +9,8 @@ Upload policy (V05.1.1):
     - Maximum number of files: 5000 per submission (router cap).
     - Maximum number of selected_files entries: 5000.
     - Pasted code is accepted as one UTF-8 source file, capped at 10 MiB;
-      ``pasted_filename`` must be a safe relative path.
+      ``pasted_filename`` must be a safe relative path and ``pasted_language``
+      selects a supported language or server-side auto-detection.
     - Maximum uncompressed archive size: ``MAX_UNCOMPRESSED_SIZE_BYTES``
       (100 MB) and ``MAX_FILES_IN_ARCHIVE`` (10000), both enforced by
       ``app.shared.lib.archive``.
@@ -321,6 +322,7 @@ async def create_scan(
     archive_file: Optional[UploadFile] = File(None),
     pasted_code: Optional[str] = Form(None, max_length=10 * 1024 * 1024),
     pasted_filename: Optional[str] = Form(None, min_length=1, max_length=1024),
+    pasted_language: Optional[str] = Form(None, min_length=1, max_length=64),
     selected_files: Optional[str] = Form(None, max_length=200000),
 ):
     # V05.3.2: reject selected_files entries containing traversal/null/backslash.
@@ -450,6 +452,11 @@ async def create_scan(
             status_code=400,
             detail="pasted_filename can only be used with pasted_code.",
         )
+    if pasted_language and not pasted_code:
+        raise HTTPException(
+            status_code=400,
+            detail="pasted_language can only be used with pasted_code.",
+        )
     if pasted_code and not pasted_filename:
         raise HTTPException(
             status_code=400,
@@ -472,6 +479,7 @@ async def create_scan(
         scan = await service.create_scan_from_pasted_code(
             code=pasted_code,
             filename=pasted_filename,
+            language=pasted_language or "auto",
             **common_args,
         )
         submission_method = "pasted_code"

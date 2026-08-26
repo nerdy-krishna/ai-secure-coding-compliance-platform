@@ -204,6 +204,99 @@ const EXT_TO_LANG: Record<string, string> = {
   ".cpp": "cpp",
   ".cc": "cpp",
   ".hpp": "cpp",
+  ".rs": "rust",
+  ".swift": "swift",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".scala": "scala",
+  ".sc": "scala",
+  ".sh": "shell",
+  ".bash": "shell",
+  ".zsh": "shell",
+  ".ps1": "powershell",
+  ".pl": "perl",
+  ".pm": "perl",
+  ".r": "r",
+  ".lua": "lua",
+  ".dart": "dart",
+  ".ex": "elixir",
+  ".exs": "elixir",
+  ".erl": "erlang",
+  ".hrl": "erlang",
+  ".hs": "haskell",
+  ".clj": "clojure",
+  ".cljs": "clojure",
+  ".fs": "fsharp",
+  ".vb": "visualbasic",
+  ".m": "objectivec",
+  ".mm": "objectivecpp",
+  ".groovy": "groovy",
+  ".sol": "solidity",
+  ".sql": "sql",
+  ".graphql": "graphql",
+  ".gql": "graphql",
+  ".html": "html",
+  ".css": "css",
+  ".scss": "scss",
+  ".vue": "vue",
+  ".svelte": "svelte",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+  ".json": "json",
+  ".xml": "xml",
+  ".toml": "toml",
+  ".md": "markdown",
+  ".tf": "terraform",
+  ".hcl": "terraform",
+  ".txt": "text",
+};
+
+const PASTE_LANGUAGE_GROUPS = [
+  {
+    label: "Automatic",
+    options: [["auto", "Auto-detect"]],
+  },
+  {
+    label: "General purpose",
+    options: [
+      ["python", "Python"], ["javascript", "JavaScript"], ["typescript", "TypeScript"],
+      ["java", "Java"], ["csharp", "C#"], ["c", "C"], ["cpp", "C++"],
+      ["go", "Go"], ["rust", "Rust"], ["ruby", "Ruby"], ["php", "PHP"],
+      ["kotlin", "Kotlin"], ["swift", "Swift"], ["scala", "Scala"],
+    ],
+  },
+  {
+    label: "Scripting and functional",
+    options: [
+      ["shell", "Shell / Bash"], ["powershell", "PowerShell"], ["perl", "Perl"],
+      ["r", "R"], ["lua", "Lua"], ["dart", "Dart"], ["elixir", "Elixir"],
+      ["erlang", "Erlang"], ["haskell", "Haskell"], ["clojure", "Clojure"],
+      ["fsharp", "F#"], ["visualbasic", "Visual Basic .NET"], ["groovy", "Groovy"],
+    ],
+  },
+  {
+    label: "Native, web, and data",
+    options: [
+      ["objectivec", "Objective-C"], ["objectivecpp", "Objective-C++"],
+      ["solidity", "Solidity"], ["sql", "SQL"], ["graphql", "GraphQL"],
+      ["html", "HTML"], ["css", "CSS"], ["scss", "SCSS"], ["vue", "Vue"],
+      ["svelte", "Svelte"], ["terraform", "Terraform / HCL"], ["yaml", "YAML"],
+      ["json", "JSON"], ["xml", "XML"], ["toml", "TOML"], ["markdown", "Markdown"],
+      ["text", "Plain text"],
+    ],
+  },
+] as const;
+
+const PASTE_LANGUAGE_EXTENSIONS: Record<string, string> = {
+  python: ".py", javascript: ".js", typescript: ".ts", java: ".java", csharp: ".cs",
+  c: ".c", cpp: ".cpp", go: ".go", rust: ".rs", ruby: ".rb", php: ".php",
+  kotlin: ".kt", swift: ".swift", scala: ".scala", shell: ".sh", powershell: ".ps1",
+  perl: ".pl", r: ".r", lua: ".lua", dart: ".dart", elixir: ".ex", erlang: ".erl",
+  haskell: ".hs", clojure: ".clj", fsharp: ".fs", visualbasic: ".vb", objectivec: ".m",
+  objectivecpp: ".mm", groovy: ".groovy", solidity: ".sol", sql: ".sql", graphql: ".graphql",
+  html: ".html", css: ".css", scss: ".scss", vue: ".vue", svelte: ".svelte",
+  terraform: ".tf", yaml: ".yaml", json: ".json", xml: ".xml", toml: ".toml",
+  markdown: ".md", text: ".txt",
 };
 
 function detectLanguages(fileNames: string[]): string[] {
@@ -214,6 +307,39 @@ function detectLanguages(fileNames: string[]): string[] {
     if (lang) langs.add(lang);
   }
   return Array.from(langs);
+}
+
+function detectPastedLanguage(code: string, filename: string): string {
+  const fromFilename = detectLanguages([filename])[0];
+  if (fromFilename) return fromFilename;
+  const source = code.trimStart();
+  if (source.startsWith("<?php")) return "php";
+  if (source.startsWith("#!")) return source.includes("powershell") ? "powershell" : "shell";
+  if (/^\s*(def|class|from|import)\s+[A-Za-z_]/m.test(code)) return "python";
+  if (/^\s*(interface|type)\s+[A-Za-z_$]/m.test(code)) return "typescript";
+  if (/\b(const|let|function)\b|=>|console\./.test(code)) return "javascript";
+  if (/^\s*(package\s+[\w.]+;|public\s+class\s+)/m.test(code)) return "java";
+  if (/^\s*(using\s+System|namespace\s+[\w.]+)/m.test(code)) return "csharp";
+  if (/^\s*(package\s+[\w.]+\s*$)|\bfunc\s+\w+\(/m.test(code)) return "go";
+  if (/^\s*(fn\s+\w+|use\s+\w+::)/m.test(code)) return "rust";
+  if (/std::|#include\s*<iostream>/.test(code)) return "cpp";
+  if (/^\s*(#include\s*<.*>|int\s+main\s*\()/m.test(code)) return "c";
+  if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE\s+TABLE)\b/im.test(code)) return "sql";
+  return "text";
+}
+
+function storedPastedFilename(filename: string, language: string): string {
+  const trimmed = filename.trim();
+  const extension = PASTE_LANGUAGE_EXTENSIONS[language] ?? ".txt";
+  if (!trimmed) return `snippet${extension}`;
+  const currentLanguage = detectLanguages([trimmed])[0];
+  if (currentLanguage === language) return trimmed;
+  const slash = trimmed.lastIndexOf("/");
+  const directory = slash >= 0 ? trimmed.slice(0, slash + 1) : "";
+  const leaf = slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+  const dot = leaf.lastIndexOf(".");
+  const stem = dot > 0 ? leaf.slice(0, dot) : leaf;
+  return `${directory}${stem}${extension}`;
 }
 
 function coverageKey(languages: string[]): string {
@@ -300,7 +426,8 @@ const SubmitPage: React.FC = () => {
   const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [pastedCode, setPastedCode] = useState("");
-  const [pastedFilename, setPastedFilename] = useState("snippet.py");
+  const [pastedFilename, setPastedFilename] = useState("snippet");
+  const [pastedLanguage, setPastedLanguage] = useState("auto");
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
   const [repoUrl, setRepoUrl] = useState<string>(navState.repoUrl ?? "");
   const [submitting, setSubmitting] = useState(false);
@@ -494,7 +621,7 @@ const SubmitPage: React.FC = () => {
           !normalizedPath.startsWith("/") &&
           !normalizedPath.includes("\\") &&
           !pathSegments.includes(".."),
-        message: "Enter a safe relative filename, such as snippet.py.",
+        message: "Enter a safe filename, such as payment-handler.",
         fieldId: "field-pasted-filename",
       });
     } else if (mode === "archive") {
@@ -570,19 +697,30 @@ const SubmitPage: React.FC = () => {
     },
   );
 
+  const resolvedPastedLanguage = useMemo(
+    () =>
+      pastedLanguage === "auto"
+        ? detectPastedLanguage(pastedCode, pastedFilename)
+        : pastedLanguage,
+    [pastedLanguage, pastedCode, pastedFilename],
+  );
+  const pastedStorageFilename = useMemo(
+    () => storedPastedFilename(pastedFilename, resolvedPastedLanguage),
+    [pastedFilename, resolvedPastedLanguage],
+  );
+
   // Languages detected from whatever files are currently staged — same
   // file-name sources the coverage check uses, computed reactively.
   const detectedLanguages = useMemo(() => {
+    if (mode === "paste" && pastedCode.trim()) return [resolvedPastedLanguage];
     const fileNames =
       mode === "upload"
         ? files.map((f) => f.name)
-        : mode === "paste" && pastedCode.trim()
-          ? [pastedFilename.trim()]
         : (mode === "archive" || mode === "git") && previewFiles
           ? previewFiles.map((f) => f.path)
           : [];
     return detectLanguages(fileNames);
-  }, [mode, files, pastedCode, pastedFilename, previewFiles]);
+  }, [mode, files, pastedCode, resolvedPastedLanguage, previewFiles]);
 
   // The framework to nudge toward, or null. A suggestion is shown only
   // when the detected languages match the table, the framework exists on
@@ -687,6 +825,7 @@ const SubmitPage: React.FC = () => {
       } else if (mode === "paste") {
         appendScanField(payload, "pasted_code", pastedCode);
         appendScanField(payload, "pasted_filename", pastedFilename.trim());
+        appendScanField(payload, "pasted_language", pastedLanguage);
       } else if (mode === "git") {
         appendScanField(payload, "repo_url", repoUrl.trim());
       } else if (mode === "archive" && archiveFile) {
@@ -740,11 +879,11 @@ const SubmitPage: React.FC = () => {
       mode === "upload"
         ? files.map((f) => f.name)
         : mode === "paste"
-          ? [pastedFilename.trim()]
+          ? [resolvedPastedLanguage]
         : (mode === "archive" || mode === "git") && previewFiles
           ? previewFiles.map((f) => f.path)
           : [];
-    const langs = detectLanguages(fileNames);
+    const langs = mode === "paste" ? [resolvedPastedLanguage] : detectLanguages(fileNames);
     const key = coverageKey(langs);
     const dismissed = langs.length === 0 || sessionStorage.getItem(key) === "1";
 
@@ -950,6 +1089,41 @@ const SubmitPage: React.FC = () => {
               <div style={{ display: "grid", gap: 12 }}>
                 <div>
                   <label
+                    htmlFor="field-pasted-language"
+                    style={{
+                      display: "block",
+                      fontSize: 12,
+                      color: "var(--fg-muted)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Programming language
+                  </label>
+                  <select
+                    id="field-pasted-language"
+                    className="sccap-input"
+                    value={pastedLanguage}
+                    onChange={(event) => setPastedLanguage(event.target.value)}
+                    style={{ width: "100%" }}
+                  >
+                    {PASTE_LANGUAGE_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--fg-subtle)" }}>
+                    {pastedLanguage === "auto"
+                      ? `Auto-detect will scan this as ${resolvedPastedLanguage}.`
+                      : "Your selection determines the scanner language and stored extension."}
+                  </div>
+                </div>
+                <div>
+                  <label
                     htmlFor="field-pasted-filename"
                     style={{
                       display: "block",
@@ -958,18 +1132,19 @@ const SubmitPage: React.FC = () => {
                       marginBottom: 6,
                     }}
                   >
-                    Filename
+                    File name
                   </label>
                   <input
                     id="field-pasted-filename"
                     className="sccap-input mono"
                     value={pastedFilename}
                     onChange={(event) => setPastedFilename(event.target.value)}
-                    placeholder="snippet.py"
+                    placeholder="payment-handler"
                     maxLength={1024}
                   />
                   <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--fg-subtle)" }}>
-                    Include the correct extension so SCCAP can select the language-specific scanners.
+                    Enter the name you want to store. SCCAP adds or corrects the extension for the selected language.
+                    <span className="mono"> Stored as: {pastedStorageFilename}</span>
                   </div>
                 </div>
                 <div>
