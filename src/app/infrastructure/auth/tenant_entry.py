@@ -7,7 +7,7 @@ import hmac
 import uuid
 from typing import TypedDict
 
-from fastapi import Request
+from fastapi import Request, Response
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.config.config import settings
@@ -16,6 +16,17 @@ from app.config.config import settings
 HEADER_NAME = "X-SCCAP-Tenant-Entry"
 MAX_AGE_SECONDS = 600
 _SALT = "platform-tenant-entry-v1"
+
+
+def _cookie_name() -> str:
+    return (
+        "SCCAPTenantEntryDev"
+        if settings.ALLOW_INSECURE_COOKIES
+        else "__Host-SCCAPTenantEntry"
+    )
+
+
+COOKIE_NAME = _cookie_name()
 
 
 class TenantEntryClaims(TypedDict):
@@ -70,6 +81,32 @@ def issue_tenant_entry_grant(
     return _serializer().dumps(claims)
 
 
+def set_tenant_entry_cookie(response: Response, token: str) -> None:
+    """Persist the short-lived grant without exposing it to browser JavaScript."""
+
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        max_age=MAX_AGE_SECONDS,
+        path="/",
+        secure=not settings.ALLOW_INSECURE_COOKIES,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def clear_tenant_entry_cookie(response: Response) -> None:
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value="",
+        max_age=0,
+        path="/",
+        secure=not settings.ALLOW_INSECURE_COOKIES,
+        httponly=True,
+        samesite="strict",
+    )
+
+
 def consume_tenant_entry_grant(
     request: Request,
     token: str,
@@ -93,9 +130,12 @@ def consume_tenant_entry_grant(
 
 __all__ = [
     "BadSignature",
+    "COOKIE_NAME",
     "HEADER_NAME",
     "MAX_AGE_SECONDS",
     "SignatureExpired",
+    "clear_tenant_entry_cookie",
     "consume_tenant_entry_grant",
     "issue_tenant_entry_grant",
+    "set_tenant_entry_cookie",
 ]

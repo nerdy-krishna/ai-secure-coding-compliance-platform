@@ -28,6 +28,7 @@ from app.infrastructure.database.repositories.authorization_repo import (
 )
 from app.infrastructure.auth.tenant_entry import (
     BadSignature as TenantEntryBadSignature,
+    COOKIE_NAME as TENANT_ENTRY_COOKIE,
     HEADER_NAME as TENANT_ENTRY_HEADER,
     SignatureExpired as TenantEntryExpired,
     consume_tenant_entry_grant,
@@ -244,7 +245,9 @@ async def get_current_user_tenant_id(
     """Yield one explicit tenant, optionally from a fresh platform-entry grant."""
 
     home_tenant_id = effective_tenant_id(user.tenant_id)
-    token = request.headers.get(TENANT_ENTRY_HEADER)
+    token = request.headers.get(TENANT_ENTRY_HEADER) or request.cookies.get(
+        TENANT_ENTRY_COOKIE
+    )
     if not token:
         if SystemConfigCache.is_feature_enabled("multi_tenant"):
             role_keys = await repo.role_keys_for_user(

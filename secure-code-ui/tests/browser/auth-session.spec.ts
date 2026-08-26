@@ -78,10 +78,61 @@ test("tenant-entry expiry redirects to tenant selection without logging out", as
   context,
 }) => {
   await login(page);
+  const tenantEntryCookie = (await context.cookies()).find((cookie) =>
+    ["__Host-SCCAPTenantEntry", "SCCAPTenantEntryDev"].includes(cookie.name),
+  );
+  if (!tenantEntryCookie) throw new Error("tenant-entry cookie was not issued");
+  expect(tenantEntryCookie.httpOnly).toBe(true);
+  await context.clearCookies({ name: tenantEntryCookie.name });
   await context.setExtraHTTPHeaders({});
 
   await page.goto("/account/history");
   await expect(page).toHaveURL(/\/admin\/tenants$/);
   const me = await page.request.get("/api/v1/auth/session/me");
   expect(me.status()).toBe(200);
+});
+
+test("tenant entry remains active when navigating to the dashboard", async ({
+  page,
+  context,
+}) => {
+  const email = process.env.SCCAP_BROWSER_EMAIL;
+  const password = process.env.SCCAP_BROWSER_PASSWORD;
+  if (!email || !password) throw new Error("browser fixture credentials are required");
+
+  await page.goto("/login");
+  await page.getByLabel("Username or email").fill(email);
+  await page.getByLabel("Password", { exact: false }).fill(password);
+  await page.waitForTimeout(800);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL(/\/(account\/dashboard|admin\/tenants)$/);
+  if (!page.url().endsWith("/admin/tenants")) {
+    await page.goto("/admin/tenants");
+  }
+
+  page.on("dialog", async (dialog) => {
+    if (dialog.message().startsWith("Re-enter your password")) {
+      await dialog.accept(password);
+    } else if (dialog.message().startsWith("Reason for break-glass")) {
+      await dialog.accept("Browser tenant navigation regression");
+    } else {
+      await dialog.dismiss();
+    }
+  });
+  await page.getByRole("button", { name: "Enter tenant" }).first().click();
+  await expect(page.getByRole("button", { name: "Exit tenant" })).toBeVisible();
+  const tenantEntryCookie = (await context.cookies()).find((cookie) =>
+    ["__Host-SCCAPTenantEntry", "SCCAPTenantEntryDev"].includes(cookie.name),
+  );
+  expect(tenantEntryCookie?.httpOnly).toBe(true);
+
+  await page.reload();
+
+  const dashboardStats = page.waitForResponse((response) =>
+    response.url().includes("/api/v1/dashboard/stats"),
+  );
+  await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+  expect((await dashboardStats).status()).toBe(200);
+  await expect(page).toHaveURL(/\/account\/dashboard$/);
+  await expect(page.getByText(/open findings across the platform/i)).toBeVisible();
 });

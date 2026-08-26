@@ -25,7 +25,16 @@ import uuid as _uuid
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path, Request, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Path,
+    Request,
+    Response,
+    status,
+)
 from fastapi_users.password import PasswordHelper
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
@@ -35,7 +44,9 @@ from app.api.v1.dependencies import get_current_user_tenant_id, require_permissi
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.tenant_entry import (
     MAX_AGE_SECONDS as TENANT_ENTRY_MAX_AGE_SECONDS,
+    clear_tenant_entry_cookie,
     issue_tenant_entry_grant,
+    set_tenant_entry_cookie,
 )
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.auth.sso.domains import (
@@ -411,6 +422,7 @@ async def create_tenant(
 )
 async def create_tenant_entry(
     request: Request,
+    response: Response,
     payload: TenantEntryCreate = Body(...),
     db: AsyncSession = Depends(get_db),
     user: db_models.User = Depends(current_active_user),
@@ -460,6 +472,7 @@ async def create_tenant_entry(
         user_id=user.id,
         tenant_id=payload.tenant_id,
     )
+    set_tenant_entry_cookie(response, token)
     authz.record_audit(
         tenant_id=payload.tenant_id,
         principal_kind="human",
@@ -494,6 +507,17 @@ async def create_tenant_entry(
         entry_token=token,
         expires_in=TENANT_ENTRY_MAX_AGE_SECONDS,
     )
+
+
+@router.delete(
+    "/entry",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
+async def clear_tenant_entry(response: Response) -> None:
+    """End the current browser's explicit tenant entry immediately."""
+
+    clear_tenant_entry_cookie(response)
 
 
 @router.get(

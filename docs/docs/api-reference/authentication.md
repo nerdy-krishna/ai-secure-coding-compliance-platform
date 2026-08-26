@@ -105,10 +105,13 @@ assignment convenience; route checks use capabilities such as `identity.manage`,
 
 Tenant users operate only in their assigned tenant. A platform owner cannot use
 global capabilities as a tenant-data bypass. They must select one tenant from
-**Admin → Tenants**, re-enter their password, and provide a reason. The resulting
-`X-SCCAP-Tenant-Entry` grant stays in SPA memory, is bound to the current
-principal/credential and selected tenant, and expires after ten minutes. Scan
-stream tokens preserve that selected tenant in their signed claims.
+**Admin → Tenants**, re-enter their password, and provide a reason. Browsers
+receive the resulting grant in a signed HttpOnly `SameSite=Strict` cookie; it is
+bound to the current principal/credential and selected tenant and expires after
+ten minutes, including across navigation and reloads. Explicit Bearer clients
+may instead send the returned grant in `X-SCCAP-Tenant-Entry`. Calling
+`DELETE /api/v1/admin/tenants/entry` exits the tenant immediately. Scan stream
+tokens preserve the selected tenant in their signed claims.
 
 Tenant identity managers create accounts through `POST /api/v1/admin/users`.
 When SMTP is configured, the new user receives a password-setup/reset link.

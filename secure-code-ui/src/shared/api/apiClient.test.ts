@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import apiClient, {
-  clearTenantEntryGrant,
   getAuthBoundaryAction,
+  markTenantEntryEstablished,
   setBrowserSessionEstablished,
-  setTenantEntryGrant,
   shouldRetryApiQuery,
   TENANT_ENTRY_REQUIRED_EVENT,
 } from "./apiClient";
@@ -90,30 +89,14 @@ describe("API authentication boundary", () => {
     });
 
     await adapterReady;
-    setTenantEntryGrant("new-entry-grant", 600);
+    markTenantEntryEstablished();
     staleControl.reject?.();
     await expect(staleRequest).rejects.toMatchObject({
       response: { status: 403 },
     });
 
-    let forwardedGrant: unknown;
-    await apiClient.get("/probe", {
-      adapter: async (config) => {
-        forwardedGrant = config.headers.get("X-SCCAP-Tenant-Entry");
-        return {
-          config,
-          data: null,
-          headers: {},
-          status: 200,
-          statusText: "OK",
-        };
-      },
-    });
-
-    expect(forwardedGrant).toBe("new-entry-grant");
     expect(dispatchEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: TENANT_ENTRY_REQUIRED_EVENT }),
     );
-    clearTenantEntryGrant();
   });
 });

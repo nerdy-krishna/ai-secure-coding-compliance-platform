@@ -3586,7 +3586,11 @@ export interface paths {
          * @description Reauthenticate a platform owner and bind a short-lived selected tenant.
          */
         post: operations["create_tenant_entry_api_v1_admin_tenants_entry_post"];
-        delete?: never;
+        /**
+         * Clear Tenant Entry
+         * @description End the current browser's explicit tenant entry immediately.
+         */
+        delete: operations["clear_tenant_entry_api_v1_admin_tenants_entry_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -16570,6 +16574,24 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    clear_tenant_entry_api_v1_admin_tenants_entry_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

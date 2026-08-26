@@ -94,7 +94,8 @@ Then verify application behavior:
    session or approve a human action.
 5. A platform owner sees platform metadata only until selecting **Admin →
    Tenants → Enter tenant**, re-entering their password, and supplying a reason.
-   The grant is memory-only and expires after ten minutes.
+   The credential-bound browser grant is HttpOnly, survives page navigation,
+   and expires after ten minutes.
 
 ## Enable critical separation of duties
 

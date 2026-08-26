@@ -11,8 +11,7 @@ const apiClient = axios.create({
 
 let csrfToken: string | null = null;
 let browserSessionEstablished = false;
-let tenantEntryGrant: string | null = null;
-let tenantEntryExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+let tenantEntryGeneration = 0;
 
 const SAFE_METHODS = new Set(["get", "head", "options"]);
 
@@ -26,10 +25,7 @@ export type AuthBoundaryAction =
 type ApiErrorShape = {
   config?: {
     url?: string;
-    headers?: {
-      get?: (name: string) => unknown;
-      [name: string]: unknown;
-    };
+    sccapTenantEntryGeneration?: number;
   };
   response?: {
     status?: number;
@@ -64,50 +60,34 @@ export function setBrowserSessionEstablished(established: boolean): void {
   browserSessionEstablished = established;
   if (!established) {
     csrfToken = null;
-    clearTenantEntryGrant();
+    markTenantEntryCleared();
   }
 }
 
-export function setTenantEntryGrant(token: string, expiresInSeconds: number): void {
-  tenantEntryGrant = token;
-  if (tenantEntryExpiryTimer) clearTimeout(tenantEntryExpiryTimer);
-  tenantEntryExpiryTimer = setTimeout(
-    () => clearTenantEntryGrant(),
-    Math.max(0, expiresInSeconds * 1000),
-  );
+export function markTenantEntryEstablished(): void {
+  tenantEntryGeneration += 1;
 }
 
-export function clearTenantEntryGrant(): void {
-  tenantEntryGrant = null;
-  if (tenantEntryExpiryTimer) clearTimeout(tenantEntryExpiryTimer);
-  tenantEntryExpiryTimer = null;
-}
-
-function getRequestTenantEntryGrant(error: unknown): string | null {
-  const headers = (error as ApiErrorShape).config?.headers;
-  if (!headers) return null;
-
-  const value =
-    headers.get?.("X-SCCAP-Tenant-Entry") ??
-    headers["X-SCCAP-Tenant-Entry"] ??
-    headers["x-sccap-tenant-entry"];
-  return typeof value === "string" ? value : null;
+export function markTenantEntryCleared(): void {
+  tenantEntryGeneration += 1;
 }
 
 function isStaleTenantEntryDenial(error: unknown): boolean {
+  const requestGeneration = (error as ApiErrorShape).config
+    ?.sccapTenantEntryGeneration;
   return (
-    tenantEntryGrant !== null &&
-    getRequestTenantEntryGrant(error) !== tenantEntryGrant
+    typeof requestGeneration === "number" &&
+    requestGeneration < tenantEntryGeneration
   );
 }
 
 apiClient.interceptors.request.use((config) => {
+  (
+    config as typeof config & { sccapTenantEntryGeneration?: number }
+  ).sccapTenantEntryGeneration = tenantEntryGeneration;
   const method = (config.method || "get").toLowerCase();
   if (!SAFE_METHODS.has(method) && csrfToken && config.headers) {
     config.headers["X-CSRF-Token"] = csrfToken;
-  }
-  if (tenantEntryGrant && config.headers) {
-    config.headers["X-SCCAP-Tenant-Entry"] = tenantEntryGrant;
   }
   return config;
 });
@@ -125,14 +105,14 @@ apiClient.interceptors.response.use(
     if (action === "session-expired" && browserSessionEstablished) {
       browserSessionEstablished = false;
       csrfToken = null;
-      clearTenantEntryGrant();
+      markTenantEntryCleared();
       window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
     } else if (
       action === "tenant-entry-required" &&
       browserSessionEstablished &&
       !isStaleTenantEntryDenial(error)
     ) {
-      clearTenantEntryGrant();
+      markTenantEntryCleared();
       window.dispatchEvent(new CustomEvent(TENANT_ENTRY_REQUIRED_EVENT));
     }
     return Promise.reject(error);

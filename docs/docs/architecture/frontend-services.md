@@ -38,10 +38,11 @@ axios instance that handles:
   the same origin as the API; absolute when running Vite dev mode on
   `:5173`).
 - The opaque HttpOnly browser-session cookie through `withCredentials`.
-- In-memory CSRF and explicit platform tenant-entry headers.
+- In-memory CSRF plus the credential-bound HttpOnly platform tenant-entry cookie.
 - Session-expiry handling: `401` clears browser auth state and routes to login.
-- Tenant-entry handling: the exact tenant-entry `403` clears only the entry
-  grant and routes a still-authenticated platform owner to **Admin → Tenants**.
+- Tenant-entry handling: the exact tenant-entry `403` routes a still-authenticated
+  platform owner to **Admin → Tenants**; explicit exit clears the server-issued
+  browser cookie through `DELETE /admin/tenants/entry`.
   Permission and CSRF `403` responses do not log the user out.
 
 Domain services under `shared/api/` are thin wrappers that call into

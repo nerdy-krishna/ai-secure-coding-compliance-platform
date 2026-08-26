@@ -243,7 +243,7 @@ local users through `/admin/users`; each starts with the `analyst` role.
 | SSE stream token | URL query param `?access_token=…`      | 60 seconds; bound to selected tenant and one scan                    | `sse:scan-stream`   |
 | SCIM bearer      | `Authorization: Bearer <token>`        | No expiry (rotatable; revocable via admin UI)                        | `scim`              |
 | Passkey assertion challenge | Server-issued per attempt    | 60 s                                                                 | n/a                 |
-| Tenant-entry grant | JavaScript memory + `X-SCCAP-Tenant-Entry` | 10 minutes; bound to principal and browser/bearer credential | one explicit tenant |
+| Tenant-entry grant | HttpOnly `__Host-SCCAPTenantEntry` cookie (`SCCAPTenantEntryDev` locally), or `X-SCCAP-Tenant-Entry` for explicit API clients | 10 minutes; bound to principal and browser/bearer credential | one explicit tenant |
 
 ### Browser session logic (`apiClient.ts` + `AuthProvider.tsx`)
 

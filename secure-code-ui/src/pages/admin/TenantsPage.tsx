@@ -167,10 +167,14 @@ const TenantsPage: React.FC = () => {
     }
   };
 
-  const onLeave = () => {
-    tenantService.leave();
-    setEnteredTenantId(null);
-    toast.success("Exited the selected tenant.");
+  const onLeave = async () => {
+    try {
+      await tenantService.leave();
+      setEnteredTenantId(null);
+      toast.success("Exited the selected tenant.");
+    } catch {
+      toast.error("Failed to exit the selected tenant.");
+    }
   };
 
   const sortedTenants = useMemo(
@@ -351,7 +355,7 @@ const TenantsPage: React.FC = () => {
                   {enteredTenantId === row.id ? (
                     <button
                       className="sccap-btn sccap-btn-sm sccap-btn-primary"
-                      onClick={onLeave}
+                      onClick={() => void onLeave()}
                       title="Exit the selected tenant now"
                     >
                       Exit tenant

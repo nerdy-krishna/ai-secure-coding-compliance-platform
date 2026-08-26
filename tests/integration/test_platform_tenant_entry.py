@@ -10,6 +10,7 @@ import httpx
 from fastapi_users.password import PasswordHelper
 from sqlalchemy import delete, select
 
+from app.infrastructure.auth.tenant_entry import COOKIE_NAME
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import (
     AuthorizationAuditEvent,
@@ -169,6 +170,16 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         token = issued.json()["entry_token"]
         self.assertEqual(issued.json()["tenant_id"], str(self.target_tenant_id))
         self.assertEqual(issued.json()["expires_in"], 600)
+        set_cookie = issued.headers.get("set-cookie", "")
+        self.assertIn(f"{COOKIE_NAME}=", set_cookie)
+        self.assertIn("HttpOnly", set_cookie)
+        self.assertIn("Max-Age=600", set_cookie)
+        self.assertIn("SameSite=strict", set_cookie)
+
+        cookie_users = await self.client.get(
+            "/api/v1/admin/users", headers=owner_headers
+        )
+        self.assertEqual(cookie_users.status_code, 200, cookie_users.text)
 
         entered_headers = {**owner_headers, "X-SCCAP-Tenant-Entry": token}
         target_users = await self.client.get(
@@ -220,6 +231,13 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             json={"tenant_id": str(self.home_tenant_id)},
         )
         self.assertEqual(critical_move.status_code, 409, critical_move.text)
+
+        cleared = await self.client.delete(entry_endpoint, headers=owner_headers)
+        self.assertEqual(cleared.status_code, 204, cleared.text)
+        after_clear = await self.client.get(
+            "/api/v1/admin/users", headers=owner_headers
+        )
+        self.assertEqual(after_clear.status_code, 403, after_clear.text)
 
         async with AsyncSessionLocal() as db:
             audit_row = await db.scalar(
