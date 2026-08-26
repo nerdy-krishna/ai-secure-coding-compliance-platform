@@ -70,6 +70,26 @@ class PasswordSessionTests(unittest.IsolatedAsyncioTestCase):
         else:
             self.assertFalse(strategy.browser_session_cookie_name.startswith("__Host-"))
 
+    async def test_stateful_browser_cookie_uses_effective_absolute_lifetime(
+        self,
+    ) -> None:
+        strategy = get_custom_cookie_jwt_strategy()
+        response = Response()
+
+        with patch(
+            "app.infrastructure.auth.backend.SessionPolicy.from_settings",
+            return_value=SimpleNamespace(absolute_seconds=6 * 60 * 60),
+        ):
+            await strategy.write_browser_session(response, "opaque-credential")
+
+        cookie = SimpleCookie()
+        for value in response.headers.getlist("set-cookie"):
+            cookie.load(value)
+        self.assertEqual(
+            cookie[strategy.browser_session_cookie_name]["max-age"],
+            str(6 * 60 * 60),
+        )
+
     async def test_logout_expires_refresh_cookie(self) -> None:
         strategy = get_custom_cookie_jwt_strategy()
         user = SimpleNamespace(id=42)

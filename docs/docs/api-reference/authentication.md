@@ -35,6 +35,13 @@ metadata, current credential generation, and revocation state.
 
 ## Refresh
 
+`/auth/refresh` is the compatibility exchange for explicit Bearer-token
+clients. The SPA does not call it during bootstrap or after a `401`; its primary
+credential is the stateful browser-session cookie, whose idle deadline slides
+on authenticated activity. An idle-expired, revoked, or absolute-expired
+browser session must return to login and is not silently resurrected by the
+legacy refresh JWT.
+
 ```http
 POST /api/v1/auth/refresh
 Cookie: SecureCodePlatformRefresh=...
@@ -45,7 +52,16 @@ configured Origin and an `X-CSRF-Token` obtained from
 `GET /api/v1/auth/session/csrf`. Refresh rotates the opaque credential generation
 with a database lock. Reuse of a prior generation revokes that session family;
 inactive users, idle/absolute expiry, and expired bound IdP sessions return
-`401`.
+`401`. The refresh JWT defaults to seven days, but browser use remains capped by
+the effective browser-session absolute deadline (24 hours by default).
+
+For browser requests, response semantics are intentionally distinct:
+
+- `401` means the browser session is missing, invalid, revoked, or expired; the
+  SPA clears local auth state and routes to login.
+- `403` means the authenticated principal lacks permission, CSRF proof, or an
+  explicit tenant-entry grant. Only the tenant-entry variant routes a platform
+  owner to **Admin → Tenants**; it does not log them out.
 
 Session inventory and revocation endpoints are:
 

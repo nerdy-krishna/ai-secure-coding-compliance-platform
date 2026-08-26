@@ -6,13 +6,19 @@ import {
   Route,
   BrowserRouter as Router,
   Routes,
+  useLocation,
+  useNavigate,
 } from "react-router-dom";
 import { useAuth } from "../shared/hooks/useAuth";
 import { AuthProvider } from "./providers/AuthProvider";
 import { ThemeProvider } from "./providers/ThemeProvider";
 import { FeatureProvider } from "./providers/FeatureProvider";
 import { useFeatures } from "../shared/hooks/useFeatures";
-import { ToastProvider } from "../shared/ui/Toast";
+import { ToastProvider, useToast } from "../shared/ui/Toast";
+import {
+  TENANT_ENTRY_REQUIRED_EVENT,
+  shouldRetryApiQuery,
+} from "../shared/api/apiClient";
 import { hasAnyPermission } from "../shared/lib/permissions";
 import { LoadingState } from "../shared/ui/AsyncState";
 import { RouteErrorBoundary } from "../shared/ui/RouteErrorBoundary";
@@ -175,9 +181,36 @@ const FeatureRoute: React.FC<{ feature: string }> = ({ feature }) => {
   return <Outlet />;
 };
 
+const AuthNavigationBridge: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const toast = useToast();
+
+  React.useEffect(() => {
+    const onTenantEntryRequired = () => {
+      toast.warn(
+        "Your login is still valid. Select and enter a tenant to access tenant data.",
+      );
+      if (location.pathname !== "/admin/tenants") {
+        navigate("/admin/tenants", { replace: true });
+      }
+    };
+    window.addEventListener(TENANT_ENTRY_REQUIRED_EVENT, onTenantEntryRequired);
+    return () => {
+      window.removeEventListener(
+        TENANT_ENTRY_REQUIRED_EVENT,
+        onTenantEntryRequired,
+      );
+    };
+  }, [location.pathname, navigate, toast]);
+
+  return null;
+};
+
 function AppContent() {
   return (
     <Router>
+      <AuthNavigationBridge />
       <Routes>
         <Route element={<RouteGuard requires="unauth" />}>
           <Route path="/login" element={routeContent(<LoginPage />)} />
@@ -297,7 +330,13 @@ function AppContent() {
   );
 }
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: shouldRetryApiQuery,
+    },
+  },
+});
 
 function App() {
   return (

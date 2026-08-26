@@ -16,6 +16,44 @@ let tenantEntryExpiryTimer: ReturnType<typeof setTimeout> | null = null;
 
 const SAFE_METHODS = new Set(["get", "head", "options"]);
 
+export const SESSION_EXPIRED_EVENT = "sccap:session-expired";
+export const TENANT_ENTRY_REQUIRED_EVENT = "sccap:tenant-entry-required";
+
+export type AuthBoundaryAction =
+  | "session-expired"
+  | "tenant-entry-required";
+
+type ApiErrorShape = {
+  config?: { url?: string };
+  response?: {
+    status?: number;
+    data?: { detail?: unknown };
+  };
+};
+
+export function getAuthBoundaryAction(error: unknown): AuthBoundaryAction | null {
+  const apiError = error as ApiErrorShape;
+  const status = apiError.response?.status;
+  if (status === 401) return "session-expired";
+  if (status !== 403) return null;
+
+  const detail = apiError.response?.data?.detail;
+  if (detail === "Tenant entry required.") return "tenant-entry-required";
+  if (
+    detail === "Tenant entry denied." &&
+    !apiError.config?.url?.endsWith("/admin/tenants/entry")
+  ) {
+    return "tenant-entry-required";
+  }
+  return null;
+}
+
+export function shouldRetryApiQuery(failureCount: number, error: unknown): boolean {
+  const status = (error as ApiErrorShape).response?.status;
+  if (typeof status === "number" && status >= 400 && status < 500) return false;
+  return failureCount < 3;
+}
+
 export function setBrowserSessionEstablished(established: boolean): void {
   browserSessionEstablished = established;
   if (!established) {
@@ -59,11 +97,15 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error.response?.status === 401 && browserSessionEstablished) {
+    const action = getAuthBoundaryAction(error);
+    if (action === "session-expired" && browserSessionEstablished) {
       browserSessionEstablished = false;
       csrfToken = null;
       clearTenantEntryGrant();
-      window.dispatchEvent(new CustomEvent("sccap:session-expired"));
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    } else if (action === "tenant-entry-required" && browserSessionEstablished) {
+      clearTenantEntryGrant();
+      window.dispatchEvent(new CustomEvent(TENANT_ENTRY_REQUIRED_EVENT));
     }
     return Promise.reject(error);
   },

@@ -37,8 +37,12 @@ axios instance that handles:
 - Base URL resolution (relative `/api/v1` when the UI is served from
   the same origin as the API; absolute when running Vite dev mode on
   `:5173`).
-- Bearer token injection from `useAuth`.
-- Automatic refresh on 401 via the custom `/auth/refresh` endpoint.
+- The opaque HttpOnly browser-session cookie through `withCredentials`.
+- In-memory CSRF and explicit platform tenant-entry headers.
+- Session-expiry handling: `401` clears browser auth state and routes to login.
+- Tenant-entry handling: the exact tenant-entry `403` clears only the entry
+  grant and routes a still-authenticated platform owner to **Admin → Tenants**.
+  Permission and CSRF `403` responses do not log the user out.
 
 Domain services under `shared/api/` are thin wrappers that call into
 this axios instance:
@@ -57,7 +61,7 @@ this axios instance:
 | `"root-redirect"` | `/` — forwards to `/login` or `/account/dashboard`. |
 | `"unauth"` | Login / forgot / reset — redirects authenticated users away. |
 | `"auth"` | Any authenticated user. Renders inside `DashboardLayout`. |
-| `"superuser"` | `/admin/*` — requires `user.is_superuser`. Also renders inside `DashboardLayout`. |
+| `"permission"` | Requires one of the route's stable permission keys and renders inside `DashboardLayout`. |
 
 Every guard redirects to `/setup` when
 `isSetupCompleted === false`, so first-run deployments can't bypass
@@ -98,9 +102,11 @@ Centered two-panel auth layout used by login / forgot / reset.
   (`["dashboard", "stats"]`, `["projects", search]`,
   `["chatSessions"]`, etc.). Mutations invalidate the relevant query
   keys on success.
-- **Auth state**: `AuthProvider` in `app/providers/AuthProvider.tsx`
-  holds the access token and user object; persists the refresh
-  token via secure storage and automatically refreshes on load.
+- **Auth state**: `AuthProvider` in `app/providers/AuthProvider.tsx` restores
+  the HttpOnly server session through `/auth/session/me`, holds only the user
+  and deadline metadata, and never stores access or refresh tokens in browser
+  storage. Authenticated activity slides the idle deadline; the absolute
+  deadline requires a new login.
 - **Theme + preview state**: `ThemeProvider` persists theme / variant
   / accent / role in localStorage. Roles are narrowed to
   `"user" | "admin"` as of H.3; legacy `dev` / `enterprise` values

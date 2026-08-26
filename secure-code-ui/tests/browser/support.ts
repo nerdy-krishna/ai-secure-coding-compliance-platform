@@ -82,7 +82,10 @@ export async function login(page: Page): Promise<void> {
   await page.getByLabel("Password", { exact: false }).fill(password);
   await page.waitForTimeout(800);
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page).toHaveURL(/\/account\/dashboard$/);
+  // A platform owner has no implicit tenant scope. Dashboard requests may
+  // therefore route to tenant selection before this helper obtains its
+  // explicit fixture grant.
+  await expect(page).toHaveURL(/\/(account\/dashboard|admin\/tenants)$/);
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Dashboard", exact: true }),

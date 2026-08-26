@@ -8,6 +8,7 @@ import React, {
 } from "react";
 
 import apiClient, {
+  SESSION_EXPIRED_EVENT,
   setBrowserSessionEstablished,
 } from "../../shared/api/apiClient";
 import { authService } from "../../shared/api/authService";
@@ -132,9 +133,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     const onExpired = () => clearSession();
-    window.addEventListener("sccap:session-expired", onExpired);
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
     return () => {
-      window.removeEventListener("sccap:session-expired", onExpired);
+      window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
     };
   }, [clearSession]);
 

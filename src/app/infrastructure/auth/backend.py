@@ -19,6 +19,7 @@ from app.config.config import settings
 from app.infrastructure.auth.session import (
     BrowserSessionService,
     IssuedSession,
+    SessionPolicy,
     issue_csrf_token,
 )
 
@@ -94,7 +95,9 @@ class CustomCookieJWTStrategy(
         response.set_cookie(
             key=self.browser_session_cookie_name,
             value=credential,
-            max_age=settings.SESSION_ABSOLUTE_LIFETIME_SECONDS,
+            # Keep the browser cookie aligned with the server-side policy,
+            # including the runtime security.session_lifetime_hours override.
+            max_age=SessionPolicy.from_settings().absolute_seconds,
             path="/",
             secure=self.cookie_secure,
             httponly=True,

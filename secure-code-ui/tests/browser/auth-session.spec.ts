@@ -58,3 +58,30 @@ test("security settings show the current server-side session", async ({ page }) 
   await expect(page.getByText("Current")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign out other sessions" })).toBeVisible();
 });
+
+test("an expired browser session redirects to login", async ({ page }) => {
+  await login(page);
+  await page.route("**/api/v1/scans/history**", async (route) => {
+    await route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Browser session is invalid or expired." }),
+    });
+  });
+
+  await page.goto("/account/history");
+  await expect(page).toHaveURL(/\/login$/);
+});
+
+test("tenant-entry expiry redirects to tenant selection without logging out", async ({
+  page,
+  context,
+}) => {
+  await login(page);
+  await context.setExtraHTTPHeaders({});
+
+  await page.goto("/account/history");
+  await expect(page).toHaveURL(/\/admin\/tenants$/);
+  const me = await page.request.get("/api/v1/auth/session/me");
+  expect(me.status()).toBe(200);
+});

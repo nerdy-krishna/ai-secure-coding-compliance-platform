@@ -250,6 +250,9 @@ local users through `/admin/users`; each starts with the `analyst` role.
 - The SPA synchronously removes the retired `localStorage.accessToken` value and never writes a replacement.
 - Bootstrap calls `/auth/session/me` and `/auth/session/csrf`; the CSRF value remains module-memory only.
 - Activity touches are coalesced. A warning appears two minutes before the idle or absolute deadline.
+- A `401` clears SPA auth state and returns to login. Tenant-entry `403`
+  responses clear only the short-lived entry grant and route to tenant
+  selection; permission and CSRF `403` responses preserve the login.
 - Two concurrent rotations serialize on the session row. Presenting the prior generation revokes only that family.
 - A tenant may configure a per-user limit with `deny_new` (default) or explicit `revoke_oldest` enforcement.
 

@@ -35,9 +35,10 @@ export interface RoleChangeRequestRead {
 
 export const authService = {
   // Login
-  // FastAPI Users' /auth/login endpoint expects form data (username, password)
-  // It returns an access_token and token_type.
-  // The refresh token is set as an HttpOnly cookie.
+  // FastAPI Users' /auth/login endpoint expects form data (username, password).
+  // Browser authentication is the opaque HttpOnly session cookie issued by
+  // this response. The returned access JWT and refresh cookie remain for
+  // non-SPA compatibility; the browser app deliberately stores neither token.
   loginUser: async (
     loginData: UserLoginData,
   ): Promise<TokenResponse> => {
