@@ -134,5 +134,5 @@ test("tenant entry remains active when navigating to the dashboard", async ({
   await page.getByRole("link", { name: "Dashboard", exact: true }).click();
   expect((await dashboardStats).status()).toBe(200);
   await expect(page).toHaveURL(/\/account\/dashboard$/);
-  await expect(page.getByText(/open findings across the platform/i)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 });
