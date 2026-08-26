@@ -1,9 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
+import apiClient, {
+  clearTenantEntryGrant,
   getAuthBoundaryAction,
+  setBrowserSessionEstablished,
+  setTenantEntryGrant,
   shouldRetryApiQuery,
+  TENANT_ENTRY_REQUIRED_EVENT,
 } from "./apiClient";
+
+afterEach(() => {
+  setBrowserSessionEstablished(false);
+  vi.unstubAllGlobals();
+});
 
 describe("API authentication boundary", () => {
   it("treats 401 as an expired browser session", () => {
@@ -53,5 +62,58 @@ describe("API authentication boundary", () => {
     expect(shouldRetryApiQuery(0, { response: { status: 422 } })).toBe(false);
     expect(shouldRetryApiQuery(0, { response: { status: 503 } })).toBe(true);
     expect(shouldRetryApiQuery(3, { response: { status: 503 } })).toBe(false);
+  });
+
+  it("does not let a stale tenant denial clear a newer entry grant", async () => {
+    const dispatchEvent = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent });
+    setBrowserSessionEstablished(true);
+
+    const staleControl: { reject: (() => void) | null } = { reject: null };
+    let markAdapterReady!: () => void;
+    const adapterReady = new Promise<void>((resolve) => {
+      markAdapterReady = resolve;
+    });
+    const staleRequest = apiClient.get("/tenant-scoped-resource", {
+      adapter: (config) =>
+        new Promise((_resolve, reject) => {
+          staleControl.reject = () =>
+            reject({
+              config,
+              response: {
+                status: 403,
+                data: { detail: "Tenant entry required." },
+              },
+            });
+          markAdapterReady();
+        }),
+    });
+
+    await adapterReady;
+    setTenantEntryGrant("new-entry-grant", 600);
+    staleControl.reject?.();
+    await expect(staleRequest).rejects.toMatchObject({
+      response: { status: 403 },
+    });
+
+    let forwardedGrant: unknown;
+    await apiClient.get("/probe", {
+      adapter: async (config) => {
+        forwardedGrant = config.headers.get("X-SCCAP-Tenant-Entry");
+        return {
+          config,
+          data: null,
+          headers: {},
+          status: 200,
+          statusText: "OK",
+        };
+      },
+    });
+
+    expect(forwardedGrant).toBe("new-entry-grant");
+    expect(dispatchEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: TENANT_ENTRY_REQUIRED_EVENT }),
+    );
+    clearTenantEntryGrant();
   });
 });

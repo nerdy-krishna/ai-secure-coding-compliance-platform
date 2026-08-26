@@ -24,7 +24,13 @@ export type AuthBoundaryAction =
   | "tenant-entry-required";
 
 type ApiErrorShape = {
-  config?: { url?: string };
+  config?: {
+    url?: string;
+    headers?: {
+      get?: (name: string) => unknown;
+      [name: string]: unknown;
+    };
+  };
   response?: {
     status?: number;
     data?: { detail?: unknown };
@@ -77,6 +83,24 @@ export function clearTenantEntryGrant(): void {
   tenantEntryExpiryTimer = null;
 }
 
+function getRequestTenantEntryGrant(error: unknown): string | null {
+  const headers = (error as ApiErrorShape).config?.headers;
+  if (!headers) return null;
+
+  const value =
+    headers.get?.("X-SCCAP-Tenant-Entry") ??
+    headers["X-SCCAP-Tenant-Entry"] ??
+    headers["x-sccap-tenant-entry"];
+  return typeof value === "string" ? value : null;
+}
+
+function isStaleTenantEntryDenial(error: unknown): boolean {
+  return (
+    tenantEntryGrant !== null &&
+    getRequestTenantEntryGrant(error) !== tenantEntryGrant
+  );
+}
+
 apiClient.interceptors.request.use((config) => {
   const method = (config.method || "get").toLowerCase();
   if (!SAFE_METHODS.has(method) && csrfToken && config.headers) {
@@ -103,7 +127,11 @@ apiClient.interceptors.response.use(
       csrfToken = null;
       clearTenantEntryGrant();
       window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
-    } else if (action === "tenant-entry-required" && browserSessionEstablished) {
+    } else if (
+      action === "tenant-entry-required" &&
+      browserSessionEstablished &&
+      !isStaleTenantEntryDenial(error)
+    ) {
       clearTenantEntryGrant();
       window.dispatchEvent(new CustomEvent(TENANT_ENTRY_REQUIRED_EVENT));
     }
