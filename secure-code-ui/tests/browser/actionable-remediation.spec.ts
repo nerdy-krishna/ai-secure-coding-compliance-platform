@@ -1,22 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import { login } from "./support";
 
 const candidateId = "11111111-1111-4111-8111-111111111111";
 const conflictedCandidateId = "77777777-7777-4777-8777-777777777777";
 const canonicalId = "22222222-2222-4222-8222-222222222222";
-
-async function login(page: Page) {
-  const email = process.env.SCCAP_BROWSER_EMAIL;
-  const password = process.env.SCCAP_BROWSER_PASSWORD;
-  if (!email || !password) throw new Error("Task33 browser credentials are required");
-  await page.goto("/login");
-  await page.getByLabel("Username or email").fill(email);
-  await page.getByLabel("Password", { exact: false }).fill(password);
-  await page.waitForTimeout(800);
-  await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page).toHaveURL(/\/account\/dashboard$/);
-  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Dashboard", exact: true })).toBeVisible();
-}
 
 function result(scanId: string, mode: "SUGGEST" | "REMEDIATE", legacy = false) {
   const finding = {
