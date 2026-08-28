@@ -154,7 +154,7 @@ flowchart LR
 
 ### Edge labels of note
 
-- **`HTTPS · SPA · opaque HttpOnly session`** — the SPA stores no access or refresh token. It authenticates with the stateful `__Host-SCCAPSession` cookie (`SCCAPSessionDev` only for the explicit HTTP local profile), keeps only the CSRF proof in memory, and receives tenant-entry state in a separate ten-minute HttpOnly cookie. Bearer access/refresh JWTs remain non-SPA compatibility credentials.
+- **`HTTPS · SPA · opaque HttpOnly session`** — the SPA stores no access or refresh token. It authenticates with the stateful `__Host-SCCAPSession` cookie (`SCCAPSessionDev` only for the explicit HTTP local profile), keeps only the CSRF proof in memory, and keeps the active tenant on that server-side session row. Bearer access/refresh JWTs remain non-SPA compatibility credentials.
 - **`transactional publish · scan_outbox sweeper`** — the API never publishes directly to RabbitMQ; it writes a row to `scan_outbox`, then `outbox_sweeper.py` publishes durably and marks the row sent.
 - **`consume · aio_pika robust`** — the worker uses `aio_pika.connect_robust` with exponential backoff and a duplicate-delivery idempotency precheck against `scans.status`.
 - **`MCP over stdio/HTTP`** — the same FastAPI process mounts an MCP server so external Claude Code or Cursor sessions can hit scan/chat tools with the user's JWT.

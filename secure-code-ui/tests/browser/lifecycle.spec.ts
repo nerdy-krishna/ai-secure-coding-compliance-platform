@@ -46,6 +46,61 @@ test("submission lands on and remains at the canonical scan route", async ({ pag
   await expect(page.getByText("Live event log")).toBeVisible();
 });
 
+test("prescan review fits the viewport without overlapping controls", async ({ page }) => {
+  const fixture = getBrowserFixture();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  await page.goto(`/analysis/scanning/${fixture.prescan_scan_id}`);
+
+  await expect(page.getByRole("button", { name: "Continue to LLM" })).toBeVisible();
+  await expect(page.locator(".prescan-review-card")).toBeVisible();
+
+  const layout = await page.evaluate(() => {
+    const rect = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) throw new Error(`missing layout probe: ${selector}`);
+      const bounds = element.getBoundingClientRect();
+      return {
+        top: bounds.top,
+        right: bounds.right,
+        bottom: bounds.bottom,
+        left: bounds.left,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+      };
+    };
+    const controls = rect(".scan-running-controls");
+    const progress = rect(".scan-progress-card");
+    const review = rect(".prescan-review-card");
+    const table = rect(".prescan-findings-table");
+    const activity = rect(".scan-activity-log");
+    return {
+      documentClientWidth: document.documentElement.clientWidth,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      controls,
+      progress,
+      review,
+      table,
+      activity,
+      controlsOverlapProgress:
+        controls.bottom > progress.top && controls.top < progress.bottom,
+      controlsOverlapReview:
+        controls.bottom > review.top && controls.top < review.bottom,
+    };
+  });
+
+  expect(layout.documentScrollWidth).toBeLessThanOrEqual(
+    layout.documentClientWidth + 1,
+  );
+  expect(layout.controlsOverlapProgress).toBe(false);
+  expect(layout.controlsOverlapReview).toBe(false);
+  expect(layout.review.scrollWidth).toBeLessThanOrEqual(layout.review.clientWidth + 1);
+  expect(layout.table.scrollWidth).toBeLessThanOrEqual(layout.table.clientWidth + 1);
+  expect(layout.activity.scrollWidth).toBeLessThanOrEqual(
+    layout.activity.clientWidth + 1,
+  );
+});
+
 test("profiling and analysis gates render durable evidence and accept one decision", async ({
   page,
 }) => {

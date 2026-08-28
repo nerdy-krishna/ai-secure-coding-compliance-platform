@@ -5,7 +5,7 @@ title: Tenant authorization rollout
 # Tenant authorization rollout
 
 This runbook covers the role-based authorization, forced PostgreSQL row-level
-security (RLS), explicit platform-owner tenant entry, and optional critical
+security (RLS), session-scoped platform-owner tenant selection, and optional critical
 separation-of-duties (SoD) policy.
 
 ## What changes
@@ -23,7 +23,7 @@ has `BYPASSRLS`, or owns a forced-RLS table.
 
 | Built-in role | Effective capability summary |
 |---|---|
-| `platform_owner` | All platform capabilities; tenant data still requires explicit entry |
+| `platform_owner` | All platform capabilities; starts in default tenant and explicitly switches one session when needed |
 | `tenant_admin` | Tenant scan/audit read, identities, groups, tenant policy, SSO, and service principals |
 | `security_approver` | Tenant scan approval, finding triage/waivers, rule candidate/promotion seam, and audit read |
 | `analyst` | Own/shared scan submit/read/control, finding triage, and waiver/rule requests |
@@ -92,10 +92,10 @@ Then verify application behavior:
 3. Removing a role assignment takes effect on the next request.
 4. A SCIM token can access only its bound tenant and cannot open a browser
    session or approve a human action.
-5. A platform owner sees platform metadata only until selecting **Admin →
-   Tenants → Enter tenant**, re-entering their password, and supplying a reason.
-   The credential-bound browser grant is HttpOnly, survives page navigation,
-   and expires after ten minutes.
+5. A platform owner starts in the seeded default tenant. Switching tenants from
+   the profile menu updates only the current browser session, survives navigation
+   and credential rotation, and ends with that session's logout, revocation,
+   idle timeout, or absolute timeout.
 
 ## Enable critical separation of duties
 
@@ -130,7 +130,7 @@ payloads. Authentication/session events remain in `auth_audit_events`.
 Alert on:
 
 - `database.rls_role.unsafe`;
-- `authorization.break_glass_tenant_entry`;
+- unexpected `authorization.session_tenant_selected` volume;
 - repeated denied or expired action requests;
 - unexpected growth in platform-owner assignments; and
 - worker messages rejected as untrusted tenant identity.

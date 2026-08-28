@@ -1,5 +1,6 @@
 # src/app/infrastructure/auth/schemas.py
 import re
+import uuid
 from typing import Optional
 
 from fastapi_users import schemas
@@ -53,6 +54,9 @@ class UserRead(schemas.BaseUser[int]):
     is_verified: bool = Field(default=False, exclude=True)
     role_keys: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
+    active_tenant_id: Optional[uuid.UUID] = None
+    active_tenant_slug: Optional[str] = None
+    active_tenant_display_name: Optional[str] = None
 
 
 class UserCreate(schemas.BaseUserCreate):

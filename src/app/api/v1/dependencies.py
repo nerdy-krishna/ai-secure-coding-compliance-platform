@@ -26,14 +26,8 @@ from app.infrastructure.database.repositories.user_group_repo import (
 from app.infrastructure.database.repositories.authorization_repo import (
     AuthorizationRepository,
 )
-from app.infrastructure.auth.tenant_entry import (
-    BadSignature as TenantEntryBadSignature,
-    COOKIE_NAME as TENANT_ENTRY_COOKIE,
-    HEADER_NAME as TENANT_ENTRY_HEADER,
-    SignatureExpired as TenantEntryExpired,
-    consume_tenant_entry_grant,
-)
 from app.infrastructure.database.tenant_context import (
+    DEFAULT_TENANT_ID,
     apply_session_context,
     bind_principal,
     effective_tenant_id,
@@ -48,7 +42,6 @@ from app.core.services.scan import (
 from app.core.services.chat_service import ChatService
 from app.core.services.rag_preprocessor_service import RAGPreprocessorService
 from app.core.services.security_standards_service import SecurityStandardsService
-from app.core.config_cache import SystemConfigCache
 from app.shared.lib import scan_scope
 from app.shared.lib.permissions import PLATFORM_OWNER, SCAN_READ_TENANT
 
@@ -242,47 +235,14 @@ async def get_current_user_tenant_id(
     user: db_models.User = Depends(current_active_user),
     repo: AuthorizationRepository = Depends(get_authorization_repository),
 ) -> AsyncGenerator[uuid.UUID, None]:
-    """Yield one explicit tenant, optionally from a fresh platform-entry grant."""
+    """Yield the user's tenant, or a platform owner's session-selected tenant."""
 
     home_tenant_id = effective_tenant_id(user.tenant_id)
-    token = request.headers.get(TENANT_ENTRY_HEADER) or request.cookies.get(
-        TENANT_ENTRY_COOKIE
-    )
-    if not token:
-        if SystemConfigCache.is_feature_enabled("multi_tenant"):
-            role_keys = await repo.role_keys_for_user(
-                user=user,
-                tenant_id=home_tenant_id,
-            )
-            if PLATFORM_OWNER in role_keys:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Tenant entry required.",
-                )
-        yield home_tenant_id
-        return
-    if len(token) > 4096:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant entry denied.",
-        )
-    try:
-        target_tenant_id = consume_tenant_entry_grant(
-            request,
-            token,
-            user_id=user.id,
-        )
-    except (TenantEntryBadSignature, TenantEntryExpired, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant entry denied.",
-        )
-
     role_keys = await repo.role_keys_for_user(user=user, tenant_id=home_tenant_id)
-    if PLATFORM_OWNER not in role_keys:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant entry denied.",
+    target_tenant_id = home_tenant_id
+    if PLATFORM_OWNER in role_keys:
+        target_tenant_id = (
+            getattr(request.state, "active_tenant_id", None) or DEFAULT_TENANT_ID
         )
     target_exists = await repo.db.scalar(
         select(db_models.Tenant.id).where(db_models.Tenant.id == target_tenant_id)
@@ -312,15 +272,8 @@ async def get_current_user_tenant_id_sse(
     home_tenant_id = effective_tenant_id(user.tenant_id)
     stream_tenant_id = getattr(request.state, "sse_tenant_id", None)
     role_keys = await repo.role_keys_for_user(user=user, tenant_id=home_tenant_id)
-    if PLATFORM_OWNER in role_keys and SystemConfigCache.is_feature_enabled(
-        "multi_tenant"
-    ):
-        if stream_tenant_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Tenant entry required.",
-            )
-        return stream_tenant_id
+    if PLATFORM_OWNER in role_keys:
+        return stream_tenant_id or DEFAULT_TENANT_ID
     if stream_tenant_id is not None and stream_tenant_id != home_tenant_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -330,6 +283,7 @@ async def get_current_user_tenant_id_sse(
 
 
 async def get_visible_user_ids_sse(
+    tenant_id: uuid.UUID = Depends(get_current_user_tenant_id_sse),
     user: db_models.User = Depends(current_active_user_sse),
     repo: UserGroupRepository = Depends(get_user_group_repository),
     permissions: frozenset[str] = Depends(get_current_permissions_sse),
@@ -347,7 +301,7 @@ async def get_visible_user_ids_sse(
     return await scan_scope.visible_user_ids(
         user,
         repo,
-        tenant_id=effective_tenant_id(user.tenant_id),
+        tenant_id=tenant_id,
         tenant_wide=SCAN_READ_TENANT in permissions,
     )
 

@@ -59,9 +59,8 @@ For browser requests, response semantics are intentionally distinct:
 
 - `401` means the browser session is missing, invalid, revoked, or expired; the
   SPA clears local auth state and routes to login.
-- `403` means the authenticated principal lacks permission, CSRF proof, or an
-  explicit tenant-entry grant. Only the tenant-entry variant routes a platform
-  owner to **Admin → Tenants**; it does not log them out.
+- `403` means the authenticated principal lacks permission or a valid CSRF
+  proof. It does not clear browser authentication or redirect to tenant selection.
 
 Session inventory and revocation endpoints are:
 
@@ -95,7 +94,7 @@ SMTP must be configured:
 2. The backend emails a short-lived reset token.
 3. `POST /api/v1/auth/reset-password` with `{ token, password }`.
 
-## Roles, permissions, and tenant entry
+## Roles, permissions, and active tenant
 
 SCCAP authorizes routes with stable permission keys resolved from database role
 assignments. Built-in roles are `platform_owner`, `tenant_admin`,
@@ -104,14 +103,14 @@ assignment convenience; route checks use capabilities such as `identity.manage`,
 `scan.approve`, and `audit.read` plus tenant and resource scope.
 
 Tenant users operate only in their assigned tenant. A platform owner cannot use
-global capabilities as a tenant-data bypass. They must select one tenant from
-**Admin → Tenants**, re-enter their password, and provide a reason. Browsers
-receive the resulting grant in a signed HttpOnly `SameSite=Strict` cookie; it is
-bound to the current principal/credential and selected tenant and expires after
-ten minutes, including across navigation and reloads. Explicit Bearer clients
-may instead send the returned grant in `X-SCCAP-Tenant-Entry`. Calling
-`DELETE /api/v1/admin/tenants/entry` exits the tenant immediately. Scan stream
-tokens preserve the selected tenant in their signed claims.
+global capabilities as a cross-tenant data bypass. Each new browser login starts
+in the seeded default tenant. The profile menu can select another tenant through
+`POST /api/v1/admin/tenants/entry`; the server stores that choice on the current
+`auth_sessions` row, so it shares the login's idle timeout, absolute timeout,
+credential rotation, logout, and revocation lifecycle. No additional password or
+reason prompt is required. `GET /api/v1/admin/tenants/entry` returns the active
+tenant, and `DELETE` returns the session to the default tenant. Scan stream tokens
+preserve the selected tenant in their signed claims.
 
 Tenant identity managers create accounts through `POST /api/v1/admin/users`.
 When SMTP is configured, the new user receives a password-setup/reset link.

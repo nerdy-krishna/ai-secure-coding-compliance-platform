@@ -3579,16 +3579,20 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Tenant Entry
+         * @description Return the tenant currently selected by this authenticated session.
+         */
+        get: operations["get_tenant_entry_api_v1_admin_tenants_entry_get"];
         put?: never;
         /**
          * Create Tenant Entry
-         * @description Reauthenticate a platform owner and bind a short-lived selected tenant.
+         * @description Select one tenant for the current authenticated browser session.
          */
         post: operations["create_tenant_entry_api_v1_admin_tenants_entry_post"];
         /**
          * Clear Tenant Entry
-         * @description End the current browser's explicit tenant entry immediately.
+         * @description Return the current browser session to the seeded default tenant.
          */
         delete: operations["clear_tenant_entry_api_v1_admin_tenants_entry_delete"];
         options?: never;
@@ -9935,10 +9939,6 @@ export interface components {
              * Format: uuid
              */
             tenant_id: string;
-            /** Password */
-            password: string;
-            /** Reason */
-            reason: string;
         };
         /** TenantEntryRead */
         TenantEntryRead: {
@@ -9947,10 +9947,12 @@ export interface components {
              * Format: uuid
              */
             tenant_id: string;
-            /** Entry Token */
-            entry_token: string;
-            /** Expires In */
-            expires_in: number;
+            /** Slug */
+            slug: string;
+            /** Display Name */
+            display_name: string;
+            /** Is Default */
+            is_default: boolean;
         };
         /** TenantRead */
         TenantRead: {
@@ -11029,6 +11031,12 @@ export interface components {
             role_keys?: string[];
             /** Permissions */
             permissions?: string[];
+            /** Active Tenant Id */
+            active_tenant_id?: string | null;
+            /** Active Tenant Slug */
+            active_tenant_slug?: string | null;
+            /** Active Tenant Display Name */
+            active_tenant_display_name?: string | null;
         };
         /** UserTenantRead */
         UserTenantRead: {
@@ -18396,6 +18404,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_tenant_entry_api_v1_admin_tenants_entry_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantEntryRead"];
                 };
             };
         };

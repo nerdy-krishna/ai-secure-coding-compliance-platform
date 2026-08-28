@@ -3766,6 +3766,15 @@ class AuthSession(Base):
         nullable=True,
         index=True,
     )
+    # Session-scoped workspace selection. Null resolves to the user's home
+    # tenant, except for platform owners where it resolves to the seeded
+    # default tenant.
+    active_tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     provider_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("sso_providers.id", ondelete="SET NULL"),

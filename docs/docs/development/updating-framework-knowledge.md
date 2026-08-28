@@ -6,7 +6,7 @@ title: Updating Framework Knowledge
 # Updating Framework Knowledge
 
 Every framework's knowledge base lives in the `security_guidelines`
-Qdrant collection (replaced ChromaDB per ADR-008), tagged with
+Qdrant collection (replaced ChromaDB per ADR-003), tagged with
 `framework_name` metadata. Admins can refresh a framework (replace
 its docs) or add new frameworks. Both paths go through the same
 ingestion pipeline.

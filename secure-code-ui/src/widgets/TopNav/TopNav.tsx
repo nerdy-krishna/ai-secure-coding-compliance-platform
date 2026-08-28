@@ -11,8 +11,15 @@ import { useFeatures } from "../../shared/hooks/useFeatures";
 import { useTheme } from "../../app/providers/ThemeProvider";
 import { Icon } from "../../shared/ui/Icon";
 import { NotificationCenter } from "../../shared/ui/NotificationCenter";
+import { useToast } from "../../shared/ui/Toast";
 import { SearchCombobox } from "./SearchCombobox";
-import { ADMIN_AREA_PERMISSIONS, hasAnyPermission } from "../../shared/lib/permissions";
+import {
+  ADMIN_AREA_PERMISSIONS,
+  hasAnyPermission,
+  hasPermission,
+  Permission,
+} from "../../shared/lib/permissions";
+import { tenantService, type Tenant } from "../../shared/api/tenantService";
 
 interface NavItem {
   id: string;
@@ -45,6 +52,10 @@ export const TopNav: React.FC = () => {
   const hasAdminAccess = hasAnyPermission(
     user?.permissions,
     ADMIN_AREA_PERMISSIONS,
+  );
+  const canSwitchTenant = hasPermission(
+    user?.permissions,
+    Permission.platformTenantManage,
   );
 
   // Hide nav items whose backing feature is disabled (modular setup).
@@ -153,7 +164,13 @@ export const TopNav: React.FC = () => {
           >
             {theme === "light" ? <Icon.Moon size={16} /> : <Icon.Sun size={16} />}
           </button>
-          <UserMenu isSuperuser={isSuperuser} email={user?.email} />
+          <UserMenu
+            isSuperuser={isSuperuser}
+            email={user?.email}
+            canSwitchTenant={canSwitchTenant}
+            activeTenantId={user?.active_tenant_id}
+            activeTenantName={user?.active_tenant_display_name}
+          />
         </div>
       </div>
     </header>
@@ -216,11 +233,24 @@ const Brand: React.FC = () => (
 interface UserMenuProps {
   isSuperuser: boolean;
   email?: string;
+  canSwitchTenant: boolean;
+  activeTenantId?: string | null;
+  activeTenantName?: string | null;
 }
 
-const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
+const UserMenu: React.FC<UserMenuProps> = ({
+  isSuperuser,
+  email,
+  canSwitchTenant,
+  activeTenantId,
+  activeTenantName,
+}) => {
   const [open, setOpen] = useState(false);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [tenantsLoading, setTenantsLoading] = useState(false);
+  const [switchingTenant, setSwitchingTenant] = useState(false);
   const { logout } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -244,6 +274,39 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !canSwitchTenant || tenants.length > 0 || tenantsLoading) return;
+    setTenantsLoading(true);
+    void tenantService
+      .list()
+      .then((rows) =>
+        setTenants(
+          [...rows].sort((a, b) => {
+            if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
+            return a.display_name.localeCompare(b.display_name);
+          }),
+        ),
+      )
+      .catch(() => toast.error("Failed to load tenants."))
+      .finally(() => setTenantsLoading(false));
+  }, [canSwitchTenant, open, tenants.length, tenantsLoading, toast]);
+
+  const switchTenant = async (tenantId: string) => {
+    if (!tenantId || tenantId === activeTenantId || switchingTenant) return;
+    setSwitchingTenant(true);
+    try {
+      const selected = await tenantService.enter(tenantId);
+      toast.success(`Switched to ${selected.display_name}.`);
+      window.location.assign("/account/dashboard");
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { detail?: string } } }
+      ).response?.data?.detail;
+      toast.error(detail || "Failed to switch tenant.");
+      setSwitchingTenant(false);
+    }
+  };
 
   const handleSignOut = async () => {
     setOpen(false);
@@ -319,6 +382,49 @@ const UserMenu: React.FC<UserMenuProps> = ({ isSuperuser, email }) => {
             zIndex: 30,
           }}
         >
+          {canSwitchTenant && (
+            <div
+              style={{
+                padding: "8px 10px 10px",
+                borderBottom: "1px solid var(--border)",
+                marginBottom: 6,
+              }}
+            >
+              <label
+                htmlFor="active-tenant-select"
+                style={{
+                  display: "grid",
+                  gap: 6,
+                  color: "var(--fg-muted)",
+                  fontSize: 11.5,
+                }}
+              >
+                Active tenant
+                <select
+                  id="active-tenant-select"
+                  className="sccap-input"
+                  value={activeTenantId ?? ""}
+                  disabled={tenantsLoading || switchingTenant}
+                  onChange={(event) => void switchTenant(event.target.value)}
+                  style={{ width: "100%", fontSize: 12.5 }}
+                >
+                  {activeTenantId && tenants.length === 0 && (
+                    <option value={activeTenantId}>
+                      {activeTenantName || "Current tenant"}
+                    </option>
+                  )}
+                  {tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.display_name}{tenant.is_default ? " (default)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div style={{ marginTop: 5, fontSize: 10.5, color: "var(--fg-subtle)" }}>
+                Selection lasts until this login session ends.
+              </div>
+            </div>
+          )}
           <button
             role="menuitem"
             onClick={goSettings}

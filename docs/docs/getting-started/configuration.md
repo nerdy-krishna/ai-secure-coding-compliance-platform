@@ -128,7 +128,7 @@ governance repository/workflow; direct bucket deletion bypasses the audit trail.
 
 ## 🧠 Qdrant Vector Database
 
-Replaced ChromaDB per ADR-008. The compose stack runs Qdrant in the
+Replaced ChromaDB per ADR-003. The compose stack runs Qdrant in the
 `qdrant` container; the app talks to it through the `VectorStore`
 Protocol (`infrastructure/rag/qdrant_store.py`).
 

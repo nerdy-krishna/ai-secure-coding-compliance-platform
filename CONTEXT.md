@@ -67,8 +67,10 @@ must carry actionable stage details; status changes alone are insufficient opera
 
 ### Scan artifact
 
-A versioned structured payload associated with a Scan. Finding lineage and bounded native scanner
-reports are currently persisted as artifacts.
+A versioned structured payload associated with a Scan. Finding lineage and patch-plan projections
+remain structured artifacts. Large native scanner reports and exact rule bodies are stored as
+encrypted, versioned, attempt-addressed evidence objects; bounded legacy JSON artifacts remain
+readable only during migration.
 
 ### Finding lineage
 
@@ -77,9 +79,10 @@ use a persisted lineage artifact; legacy scans fall back to inferred title-based
 
 ### Visibility scope
 
-The tenant and user-group constraints applied to user-owned list/query operations. Superusers may
-receive an unrestricted scope; ordinary users receive the explicit visible-user set within their
-tenant.
+The tenant and user-group constraints applied to user-owned list/query operations. Tenant-wide
+permission may remove the ownership/group filter inside the active tenant, but no role bypasses the
+tenant predicate or forced PostgreSQL RLS. Other callers receive an explicit same-tenant visible-user
+set.
 
 ### Feature catalog
 
@@ -133,7 +136,7 @@ specialist, or model cannot directly confirm a finding.
 - Changes to lifecycle nodes, edges, statuses, events, or approvals update the canonical workflow
   documentation in the same change.
 
-## Known current limitations
+## Current implementation notes and limitations
 
 - Submission, approval/decline, resume, and restart commit their aggregate changes and outbox intent
   atomically and never publish inline. Cancellation commits its status and audit event atomically.
@@ -142,16 +145,16 @@ specialist, or model cannot directly confirm a finding.
   `FAILED`/`CANCELLED` reset path.
 - Successful graph nodes append their exact identifier to `WorkerState.completed_stages` in the
   same LangGraph checkpoint as their outputs. Resume retains the failed thread; restart deletes it.
-- Scanner reports are retained in bounded PostgreSQL JSONB, but they are not yet immutable,
-  attempt-addressed evidence in object storage.
+- Native scanner evidence is stored in encrypted, versioned, attempt-addressed object storage.
+  Bounded PostgreSQL JSON remains a migration-only read path and never overrides verified evidence.
 - SSE exposes persisted scan events and scanner-level activity, but many non-scanner stages still
   contain only coarse state transitions.
 - Prompt limits currently reject oversized calls; they do not split or compact prompts.
 - Global consolidation uses deterministic exact-field grouping rather than an LLM-assisted
   cross-file root-cause pass.
-- Authentication uses bearer access/refresh tokens. Password, SSO, and WebAuthn login now share the
-  refresh-cookie issuance path, and logout expires both cookies; browser-level longevity testing is
-  still missing.
+- Browser traffic uses an HttpOnly, opaque, stateful server-side session plus a memory-only CSRF
+  proof. The bearer-token FastAPI Users surface remains only as a compatibility/non-browser boundary
+  while browser-managed access tokens are retired; browser-level longevity testing is still missing.
 - The inherited automated test suites were removed on 2026-08-22. Replacement tests are added only
   at verified production seams as defects and invariants are addressed.
 - Pentesting Foundation 0 currently implements versioned contracts, vocabulary, feature discovery,

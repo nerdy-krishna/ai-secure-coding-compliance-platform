@@ -1,6 +1,6 @@
 // secure-code-ui/src/pages/admin/TenantsPage.tsx
 //
-// Platform tenant metadata and explicit, short-lived tenant entry.
+// Platform tenant metadata. Active tenant switching lives in the profile menu.
 
 import React, { useEffect, useMemo, useState } from "react";
 import { Icon } from "../../shared/ui/Icon";
@@ -29,7 +29,6 @@ const TenantsPage: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [enteredTenantId, setEnteredTenantId] = useState<string | null>(null);
 
   const [slug, setSlug] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -143,40 +142,6 @@ const TenantsPage: React.FC = () => {
     }
   };
 
-  const onEnter = async (row: Tenant) => {
-    const password = window.prompt(`Re-enter your password to enter "${row.slug}".`);
-    if (!password) return;
-    const reason = window.prompt(
-      "Reason for break-glass tenant entry (recorded as a privacy-safe fingerprint):",
-    );
-    if (!reason || reason.trim().length < 10) {
-      toast.error("A reason of at least 10 characters is required.");
-      return;
-    }
-    try {
-      await tenantService.enter(row.id, password, reason.trim());
-      setEnteredTenantId(row.id);
-      toast.success(`Entered "${row.slug}" for up to 10 minutes.`);
-    } catch (err) {
-      const msg =
-        (err as { response?: { data?: { detail?: string } }; message?: string })
-          ?.response?.data?.detail ||
-        (err as { message?: string })?.message ||
-        "Tenant entry denied";
-      toast.error(msg);
-    }
-  };
-
-  const onLeave = async () => {
-    try {
-      await tenantService.leave();
-      setEnteredTenantId(null);
-      toast.success("Exited the selected tenant.");
-    } catch {
-      toast.error("Failed to exit the selected tenant.");
-    }
-  };
-
   const sortedTenants = useMemo(
     () =>
       [...tenants].sort((a, b) => {
@@ -199,8 +164,8 @@ const TenantsPage: React.FC = () => {
         />
         <div style={{ color: "var(--fg-muted)", fontSize: 13, marginTop: 4 }}>
           Tenants partition the platform into isolated workspaces. Platform
-          owners must re-enter their password, provide a reason, and select one
-          tenant before tenant data is available. Entry expires after 10 minutes.
+          owners begin in the default tenant and can switch their active tenant
+          from the profile menu. The selection lasts for the login session.
         </div>
       </div>
 
@@ -352,23 +317,6 @@ const TenantsPage: React.FC = () => {
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  {enteredTenantId === row.id ? (
-                    <button
-                      className="sccap-btn sccap-btn-sm sccap-btn-primary"
-                      onClick={() => void onLeave()}
-                      title="Exit the selected tenant now"
-                    >
-                      Exit tenant
-                    </button>
-                  ) : (
-                    <button
-                      className="sccap-btn sccap-btn-sm sccap-btn-ghost"
-                      onClick={() => void onEnter(row)}
-                      title="Step up and enter this tenant for up to 10 minutes"
-                    >
-                      Enter tenant
-                    </button>
-                  )}
                   <button
                     className="sccap-btn sccap-btn-sm sccap-btn-ghost"
                     onClick={() => void onRename(row)}

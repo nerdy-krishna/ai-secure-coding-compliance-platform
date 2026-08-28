@@ -16,7 +16,7 @@ PostgreSQL row-level security remains a second boundary.
 | Normal user | Their own canonical events and allowances only |
 | Group owner | Users in groups where their membership role is `owner` |
 | Tenant-wide auditor or administrator | The explicitly selected tenant |
-| Platform owner | One tenant after password/reason-bound tenant entry |
+| Platform owner | Default tenant initially; one explicitly selected tenant per browser session |
 
 An ordinary group member does not inherit peer spend visibility from scan
 sharing. Account and group filters outside the resolved scope return `404`, so

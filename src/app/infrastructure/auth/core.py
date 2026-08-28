@@ -63,6 +63,8 @@ async def current_active_user(
     unsafe requests additionally require an exact allowed Origin and a CSRF
     header bound to the server-side session family.
     """
+    request.state.auth_session_id = None
+    request.state.active_tenant_id = None
     if bearer_user is not None:
         user = bearer_user
     else:
@@ -106,6 +108,8 @@ async def current_active_user(
             )
             await db.commit()
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        request.state.auth_session_id = session_row.id
+        request.state.active_tenant_id = session_row.active_tenant_id
         await db.commit()
 
     binding = bind_principal(

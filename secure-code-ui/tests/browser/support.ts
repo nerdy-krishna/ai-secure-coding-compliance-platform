@@ -10,6 +10,7 @@ export const SUBMITTED_SOURCE_SECRET =
 export interface BrowserFixture {
   llm_config_id: string;
   framework_name: string;
+  prescan_scan_id: string;
   gate_scan_id: string;
   gate_id: string;
   replay_scan_id: string;
@@ -82,20 +83,17 @@ export async function login(page: Page): Promise<void> {
   await page.getByLabel("Password", { exact: false }).fill(password);
   await page.waitForTimeout(800);
   await page.getByRole("button", { name: "Log in" }).click();
-  // A platform owner has no implicit tenant scope. Dashboard requests may
-  // therefore route to tenant selection before this helper obtains its
-  // explicit fixture grant.
   await expect(page).toHaveURL(/\/(account\/dashboard|admin\/tenants)$/);
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Dashboard", exact: true }),
   ).toBeVisible();
 
-  // The browser fixture is a platform owner so it can exercise the complete
-  // authenticated route inventory. In multi-tenant mode, platform owners must
-  // explicitly enter a tenant before tenant-scoped scan APIs will authorize.
+  // Browser sessions now default platform owners into the seeded tenant. Keep
+  // the explicit selection here so the fixture documents and verifies the
+  // current session-scoped API contract without a separate step-up grant.
   const tenantEntry = await page.evaluate(
-    async ({ password: fixturePassword, tenantId }) => {
+    async ({ tenantId }) => {
       const csrfResponse = await fetch("/api/v1/auth/session/csrf", {
         credentials: "include",
       });
@@ -112,26 +110,21 @@ export async function login(page: Page): Promise<void> {
         },
         body: JSON.stringify({
           tenant_id: tenantId,
-          password: fixturePassword,
-          reason: "Automated browser acceptance fixture",
         }),
       });
       const body = (await response.json()) as {
         detail?: string;
-        entry_token?: string;
+        tenant_id?: string;
       };
       return { status: response.status, ...body };
     },
-    { password, tenantId: DEFAULT_TENANT_ID },
+    { tenantId: DEFAULT_TENANT_ID },
   );
-  if (tenantEntry.status !== 200 || !tenantEntry.entry_token) {
+  if (tenantEntry.status !== 200 || tenantEntry.tenant_id !== DEFAULT_TENANT_ID) {
     throw new Error(
-      `browser tenant entry failed (${tenantEntry.status}): ${tenantEntry.detail ?? "missing grant"}`,
+      `browser tenant selection failed (${tenantEntry.status}): ${tenantEntry.detail ?? "missing active tenant"}`,
     );
   }
-  await page.context().setExtraHTTPHeaders({
-    "X-SCCAP-Tenant-Entry": tenantEntry.entry_token,
-  });
   await page.goto("/account/dashboard");
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 }

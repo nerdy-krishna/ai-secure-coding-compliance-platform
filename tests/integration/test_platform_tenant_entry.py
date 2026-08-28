@@ -10,7 +10,6 @@ import httpx
 from fastapi_users.password import PasswordHelper
 from sqlalchemy import delete, select
 
-from app.infrastructure.auth.tenant_entry import COOKIE_NAME
 from app.infrastructure.database.database import AsyncSessionLocal, engine
 from app.infrastructure.database.models import (
     AuthorizationAuditEvent,
@@ -109,172 +108,74 @@ class PlatformTenantEntryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
-    async def test_step_up_grant_selects_one_tenant_and_stales_immediately(
+    async def test_browser_session_defaults_switches_and_survives_rotation(
         self,
     ) -> None:
         entry_endpoint = "/api/v1/admin/tenants/entry"
-        entry_reason = "Investigating a tenant security incident"
-        admin_headers = await self._headers("admin")
-        empty_reason = await self.client.post(
-            entry_endpoint,
-            headers=await self._headers("owner"),
-            json={
-                "tenant_id": str(self.target_tenant_id),
-                "password": self.password,
-                "reason": "          ",
-            },
+        _owner_id, owner_email = self.users["owner"]
+        login = await self.client.post(
+            "/api/v1/auth/login",
+            data={"username": owner_email, "password": self.password},
         )
-        self.assertEqual(empty_reason.status_code, 422, empty_reason.text)
-        non_platform = await self.client.post(
-            entry_endpoint,
-            headers=admin_headers,
-            json={
-                "tenant_id": str(self.target_tenant_id),
-                "password": self.password,
-                "reason": entry_reason,
-            },
-        )
-        self.assertEqual(non_platform.status_code, 403, non_platform.text)
+        self.assertEqual(login.status_code, 200, login.text)
+        browser_headers = {
+            "Origin": self.base_url,
+            "X-CSRF-Token": login.headers["x-csrf-token"],
+        }
 
-        owner_headers = await self._headers("owner")
-        global_config = await self.client.get(
-            "/api/v1/admin/logs/level", headers=owner_headers
+        initial = await self.client.get(entry_endpoint)
+        self.assertEqual(initial.status_code, 200, initial.text)
+        self.assertEqual(
+            initial.json()["tenant_id"],
+            "00000000-0000-0000-0000-000000000001",
         )
-        self.assertEqual(global_config.status_code, 200, global_config.text)
-        no_entry = await self.client.get("/api/v1/admin/users", headers=owner_headers)
-        self.assertEqual(no_entry.status_code, 403, no_entry.text)
-        tenant_admin_users = await self.client.get(
-            "/api/v1/admin/users", headers=admin_headers
-        )
-        self.assertEqual(tenant_admin_users.status_code, 200, tenant_admin_users.text)
-        wrong_password = await self.client.post(
-            entry_endpoint,
-            headers=owner_headers,
-            json={
-                "tenant_id": str(self.target_tenant_id),
-                "password": "wrong",
-                "reason": entry_reason,
-            },
-        )
-        self.assertEqual(wrong_password.status_code, 403, wrong_password.text)
+        self.assertTrue(initial.json()["is_default"])
+
         issued = await self.client.post(
             entry_endpoint,
-            headers=owner_headers,
-            json={
-                "tenant_id": str(self.target_tenant_id),
-                "password": self.password,
-                "reason": entry_reason,
-            },
+            headers=browser_headers,
+            json={"tenant_id": str(self.target_tenant_id)},
         )
         self.assertEqual(issued.status_code, 200, issued.text)
-        token = issued.json()["entry_token"]
         self.assertEqual(issued.json()["tenant_id"], str(self.target_tenant_id))
-        self.assertEqual(issued.json()["expires_in"], 600)
-        set_cookie = issued.headers.get("set-cookie", "")
-        self.assertIn(f"{COOKIE_NAME}=", set_cookie)
-        self.assertIn("HttpOnly", set_cookie)
-        self.assertIn("Max-Age=600", set_cookie)
-        self.assertIn("SameSite=strict", set_cookie)
+        self.assertNotIn("entry_token", issued.json())
+        self.assertNotIn("expires_in", issued.json())
 
-        cookie_users = await self.client.get(
-            "/api/v1/admin/users", headers=owner_headers
-        )
-        self.assertEqual(cookie_users.status_code, 200, cookie_users.text)
-
-        entered_headers = {**owner_headers, "X-SCCAP-Tenant-Entry": token}
-        target_users = await self.client.get(
-            "/api/v1/admin/users", headers=entered_headers
-        )
+        selected = await self.client.get(entry_endpoint)
+        self.assertEqual(selected.status_code, 200, selected.text)
+        self.assertEqual(selected.json()["tenant_id"], str(self.target_tenant_id))
+        target_users = await self.client.get("/api/v1/admin/users")
         self.assertEqual(target_users.status_code, 200, target_users.text)
         target_ids = {row["id"] for row in target_users.json()}
         self.assertIn(self.users["target-member"][0], target_ids)
         self.assertNotIn(self.users["home-member"][0], target_ids)
 
-        mismatched_principal = await self.client.get(
-            "/api/v1/admin/users",
-            headers={**admin_headers, "X-SCCAP-Tenant-Entry": token},
+        refresh = await self.client.post(
+            "/api/v1/auth/refresh",
+            headers=browser_headers,
         )
-        self.assertEqual(
-            mismatched_principal.status_code, 403, mismatched_principal.text
-        )
-        tampered = await self.client.get(
-            "/api/v1/admin/users",
-            headers={**owner_headers, "X-SCCAP-Tenant-Entry": f"{token}x"},
-        )
-        self.assertEqual(tampered.status_code, 403, tampered.text)
+        self.assertEqual(refresh.status_code, 200, refresh.text)
+        after_rotation = await self.client.get(entry_endpoint)
+        self.assertEqual(after_rotation.status_code, 200, after_rotation.text)
+        self.assertEqual(after_rotation.json()["tenant_id"], str(self.target_tenant_id))
 
-        moved = await self.client.patch(
-            f"/api/v1/admin/users/{self.users['target-member'][0]}/tenant",
-            headers=entered_headers,
-            json={"tenant_id": str(self.home_tenant_id)},
-        )
-        self.assertEqual(moved.status_code, 200, moved.text)
-        self.assertEqual(moved.json()["tenant_id"], str(self.home_tenant_id))
-        async with AsyncSessionLocal() as db:
-            roles = set(
-                (
-                    await db.scalars(
-                        select(RoleAssignment.role_key).where(
-                            RoleAssignment.user_id == self.users["target-member"][0]
-                        )
-                    )
-                ).all()
-            )
-            self.assertEqual(roles, {ANALYST})
-            target = await db.get(Tenant, self.target_tenant_id)
-            target.separation_of_duties_mode = "critical"
-            await db.commit()
-
-        critical_move = await self.client.patch(
-            f"/api/v1/admin/users/{self.users['target-critical'][0]}/tenant",
-            headers=entered_headers,
-            json={"tenant_id": str(self.home_tenant_id)},
-        )
-        self.assertEqual(critical_move.status_code, 409, critical_move.text)
-
-        cleared = await self.client.delete(entry_endpoint, headers=owner_headers)
+        cleared = await self.client.delete(entry_endpoint, headers=browser_headers)
         self.assertEqual(cleared.status_code, 204, cleared.text)
-        after_clear = await self.client.get(
-            "/api/v1/admin/users", headers=owner_headers
-        )
-        self.assertEqual(after_clear.status_code, 403, after_clear.text)
+        after_clear = await self.client.get(entry_endpoint)
+        self.assertEqual(after_clear.status_code, 200, after_clear.text)
+        self.assertTrue(after_clear.json()["is_default"])
 
         async with AsyncSessionLocal() as db:
             audit_row = await db.scalar(
                 select(AuthorizationAuditEvent).where(
                     AuthorizationAuditEvent.principal_id == str(self.users["owner"][0]),
-                    AuthorizationAuditEvent.resource_type == "tenant_entry",
+                    AuthorizationAuditEvent.resource_type == "active_tenant",
                     AuthorizationAuditEvent.outcome == "allowed",
                 )
             )
             self.assertIsNotNone(audit_row)
             self.assertEqual(audit_row.tenant_id, self.target_tenant_id)
             self.assertNotIn(str(self.target_tenant_id), audit_row.target_fingerprint)
-            reason_row = await db.scalar(
-                select(AuthorizationAuditEvent).where(
-                    AuthorizationAuditEvent.principal_id == str(self.users["owner"][0]),
-                    AuthorizationAuditEvent.resource_type == "tenant_entry_reason",
-                    AuthorizationAuditEvent.outcome == "allowed",
-                )
-            )
-            self.assertIsNotNone(reason_row)
-            self.assertNotIn(entry_reason, reason_row.target_fingerprint)
-            await db.execute(
-                delete(RoleAssignment).where(
-                    RoleAssignment.user_id == self.users["owner"][0],
-                    RoleAssignment.role_key == PLATFORM_OWNER,
-                )
-            )
-            await db.commit()
-
-        stale_grant = await self.client.get(
-            "/api/v1/admin/users", headers=entered_headers
-        )
-        self.assertEqual(stale_grant.status_code, 403, stale_grant.text)
-        stale_global_role = await self.client.get(
-            "/api/v1/admin/logs/level", headers=owner_headers
-        )
-        self.assertEqual(stale_global_role.status_code, 403, stale_global_role.text)
 
 
 if __name__ == "__main__":

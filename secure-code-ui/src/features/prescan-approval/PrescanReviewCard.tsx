@@ -70,13 +70,14 @@ export const PrescanReviewCard: React.FC<Props> = ({
 
   return (
     <div
-      className="sccap-card"
+      className="sccap-card prescan-review-card"
       style={{
         background: hasCriticalSecret ? "var(--critical-weak)" : "var(--primary-weak)",
         borderColor: "transparent",
       }}
     >
       <div
+        className="prescan-review-header"
         style={{
           display: "flex",
           alignItems: "center",
@@ -85,7 +86,7 @@ export const PrescanReviewCard: React.FC<Props> = ({
           marginBottom: 12,
         }}
       >
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div
             style={{
               fontWeight: 600,
@@ -122,7 +123,10 @@ export const PrescanReviewCard: React.FC<Props> = ({
           </div>
         </div>
         {!readOnly && (
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <div
+            className="prescan-review-actions"
+            style={{ display: "flex", gap: 8, flexShrink: 0 }}
+          >
             <button
               className="sccap-btn"
               onClick={onStop}
@@ -148,9 +152,11 @@ export const PrescanReviewCard: React.FC<Props> = ({
       </div>
 
       <div
+        className="prescan-findings-table"
         style={{
           maxHeight: 280,
-          overflow: "auto",
+          overflowY: "auto",
+          overflowX: "hidden",
           background: "var(--bg)",
           border: "1px solid var(--border)",
           borderRadius: 6,
@@ -159,6 +165,7 @@ export const PrescanReviewCard: React.FC<Props> = ({
         <table
           style={{
             width: "100%",
+            tableLayout: "fixed",
             borderCollapse: "collapse",
             fontSize: 12.5,
           }}
@@ -189,14 +196,13 @@ export const PrescanReviewCard: React.FC<Props> = ({
                 <td style={tdStyle}>
                   <code style={{ fontSize: 11 }}>{f.source || "—"}</code>
                 </td>
-                <td style={{ ...tdStyle, maxWidth: 220 }} title={f.file_path}>
+                <td style={{ ...tdStyle, width: "24%" }} title={f.file_path}>
                   <code
                     style={{
                       fontSize: 11,
                       display: "block",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      whiteSpace: "normal",
+                      overflowWrap: "anywhere",
                     }}
                   >
                     {f.file_path}
@@ -205,7 +211,10 @@ export const PrescanReviewCard: React.FC<Props> = ({
                 <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums" }}>
                   {f.line_number ?? "—"}
                 </td>
-                <td style={{ ...tdStyle, maxWidth: 280 }} title={f.title}>
+                <td
+                  style={{ ...tdStyle, width: "28%", overflowWrap: "anywhere" }}
+                  title={f.title}
+                >
                   {f.title}
                 </td>
                 <td style={tdStyle}>
@@ -247,11 +256,13 @@ const thStyle: React.CSSProperties = {
   position: "sticky",
   top: 0,
   background: "var(--bg-soft)",
+  overflowWrap: "anywhere",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "8px 10px",
   verticalAlign: "top",
+  overflowWrap: "anywhere",
 };
 
 export default PrescanReviewCard;

@@ -147,7 +147,7 @@ flowchart TB
     Dep["FastAPI dependencies:<br/>get_current_permissions()<br/>get_current_user_tenant_id()<br/>get_visible_user_ids()"]:::app
     Routers["Every list/read endpoint<br/>(scans, projects, findings, chat, llm_logs, …)"]:::app
     RLS["PostgreSQL FORCE RLS<br/>app.tenant_id + principal context"]:::app
-    Entry["platform_owner tenant entry<br/>password step-up + reason<br/>10-minute credential-bound grant"]:::app
+    Entry["platform_owner active tenant<br/>default on login · profile switch<br/>stored on auth session"]:::app
 
     Tenants --> User
     User --> Roles
@@ -243,16 +243,15 @@ local users through `/admin/users`; each starts with the `analyst` role.
 | SSE stream token | URL query param `?access_token=…`      | 60 seconds; bound to selected tenant and one scan                    | `sse:scan-stream`   |
 | SCIM bearer      | `Authorization: Bearer <token>`        | No expiry (rotatable; revocable via admin UI)                        | `scim`              |
 | Passkey assertion challenge | Server-issued per attempt    | 60 s                                                                 | n/a                 |
-| Tenant-entry grant | HttpOnly `__Host-SCCAPTenantEntry` cookie (`SCCAPTenantEntryDev` locally), or `X-SCCAP-Tenant-Entry` for explicit API clients | 10 minutes; bound to principal and browser/bearer credential | one explicit tenant |
+| Active tenant state | `auth_sessions.active_tenant_id` (server-side; no additional browser token) | same idle/absolute/revocation lifecycle as browser session | one selected tenant |
 
 ### Browser session logic (`apiClient.ts` + `AuthProvider.tsx`)
 
 - The SPA synchronously removes the retired `localStorage.accessToken` value and never writes a replacement.
 - Bootstrap calls `/auth/session/me` and `/auth/session/csrf`; the CSRF value remains module-memory only.
 - Activity touches are coalesced. A warning appears two minutes before the idle or absolute deadline.
-- A `401` clears SPA auth state and returns to login. Tenant-entry `403`
-  responses clear only the short-lived entry grant and route to tenant
-  selection; permission and CSRF `403` responses preserve the login.
+- A `401` clears SPA auth state and returns to login. Permission and CSRF `403`
+  responses preserve the login and do not trigger tenant-selection navigation.
 - Two concurrent rotations serialize on the session row. Presenting the prior generation revokes only that family.
 - A tenant may configure a per-user limit with `deny_new` (default) or explicit `revoke_oldest` enforcement.
 
@@ -263,7 +262,7 @@ Every tenant surface resolves current permissions and an explicit tenant:
 | Dependency                  | What it does                                                                          |
 |-----------------------------|---------------------------------------------------------------------------------------|
 | `get_current_permissions()` | Resolves current database role assignments into stable capability keys              |
-| `get_current_user_tenant_id()` | Returns the human's exact tenant; a platform owner must present a valid tenant-entry grant |
+| `get_current_user_tenant_id()` | Returns the human's tenant; for a platform owner, resolves the session-selected tenant or the seeded default |
 | `get_visible_user_ids()`    | Applies ownership/group scope inside that tenant; tenant-wide read permission widens only the user filter |
 
 Filters applied at the repository layer:
@@ -308,9 +307,9 @@ to:
 - Deactivate the master admin (`is_active = false`)
 - Delete the master admin
 
-Platform-owner tenant access is never implicit: recovery entry still requires
-password step-up, a reason, a ten-minute expiry, and high-severity audit
-evidence. It cannot satisfy its own critical-mode second approval.
+Platform-owner cross-tenant access is explicit: every fresh login begins in the
+default tenant and switching is recorded against the current browser session.
+This does not let the owner satisfy its own critical-mode second approval.
 
 ### SSO provider table (`sso_providers`)
 
@@ -379,7 +378,8 @@ Authorization decisions are separately recorded in append-only
 
 - `src/app/api/v1/routers/{auth_login_guard,sso,webauthn,scim,admin_sso,admin_scim,admin_tenants,admin_users,admin_groups,authorization}.py`
 - `src/app/infrastructure/auth/sso/{audit,oidc,saml,provisioning}.py`
-- `src/app/infrastructure/auth/{tenant_entry,sse_token}.py`
+- `src/app/infrastructure/auth/sse_token.py`
+- `src/app/infrastructure/database/models.py` (`AuthSession.active_tenant_id`)
 - `src/app/infrastructure/auth/scim/{auth,filter}.py`
 - `src/app/infrastructure/database/models.py` (`User`, `RoleAssignment`, `AuthorizationActionRequest`, `AuthorizationAuditEvent`, `OAuthAccount`, `SamlSubject`, `WebAuthnCredential`, `SsoProvider`, `ScimToken`, `AuthAuditEvent`, `Tenant`, `UserGroup`, `UserGroupMembership`)
 - `src/app/api/v1/dependencies.py` (`get_current_permissions`, `get_current_user_tenant_id`, `get_visible_user_ids`)

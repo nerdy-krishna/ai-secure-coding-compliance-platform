@@ -171,8 +171,40 @@
 .prompt-management-layout { grid-template-columns: 280px minmax(0, 1fr); }
 .prompt-management-layout > * { min-width: 0; }
 .user-admin-search { width: 220px; }
-.scan-running-layout { grid-template-columns: minmax(0, 1fr) 360px; }
+.scan-running-page,
+.scan-running-layout,
+.scan-running-main { width: 100%; min-width: 0; max-width: 100%; }
+.scan-running-layout { grid-template-columns: minmax(0, 1fr); }
 .scan-running-layout > * { min-width: 0; }
+.scan-running-controls {
+  grid-row: 1;
+  min-width: 0;
+  align-items: stretch;
+}
+.scan-running-main { grid-row: 2; }
+.scan-running-status-card { flex: 1 1 280px; min-width: 0; }
+.scan-running-controls > .sccap-btn {
+  flex: 1 1 150px;
+  min-width: min(100%, 150px);
+}
+.scan-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+}
+.scan-stage-item { min-width: 0; }
+.scan-approval-panel,
+.prescan-review-header {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.scan-approval-panel > :first-child,
+.prescan-review-header > :first-child { flex: 1 1 420px; min-width: 0; }
+.scan-approval-actions,
+.prescan-review-actions { flex-wrap: wrap; }
+.prescan-findings-table,
+.scan-activity-log { width: 100%; min-width: 0; max-width: 100%; }
 .table-scroll { width: 100%; min-width: 0; max-width: 100%; overflow-x: auto; }
 .page-header,
 .page-header-row,
@@ -204,6 +236,8 @@
     max-height: 320px;
   }
   .scan-running-layout { grid-template-columns: minmax(0, 1fr); }
+  .scan-stage-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 0; }
+  .scan-stage-connector { visibility: hidden; }
 }
 
 @media (max-width: 700px) {
@@ -246,6 +280,12 @@
     align-items: flex-start !important;
   }
   .page-header-actions { width: 100%; justify-content: flex-start; }
+  .scan-running-controls > .sccap-btn { flex-basis: calc(50% - 6px); }
+  .scan-stage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .prescan-review-actions,
+  .scan-approval-actions { width: 100%; }
+  .prescan-review-actions > .sccap-btn,
+  .scan-approval-actions > .sccap-btn { flex: 1 1 150px; }
   .results-summary-grid { grid-template-columns: minmax(0, 1fr) !important; }
   .results-workspace { grid-template-columns: minmax(0, 1fr) !important; }
   .diff { overflow-x: auto; }

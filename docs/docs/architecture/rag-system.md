@@ -14,7 +14,7 @@ for the session.
 ## Qdrant + embedder
 
 - **Engine**: Qdrant, run as a separate `qdrant` container in the
-  compose stack (replaced ChromaDB per ADR-008). The `VectorStore`
+  compose stack (replaced ChromaDB per ADR-003). The `VectorStore`
   Protocol in `infrastructure/rag/base.py` keeps callers
   store-agnostic; `qdrant_store.py` is the singleton impl, including
   a Chroma-`where` → Qdrant-`Filter` translator so the historic

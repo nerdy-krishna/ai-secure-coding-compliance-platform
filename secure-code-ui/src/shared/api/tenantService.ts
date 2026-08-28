@@ -1,11 +1,8 @@
 // secure-code-ui/src/shared/api/tenantService.ts
 //
-// Platform tenant metadata and explicit short-lived tenant-entry grants.
+// Platform tenant metadata and browser-session tenant selection.
 
-import apiClient, {
-  markTenantEntryCleared,
-  markTenantEntryEstablished,
-} from "./apiClient";
+import apiClient from "./apiClient";
 
 export interface Tenant {
   id: string;
@@ -25,10 +22,11 @@ export interface TenantUpdatePayload {
   display_name: string;
 }
 
-interface TenantEntryResponse {
+export interface ActiveTenant {
   tenant_id: string;
-  entry_token: string;
-  expires_in: number;
+  slug: string;
+  display_name: string;
+  is_default: boolean;
 }
 
 export const tenantService = {
@@ -47,17 +45,18 @@ export const tenantService = {
   async remove(id: string): Promise<void> {
     await apiClient.delete(`/admin/tenants/${id}`);
   },
-  async enter(id: string, password: string, reason: string): Promise<void> {
-    await apiClient.post<TenantEntryResponse>("/admin/tenants/entry", {
+  async current(): Promise<ActiveTenant> {
+    const r = await apiClient.get<ActiveTenant>("/admin/tenants/entry");
+    return r.data;
+  },
+  async enter(id: string): Promise<ActiveTenant> {
+    const r = await apiClient.post<ActiveTenant>("/admin/tenants/entry", {
       tenant_id: id,
-      password,
-      reason,
     });
-    markTenantEntryEstablished();
+    return r.data;
   },
   async leave(): Promise<void> {
     await apiClient.delete("/admin/tenants/entry");
-    markTenantEntryCleared();
   },
 };
 

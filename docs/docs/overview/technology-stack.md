@@ -44,7 +44,7 @@ LangGraph workflow with an `AsyncPostgresSaver` checkpointer. Queues:
   transactional-outbox table that guarantees RabbitMQ publication
   survives a crash between commit and publish.
 - **RabbitMQ** — message broker between API and worker.
-- **Qdrant** — vector store for RAG (replaced ChromaDB per ADR-008).
+- **Qdrant** — vector store for RAG (replaced ChromaDB per ADR-003).
   Embedding via `fastembed.TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")`
   in `infrastructure/rag/embedder.py`; vectors are byte-equivalent
   to the prior chromadb-bundled ONNX so existing collections stay

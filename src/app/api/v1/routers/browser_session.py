@@ -21,12 +21,17 @@ from app.infrastructure.auth.session import (
     issue_csrf_token,
 )
 from app.infrastructure.auth.sso import audit
+from app.infrastructure.database import models as db_models
 from app.infrastructure.database.database import get_db
 from app.infrastructure.database.models import User
 from app.infrastructure.database.repositories.authorization_repo import (
     AuthorizationRepository,
 )
-from app.infrastructure.database.tenant_context import effective_tenant_id
+from app.infrastructure.database.tenant_context import (
+    DEFAULT_TENANT_ID,
+    effective_tenant_id,
+)
+from app.shared.lib.permissions import PLATFORM_OWNER
 
 
 router = APIRouter(prefix="/auth/session")
@@ -56,6 +61,7 @@ async def _current_session(
 
 @router.get("/me", response_model=UserRead)
 async def browser_session_me(
+    request: Request,
     user: User = Depends(current_active_user),
     db: AsyncSession = Depends(get_db),
 ) -> UserRead:
@@ -63,10 +69,21 @@ async def browser_session_me(
     tenant_id = effective_tenant_id(user.tenant_id)
     role_keys = await repo.role_keys_for_user(user=user, tenant_id=tenant_id)
     permissions = await repo.permissions_for_user(user=user, tenant_id=tenant_id)
+    active_tenant_id = tenant_id
+    if PLATFORM_OWNER in role_keys:
+        active_tenant_id = (
+            getattr(request.state, "active_tenant_id", None) or DEFAULT_TENANT_ID
+        )
+    active_tenant = await db.get(db_models.Tenant, active_tenant_id)
     return UserRead.model_validate(user).model_copy(
         update={
             "role_keys": sorted(role_keys),
             "permissions": sorted(permissions),
+            "active_tenant_id": active_tenant_id,
+            "active_tenant_slug": active_tenant.slug if active_tenant else None,
+            "active_tenant_display_name": (
+                active_tenant.display_name if active_tenant else None
+            ),
         }
     )
 

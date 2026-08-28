@@ -1191,7 +1191,10 @@ const ScanRunningPage: React.FC = () => {
   }, [scanId, projectInfo, navigate, queryClient, toast]);
 
   return (
-    <div className="fade-in" style={{ display: "grid", gap: 16 }}>
+    <div
+      className="fade-in scan-running-page"
+      style={{ display: "grid", gap: 16 }}
+    >
       {/* Header — full width above the 2-col body so the Status card on
           the right aligns with the Overall progress card on the left. */}
       <PageHeader
@@ -1282,7 +1285,9 @@ const ScanRunningPage: React.FC = () => {
         subtitle="You can leave this page — the scan continues in the background and results appear on the Projects list when done."
       />
 
-      {/* Body — 2-col grid, content + sidebar. */}
+      {/* Body — controls and scan content stay in one normal-flow column.
+          Approval cards and evidence tables need the full content width; a
+          fixed sidebar caused them to render underneath the controls. */}
       <div
         className="scan-running-layout"
         style={{
@@ -1291,9 +1296,101 @@ const ScanRunningPage: React.FC = () => {
           alignItems: "start",
         }}
       >
-        <div style={{ display: "grid", gap: 16 }}>
+        <aside
+          className="scan-running-controls"
+          aria-label="Scan controls"
+          style={{ display: "flex", flexWrap: "wrap", gap: 12 }}
+        >
+          <div className="sccap-card scan-running-status-card">
+            <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>Status</div>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 600,
+                letterSpacing: "-0.02em",
+                marginTop: 4,
+                color: isError
+                  ? "var(--critical)"
+                  : status === "COMPLETED" || status === "REMEDIATION_COMPLETED"
+                    ? "var(--success)"
+                    : "var(--fg)",
+              }}
+            >
+              {isTerminal ? displayStatus(status) : scanProgress.badge}
+            </div>
+            <div
+              style={{ marginTop: 10, fontSize: 12, color: "var(--fg-muted)" }}
+            >
+              {scanProgress.stages.filter((s) => s.state === "done").length} of{" "}
+              {scanProgress.stages.length} stages complete
+            </div>
+          </div>
+
+          <button
+            className="sccap-btn sccap-btn-primary"
+            onClick={() => navigate(`/analysis/results/${scanId}`)}
+            disabled={!isTerminal || isUnsuccessful}
+            style={{ opacity: !isTerminal || isUnsuccessful ? 0.6 : 1 }}
+          >
+            {!isTerminal
+              ? "Scanning…"
+              : isUnsuccessful
+                ? "No results"
+                : (
+                    <>
+                      View results <Icon.ArrowR size={12} />
+                    </>
+                  )}
+          </button>
+          {!isTerminal && (
+            <button
+              className="sccap-btn"
+              onClick={() => setStopConfirmOpen(true)}
+              disabled={cancelling}
+              style={{ color: "var(--critical)" }}
+            >
+              <Icon.X size={12} /> {cancelling ? "Stopping…" : "Stop scan"}
+            </button>
+          )}
+          {canRunControl && (
+            <>
+              <button
+                className="sccap-btn sccap-btn-primary"
+                onClick={() => setRunControlMode("resume")}
+                disabled={runControlSubmitting}
+              >
+                Resume scan
+              </button>
+              <button
+                className="sccap-btn"
+                onClick={() => setRunControlMode("restart")}
+                disabled={runControlSubmitting}
+              >
+                Restart from original submission
+              </button>
+            </>
+          )}
+          {isSuperuser && (
+            <button
+              className="sccap-btn"
+              onClick={() => setDeleteConfirmOpen(true)}
+              disabled={deleting}
+              style={{ color: "var(--critical)" }}
+            >
+              <Icon.Alert size={12} /> {deleting ? "Deleting…" : "Delete scan"}
+            </button>
+          )}
+          <button
+            className="sccap-btn"
+            onClick={() => navigate("/account/dashboard")}
+          >
+            Back to dashboard
+          </button>
+        </aside>
+
+        <div className="scan-running-main" style={{ display: "grid", gap: 16 }}>
           {/* progress + stages */}
-        <div className="surface" style={{ padding: 24 }}>
+        <div className="surface scan-progress-card" style={{ padding: 24 }}>
           <div
             style={{
               display: "flex",
@@ -1350,7 +1447,7 @@ const ScanRunningPage: React.FC = () => {
 
           {/* Horizontal stage timeline — same design as the compact
               pipeline on the dashboard / projects scan cards. */}
-          <div style={{ display: "flex", marginTop: 22, overflowX: "auto" }}>
+          <div className="scan-stage-grid" style={{ marginTop: 22 }}>
             {scanProgress.stages.map((s, i) => {
               const state = s.state;
               const last = i === scanProgress.stages.length - 1;
@@ -1374,6 +1471,7 @@ const ScanRunningPage: React.FC = () => {
               return (
                 <div
                   key={s.key}
+                  className="scan-stage-item"
                   title={`${s.label} — ${state}${state === "paused" ? " · awaiting your approval" : ""}`}
                   style={{
                     flex: 1,
@@ -1391,6 +1489,7 @@ const ScanRunningPage: React.FC = () => {
                     }}
                   >
                     <span
+                      className="scan-stage-connector"
                       style={{
                         flex: 1,
                         height: 2,
@@ -1445,6 +1544,7 @@ const ScanRunningPage: React.FC = () => {
                       )}
                     </span>
                     <span
+                      className="scan-stage-connector"
                       style={{
                         flex: 1,
                         height: 2,
@@ -1523,7 +1623,7 @@ const ScanRunningPage: React.FC = () => {
         {/* profiling-cost gate (#71) — approve before per-file profiling */}
         {isPendingProfiling && (
           <div
-            className="sccap-card"
+            className="sccap-card scan-approval-panel"
             style={{
               background: "var(--primary-weak)",
               borderColor: "transparent",
@@ -1586,7 +1686,7 @@ const ScanRunningPage: React.FC = () => {
                 </details>
               )}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="scan-approval-actions" style={{ display: "flex", gap: 8 }}>
               <button
                 className="sccap-btn"
                 onClick={handleProfilingDecline}
@@ -1609,7 +1709,7 @@ const ScanRunningPage: React.FC = () => {
         {/* pending-approval banner + actions */}
         {isPendingApproval && (
           <div
-            className="sccap-card"
+            className="sccap-card scan-approval-panel"
             style={{
               background: "var(--primary-weak)",
               borderColor: "transparent",
@@ -1703,7 +1803,7 @@ const ScanRunningPage: React.FC = () => {
                 </div>
               )}
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="scan-approval-actions" style={{ display: "flex", gap: 8 }}>
               <button
                 className="sccap-btn"
                 onClick={handleCancel}
@@ -1967,10 +2067,14 @@ const ScanRunningPage: React.FC = () => {
             </div>
           )}
           <pre
-            className="sccap-code"
+            className="sccap-code scan-activity-log"
             style={{
               maxHeight: 240,
-              overflow: "auto",
+              overflowY: "auto",
+              overflowX: "hidden",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              wordBreak: "break-word",
               fontSize: 11.5,
               margin: 0,
             }}
@@ -1989,102 +2093,6 @@ const ScanRunningPage: React.FC = () => {
         </div>
       </div>
 
-      <aside style={{ display: "grid", gap: 12, alignContent: "start" }}>
-        <div className="sccap-card">
-          <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>Status</div>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 600,
-              letterSpacing: "-0.02em",
-              marginTop: 4,
-              // Red ONLY for genuine errors. Stops/blocks/expired stay
-              // neutral; completed stays green.
-              color: isError
-                ? "var(--critical)"
-                : status === "COMPLETED" || status === "REMEDIATION_COMPLETED"
-                  ? "var(--success)"
-                  : "var(--fg)",
-            }}
-          >
-            {isTerminal ? displayStatus(status) : scanProgress.badge}
-          </div>
-          <div
-            style={{ marginTop: 10, fontSize: 12, color: "var(--fg-muted)" }}
-          >
-            {
-              scanProgress.stages.filter((s) => s.state === "done").length
-            }{" "}
-            of {scanProgress.stages.length} stages complete
-          </div>
-        </div>
-
-        <button
-          className="sccap-btn sccap-btn-primary"
-          onClick={() => navigate(`/analysis/results/${scanId}`)}
-          // Disable "View results" when there's nothing to view: still
-          // running, OR any unsuccessful terminal (failed / stopped /
-          // blocked / expired all leave summary_report empty).
-          disabled={!isTerminal || isUnsuccessful}
-          style={{
-            opacity: !isTerminal || isUnsuccessful ? 0.6 : 1,
-          }}
-        >
-          {!isTerminal
-            ? "Scanning…"
-            : isUnsuccessful
-              ? "No results"
-              : (
-                  <>
-                    View results <Icon.ArrowR size={12} />
-                  </>
-                )}
-        </button>
-        {!isTerminal && (
-          <button
-            className="sccap-btn"
-            onClick={() => setStopConfirmOpen(true)}
-            disabled={cancelling}
-            style={{ color: "var(--critical)" }}
-          >
-            <Icon.X size={12} /> {cancelling ? "Stopping…" : "Stop scan"}
-          </button>
-        )}
-        {canRunControl && (
-          <>
-            <button
-              className="sccap-btn sccap-btn-primary"
-              onClick={() => setRunControlMode("resume")}
-              disabled={runControlSubmitting}
-            >
-              Resume scan
-            </button>
-            <button
-              className="sccap-btn"
-              onClick={() => setRunControlMode("restart")}
-              disabled={runControlSubmitting}
-            >
-              Restart from original submission
-            </button>
-          </>
-        )}
-        {isSuperuser && (
-          <button
-            className="sccap-btn"
-            onClick={() => setDeleteConfirmOpen(true)}
-            disabled={deleting}
-            style={{ color: "var(--critical)" }}
-          >
-            <Icon.Alert size={12} /> {deleting ? "Deleting…" : "Delete scan"}
-          </button>
-        )}
-        <button
-          className="sccap-btn"
-          onClick={() => navigate("/account/dashboard")}
-        >
-          Back to dashboard
-        </button>
-      </aside>
       </div>
 
       <Modal

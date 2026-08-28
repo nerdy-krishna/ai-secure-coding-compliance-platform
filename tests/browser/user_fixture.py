@@ -37,6 +37,7 @@ from app.shared.lib.permissions import PLATFORM_OWNER
 from app.shared.lib.scan_status import (
     STATUS_COMPLETED,
     STATUS_PENDING_APPROVAL,
+    STATUS_PENDING_PRESCAN_APPROVAL,
     STATUS_PENDING_PROFILING_APPROVAL,
     STATUS_QUEUED,
 )
@@ -149,11 +150,45 @@ async def _setup() -> None:
         db.add_all([llm, framework])
         await db.flush()
 
+        prescan_project = Project(user=user, name=f"Browser prescan {uuid4().hex[:10]}")
         gate_project = Project(user=user, name=f"Browser gate {uuid4().hex[:10]}")
         replay_project = Project(user=user, name=f"Browser replay {uuid4().hex[:10]}")
         result_project = Project(user=user, name=f"Browser result {uuid4().hex[:10]}")
-        db.add_all([gate_project, replay_project, result_project])
+        db.add_all([prescan_project, gate_project, replay_project, result_project])
         await db.flush()
+
+        prescan_scan, _ = await _new_scan_with_attempt(
+            db,
+            project=prescan_project,
+            user=user,
+            status=STATUS_PENDING_PRESCAN_APPROVAL,
+            llm_config_id=llm.id,
+        )
+        db.add_all(
+            [
+                Finding(
+                    scan_id=prescan_scan.id,
+                    file_path=(
+                        "src/security/handlers/very-long-browser-fixture-"
+                        f"module-{index}.py"
+                    ),
+                    line_number=40 + index,
+                    vulnerable_snippet="eval(request.args['expression'])",
+                    title=(
+                        "Browser fixture user-controlled expression reaches "
+                        f"dynamic evaluation path {index}"
+                    ),
+                    description="Deterministic browser layout fixture finding.",
+                    severity="High" if index == 0 else "Medium",
+                    remediation="Replace dynamic evaluation with an allowlisted parser.",
+                    cwe="CWE-95",
+                    confidence="High",
+                    source="semgrep" if index != 1 else "bandit",
+                    finding_bucket="sast",
+                )
+                for index in range(4)
+            ]
+        )
 
         profiling_cost = {
             "total_estimated_cost": 0.12,
@@ -287,12 +322,22 @@ async def _setup() -> None:
             purpose="Approve utility-model profiling before full analysis.",
             evidence={"stage": "file_profiling", "cost_details": profiling_cost},
         )
+        prescan_gate = await ApprovalGateRepository(db).create_or_get_pending(
+            scan_id=prescan_scan.id,
+            kind="prescan_approval",
+            node_name="pending_prescan_approval",
+            display_name="Review deterministic scanner findings",
+            purpose="Review deterministic evidence before any LLM spend.",
+            evidence={"stage": "prescan", "findings": 4},
+        )
 
         print(
             json.dumps(
                 {
                     "llm_config_id": str(llm.id),
                     "framework_name": framework.name,
+                    "prescan_scan_id": str(prescan_scan.id),
+                    "prescan_gate_id": str(prescan_gate.gate_id),
                     "gate_scan_id": str(gate_scan.id),
                     "gate_id": str(gate.gate_id),
                     "replay_scan_id": str(replay_scan.id),

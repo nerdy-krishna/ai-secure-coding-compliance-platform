@@ -8,8 +8,8 @@ Surface (all require stable authorization capabilities):
   PATCH  /api/v1/admin/tenants/{id}       — rename display_name only
   DELETE /api/v1/admin/tenants/{id}       — delete (default tenant is protected)
 
-Platform owners explicitly enter one tenant with a short-lived,
-credential-bound step-up grant before accessing tenant data.
+Platform owners start in the seeded default tenant and may select another
+tenant for the lifetime of their current browser session.
 
 Slug constraints
 - ASCII alphanumerics + dash + underscore, 1–64 chars, lowercased.
@@ -35,18 +35,14 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi_users.password import PasswordHelper
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user_tenant_id, require_permission
 from app.infrastructure.auth.core import current_active_user
 from app.infrastructure.auth.tenant_entry import (
-    MAX_AGE_SECONDS as TENANT_ENTRY_MAX_AGE_SECONDS,
     clear_tenant_entry_cookie,
-    issue_tenant_entry_grant,
-    set_tenant_entry_cookie,
 )
 from app.infrastructure.auth.sso import audit
 from app.infrastructure.auth.sso.domains import (
@@ -134,24 +130,13 @@ class DomainChallengeRead(DomainRead):
 class TenantEntryCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tenant_id: _uuid.UUID
-    password: str = Field(..., min_length=1, max_length=256)
-    reason: str = Field(..., min_length=10, max_length=500)
-
-    @field_validator("reason")
-    @classmethod
-    def normalize_reason(cls, value: str) -> str:
-        normalized = value.strip()
-        if len(normalized) < 10:
-            raise ValueError(
-                "reason must contain at least 10 non-whitespace characters"
-            )
-        return normalized
 
 
 class TenantEntryRead(BaseModel):
     tenant_id: _uuid.UUID
-    entry_token: str
-    expires_in: int
+    slug: str
+    display_name: str
+    is_default: bool
 
 
 def _to_read(row: db_models.Tenant) -> TenantRead:
@@ -427,7 +412,7 @@ async def create_tenant_entry(
     db: AsyncSession = Depends(get_db),
     user: db_models.User = Depends(current_active_user),
 ) -> TenantEntryRead:
-    """Reauthenticate a platform owner and bind a short-lived selected tenant."""
+    """Select one tenant for the current authenticated browser session."""
 
     tenant = await db.scalar(
         select(db_models.Tenant).where(db_models.Tenant.id == payload.tenant_id)
@@ -435,77 +420,76 @@ async def create_tenant_entry(
     if tenant is None:
         raise HTTPException(status_code=404, detail="tenant not found")
 
-    verified, updated_hash = PasswordHelper().verify_and_update(
-        payload.password,
-        user.hashed_password,
+    session_id = getattr(request.state, "auth_session_id", None)
+    if session_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tenant switching requires a browser session.",
+        )
+    session_row = await db.scalar(
+        select(db_models.AuthSession)
+        .where(
+            db_models.AuthSession.id == session_id,
+            db_models.AuthSession.user_id == user.id,
+            db_models.AuthSession.revoked_at.is_(None),
+        )
+        .with_for_update()
     )
+    if session_row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    session_row.active_tenant_id = tenant.id
+
     authz = AuthorizationRepository(db)
     fingerprint = target_fingerprint(
-        resource_type="tenant_entry",
+        resource_type="active_tenant",
         target_id=str(payload.tenant_id),
     )
-    reason_fingerprint = target_fingerprint(
-        resource_type="tenant_entry_reason",
-        target_id=payload.reason.strip(),
-    )
-    if not verified:
-        authz.record_audit(
-            tenant_id=payload.tenant_id,
-            principal_kind="human",
-            principal_id=str(user.id),
-            permission=PLATFORM_TENANT_MANAGE,
-            resource_type="tenant_entry",
-            target_fingerprint_value=fingerprint,
-            outcome="denied",
-            reason_code="step_up_failed",
-        )
-        await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant entry denied.",
-        )
-    if updated_hash is not None:
-        user.hashed_password = updated_hash
-
-    token = issue_tenant_entry_grant(
-        request,
-        user_id=user.id,
-        tenant_id=payload.tenant_id,
-    )
-    set_tenant_entry_cookie(response, token)
     authz.record_audit(
         tenant_id=payload.tenant_id,
         principal_kind="human",
         principal_id=str(user.id),
         permission=PLATFORM_TENANT_MANAGE,
-        resource_type="tenant_entry",
+        resource_type="active_tenant",
         target_fingerprint_value=fingerprint,
         outcome="allowed",
-        reason_code="break_glass_step_up_verified",
+        reason_code="session_tenant_selected",
     )
-    authz.record_audit(
-        tenant_id=payload.tenant_id,
-        principal_kind="human",
-        principal_id=str(user.id),
-        permission=PLATFORM_TENANT_MANAGE,
-        resource_type="tenant_entry_reason",
-        target_fingerprint_value=reason_fingerprint,
-        outcome="allowed",
-        reason_code="break_glass_reason_recorded",
-    )
-    logger.warning(
-        "authorization.break_glass_tenant_entry",
+    logger.info(
+        "authorization.session_tenant_selected",
         extra={
             "actor_id": user.id,
             "tenant_id": str(payload.tenant_id),
-            "expires_in": TENANT_ENTRY_MAX_AGE_SECONDS,
+            "session_id": str(session_id),
         },
     )
+    # Remove any legacy ten-minute entry cookie left by an older frontend.
+    clear_tenant_entry_cookie(response)
     await db.commit()
     return TenantEntryRead(
-        tenant_id=payload.tenant_id,
-        entry_token=token,
-        expires_in=TENANT_ENTRY_MAX_AGE_SECONDS,
+        tenant_id=tenant.id,
+        slug=tenant.slug,
+        display_name=tenant.display_name,
+        is_default=(tenant.id == DEFAULT_TENANT_ID),
+    )
+
+
+@router.get(
+    "/entry",
+    response_model=TenantEntryRead,
+    dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
+)
+async def get_tenant_entry(
+    tenant_id: _uuid.UUID = Depends(get_current_user_tenant_id),
+    db: AsyncSession = Depends(get_db),
+) -> TenantEntryRead:
+    """Return the tenant currently selected by this authenticated session."""
+
+    tenant = await _get_tenant_or_404(db, tenant_id)
+    return TenantEntryRead(
+        tenant_id=tenant.id,
+        slug=tenant.slug,
+        display_name=tenant.display_name,
+        is_default=(tenant.id == DEFAULT_TENANT_ID),
     )
 
 
@@ -514,10 +498,34 @@ async def create_tenant_entry(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_permission(PLATFORM_TENANT_MANAGE))],
 )
-async def clear_tenant_entry(response: Response) -> None:
-    """End the current browser's explicit tenant entry immediately."""
+async def clear_tenant_entry(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    user: db_models.User = Depends(current_active_user),
+) -> None:
+    """Return the current browser session to the seeded default tenant."""
 
+    session_id = getattr(request.state, "auth_session_id", None)
+    if session_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tenant switching requires a browser session.",
+        )
+    session_row = await db.scalar(
+        select(db_models.AuthSession)
+        .where(
+            db_models.AuthSession.id == session_id,
+            db_models.AuthSession.user_id == user.id,
+            db_models.AuthSession.revoked_at.is_(None),
+        )
+        .with_for_update()
+    )
+    if session_row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    session_row.active_tenant_id = None
     clear_tenant_entry_cookie(response)
+    await db.commit()
 
 
 @router.get(

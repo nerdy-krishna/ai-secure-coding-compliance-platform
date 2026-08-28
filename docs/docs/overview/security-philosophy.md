@@ -6,32 +6,26 @@ sidebar_position: 3
 # Security Philosophy
 
 SCCAP is built around one principle: **audit first, remediate
-intelligently**. Every core design decision — the two-phase scan
+intelligently**. Every core design decision — the checkpointed, multi-gate scan
 workflow, the encrypted secret store, the scoped visibility filter,
 the checkpointed workflow — follows from applying that principle to
 both the scanned code and the scanning platform itself.
 
 ## Audit before you spend
 
-Large-model calls are expensive and non-deterministic. SCCAP inserts a
-mandatory checkpoint between "we've looked at your code" and "we've
-run the deep analysis":
+Large-model calls are expensive and non-deterministic. SCCAP uses up to three
+durable human gates before expensive stages:
 
-1. The API accepts a scan submission and enqueues a message on
-   `code_submission_queue`.
-2. The worker pulls the message and runs a cheap *audit* pass
-   (`RepositoryMappingEngine` + `ContextBundlingEngine`) to build a
-   symbol index and dependency graph.
-3. An `estimate_cost` node computes the projected token + dollar cost
-   for the deep analysis, persists it as `cost_details`, sets the scan
-   status to `PENDING_COST_APPROVAL`, and calls LangGraph's native
-   `interrupt()` — the workflow is now paused, with its state
-   serialized into the Postgres checkpointer keyed on `scan_id`.
-4. The UI shows the estimate. The user approves, cancels, or walks
-   away.
-5. On approve, the API publishes to `analysis_approved_queue`; the
-   worker resumes the **same** LangGraph thread with
-   `Command(resume=payload)` and runs the deep analysis.
+1. The API atomically commits the scan aggregate and a submission outbox intent. The outbox sweeper,
+   not the request path, publishes to `code_submission_queue`.
+2. The worker builds the repository map, classifies files, and runs deterministic scanners. If they
+   find issues, `pending_prescan_approval` pauses for operator review.
+3. `estimate_profiling_cost` prepares the utility-model estimate and `profiling_cost_gate` pauses
+   before profiling.
+4. Profiling feeds `estimate_cost`; `cost_gate` pauses before full reasoning-model analysis.
+5. Every approval atomically records the gate decision and an outbox intent. The sweeper publishes
+   it to `analysis_approved_queue`, and a worker resumes the **same** LangGraph thread with
+   `Command(resume=payload)`.
 
 Nothing expensive runs without an explicit human yes. Nothing is lost
 if the worker restarts between the estimate and the approval.
@@ -48,13 +42,10 @@ of silently falling back to regex parsing.
 
 ## Scoped visibility by default
 
-A regular user sees their own scans plus scans owned by anyone they
-share a **User Group** with. Admins see everything. The filter is a
-single helper (`scan_scope.visible_user_ids(user, repo)`) that returns
-`None` for admins or `[user.id, ...peers]` for regular users. Every
-list endpoint that could leak data takes this list and passes it
-through to the repository layer — so the surface area of "could forget
-to filter" is one helper, not dozens.
+A regular user sees their own scans plus scans owned by users in an allowed **User Group**. A caller
+with tenant-wide permission may remove that ownership/group filter, but still remains inside the
+active tenant; no role bypasses the tenant predicate or forced PostgreSQL RLS. The shared visibility
+helper and repository paths enforce this scope consistently.
 
 ## Encrypted secrets
 
