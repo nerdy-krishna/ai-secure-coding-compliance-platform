@@ -32,6 +32,12 @@ try:
     log.info("Successfully imported database metadata.")
     # Ensure all models are imported so Base.metadata is populated
     import app.infrastructure.database.models  # noqa: F401 — registers all models with Base.metadata
+    import app.infrastructure.governance.models  # noqa: F401 — split governance models use the same Base
+    from app.infrastructure.database.schema_contracts import (
+        register_schema_contracts,
+    )
+
+    register_schema_contracts()
 
     # Migrations are intentionally isolated from application Settings so the
     # hook needs only a database URL, never broker/auth/provider credentials.

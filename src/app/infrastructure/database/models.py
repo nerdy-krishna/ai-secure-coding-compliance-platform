@@ -403,7 +403,12 @@ class ScanArtifact(Base):
     )
     evidence_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        sa.ForeignKey("evidence_objects.id", ondelete="SET NULL"),
+        sa.ForeignKey(
+            "evidence_objects.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="scan_artifacts_evidence_id_fkey",
+        ),
         nullable=True,
         unique=True,
     )

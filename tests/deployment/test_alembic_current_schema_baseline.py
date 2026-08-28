@@ -20,7 +20,8 @@ MIGRATION_PATH = (
 BASELINE_PATH = (
     ROOT / "alembic" / "baselines" / "2026_08_28_current_schema.sql"
 )
-LEGACY_HEAD = "4d5e6f708192"
+BASELINE_ROOT = "4d5e6f708192"
+CURRENT_HEAD = "5e6f7081a2b3"
 
 
 def _load_migration():
@@ -35,15 +36,17 @@ def _load_migration():
 
 
 class AlembicCurrentSchemaBaselineTests(unittest.TestCase):
-    def test_active_tree_is_one_root_that_preserves_the_legacy_head_identity(self) -> None:
+    def test_active_tree_preserves_the_baseline_root_identity(self) -> None:
         config = Config(str(ROOT / "alembic.ini"))
         script = ScriptDirectory.from_config(config)
         revisions = list(script.walk_revisions())
 
-        self.assertEqual(script.get_heads(), [LEGACY_HEAD])
-        self.assertEqual(len(revisions), 1)
-        self.assertEqual(revisions[0].revision, LEGACY_HEAD)
-        self.assertIsNone(revisions[0].down_revision)
+        self.assertEqual(script.get_heads(), [CURRENT_HEAD])
+        self.assertEqual(len(revisions), 2)
+        self.assertEqual(revisions[0].revision, CURRENT_HEAD)
+        self.assertEqual(revisions[0].down_revision, BASELINE_ROOT)
+        self.assertEqual(revisions[1].revision, BASELINE_ROOT)
+        self.assertIsNone(revisions[1].down_revision)
 
     def test_legacy_revisions_are_retained_but_not_active(self) -> None:
         legacy_revisions = list((ROOT / "alembic" / "versions").glob("*.py"))

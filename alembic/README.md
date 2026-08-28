@@ -11,7 +11,8 @@ The active root deliberately reuses revision `4d5e6f708192`, the former legacy
 head:
 
 - An empty database runs the frozen current-schema baseline on `upgrade head`.
-- A database already at `4d5e6f708192` remains at head without DDL or stamping.
+- A database already at `4d5e6f708192` crosses the baseline boundary without
+  stamping and applies only the additive revisions after that root.
 - A database below `4d5e6f708192` must use the archived chain to reach that
   revision before deploying this baseline.
 - Downgrading through the baseline is unsupported. Restore a verified backup
@@ -39,13 +40,21 @@ edited without explicit review. Future migrations belong in
 `alembic/current_versions` and must use `4d5e6f708192` (or the latest active
 head) as `down_revision`.
 
+Alembic also loads `app.infrastructure.database.schema_contracts`, which
+registers PostgreSQL-only partial/descending/GIN indexes, legacy checks, and
+the offline activation ledger in the shared SQLAlchemy metadata. At the active
+head, `alembic check` must exit successfully with no proposed operations; do
+not suppress newly reported drift with broad autogenerate exclusions.
+
 ## Release procedure
 
 Before releasing the baseline:
 
 1. Back up every existing database and verify restore.
-2. Confirm `alembic current` reports `4d5e6f708192` on every environment.
-3. Run `alembic upgrade head`; it should perform no DDL on those environments.
+2. Confirm `alembic current` reports `4d5e6f708192` or a descendant in the
+   active revision tree on every environment.
+3. Review and run `alembic upgrade head`; only post-baseline additive revisions
+   should execute on an existing `4d5e6f708192` database.
 4. Prove an empty PostgreSQL database can run `alembic upgrade head` and that
    its schema matches the frozen snapshot contract.
 
