@@ -71,6 +71,8 @@ def _feature_view(name: str, enabled_set: set) -> dict:
         "container_backed": feat.container_backed,
         "compose_profile": feat.compose_profile,
         "depends_on": sorted(feat.depends_on),
+        "api_namespace": feat.api_namespace,
+        "wire_contract": feat.wire_contract,
     }
 
 

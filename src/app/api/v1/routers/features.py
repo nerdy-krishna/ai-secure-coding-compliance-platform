@@ -12,6 +12,7 @@ import os
 
 from fastapi import APIRouter
 
+from app.api.v1.schemas.features import FeaturesResponse
 from app.core.config_cache import SystemConfigCache
 from app.core.features import ALL_FEATURES, catalog_metadata
 
@@ -20,8 +21,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/features", tags=["Features"])
-async def get_features() -> dict:
+@router.get("/features", tags=["Features"], response_model=FeaturesResponse)
+async def get_features() -> FeaturesResponse:
     """Return the enabled-feature set, the install variant, the active compose
     profiles, and the full static catalog.
 
@@ -31,12 +32,10 @@ async def get_features() -> dict:
     """
     enabled = SystemConfigCache.get_enabled_features()
     profiles_env = os.environ.get("COMPOSE_PROFILES", "")
-    return {
-        "enabled_features": sorted(enabled),
-        "all_features": sorted(ALL_FEATURES),
-        "variant": (os.environ.get("SCCAP_VARIANT", "") or "enterprise")
-        .strip()
-        .lower(),
-        "compose_profiles": [p.strip() for p in profiles_env.split(",") if p.strip()],
-        "catalog": catalog_metadata(),
-    }
+    return FeaturesResponse(
+        enabled_features=sorted(enabled),
+        all_features=sorted(ALL_FEATURES),
+        variant=(os.environ.get("SCCAP_VARIANT", "") or "enterprise").strip().lower(),
+        compose_profiles=[p.strip() for p in profiles_env.split(",") if p.strip()],
+        catalog=catalog_metadata(),
+    )

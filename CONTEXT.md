@@ -85,7 +85,30 @@ tenant.
 
 The runtime feature flags seeded by an installation variant. Scan is always enabled; optional
 features include chat, compliance, multi-user, groups, SSO, SCIM, multi-tenancy, email,
-observability stacks, MCP, and admin authoring.
+observability stacks, MCP, admin authoring, and the separately gated Pentesting bounded context.
+
+### Pentest Engagement
+
+A Project-linked, tenant-scoped authorization and rules aggregate for black-box, gray-box, or
+white-box pentesting. It is separate from Code Scan and owns Pentest Attempts, decisions,
+executions, evidence references, finding truth, coverage effects, mutations, cleanup, and retests.
+
+### Pentest Attempt
+
+The immutable execution identity for an Engagement run. Resume retains the Attempt; restart or
+retest creates a linked child. Every Attempt pins its contract, policy, catalog, adapter, evidence,
+prompt, model, report, and runner versions.
+
+### Pentest DecisionDelta
+
+A digest-chained, monotonically sequenced summary of one atomic committed state change. A dependent
+orchestrator decision may consume only committed deltas, never in-flight tool output.
+
+### Pentest finding truth
+
+The deterministic progression from evidence-backed Observation to CandidateFinding and, only after
+a configured evidence predicate or independent reproduction, ConfirmedFinding. A scanner, adapter,
+specialist, or model cannot directly confirm a finding.
 
 ## Invariants
 
@@ -97,6 +120,16 @@ observability stacks, MCP, and admin authoring.
 - Scanner and LLM provenance must survive consolidation and reporting.
 - Secrets are encrypted before database persistence and must not appear in logs or public artifacts.
 - Every list operation over user-owned data must enforce tenant and visibility scope.
+- Pentesting remains a separate Project-linked bounded context; it never stretches or mutates the
+  existing Code Scan aggregate or lifecycle.
+- PostgreSQL is authoritative for Pentesting state; RabbitMQ is notification-only through an
+  outbox, and Qdrant is methodology retrieval only.
+- Every Pentesting target interaction requires authorization, tenant/attempt identity, and a pinned
+  deterministic scope-policy decision. Secrets use opaque handles outside their broker boundary.
+- Pentest coverage passes only through exact evidence predicates; absence of a tool alert is not a
+  pass, and no unverified observation is a confirmed finding.
+- Mutations are registered before execution, cleanup remains durable and visible, and cancellation
+  cannot turn partial work into success.
 - Changes to lifecycle nodes, edges, statuses, events, or approvals update the canonical workflow
   documentation in the same change.
 
@@ -121,3 +154,6 @@ observability stacks, MCP, and admin authoring.
   still missing.
 - The inherited automated test suites were removed on 2026-08-22. Replacement tests are added only
   at verified production seams as defects and invariants are addressed.
+- Pentesting Foundation 0 currently implements versioned contracts, vocabulary, feature discovery,
+  permissions, generated frontend wire types, and provider/consumer tests only. It does not yet
+  persist Engagements or execute target activity.

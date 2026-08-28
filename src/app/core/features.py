@@ -6,7 +6,7 @@ mirrored into :class:`~app.core.config_cache.SystemConfigCache`.
 
 This module owns four things:
 
-  * the **catalog** — the 13 features and their dependency edges;
+  * the **catalog** — the platform features and their dependency edges;
   * **dependency resolution** — closing a requested set under its deps
     (``resolve_dependencies``) and the disable-direction counterpart
     (``prune_unsatisfied``);
@@ -58,6 +58,10 @@ class Feature:
     compose_profile: str | None = None
     #: Always-on features cannot be disabled — ``scan`` is the product floor.
     always_on: bool = False
+    #: Optional public API boundary advertised by feature discovery.
+    api_namespace: str | None = None
+    #: Optional versioned wire contract for cross-layer consumers.
+    wire_contract: str | None = None
 
 
 FEATURE_CATALOG: Dict[str, Feature] = {
@@ -78,6 +82,15 @@ FEATURE_CATALOG: Dict[str, Feature] = {
         name="compliance",
         description="ASVS / MASVS posture and compliance reports.",
         depends_on=frozenset({"scan"}),
+    ),
+    "pentesting": Feature(
+        name="pentesting",
+        description=(
+            "Authorized adaptive black-box, gray-box, and white-box pentesting."
+        ),
+        depends_on=frozenset({"scan"}),
+        api_namespace="/api/v1/pentesting",
+        wire_contract="sccap.pentest.v1",
     ),
     "multi_user": Feature(
         name="multi_user",
@@ -135,9 +148,12 @@ ALL_FEATURES: FrozenSet[str] = frozenset(FEATURE_CATALOG)
 
 #: Fallback membership for a catalog feature that has *no* ``features.*`` row
 #: — used by ``parse_enabled_from_rows`` so a catalog grown in a later release
-#: degrades gracefully (the feature reads as enabled) against a DB seeded by
-#: an earlier one. This is *not* the seed default; seeding is variant-driven.
-DEFAULT_ENABLED_FEATURES: FrozenSet[str] = ALL_FEATURES
+#: has an explicit upgrade default against a DB seeded by an earlier one. This
+#: is *not* the fresh-install seed default; seeding is variant-driven.
+# Active target testing is deliberately opt-in for already-seeded installations.
+# Fresh installations still receive variant-specific membership; an upgrade from
+# a prior catalog cannot silently enable a new network-active product boundary.
+DEFAULT_ENABLED_FEATURES: FrozenSet[str] = ALL_FEATURES - {"pentesting"}
 
 
 # --- Variants (modular setup — issue #105) -----------------------------------
@@ -332,6 +348,8 @@ def catalog_metadata() -> List[dict]:
             "container_backed": f.container_backed,
             "compose_profile": f.compose_profile,
             "always_on": f.always_on,
+            "api_namespace": f.api_namespace,
+            "wire_contract": f.wire_contract,
         }
         for f in (FEATURE_CATALOG[n] for n in sorted(FEATURE_CATALOG))
     ]

@@ -3975,6 +3975,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pentesting/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discover Pentesting Foundation 0 contracts
+         * @description Return version and compatibility metadata; performs no target activity.
+         */
+        get: operations["get_pentesting_contracts_api_v1_pentesting_contracts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4022,6 +4042,28 @@ export interface components {
             is_requester: boolean;
             /** Can Decide */
             can_decide: boolean;
+        };
+        /** ActorRefV1 */
+        ActorRefV1: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "human" | "service_principal" | "system";
+            /** Id */
+            id: string;
+        };
+        /**
+         * AdapterArgumentsV1
+         * @description Bounded generic envelope; each real adapter later supplies its schema.
+         */
+        AdapterArgumentsV1: {
+            /** Schema Id */
+            schema_id: string;
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
         };
         /**
          * AdminFindingItem
@@ -4356,6 +4398,72 @@ export interface components {
              */
             question: string;
         };
+        /** AttemptV1 */
+        AttemptV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /** Sequence */
+            sequence: number;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "initial" | "restart" | "retest";
+            /** Parent Attempt Id */
+            parent_attempt_id?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "preparing" | "running" | "waiting_for_operator" | "paused" | "stopping" | "completed" | "blocked" | "failed";
+            /** State Version */
+            state_version: number;
+            pinned_versions: components["schemas"]["PinnedVersionsV1"];
+            /**
+             * Last Committed Delta Sequence
+             * @default 0
+             */
+            last_committed_delta_sequence: number;
+            /**
+             * Cancellation Generation
+             * @default 0
+             */
+            cancellation_generation: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Terminal Outcome */
+            terminal_outcome?: ("resolved" | "incomplete" | "operator_stopped" | "blocked" | "failed") | null;
+            /** Created By User Id */
+            created_by_user_id: number;
+        };
         /** AuditRead */
         AuditRead: {
             /**
@@ -4422,6 +4530,33 @@ export interface components {
              * Format: date-time
              */
             absolute_expires_at: string;
+        };
+        /** AuthorizationConfirmationV1 */
+        AuthorizationConfirmationV1: {
+            /**
+             * Confirmed
+             * @constant
+             */
+            confirmed: true;
+            /** Confirmed By User Id */
+            confirmed_by_user_id: number;
+            /**
+             * Confirmed At
+             * Format: date-time
+             */
+            confirmed_at: string;
+            /** Statement Version */
+            statement_version: string;
+            /**
+             * Runtime Authorized
+             * @constant
+             */
+            runtime_authorized: true;
+            /**
+             * Source Review Authorized
+             * @default false
+             */
+            source_review_authorized: boolean;
         };
         /** AuthorizationPolicyRead */
         AuthorizationPolicyRead: {
@@ -4772,6 +4907,85 @@ export interface components {
             } | null;
             fixtures?: components["schemas"]["RuleFixturePack"] | null;
         };
+        /** CandidateFindingV1 */
+        CandidateFindingV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Candidate Finding Id
+             * Format: uuid
+             */
+            candidate_finding_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Root Cause Fingerprint */
+            root_cause_fingerprint: string;
+            /** Title */
+            title: string;
+            /** Claim */
+            claim: string;
+            /** Affected Target Refs */
+            affected_target_refs: components["schemas"]["TargetRefV1"][];
+            /** Affected Identity Refs */
+            affected_identity_refs?: components["schemas"]["IdentityRefV1"][];
+            /** Expected Behavior */
+            expected_behavior: string;
+            /** Observed Behavior */
+            observed_behavior: string;
+            /** Impact Hypothesis */
+            impact_hypothesis: string;
+            /** Reproduction Plan */
+            reproduction_plan: string[];
+            /** Evidence Refs */
+            evidence_refs: string[];
+            /** Source Observation Ids */
+            source_observation_ids: string[];
+            /**
+             * Verification Route
+             * @enum {string}
+             */
+            verification_route: "deterministic_predicate" | "independent_reproduction";
+            /** Verification Requirement Version */
+            verification_requirement_version: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "proposed" | "verification_queued" | "verifying" | "confirmed" | "refuted" | "inconclusive";
+            /** Limitations */
+            limitations?: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** CandidatePage */
         CandidatePage: {
             /** Items */
@@ -4945,6 +5159,321 @@ export interface components {
             /** Ref */
             ref: string;
         };
+        /** CleanupObligationV1 */
+        CleanupObligationV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Cleanup Obligation Id
+             * Format: uuid
+             */
+            cleanup_obligation_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Mutation Id */
+            mutation_id?: string | null;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Resource Kind */
+            resource_kind: string;
+            /** Resource Ref */
+            resource_ref: string;
+            /** Cleanup Action Ref */
+            cleanup_action_ref: string;
+            /** Verification Requirement */
+            verification_requirement: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "running" | "resolved" | "failed" | "manual_action_required" | "waived";
+            /** Attempts */
+            attempts: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /** Blocks Resolved Completion */
+            blocks_resolved_completion: boolean;
+            /** Due At */
+            due_at?: string | null;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** CodeScanObservationBatchV1 */
+        CodeScanObservationBatchV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.codescan-adapter.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.codescan-adapter.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Scan Id
+             * Format: uuid
+             */
+            scan_id: string;
+            /**
+             * Scan Attempt Id
+             * Format: uuid
+             */
+            scan_attempt_id: string;
+            /**
+             * Source Snapshot Id
+             * Format: uuid
+             */
+            source_snapshot_id: string;
+            /** Source Snapshot Digest */
+            source_snapshot_digest: string;
+            /** Code Scan Contract Version */
+            code_scan_contract_version: string;
+            /** Observations */
+            observations?: components["schemas"]["CodeScanSourceObservationV1"][];
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /** Scanner Coverage Refs */
+            scanner_coverage_refs?: string[];
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /** Batch Digest */
+            batch_digest: string;
+        };
+        /** CodeScanRequestV1 */
+        CodeScanRequestV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.codescan-adapter.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.codescan-adapter.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Source Input Ref */
+            source_input_ref: string;
+            /** Requested Capabilities */
+            requested_capabilities: string[];
+            /** Authorization Ref */
+            authorization_ref: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
+        /** CodeScanSourceObservationV1 */
+        CodeScanSourceObservationV1: {
+            /** Observation Type */
+            observation_type: string;
+            /** Source Path */
+            source_path: string;
+            /** Start Line */
+            start_line?: number | null;
+            /** End Line */
+            end_line?: number | null;
+            /**
+             * Classification
+             * @enum {string}
+             */
+            classification: "static_observation" | "source_path_verified" | "deployment_correlated" | "runtime_reproduced" | "refuted_or_unreachable";
+            /** Normalized Facts */
+            normalized_facts?: {
+                [key: string]: unknown;
+            };
+            /** Evidence Refs */
+            evidence_refs: string[];
+        };
+        /** CompatibilityContractV1 */
+        CompatibilityContractV1: {
+            /**
+             * Additive Changes
+             * @default consumer_first
+             * @constant
+             */
+            additive_changes: "consumer_first";
+            /**
+             * Breaking Changes
+             * @default new_major_side_by_side
+             * @constant
+             */
+            breaking_changes: "new_major_side_by_side";
+            /**
+             * Unknown Major
+             * @default reject
+             * @constant
+             */
+            unknown_major: "reject";
+            /**
+             * Signed Models Unknown Fields
+             * @default forbid
+             * @constant
+             */
+            signed_models_unknown_fields: "forbid";
+            /**
+             * Forward Extension Field
+             * @default extensions
+             * @constant
+             */
+            forward_extension_field: "extensions";
+            /**
+             * Active Attempt Versions
+             * @default pinned
+             * @constant
+             */
+            active_attempt_versions: "pinned";
+            /**
+             * Rollout Reader Compatibility
+             * @default N-1
+             * @constant
+             */
+            rollout_reader_compatibility: "N-1";
+        };
+        /** ConfirmedFindingV1 */
+        ConfirmedFindingV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Confirmed Finding Id
+             * Format: uuid
+             */
+            confirmed_finding_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Candidate Finding Id
+             * Format: uuid
+             */
+            candidate_finding_id: string;
+            /** Root Cause Fingerprint */
+            root_cause_fingerprint: string;
+            /** Title */
+            title: string;
+            /** Affected Target Refs */
+            affected_target_refs: components["schemas"]["TargetRefV1"][];
+            /** Affected Identity Refs */
+            affected_identity_refs?: components["schemas"]["IdentityRefV1"][];
+            /** Expected Behavior */
+            expected_behavior: string;
+            /** Observed Behavior */
+            observed_behavior: string;
+            /** Security Impact */
+            security_impact: string;
+            /** Reproduction Steps */
+            reproduction_steps: string[];
+            /** Evidence Refs */
+            evidence_refs: string[];
+            verification: components["schemas"]["FindingVerificationV1"];
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "informational" | "low" | "medium" | "high" | "critical";
+            /** Severity Method Version */
+            severity_method_version: string;
+            /** Framework Mappings */
+            framework_mappings?: string[];
+            /** Cwe Mappings */
+            cwe_mappings?: string[];
+            /**
+             * Cleanup Status
+             * @enum {string}
+             */
+            cleanup_status: "not_required" | "resolved" | "unresolved";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "confirmed" | "risk_accepted" | "remediated" | "superseded";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** ConnectorCreate */
         ConnectorCreate: {
             /**
@@ -5093,6 +5622,219 @@ export interface components {
              */
             dropped: number;
         };
+        /** ContractDiscoveryResponseV1 */
+        ContractDiscoveryResponseV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Feature
+             * @default pentesting
+             * @constant
+             */
+            feature: "pentesting";
+            /**
+             * Api Namespace
+             * @default /api/v1/pentesting
+             * @constant
+             */
+            api_namespace: "/api/v1/pentesting";
+            /**
+             * Contract Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            contract_version: "sccap.pentest.v1";
+            /**
+             * Event Version
+             * @default sccap.pentest.event.v1
+             * @constant
+             */
+            event_version: "sccap.pentest.event.v1";
+            /**
+             * Error Version
+             * @default sccap.pentest.error.v1
+             * @constant
+             */
+            error_version: "sccap.pentest.error.v1";
+            /**
+             * Runner Protocol Version
+             * @default sccap.pentest.runner.v1
+             * @constant
+             */
+            runner_protocol_version: "sccap.pentest.runner.v1";
+            /**
+             * Code Scan Adapter Version
+             * @default sccap.pentest.codescan-adapter.v1
+             * @constant
+             */
+            code_scan_adapter_version: "sccap.pentest.codescan-adapter.v1";
+            /**
+             * Authoritative Store
+             * @default postgresql
+             * @constant
+             */
+            authoritative_store: "postgresql";
+            /**
+             * Queue Role
+             * @default notification_only
+             * @constant
+             */
+            queue_role: "notification_only";
+            /**
+             * Qdrant Role
+             * @default methodology_retrieval_only
+             * @constant
+             */
+            qdrant_role: "methodology_retrieval_only";
+            /**
+             * Event Types
+             * @default [
+             *       "pentest.engagement.created.v1",
+             *       "pentest.engagement.state_changed.v1",
+             *       "pentest.engagement.scope_policy_pinned.v1",
+             *       "pentest.attempt.created.v1",
+             *       "pentest.attempt.resumed.v1",
+             *       "pentest.attempt.terminal.v1",
+             *       "pentest.decision.committed.v1",
+             *       "pentest.specialist_task.created.v1",
+             *       "pentest.tool_proposal.validated.v1",
+             *       "pentest.execution.requested.v1",
+             *       "pentest.execution.started.v1",
+             *       "pentest.execution.awaiting_callback.v1",
+             *       "pentest.execution.terminal.v1",
+             *       "pentest.execution.cancellation_requested.v1",
+             *       "pentest.evidence.committed.v1",
+             *       "pentest.decision_delta.committed.v1",
+             *       "pentest.observation.created.v1",
+             *       "pentest.candidate_finding.changed.v1",
+             *       "pentest.confirmed_finding.created.v1",
+             *       "pentest.coverage.changed.v1",
+             *       "pentest.mutation.registered.v1",
+             *       "pentest.cleanup.changed.v1",
+             *       "pentest.retest.linked.v1"
+             *     ]
+             */
+            event_types: string[];
+            /** Lifecycle Transitions */
+            lifecycle_transitions?: {
+                [key: string]: {
+                    [key: string]: string[];
+                };
+            };
+            /** Idempotency Identities */
+            idempotency_identities?: {
+                [key: string]: string[];
+            };
+            /** Error Taxonomy */
+            error_taxonomy?: {
+                [key: string]: components["schemas"]["ErrorPolicyV1"];
+            };
+            compatibility?: components["schemas"]["CompatibilityContractV1"];
+            schema_anchors?: components["schemas"]["ContractSchemaAnchorsV1"] | null;
+        };
+        /**
+         * ContractSchemaAnchorsV1
+         * @description OpenAPI anchors only; discovery returns null rather than example authority.
+         */
+        ContractSchemaAnchorsV1: {
+            engagement?: components["schemas"]["EngagementV1"] | null;
+            attempt?: components["schemas"]["AttemptV1"] | null;
+            decision?: components["schemas"]["DecisionV1"] | null;
+            specialist_task?: components["schemas"]["SpecialistTaskV1"] | null;
+            tool_proposal?: components["schemas"]["ToolProposalV1"] | null;
+            execution_task?: components["schemas"]["ExecutionTaskV1"] | null;
+            execution_result?: components["schemas"]["ExecutionResultV1"] | null;
+            evidence_ref?: components["schemas"]["EvidenceRefV1"] | null;
+            decision_delta?: components["schemas"]["DecisionDeltaV1"] | null;
+            observation?: components["schemas"]["ObservationV1"] | null;
+            candidate_finding?: components["schemas"]["CandidateFindingV1"] | null;
+            confirmed_finding?: components["schemas"]["ConfirmedFindingV1"] | null;
+            coverage_effect?: components["schemas"]["CoverageEffectV1"] | null;
+            mutation?: components["schemas"]["MutationV1"] | null;
+            cleanup_obligation?: components["schemas"]["CleanupObligationV1"] | null;
+            retest_link?: components["schemas"]["RetestLinkV1"] | null;
+            event?: components["schemas"]["PentestEventEnvelopeV1"] | null;
+            error?: components["schemas"]["PentestErrorV1"] | null;
+            code_scan_request?: components["schemas"]["CodeScanRequestV1"] | null;
+            code_scan_observation_batch?: components["schemas"]["CodeScanObservationBatchV1"] | null;
+        };
+        /** CoverageEffectV1 */
+        CoverageEffectV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Coverage Effect Id
+             * Format: uuid
+             */
+            coverage_effect_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Canonical Test Node Id */
+            canonical_test_node_id: string;
+            /** Test Catalog Version */
+            test_catalog_version: string;
+            /**
+             * Proposed By
+             * @enum {string}
+             */
+            proposed_by: "deterministic_rule" | "specialist" | "orchestrator" | "operator";
+            /**
+             * Requested Outcome
+             * @enum {string}
+             */
+            requested_outcome: "applicable" | "passed_with_evidence" | "failed_with_verified_finding" | "inconclusive" | "blocked" | "not_tested_with_reason" | "not_applicable_with_prerequisite_evidence";
+            /**
+             * Authority State
+             * @enum {string}
+             */
+            authority_state: "proposed" | "validated" | "rejected" | "committed";
+            /** Predicate Version */
+            predicate_version: string;
+            /** Prerequisite Fact Refs */
+            prerequisite_fact_refs?: string[];
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /** Confirmed Finding Refs */
+            confirmed_finding_refs?: string[];
+            /** Reason */
+            reason: string;
+            /** Limitations */
+            limitations?: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** CreateProjectRequest */
         CreateProjectRequest: {
             /** Name */
@@ -5125,6 +5867,168 @@ export interface components {
             ssl: boolean;
             /** Password */
             password: string;
+        };
+        /** DecisionDeltaV1 */
+        DecisionDeltaV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Delta Id
+             * Format: uuid
+             */
+            delta_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Previous Delta Digest */
+            previous_delta_digest?: string | null;
+            /** Delta Digest */
+            delta_digest: string;
+            /**
+             * Cause Type
+             * @enum {string}
+             */
+            cause_type: "bootstrap" | "execution_commit" | "callback" | "operator_input" | "cancellation" | "cleanup" | "verification" | "migration";
+            /** Cause Ref */
+            cause_ref: string;
+            /** Facts Added */
+            facts_added?: {
+                [key: string]: unknown;
+            }[];
+            /** Facts Changed */
+            facts_changed?: {
+                [key: string]: unknown;
+            }[];
+            /** Hypotheses Changed */
+            hypotheses_changed?: {
+                [key: string]: unknown;
+            }[];
+            /** Observations Added */
+            observations_added?: string[];
+            /** Candidate Findings Changed */
+            candidate_findings_changed?: string[];
+            /** Confirmed Findings Changed */
+            confirmed_findings_changed?: string[];
+            /** Coverage Effects Committed */
+            coverage_effects_committed?: string[];
+            /** Mutations Changed */
+            mutations_changed?: string[];
+            /** Cleanup Obligations Changed */
+            cleanup_obligations_changed?: string[];
+            /** Budgets Consumed */
+            budgets_consumed?: {
+                [key: string]: number;
+            };
+            /** Failures */
+            failures?: string[];
+            /** Remaining Uncertainty */
+            remaining_uncertainty?: string[];
+            /** Newly Applicable Actions */
+            newly_applicable_actions?: string[];
+            /** Suppressed Actions */
+            suppressed_actions?: string[];
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /**
+             * Committed At
+             * Format: date-time
+             */
+            committed_at: string;
+        };
+        /** DecisionV1 */
+        DecisionV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Decision Sequence */
+            decision_sequence: number;
+            /** Based On Delta Sequence */
+            based_on_delta_sequence: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "proposed" | "validated" | "delegated" | "waiting_execution" | "committed" | "rejected" | "superseded";
+            /** Objective */
+            objective: string;
+            /** Structured Reason */
+            structured_reason: string;
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+            /** Target Refs */
+            target_refs: components["schemas"]["TargetRefV1"][];
+            /** Capability */
+            capability: string;
+            /** Required Identity Refs */
+            required_identity_refs?: components["schemas"]["IdentityRefV1"][];
+            /** Expected Learning */
+            expected_learning: string[];
+            /** Evidence Required */
+            evidence_required: string[];
+            limits: components["schemas"]["LimitsV1"];
+            /**
+             * Reconsider After
+             * @enum {string}
+             */
+            reconsider_after: "execution_terminal" | "callback" | "operator_input";
+            /** Context Manifest Digest */
+            context_manifest_digest: string;
+            /** Model Interaction Ref */
+            model_interaction_ref?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** DeliveryAuditRead */
         DeliveryAuditRead: {
@@ -5253,6 +6157,80 @@ export interface components {
              */
             created_at: string;
         };
+        /** EngagementV1 */
+        EngagementV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Owner User Id */
+            owner_user_id: number;
+            /** Name */
+            name: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "black_box" | "gray_box" | "white_box";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "preparing" | "running" | "waiting_for_operator" | "paused" | "stopping" | "completed" | "blocked" | "failed";
+            /** State Version */
+            state_version: number;
+            authorization: components["schemas"]["AuthorizationConfirmationV1"];
+            /** Target Refs */
+            target_refs: components["schemas"]["TargetRefV1"][];
+            /** Source Input Ref */
+            source_input_ref?: string | null;
+            /** Identity Refs */
+            identity_refs?: components["schemas"]["IdentityRefV1"][];
+            /**
+             * Scope Policy Id
+             * Format: uuid
+             */
+            scope_policy_id: string;
+            /** Scope Policy Version */
+            scope_policy_version: string;
+            /** Rules Digest */
+            rules_digest: string;
+            /** Effective Defaults Version */
+            effective_defaults_version: string;
+            /** Completion Reason */
+            completion_reason?: ("objectives_resolved" | "budget_exhausted" | "operator_stopped" | "blocked" | "failed") | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * EnrichedDocument
          * @description Represents a single document/control after LLM enrichment.
@@ -5276,6 +6254,307 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** ErrorPolicyV1 */
+        ErrorPolicyV1: {
+            /** Category */
+            category: string;
+            /** Retryable */
+            retryable: boolean;
+            /** Http Status */
+            http_status: number;
+        };
+        /** EvidenceRefV1 */
+        EvidenceRefV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
+            evidence_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+            /** Evidence Type */
+            evidence_type: string;
+            /**
+             * Layer
+             * @enum {string}
+             */
+            layer: "raw" | "redacted_derivative" | "normalized";
+            /** Parent Evidence Ids */
+            parent_evidence_ids?: string[];
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Ciphertext Sha256 */
+            ciphertext_sha256?: string | null;
+            /** Media Type */
+            media_type: string;
+            /** Plaintext Size */
+            plaintext_size: number;
+            /** Object Version */
+            object_version: string;
+            producer: components["schemas"]["ProducerRefV1"];
+            /** Target Ref */
+            target_ref?: string | null;
+            /** Identity Ref */
+            identity_ref?: string | null;
+            /**
+             * Sensitivity
+             * @enum {string}
+             */
+            sensitivity: "public" | "internal" | "confidential" | "restricted";
+            /**
+             * Redaction Status
+             * @enum {string}
+             */
+            redaction_status: "not_required" | "pending" | "redacted" | "restricted_original";
+            /** Retention Policy Version */
+            retention_policy_version: string;
+            /**
+             * Retain Until
+             * Format: date-time
+             */
+            retain_until: string;
+            /** Legal Hold */
+            legal_hold: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ExecutionResultV1 */
+        ExecutionResultV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Runner Protocol Version
+             * @default sccap.pentest.runner.v1
+             * @constant
+             */
+            runner_protocol_version: "sccap.pentest.runner.v1";
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Dispatch Generation */
+            dispatch_generation: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "completed" | "failed" | "cancelled" | "timed_out" | "awaiting_callback";
+            /** Terminal */
+            terminal: boolean;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Adapter Id */
+            adapter_id: string;
+            /** Adapter Contract Version */
+            adapter_contract_version: string;
+            /** Tool Runtime Version */
+            tool_runtime_version: string;
+            /** Configuration Digest */
+            configuration_digest: string;
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /** Normalized Result Refs */
+            normalized_result_refs?: string[];
+            /** Requests Consumed */
+            requests_consumed: number;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Side Effects Observed */
+            side_effects_observed?: string[];
+            /** Mutation Refs */
+            mutation_refs?: string[];
+            /** Cleanup Obligation Refs */
+            cleanup_obligation_refs?: string[];
+            /** Callback Expectation Refs */
+            callback_expectation_refs?: string[];
+            error?: components["schemas"]["PentestErrorV1"] | null;
+            /** Cancellation Generation Observed */
+            cancellation_generation_observed: number;
+            /** Runner Id */
+            runner_id: string;
+            /** Nonce */
+            nonce: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /** Signature */
+            signature: string;
+        };
+        /** ExecutionTaskV1 */
+        ExecutionTaskV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Runner Protocol Version
+             * @default sccap.pentest.runner.v1
+             * @constant
+             */
+            runner_protocol_version: "sccap.pentest.runner.v1";
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+            /**
+             * Specialist Task Id
+             * Format: uuid
+             */
+            specialist_task_id: string;
+            /**
+             * Tool Proposal Id
+             * Format: uuid
+             */
+            tool_proposal_id: string;
+            /** Dispatch Generation */
+            dispatch_generation: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Adapter Id */
+            adapter_id: string;
+            /** Adapter Contract Version */
+            adapter_contract_version: string;
+            /** Tool Runtime Version */
+            tool_runtime_version: string;
+            /** Capability */
+            capability: string;
+            typed_arguments: components["schemas"]["AdapterArgumentsV1"];
+            /** Target Refs */
+            target_refs: components["schemas"]["TargetRefV1"][];
+            /** Identity Refs */
+            identity_refs?: components["schemas"]["IdentityRefV1"][];
+            /** Scope Grant Ref */
+            scope_grant_ref: string;
+            limits: components["schemas"]["LimitsV1"];
+            /** Lock Refs */
+            lock_refs?: string[];
+            /** Evidence Upload Grant Ref */
+            evidence_upload_grant_ref: string;
+            /** Cancellation Token Ref */
+            cancellation_token_ref: string;
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Nonce */
+            nonce: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /** Signature */
+            signature: string;
+        };
+        /** FeatureCatalogEntryResponse */
+        FeatureCatalogEntryResponse: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Depends On */
+            depends_on: string[];
+            /** Container Backed */
+            container_backed: boolean;
+            /** Compose Profile */
+            compose_profile: string | null;
+            /** Always On */
+            always_on: boolean;
+            /** Api Namespace */
+            api_namespace: string | null;
+            /** Wire Contract */
+            wire_contract: string | null;
+        };
         /**
          * FeatureUpdateRequest
          * @description Desired enabled-feature set. Container-backed features in the list are
@@ -5290,6 +6569,19 @@ export interface components {
              * @default false
              */
             confirm_destructive: boolean;
+        };
+        /** FeaturesResponse */
+        FeaturesResponse: {
+            /** Enabled Features */
+            enabled_features: string[];
+            /** All Features */
+            all_features: string[];
+            /** Variant */
+            variant: string;
+            /** Compose Profiles */
+            compose_profiles: string[];
+            /** Catalog */
+            catalog: components["schemas"]["FeatureCatalogEntryResponse"][];
         };
         /**
          * FindingDispositionEventResponse
@@ -5701,6 +6993,32 @@ export interface components {
             /** Reintroduced */
             reintroduced: number;
         };
+        /** FindingVerificationV1 */
+        FindingVerificationV1: {
+            /**
+             * Route
+             * @enum {string}
+             */
+            route: "deterministic_predicate" | "independent_reproduction";
+            /** Predicate Or Execution Ref */
+            predicate_or_execution_ref: string;
+            /** Version */
+            version: string;
+            /**
+             * Result
+             * @constant
+             */
+            result: "confirmed";
+            /** Verifier Profile Version */
+            verifier_profile_version?: string | null;
+            /** Evidence Refs */
+            evidence_refs: string[];
+            /**
+             * Verified At
+             * Format: date-time
+             */
+            verified_at: string;
+        };
         /** FindingWaiverEventResponse */
         FindingWaiverEventResponse: {
             /** Id */
@@ -5914,6 +7232,27 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** IdentityRefV1 */
+        IdentityRefV1: {
+            /**
+             * Identity Id
+             * Format: uuid
+             */
+            identity_id: string;
+            /** Session Handle Id */
+            session_handle_id?: string | null;
+            /**
+             * Identity Kind
+             * @enum {string}
+             */
+            identity_kind: "anonymous" | "account" | "service";
+            /** Apparent Role */
+            apparent_role?: string | null;
+            /** Apparent Tenant */
+            apparent_tenant?: string | null;
+            /** Broker Generation */
+            broker_generation?: number | null;
         };
         /** IngestionSettingsRead */
         IngestionSettingsRead: {
@@ -6255,6 +7594,32 @@ export interface components {
             /** Model Name */
             model_name: string;
         };
+        /** LimitsV1 */
+        LimitsV1: {
+            /**
+             * Maximum Tool Calls
+             * @default 1
+             * @constant
+             */
+            maximum_tool_calls: 1;
+            /** Maximum Requests */
+            maximum_requests: number;
+            /** Maximum Duration Seconds */
+            maximum_duration_seconds: number;
+            /**
+             * Maximum Concurrency
+             * @default 1
+             */
+            maximum_concurrency: number;
+            /**
+             * Maximum Side Effect
+             * @default read_only
+             * @enum {string}
+             */
+            maximum_side_effect: "read_only" | "reversible_mutation" | "high_impact" | "irreversible";
+            /** Allowed Interaction Classes */
+            allowed_interaction_classes?: string[];
+        };
         /** LineageEdge */
         LineageEdge: {
             /** Id */
@@ -6345,6 +7710,151 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** MutationV1 */
+        MutationV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Mutation Id
+             * Format: uuid
+             */
+            mutation_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            target_ref: components["schemas"]["TargetRefV1"];
+            identity_ref?: components["schemas"]["IdentityRefV1"] | null;
+            /** Object Ref */
+            object_ref?: string | null;
+            /** Workflow Ref */
+            workflow_ref?: string | null;
+            /** Marker */
+            marker?: string | null;
+            /** Interaction Class */
+            interaction_class: string;
+            /**
+             * Side Effect Class
+             * @enum {string}
+             */
+            side_effect_class: "reversible_mutation" | "high_impact" | "irreversible";
+            /** Intended Change */
+            intended_change: string;
+            /** Prior State Evidence Refs */
+            prior_state_evidence_refs?: string[];
+            /**
+             * Registration State
+             * @enum {string}
+             */
+            registration_state: "planned" | "authorized" | "executed" | "failed" | "rolled_back";
+            /** Rollback Recipe Ref */
+            rollback_recipe_ref: string;
+            /** Lock Refs */
+            lock_refs: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Executed At */
+            executed_at?: string | null;
+        };
+        /** ObservationV1 */
+        ObservationV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Observation Id
+             * Format: uuid
+             */
+            observation_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+            /** Observation Type */
+            observation_type: string;
+            /** Title */
+            title: string;
+            /** Normalized Facts */
+            normalized_facts: {
+                [key: string]: unknown;
+            };
+            /** Target Refs */
+            target_refs: components["schemas"]["TargetRefV1"][];
+            /** Identity Refs */
+            identity_refs?: components["schemas"]["IdentityRefV1"][];
+            /** Evidence Refs */
+            evidence_refs: string[];
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "low" | "medium" | "high";
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "deterministic_parser" | "specialist_interpretation" | "operator";
+            /**
+             * State
+             * @default active
+             * @enum {string}
+             */
+            state: "active" | "superseded" | "refuted" | "promoted";
+            /** Limitations */
+            limitations?: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** OutboxRead */
         OutboxRead: {
             /**
@@ -6430,6 +7940,119 @@ export interface components {
             page: number;
             /** Page Size */
             page_size: number;
+        };
+        /** PentestErrorV1 */
+        PentestErrorV1: {
+            /**
+             * Error Version
+             * @default sccap.pentest.error.v1
+             * @constant
+             */
+            error_version: "sccap.pentest.error.v1";
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Retryable */
+            retryable: boolean;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "validation" | "authentication" | "authorization" | "tenant" | "scope" | "credential" | "state" | "idempotency" | "compatibility" | "budget" | "tool" | "transport" | "evidence" | "cancellation" | "cleanup" | "dependency" | "internal";
+            /** Correlation Id */
+            correlation_id: string;
+            /** Safe Details */
+            safe_details?: {
+                [key: string]: unknown;
+            };
+            /** Retry After Seconds */
+            retry_after_seconds?: number | null;
+            /** Caused By Ref */
+            caused_by_ref?: string | null;
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+        };
+        /** PentestEventEnvelopeV1 */
+        PentestEventEnvelopeV1: {
+            /**
+             * Event Version
+             * @default sccap.pentest.event.v1
+             * @constant
+             */
+            event_version: "sccap.pentest.event.v1";
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Event Type */
+            event_type: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /** Attempt Id */
+            attempt_id?: string | null;
+            /** Aggregate Sequence */
+            aggregate_sequence: number;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            actor: components["schemas"]["ActorRefV1"];
+            /** Correlation Id */
+            correlation_id: string;
+            /** Causation Id */
+            causation_id?: string | null;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Payload Digest */
+            payload_digest: string;
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+        };
+        /** PinnedVersionsV1 */
+        PinnedVersionsV1: {
+            /** Contract */
+            contract: string;
+            /** Scope Policy */
+            scope_policy: string;
+            /** Capability Catalog */
+            capability_catalog: string;
+            /** Test Catalog */
+            test_catalog: string;
+            /** Knowledge Snapshot */
+            knowledge_snapshot: string;
+            /** Adapter Registry */
+            adapter_registry: string;
+            /** Normalization Rules */
+            normalization_rules: string;
+            /** Evidence Schema */
+            evidence_schema: string;
+            /** Prompt Set */
+            prompt_set: string;
+            /** Model Config */
+            model_config: string;
+            /** Report Template */
+            report_template: string;
+            /** Runner Protocol */
+            runner_protocol: string;
         };
         /** PolicyChangeRequestCreate */
         PolicyChangeRequestCreate: {
@@ -6589,6 +8212,20 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** ProducerRefV1 */
+        ProducerRefV1: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "tool_adapter" | "deterministic_service" | "specialist" | "orchestrator" | "operator" | "code_scan_adapter";
+            /** Id */
+            id: string;
+            /** Version */
+            version: string;
+            /** Configuration Digest */
+            configuration_digest: string;
         };
         /** ProjectHistoryItem */
         ProjectHistoryItem: {
@@ -7165,6 +8802,67 @@ export interface components {
              * Format: uuid
              */
             llm_config_id: string;
+        };
+        /** RetestLinkV1 */
+        RetestLinkV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Retest Link Id
+             * Format: uuid
+             */
+            retest_link_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Source Engagement Id
+             * Format: uuid
+             */
+            source_engagement_id: string;
+            /**
+             * Source Attempt Id
+             * Format: uuid
+             */
+            source_attempt_id: string;
+            /**
+             * Retest Engagement Id
+             * Format: uuid
+             */
+            retest_engagement_id: string;
+            /**
+             * Retest Attempt Id
+             * Format: uuid
+             */
+            retest_attempt_id: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "finding" | "finding_group" | "root_cause" | "coverage_branch" | "full_assessment";
+            /** Source Refs */
+            source_refs: string[];
+            /** Requested By User Id */
+            requested_by_user_id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Result */
+            result?: ("fixed" | "still_present" | "partially_fixed" | "cannot_verify" | "changed_behavior_requiring_investigation" | "new_regression") | null;
+            /** Result Evidence Refs */
+            result_evidence_refs?: string[];
         };
         /** ReviewDecision */
         ReviewDecision: {
@@ -7946,6 +9644,75 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** SpecialistTaskV1 */
+        SpecialistTaskV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Specialist Task Id
+             * Format: uuid
+             */
+            specialist_task_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+            /** Specialist Profile */
+            specialist_profile: string;
+            /** Profile Version */
+            profile_version: string;
+            /** Objective */
+            objective: string;
+            /** Hypothesis Id */
+            hypothesis_id?: string | null;
+            /** Target Refs */
+            target_refs: components["schemas"]["TargetRefV1"][];
+            /** Context Refs */
+            context_refs?: string[];
+            /** Allowed Capabilities */
+            allowed_capabilities: string[];
+            /** Identity Refs */
+            identity_refs?: components["schemas"]["IdentityRefV1"][];
+            limits: components["schemas"]["LimitsV1"];
+            /** Expected Result */
+            expected_result: string[];
+            /** Lock Refs */
+            lock_refs?: string[];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** SubmittedFileReportItem */
         SubmittedFileReportItem: {
             /** File Path */
@@ -8128,6 +9895,25 @@ export interface components {
              */
             expected_version?: number | null;
         };
+        /** TargetRefV1 */
+        TargetRefV1: {
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "origin" | "host" | "endpoint" | "operation" | "source_component";
+            /** Display Label Redacted */
+            display_label_redacted: string;
+            /** Canonical Identity Digest */
+            canonical_identity_digest: string;
+            /** Evidence Refs */
+            evidence_refs?: string[];
+        };
         /** TenantCreate */
         TenantCreate: {
             /** Slug */
@@ -8222,6 +10008,78 @@ export interface components {
             reason: string;
             /** Authorized View */
             authorized_view: string;
+        };
+        /** ToolProposalV1 */
+        ToolProposalV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Tool Proposal Id
+             * Format: uuid
+             */
+            tool_proposal_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Decision Id
+             * Format: uuid
+             */
+            decision_id: string;
+            /**
+             * Specialist Task Id
+             * Format: uuid
+             */
+            specialist_task_id: string;
+            /** Adapter Id */
+            adapter_id: string;
+            /** Adapter Contract Version */
+            adapter_contract_version: string;
+            /** Tool Runtime Version */
+            tool_runtime_version: string;
+            /** Capability */
+            capability: string;
+            arguments: components["schemas"]["AdapterArgumentsV1"];
+            /** Reason */
+            reason: string;
+            /** Expected Evidence Types */
+            expected_evidence_types: string[];
+            /** Estimated Requests */
+            estimated_requests: number;
+            /** Estimated Duration Seconds */
+            estimated_duration_seconds: number;
+            /**
+             * Side Effect Class
+             * @enum {string}
+             */
+            side_effect_class: "read_only" | "reversible_mutation" | "high_impact" | "irreversible";
+            /** Policy Input Digest */
+            policy_input_digest: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** TransitionRequest */
         TransitionRequest: {
@@ -10473,9 +12331,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["FeaturesResponse"];
                 };
             };
         };
@@ -17519,6 +19375,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_pentesting_contracts_api_v1_pentesting_contracts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractDiscoveryResponseV1"];
                 };
             };
         };

@@ -5,24 +5,12 @@
 // enabled-feature set before a user authenticates.
 
 import apiClient from "./apiClient";
+import type { components } from "../types/api-generated";
 
-/** Static catalog metadata for one feature (carries no flag state). */
-export interface FeatureCatalogEntry {
-  name: string;
-  description: string;
-  depends_on: string[];
-  container_backed: boolean;
-  compose_profile: string | null;
-  always_on: boolean;
-}
-
-export interface FeaturesResponse {
-  enabled_features: string[];
-  all_features: string[];
-  variant: string;
-  compose_profiles: string[];
-  catalog: FeatureCatalogEntry[];
-}
+/** Generated from the FastAPI feature-catalog wire contract. */
+export type FeatureCatalogEntry =
+  components["schemas"]["FeatureCatalogEntryResponse"];
+export type FeaturesResponse = components["schemas"]["FeaturesResponse"];
 
 /** A catalog feature with its admin-visible state (GET /admin/features). */
 export interface AdminFeature {
@@ -33,6 +21,8 @@ export interface AdminFeature {
   container_backed: boolean;
   compose_profile: string | null;
   depends_on: string[];
+  api_namespace: string | null;
+  wire_contract: string | null;
 }
 
 export const featureService = {

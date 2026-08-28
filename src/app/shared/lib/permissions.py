@@ -47,6 +47,12 @@ AUDIT_READ = "audit.read"
 PLATFORM_TENANT_MANAGE = "platform.tenant.manage"
 PLATFORM_CONFIG_MANAGE = "platform.config.manage"
 GROUP_MANAGE = "group.manage"
+PENTEST_CREATE = "pentest.create"
+PENTEST_READ = "pentest.read"
+PENTEST_READ_TENANT = "pentest.read.tenant"
+PENTEST_CONTROL = "pentest.control"
+PENTEST_APPROVE = "pentest.approve"
+PENTEST_EVIDENCE_READ = "pentest.evidence.read"
 
 ALL_PERMISSION_KEYS = frozenset(
     {
@@ -70,6 +76,12 @@ ALL_PERMISSION_KEYS = frozenset(
         PLATFORM_TENANT_MANAGE,
         PLATFORM_CONFIG_MANAGE,
         GROUP_MANAGE,
+        PENTEST_CREATE,
+        PENTEST_READ,
+        PENTEST_READ_TENANT,
+        PENTEST_CONTROL,
+        PENTEST_APPROVE,
+        PENTEST_EVIDENCE_READ,
     }
 )
 
@@ -86,6 +98,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             SERVICE_PRINCIPAL_MANAGE,
             AUDIT_READ,
             GROUP_MANAGE,
+            PENTEST_READ,
+            PENTEST_READ_TENANT,
+            PENTEST_EVIDENCE_READ,
         }
     ),
     SECURITY_APPROVER: frozenset(
@@ -100,6 +115,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             RULE_CANDIDATE_REVIEW,
             RULE_PROMOTE,
             AUDIT_READ,
+            PENTEST_READ,
+            PENTEST_READ_TENANT,
+            PENTEST_APPROVE,
+            PENTEST_EVIDENCE_READ,
         }
     ),
     ANALYST: frozenset(
@@ -110,6 +129,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             FINDING_TRIAGE,
             WAIVER_REQUEST,
             RULE_CANDIDATE_CREATE,
+            PENTEST_CREATE,
+            PENTEST_READ,
+            PENTEST_CONTROL,
+            PENTEST_EVIDENCE_READ,
         }
     ),
     DEVELOPER: frozenset(
@@ -120,9 +143,20 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             SCAN_APPROVE_SELF,
             WAIVER_REQUEST,
             RULE_CANDIDATE_CREATE,
+            PENTEST_READ,
         }
     ),
-    AUDITOR: frozenset({SCAN_READ, SCAN_READ_TENANT, IDENTITY_READ, AUDIT_READ}),
+    AUDITOR: frozenset(
+        {
+            SCAN_READ,
+            SCAN_READ_TENANT,
+            IDENTITY_READ,
+            AUDIT_READ,
+            PENTEST_READ,
+            PENTEST_READ_TENANT,
+            PENTEST_EVIDENCE_READ,
+        }
+    ),
 }
 
 
