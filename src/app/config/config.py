@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     RABBITMQ_SUBMISSION_QUEUE: str = "code_submission_queue"
     RABBITMQ_APPROVAL_QUEUE: str = "analysis_approved_queue"
     RABBITMQ_REPORT_QUEUE: str = "report_export_queue"
+    RABBITMQ_PENTEST_QUEUE: str = "pentest_execution_queue"
+
+    # Foundation 1 signed worker tasks. Production must provide an independent
+    # 32-byte base64url seed and may provide comma-separated kid:public-key
+    # verifier entries so API and worker credentials can be separated.
+    PENTEST_TASK_SIGNING_KEY_ID: str = "pentest-foundation1-local"
+    PENTEST_TASK_SIGNING_SEED: Optional[SecretStr] = None
+    PENTEST_TASK_VERIFY_PUBLIC_KEYS: str = ""
 
     @field_validator("RABBITMQ_URL", mode="before")
     def assemble_rabbitmq_connection(cls, v, info):

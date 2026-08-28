@@ -56,6 +56,9 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "handoff_retry",
         "outbox_id",
         "tenant_id",
+        "engagement_id",
+        "execution_id",
+        "task_digest",
         "traceparent",
         "tracestate",
     }

@@ -33,6 +33,7 @@ try:
     # Ensure all models are imported so Base.metadata is populated
     import app.infrastructure.database.models  # noqa: F401 — registers all models with Base.metadata
     import app.infrastructure.governance.models  # noqa: F401 — split governance models use the same Base
+    import app.pentesting.persistence.models  # noqa: F401 — Pentesting bounded-context models
     from app.infrastructure.database.schema_contracts import (
         register_schema_contracts,
     )

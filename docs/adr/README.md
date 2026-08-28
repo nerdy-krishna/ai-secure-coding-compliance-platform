@@ -19,3 +19,4 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-011: Observable, autoscaled worker pools](011-observable-autoscaled-worker-pools.md)
 - [ADR-012: KMS-first supply chain and cross-store evidence governance](012-supply-chain-and-evidence-governance.md)
 - [ADR-013: Pentesting bounded context and versioned Foundation 0 contracts](013-pentesting-bounded-context-contracts.md)
+- [ADR-014: Pentesting Foundation 1 exact-origin tracer](014-pentesting-foundation1-exact-origin-tracer.md)

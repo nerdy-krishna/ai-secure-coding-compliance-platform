@@ -12,16 +12,18 @@ from alembic.script import ScriptDirectory
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_PATH = (
-    ROOT
-    / "alembic"
-    / "current_versions"
-    / "2026_08_28_0000_current_schema_baseline.py"
+    ROOT / "alembic" / "current_versions" / "2026_08_28_0000_current_schema_baseline.py"
 )
-BASELINE_PATH = (
-    ROOT / "alembic" / "baselines" / "2026_08_28_current_schema.sql"
-)
+BASELINE_PATH = ROOT / "alembic" / "baselines" / "2026_08_28_current_schema.sql"
 BASELINE_ROOT = "4d5e6f708192"
-CURRENT_HEAD = "5e6f7081a2b3"
+CURRENT_HEAD = "8192a3b4c5d6"
+ACTIVE_CHAIN = (
+    ("8192a3b4c5d6", "708192a3b4c5"),
+    ("708192a3b4c5", "6f708192a3b4"),
+    ("6f708192a3b4", "5e6f7081a2b3"),
+    ("5e6f7081a2b3", BASELINE_ROOT),
+    (BASELINE_ROOT, None),
+)
 
 
 def _load_migration():
@@ -42,20 +44,19 @@ class AlembicCurrentSchemaBaselineTests(unittest.TestCase):
         revisions = list(script.walk_revisions())
 
         self.assertEqual(script.get_heads(), [CURRENT_HEAD])
-        self.assertEqual(len(revisions), 2)
-        self.assertEqual(revisions[0].revision, CURRENT_HEAD)
-        self.assertEqual(revisions[0].down_revision, BASELINE_ROOT)
-        self.assertEqual(revisions[1].revision, BASELINE_ROOT)
-        self.assertIsNone(revisions[1].down_revision)
+        self.assertEqual(
+            tuple(
+                (revision.revision, revision.down_revision) for revision in revisions
+            ),
+            ACTIVE_CHAIN,
+        )
 
     def test_legacy_revisions_are_retained_but_not_active(self) -> None:
         legacy_revisions = list((ROOT / "alembic" / "versions").glob("*.py"))
         self.assertGreaterEqual(len(legacy_revisions), 122)
         self.assertNotIn(
             str(ROOT / "alembic" / "versions"),
-            Config(str(ROOT / "alembic.ini")).get_main_option(
-                "version_locations"
-            ),
+            Config(str(ROOT / "alembic.ini")).get_main_option("version_locations"),
         )
 
     def test_frozen_snapshot_digest_and_postgres_statement_parser(self) -> None:
@@ -105,7 +106,7 @@ class AlembicCurrentSchemaBaselineTests(unittest.TestCase):
         ):
             self.assertNotIn(f"CREATE TABLE public.{excluded_table}", sql)
         self.assertNotIn("COPY public.", sql)
-        self.assertNotIn("INSERT INTO public.\"user\"", sql)
+        self.assertNotIn('INSERT INTO public."user"', sql)
         self.assertNotRegex(
             sql, re.compile(r"^\\(?:restrict|unrestrict)", re.MULTILINE)
         )

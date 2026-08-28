@@ -14,6 +14,9 @@ from app.infrastructure.database.database import AsyncSessionLocal
 from app.infrastructure.database.repositories.scan_outbox_repo import (
     ScanOutboxRepository,
 )
+from app.infrastructure.database.repositories.pentesting import (
+    PentestEngagementRepository,
+)
 from app.infrastructure.database.tenant_context import principal_scope
 from app.infrastructure.messaging.publisher import publish_message
 
@@ -33,12 +36,10 @@ async def _tick() -> None:
     ):
         async with AsyncSessionLocal() as db:
             repo = ScanOutboxRepository(db)
+            pentest_repo = PentestEngagementRepository(db)
             rows = await repo.list_unpublished(
                 older_than_seconds=MIN_AGE_SECONDS, limit=BATCH_SIZE
             )
-            if not rows:
-                return
-            logger.info("outbox_sweep.batch", extra={"count": len(rows)})
             for row in rows:
                 try:
                     payload = dict(row.payload)
@@ -69,6 +70,37 @@ async def _tick() -> None:
                         await repo.record_failed_attempt(row.id)
                     except Exception:
                         pass
+            # Scan outbox repository methods commit per row. Acquire Pentesting
+            # locks only after those commits so they remain held until each
+            # Pentesting row is published or recorded as failed.
+            pentest_rows = await pentest_repo.list_unpublished(limit=BATCH_SIZE)
+            if not rows and not pentest_rows:
+                return
+            logger.info(
+                "outbox_sweep.batch",
+                extra={"scan_count": len(rows), "pentest_count": len(pentest_rows)},
+            )
+            for row in pentest_rows:
+                try:
+                    payload = dict(row.payload)
+                    correlation_id = payload.pop("correlation_id", None)
+                    published = await publish_message(
+                        queue_name=row.queue_name,
+                        message_body=payload,
+                        correlation_id=correlation_id,
+                    )
+                    if published:
+                        await pentest_repo.mark_published(row.id)
+                    else:
+                        await pentest_repo.record_publish_failure(row.id)
+                    await db.commit()
+                except Exception:
+                    await db.rollback()
+                    logger.error(
+                        "outbox_sweep.pentest_republish_failed",
+                        extra={"engagement_id": str(row.engagement_id)},
+                        exc_info=True,
+                    )
 
 
 async def run_outbox_sweeper(stop_event: asyncio.Event) -> None:

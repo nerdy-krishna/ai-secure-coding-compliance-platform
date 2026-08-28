@@ -708,6 +708,128 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pentesting/contracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discover Pentesting Foundation 0 contracts
+         * @description Return version and compatibility metadata; performs no target activity.
+         */
+        get: operations["get_pentesting_contracts_api_v1_pentesting_contracts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Engagement */
+        post: operations["create_engagement_api_v1_pentesting_engagements_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Engagement */
+        get: operations["get_engagement_api_v1_pentesting_engagements__engagement_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/attempts/{attempt_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Attempt Summary */
+        get: operations["get_attempt_summary_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/commands/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Engagement */
+        post: operations["stop_engagement_api_v1_pentesting_engagements__engagement_id__commands_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/stream-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue Pentest Stream Token */
+        post: operations["issue_pentest_stream_token_api_v1_pentesting_engagements__engagement_id__stream_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stream Pentest Events */
+        get: operations["stream_pentest_events_api_v1_pentesting_engagements__engagement_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/llm-configs/": {
         parameters: {
             query?: never;
@@ -3979,26 +4101,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/pentesting/contracts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Discover Pentesting Foundation 0 contracts
-         * @description Return version and compatibility metadata; performs no target activity.
-         */
-        get: operations["get_pentesting_contracts_api_v1_pentesting_contracts_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4402,6 +4504,51 @@ export interface components {
              */
             question: string;
         };
+        /** AttemptSummaryV1 */
+        AttemptSummaryV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** State */
+            state: string;
+            /** Outcome */
+            outcome: string | null;
+            /** Bootstrap */
+            bootstrap: {
+                [key: string]: unknown;
+            };
+            /** Coverage */
+            coverage: {
+                [key: string]: unknown;
+            }[];
+            /** Evidence Refs */
+            evidence_refs: string[];
+            /** Decision Delta */
+            decision_delta: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Findings Confirmed
+             * @default 0
+             * @constant
+             */
+            findings_confirmed: 0;
+            /** Limitations */
+            limitations: string[];
+        };
         /** AttemptV1 */
         AttemptV1: {
             /**
@@ -4762,6 +4909,15 @@ export interface components {
             reasoning_llm_config_id?: string | null;
             /** Utility Llm Config Id */
             utility_llm_config_id?: string | null;
+        };
+        /** BootstrapRulesV1 */
+        BootstrapRulesV1: {
+            /** Maximum Duration Seconds */
+            maximum_duration_seconds?: number | null;
+            /** Maximum Response Bytes */
+            maximum_response_bytes?: number | null;
+            /** Evidence Retention Days */
+            evidence_retention_days?: number | null;
         };
         /** BudgetAmountsRead */
         BudgetAmountsRead: {
@@ -5839,6 +5995,42 @@ export interface components {
              */
             created_at: string;
         };
+        /** CreateEngagementRequestV1 */
+        CreateEngagementRequestV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Name */
+            name: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "black_box" | "gray_box" | "white_box";
+            /**
+             * Target Url
+             * Format: uri
+             */
+            target_url: string;
+            /**
+             * Authorization Confirmed
+             * @constant
+             */
+            authorization_confirmed: true;
+            /** Authorization Statement Version */
+            authorization_statement_version: string;
+            /** Client Idempotency Key */
+            client_idempotency_key: string;
+            rules?: components["schemas"]["BootstrapRulesV1"] | null;
+        };
         /** CreateProjectRequest */
         CreateProjectRequest: {
             /** Name */
@@ -6160,6 +6352,86 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** EngagementCreatedResponseV1 */
+        EngagementCreatedResponseV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** State */
+            state: string;
+            /**
+             * Mode
+             * @constant
+             */
+            mode: "black_box";
+            /** Normalized Origin */
+            normalized_origin: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** EngagementDetailV1 */
+        EngagementDetailV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Owner User Id */
+            owner_user_id: number;
+            /** Name */
+            name: string;
+            /** Mode */
+            mode: string;
+            /** State */
+            state: string;
+            /** State Version */
+            state_version: number;
+            /** Current Attempt Id */
+            current_attempt_id: string | null;
+            /** Normalized Origin */
+            normalized_origin: string;
+            /** Authorization */
+            authorization: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** EngagementV1 */
         EngagementV1: {
@@ -9717,6 +9989,49 @@ export interface components {
              */
             created_at: string;
         };
+        /** StopEngagementRequestV1 */
+        StopEngagementRequestV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /** Command Idempotency Key */
+            command_idempotency_key: string;
+            /** Expected State Version */
+            expected_state_version: number;
+        };
+        /** StopEngagementResponseV1 */
+        StopEngagementResponseV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.v1";
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** State */
+            state: string;
+        };
+        /** StreamTokenResponseV1 */
+        StreamTokenResponseV1: {
+            /** Access Token */
+            access_token: string;
+            /** Expires In */
+            expires_in: number;
+        };
         /** SubmittedFileReportItem */
         SubmittedFileReportItem: {
             /** File Path */
@@ -12388,6 +12703,222 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pentesting_contracts_api_v1_pentesting_contracts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContractDiscoveryResponseV1"];
+                };
+            };
+        };
+    };
+    create_engagement_api_v1_pentesting_engagements_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateEngagementRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementCreatedResponseV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_engagement_api_v1_pentesting_engagements__engagement_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EngagementDetailV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attempt_summary_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+                attempt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttemptSummaryV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_engagement_api_v1_pentesting_engagements__engagement_id__commands_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopEngagementRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopEngagementResponseV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    issue_pentest_stream_token_api_v1_pentesting_engagements__engagement_id__stream_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StreamTokenResponseV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_pentest_events_api_v1_pentesting_engagements__engagement_id__events_get: {
+        parameters: {
+            query?: {
+                /** @description JWT access token. EventSource can't send the Authorization header, so SSE endpoints accept the token as a query param as an alternative. Short-TTL access tokens — safe enough. */
+                access_token?: string | null;
+            };
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -19403,26 +19934,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-        };
-    };
-    get_pentesting_contracts_api_v1_pentesting_contracts_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ContractDiscoveryResponseV1"];
                 };
             };
         };

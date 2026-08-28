@@ -157,6 +157,10 @@ specialist, or model cannot directly confirm a finding.
   while browser-managed access tokens are retired; browser-level longevity testing is still missing.
 - The inherited automated test suites were removed on 2026-08-22. Replacement tests are added only
   at verified production seams as defects and invariants are addressed.
-- Pentesting Foundation 0 currently implements versioned contracts, vocabulary, feature discovery,
-  permissions, generated frontend wire types, and provider/consumer tests only. It does not yet
-  persist Engagements or execute target activity.
+- Pentesting Foundation 1 persists a Project-linked black-box Engagement and initial Attempt,
+  dispatches a signed opaque-locator task through a dedicated outbox/queue, and performs one
+  public-only, IP-pinned, anonymous, redirect-disabled exact-origin root HTTP/TLS bootstrap. Raw and
+  normalized evidence is encrypted and versioned, coverage is characterization-only, one
+  digest-chained DecisionDelta and replayable event stream are committed, and zero findings are
+  asserted. Gray-box, white-box, credentials, active scanners, mutations, adaptive orchestration,
+  Code Scan invocation, and full reporting remain unimplemented.

@@ -256,13 +256,17 @@ async def close_workflow_resources() -> None:
 def queues_for_pool(pool: str) -> tuple[str, ...]:
     """Return the exact queue subscription contract for one worker pool."""
     mapping = {
-        "scanner": (settings.RABBITMQ_SUBMISSION_QUEUE,),
+        "scanner": (
+            settings.RABBITMQ_SUBMISSION_QUEUE,
+            settings.RABBITMQ_PENTEST_QUEUE,
+        ),
         "llm": (settings.RABBITMQ_APPROVAL_QUEUE,),
         "report": (settings.RABBITMQ_REPORT_QUEUE,),
         "unified": (
             settings.RABBITMQ_SUBMISSION_QUEUE,
             settings.RABBITMQ_APPROVAL_QUEUE,
             settings.RABBITMQ_REPORT_QUEUE,
+            settings.RABBITMQ_PENTEST_QUEUE,
         ),
     }
     try:
@@ -1006,6 +1010,38 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         _safe(message.routing_key),
         message.delivery_tag,
     )
+
+    if (message.routing_key or "") == settings.RABBITMQ_PENTEST_QUEUE:
+        try:
+            body = json.loads(message.body.decode("utf-8"))
+            if not isinstance(body, dict):
+                raise ValueError("message body must be an object")
+            tenant_id = uuid.UUID(str(body.get("tenant_id")))
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
+            logger.error("pentest.delivery.invalid_envelope")
+            await message.reject(requeue=False)
+            return
+
+        async def _run_pentest_delivery() -> None:
+            try:
+                from app.workers.pentesting import handle_pentest_delivery
+
+                with principal_scope(
+                    tenant_id=tenant_id,
+                    principal_kind="service_principal",
+                    principal_id=f"pentest-worker:{body.get('outbox_id')}",
+                ):
+                    await handle_pentest_delivery(body)
+                await message.ack()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.error("pentest.delivery.unhandled", exc_info=True)
+                if not message.processed:
+                    await message.reject(requeue=True)
+
+        _track_delivery(_run_pentest_delivery())
+        return
 
     initial_state = await _build_initial_state(message)
     if initial_state is None:

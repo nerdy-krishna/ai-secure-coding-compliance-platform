@@ -1,4 +1,4 @@
-"""Short-lived, scan-id-bound JWTs for SSE streams.
+"""Short-lived, resource-bound JWTs for Code Scan and Pentesting SSE streams.
 
 EventSource cannot send custom headers, so SSE endpoints accept the
 token via `?access_token=<jwt>`. The risk of a query-string token is
@@ -36,6 +36,7 @@ from app.config.config import settings
 logger = logging.getLogger(__name__)
 
 AUDIENCE: str = "sse:scan-stream"
+PENTEST_AUDIENCE: str = "sse:pentest-engagement"
 DEFAULT_TTL_SECONDS: int = 60
 _ALGORITHM: str = "HS256"
 
@@ -99,18 +100,50 @@ def verify_scan_stream_token(
 
     claimed_scan_id = decoded.get("scan_id")
     if not claimed_scan_id or claimed_scan_id != str(expected_scan_id):
-        # The token was mint'd for a different scan. Refuse — leaked
-        # tokens cannot be replayed across scans.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid stream token.",
+        )
+    try:
+        return int(decoded.get("sub")), uuid.UUID(str(decoded.get("tenant_id")))
+    except (TypeError, ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid stream token.",
         )
 
-    sub = decoded.get("sub")
-    tenant_id = decoded.get("tenant_id")
+
+def mint_pentest_stream_token(
+    user_id: int,
+    engagement_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    ttl_seconds: int = DEFAULT_TTL_SECONDS,
+) -> tuple[str, int]:
+    """Mint a short-lived token bound to one Pentesting engagement."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "engagement_id": str(engagement_id),
+        "tenant_id": str(tenant_id),
+        "aud": PENTEST_AUDIENCE,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=ttl_seconds)).timestamp()),
+        "jti": str(uuid.uuid4()),
+    }
+    return pyjwt.encode(payload, _secret(), algorithm=_ALGORITHM), ttl_seconds
+
+
+def verify_pentest_stream_token(
+    token: str, expected_engagement_id: uuid.UUID
+) -> tuple[int, uuid.UUID]:
     try:
-        return int(sub), uuid.UUID(str(tenant_id))
-    except (TypeError, ValueError, AttributeError):
+        decoded = pyjwt.decode(
+            token, _secret(), algorithms=[_ALGORITHM], audience=PENTEST_AUDIENCE
+        )
+        if decoded.get("engagement_id") != str(expected_engagement_id):
+            raise pyjwt.InvalidTokenError
+        return int(decoded["sub"]), uuid.UUID(str(decoded["tenant_id"]))
+    except (pyjwt.InvalidTokenError, KeyError, TypeError, ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid stream token.",

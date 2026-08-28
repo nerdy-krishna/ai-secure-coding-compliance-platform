@@ -14,9 +14,13 @@ from app.workers.consumer import (
 
 
 class WorkerPoolContractTests(unittest.TestCase):
-    def test_split_pools_have_one_dedicated_queue_each(self) -> None:
+    def test_split_pools_subscribe_only_to_their_execution_class(self) -> None:
         self.assertEqual(
-            queues_for_pool("scanner"), (settings.RABBITMQ_SUBMISSION_QUEUE,)
+            queues_for_pool("scanner"),
+            (
+                settings.RABBITMQ_SUBMISSION_QUEUE,
+                settings.RABBITMQ_PENTEST_QUEUE,
+            ),
         )
         self.assertEqual(queues_for_pool("llm"), (settings.RABBITMQ_APPROVAL_QUEUE,))
         self.assertEqual(queues_for_pool("report"), (settings.RABBITMQ_REPORT_QUEUE,))
@@ -28,6 +32,7 @@ class WorkerPoolContractTests(unittest.TestCase):
                 settings.RABBITMQ_SUBMISSION_QUEUE,
                 settings.RABBITMQ_APPROVAL_QUEUE,
                 settings.RABBITMQ_REPORT_QUEUE,
+                settings.RABBITMQ_PENTEST_QUEUE,
             ),
         )
 
