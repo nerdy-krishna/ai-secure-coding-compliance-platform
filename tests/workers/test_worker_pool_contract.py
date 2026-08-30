@@ -20,6 +20,7 @@ class WorkerPoolContractTests(unittest.TestCase):
             (
                 settings.RABBITMQ_SUBMISSION_QUEUE,
                 settings.RABBITMQ_PENTEST_QUEUE,
+                settings.RABBITMQ_PENTEST_V2_QUEUE,
             ),
         )
         self.assertEqual(queues_for_pool("llm"), (settings.RABBITMQ_APPROVAL_QUEUE,))
@@ -33,6 +34,7 @@ class WorkerPoolContractTests(unittest.TestCase):
                 settings.RABBITMQ_APPROVAL_QUEUE,
                 settings.RABBITMQ_REPORT_QUEUE,
                 settings.RABBITMQ_PENTEST_QUEUE,
+                settings.RABBITMQ_PENTEST_V2_QUEUE,
             ),
         )
 

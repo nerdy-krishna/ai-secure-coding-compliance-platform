@@ -514,6 +514,27 @@ async def lifespan(app: FastAPI):
         run_outbox_sweeper(sweeper_stop), name="outbox-sweeper"
     )
 
+    pentest_foundation2_stop = asyncio.Event()
+    pentest_foundation2_tasks: list[asyncio.Task] = []
+    if settings.PENTEST_FOUNDATION2_ENABLED:
+        from app.infrastructure.messaging.pentest_evidence_orphan_sweeper import (
+            run_pentest_evidence_orphan_sweeper,
+        )
+        from app.infrastructure.messaging.pentest_recovery_sweeper import (
+            run_pentest_recovery_sweeper,
+        )
+
+        pentest_foundation2_tasks = [
+            asyncio.create_task(
+                run_pentest_recovery_sweeper(pentest_foundation2_stop),
+                name="pentest-recovery-sweeper",
+            ),
+            asyncio.create_task(
+                run_pentest_evidence_orphan_sweeper(pentest_foundation2_stop),
+                name="pentest-evidence-orphan-sweeper",
+            ),
+        ]
+
     # --- Start the prescan-approval auto-decline sweeper (ADR-009) ---
     # Transitions scans stuck in PENDING_PRESCAN_APPROVAL > 24h to
     # BLOCKED_USER_DECLINE. Runs on the API container since the worker
@@ -698,6 +719,7 @@ async def lifespan(app: FastAPI):
     # This code runs on shutdown
     logger.info("Application shutdown.")
     sweeper_stop.set()
+    pentest_foundation2_stop.set()
     prescan_sweeper_stop.set()
     findings_source_sweeper_stop.set()
     retention_sweeper_stop.set()
@@ -713,6 +735,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"scan_progress: bus shutdown error: {e}")
     set_scan_progress_bus(None)
+    for task in pentest_foundation2_tasks:
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning("Pentest Foundation 2 sweeper did not stop; cancelling.")
+            task.cancel()
+        except Exception as e:
+            logger.warning("Pentest Foundation 2 sweeper shutdown error: %s", e)
     try:
         await asyncio.wait_for(sweeper_task, timeout=5)
     except asyncio.TimeoutError:

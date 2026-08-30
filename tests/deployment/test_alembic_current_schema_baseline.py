@@ -17,7 +17,8 @@ MIGRATION_PATH = (
 )
 BASELINE_PATH = ROOT / "alembic" / "baselines" / "2026_08_28_current_schema.sql"
 BASELINE_ROOT = "4d5e6f708192"
-CURRENT_HEAD = "92a3b4c5d6e7"
+FOUNDATION1_HEAD = "92a3b4c5d6e7"
+CURRENT_HEAD = "c5d6e7f8091a"
 PENTEST_REFERENCE_MIGRATION_PATH = (
     ROOT
     / "alembic"
@@ -25,6 +26,9 @@ PENTEST_REFERENCE_MIGRATION_PATH = (
     / "2026_08_30_0500_harden_pentest_reference_integrity.py"
 )
 ACTIVE_CHAIN = (
+    ("c5d6e7f8091a", "b4c5d6e7f809"),
+    ("b4c5d6e7f809", "a3b4c5d6e7f8"),
+    ("a3b4c5d6e7f8", FOUNDATION1_HEAD),
     ("92a3b4c5d6e7", "8192a3b4c5d6"),
     ("8192a3b4c5d6", "708192a3b4c5"),
     ("708192a3b4c5", "6f708192a3b4"),
@@ -136,7 +140,7 @@ class AlembicCurrentSchemaBaselineTests(unittest.TestCase):
         migration = _load_pentest_reference_migration()
         upgrade_source = inspect.getsource(migration.upgrade).lower()
 
-        self.assertEqual(migration.revision, CURRENT_HEAD)
+        self.assertEqual(migration.revision, FOUNDATION1_HEAD)
         self.assertEqual(migration.down_revision, "8192a3b4c5d6")
         self.assertIn("create or replace function", upgrade_source)
         self.assertNotIn("create table", upgrade_source)

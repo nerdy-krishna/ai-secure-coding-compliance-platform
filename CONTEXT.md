@@ -102,6 +102,12 @@ The immutable execution identity for an Engagement run. Resume retains the Attem
 retest creates a linked child. Every Attempt pins its contract, policy, catalog, adapter, evidence,
 prompt, model, report, and runner versions.
 
+### Pentest Execution
+
+One Attempt-bound bounded action with a stable identity, append-only dispatch generations, and a
+PostgreSQL lease. Lease owner, generation, interaction journal, and state version fence stale
+workers. An Execution result becomes authoritative only through its atomic Execution commit.
+
 ### Pentest DecisionDelta
 
 A digest-chained, monotonically sequenced summary of one atomic committed state change. A dependent
@@ -131,6 +137,14 @@ specialist, or model cannot directly confirm a finding.
   deterministic scope-policy decision. Secrets use opaque handles outside their broker boundary.
 - Pentest coverage passes only through exact evidence predicates; absence of a tool alert is not a
   pass, and no unverified observation is a confirmed finding.
+- Pentest RabbitMQ delivery is notification only. A worker reconciles the signed dispatch with
+  PostgreSQL and acquires the current lease generation before target activity; an expired lease is
+  reclaimable only before external interaction starts.
+- A Pentest Execution result, evidence metadata and manifest generation, facts, coverage, budgets,
+  progress, events, projection, and DecisionDelta become visible in one idempotent PostgreSQL
+  transaction. Uncommitted object versions cannot support a claim.
+- Pentest resume retains the current Attempt and completed Execution commits; restart creates a
+  sequenced child Attempt. Externally uncertain actions are never automatically replayed.
 - Mutations are registered before execution, cleanup remains durable and visible, and cancellation
   cannot turn partial work into success.
 - Changes to lifecycle nodes, edges, statuses, events, or approvals update the canonical workflow
@@ -157,10 +171,11 @@ specialist, or model cannot directly confirm a finding.
   while browser-managed access tokens are retired; browser-level longevity testing is still missing.
 - The inherited automated test suites were removed on 2026-08-22. Replacement tests are added only
   at verified production seams as defects and invariants are addressed.
-- Pentesting Foundation 1 persists a Project-linked black-box Engagement and initial Attempt,
-  dispatches a signed opaque-locator task through a dedicated outbox/queue, and performs one
-  public-only, IP-pinned, anonymous, redirect-disabled exact-origin root HTTP/TLS bootstrap. Raw and
-  normalized evidence is encrypted and versioned, coverage is characterization-only, one
-  digest-chained DecisionDelta and replayable event stream are committed, and zero findings are
-  asserted. Gray-box, white-box, credentials, active scanners, mutations, adaptive orchestration,
-  Code Scan invocation, and full reporting remain unimplemented.
+- Pentesting Foundation 2 keeps the Project-linked black-box Engagement and harmless public-only,
+  IP-pinned, anonymous, redirect-disabled exact-origin root HTTP/TLS bootstrap, while adding signed
+  v2 dispatch/result envelopes, generation-fenced leases, an interaction journal, raw/redacted/
+  normalized evidence lineage, exact-version staging, manifest generations, orphan reconciliation,
+  atomic Execution commits, cancellation fencing, and resume/restart semantics. Runner v1 remains
+  readable while v2 production is feature-gated. Coverage is characterization-only and zero
+  findings are asserted. Gray-box, white-box, credentials, active scanners, target mutations,
+  adaptive orchestration, Code Scan invocation, and full reporting remain unimplemented.

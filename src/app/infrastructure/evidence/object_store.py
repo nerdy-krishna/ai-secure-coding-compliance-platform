@@ -259,6 +259,24 @@ class EvidenceObjectStore:
             self._list_versions_older_than_sync, cutoff=cutoff, limit=limit
         )
 
+    async def list_versions(
+        self, *, prefix: str, limit: int = 100
+    ) -> list[tuple[str, str]]:
+        """List exact immutable versions beneath one caller-authorized prefix."""
+        return await asyncio.to_thread(
+            self._list_versions_sync, prefix=prefix, limit=limit
+        )
+
+    def _list_versions_sync(self, *, prefix: str, limit: int) -> list[tuple[str, str]]:
+        found: list[tuple[str, str]] = []
+        paginator = self.client.get_paginator("list_object_versions")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for item in page.get("Versions", []):
+                found.append((str(item["Key"]), str(item["VersionId"])))
+                if len(found) >= limit:
+                    return found
+        return found
+
     def _list_versions_older_than_sync(
         self, *, cutoff: datetime, limit: int
     ) -> list[tuple[str, str]]:

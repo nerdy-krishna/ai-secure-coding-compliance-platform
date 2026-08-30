@@ -259,6 +259,7 @@ def queues_for_pool(pool: str) -> tuple[str, ...]:
         "scanner": (
             settings.RABBITMQ_SUBMISSION_QUEUE,
             settings.RABBITMQ_PENTEST_QUEUE,
+            settings.RABBITMQ_PENTEST_V2_QUEUE,
         ),
         "llm": (settings.RABBITMQ_APPROVAL_QUEUE,),
         "report": (settings.RABBITMQ_REPORT_QUEUE,),
@@ -267,6 +268,7 @@ def queues_for_pool(pool: str) -> tuple[str, ...]:
             settings.RABBITMQ_APPROVAL_QUEUE,
             settings.RABBITMQ_REPORT_QUEUE,
             settings.RABBITMQ_PENTEST_QUEUE,
+            settings.RABBITMQ_PENTEST_V2_QUEUE,
         ),
     }
     try:
@@ -1011,7 +1013,10 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         message.delivery_tag,
     )
 
-    if (message.routing_key or "") == settings.RABBITMQ_PENTEST_QUEUE:
+    if (message.routing_key or "") in {
+        settings.RABBITMQ_PENTEST_QUEUE,
+        settings.RABBITMQ_PENTEST_V2_QUEUE,
+    }:
         try:
             body = json.loads(message.body.decode("utf-8"))
             if not isinstance(body, dict):

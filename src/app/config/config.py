@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     RABBITMQ_APPROVAL_QUEUE: str = "analysis_approved_queue"
     RABBITMQ_REPORT_QUEUE: str = "report_export_queue"
     RABBITMQ_PENTEST_QUEUE: str = "pentest_execution_queue"
+    RABBITMQ_PENTEST_V2_QUEUE: str = "pentest_execution_v2_queue"
 
     # Foundation 1 signed worker tasks. Production must provide an independent
     # 32-byte base64url seed and may provide comma-separated kid:public-key
@@ -95,6 +96,17 @@ class Settings(BaseSettings):
     PENTEST_TASK_SIGNING_KEY_ID: str = "pentest-foundation1-local"
     PENTEST_TASK_SIGNING_SEED: Optional[SecretStr] = None
     PENTEST_TASK_VERIFY_PUBLIC_KEYS: str = ""
+    PENTEST_RESULT_SIGNING_KEY_ID: str = "pentest-foundation2-result-local"
+    PENTEST_RESULT_SIGNING_SEED: Optional[SecretStr] = None
+    PENTEST_RESULT_VERIFY_PUBLIC_KEYS: str = ""
+    PENTEST_RESULT_KEY_AUDIENCE: str = "pentest-result:foundation2"
+    PENTEST_FOUNDATION2_ENABLED: bool = False
+    PENTEST_EXECUTION_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
+    PENTEST_EXECUTION_HEARTBEAT_SECONDS: int = Field(default=10, ge=1, le=60)
+    PENTEST_EXECUTION_RECOVERY_GRACE_SECONDS: int = Field(default=20, ge=1, le=300)
+    PENTEST_EVIDENCE_ORPHAN_GRACE_SECONDS: int = Field(
+        default=24 * 60 * 60, ge=300, le=30 * 24 * 60 * 60
+    )
 
     @field_validator("RABBITMQ_URL", mode="before")
     def assemble_rabbitmq_connection(cls, v, info):
