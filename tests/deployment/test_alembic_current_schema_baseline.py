@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import importlib.util
+import inspect
 from pathlib import Path
 import re
 import unittest
@@ -16,8 +17,15 @@ MIGRATION_PATH = (
 )
 BASELINE_PATH = ROOT / "alembic" / "baselines" / "2026_08_28_current_schema.sql"
 BASELINE_ROOT = "4d5e6f708192"
-CURRENT_HEAD = "8192a3b4c5d6"
+CURRENT_HEAD = "92a3b4c5d6e7"
+PENTEST_REFERENCE_MIGRATION_PATH = (
+    ROOT
+    / "alembic"
+    / "current_versions"
+    / "2026_08_30_0500_harden_pentest_reference_integrity.py"
+)
 ACTIVE_CHAIN = (
+    ("92a3b4c5d6e7", "8192a3b4c5d6"),
     ("8192a3b4c5d6", "708192a3b4c5"),
     ("708192a3b4c5", "6f708192a3b4"),
     ("6f708192a3b4", "5e6f7081a2b3"),
@@ -29,6 +37,17 @@ ACTIVE_CHAIN = (
 def _load_migration():
     spec = importlib.util.spec_from_file_location(
         "sccap_current_baseline", MIGRATION_PATH
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_pentest_reference_migration():
+    spec = importlib.util.spec_from_file_location(
+        "sccap_pentest_reference_integrity", PENTEST_REFERENCE_MIGRATION_PATH
     )
     assert spec is not None
     assert spec.loader is not None
@@ -110,6 +129,21 @@ class AlembicCurrentSchemaBaselineTests(unittest.TestCase):
         self.assertNotRegex(
             sql, re.compile(r"^\\(?:restrict|unrestrict)", re.MULTILINE)
         )
+
+    def test_pentest_reference_hardening_is_additive_and_n_minus_one_safe(
+        self,
+    ) -> None:
+        migration = _load_pentest_reference_migration()
+        upgrade_source = inspect.getsource(migration.upgrade).lower()
+
+        self.assertEqual(migration.revision, CURRENT_HEAD)
+        self.assertEqual(migration.down_revision, "8192a3b4c5d6")
+        self.assertIn("create or replace function", upgrade_source)
+        self.assertNotIn("create table", upgrade_source)
+        self.assertNotIn("drop table", upgrade_source)
+        self.assertNotIn("alter table", upgrade_source)
+        self.assertNotIn("add_column", upgrade_source)
+        self.assertNotIn("drop_column", upgrade_source)
 
 
 if __name__ == "__main__":
