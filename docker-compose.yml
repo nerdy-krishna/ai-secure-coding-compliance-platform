@@ -62,6 +62,7 @@ services:
         fluentd-max-retries: "30"
     networks:
       - scpnetwork
+      - pentest-control
     command: [ "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000" ]
 
   db:
@@ -96,6 +97,7 @@ services:
         fluentd-max-retries: "30"
     networks:
       - scpnetwork
+      - pentest-control
 
   rabbitmq:
     image: rabbitmq:3.12-management
@@ -229,6 +231,52 @@ services:
     networks:
       - scpnetwork
     command: [ "python", "-m", "app.workers.consumer" ]
+
+  # Foundation 3 target-traffic runtime. It is deliberately not the unified
+  # worker, receives no database/object-store/provider credentials, and starts
+  # only under the explicit pentesting-v3 profile.
+  pentest-runner-v3:
+    profiles: ["pentesting-v3"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: sccap_pentest_runner_v3
+    environment:
+      PYTHONPATH: /app/src
+      PENTEST_RUNNER_V3_RABBIT_URL: ${PENTEST_RUNNER_V3_RABBIT_URL:-}
+      PENTEST_RUNNER_V3_QUEUE: ${RABBITMQ_PENTEST_V3_QUEUE:-pentest_execution_v3_queue}
+      PENTEST_RUNNER_V3_GATEWAY_URL: http://app:8000
+      PENTEST_RUNNER_V3_GATEWAY_SERVICE_IDENTITY: ${PENTEST_RUNNER_V3_GATEWAY_TOKEN:-}
+      PENTEST_RUNNER_V3_TASK_PUBLIC_KEYS: ${PENTEST_RUNNER_V3_TASK_PUBLIC_KEYS:-}
+      PENTEST_RUNNER_V3_OBSERVATION_KEY_ID: ${PENTEST_SCOPE_OBSERVATION_SIGNING_KEY_ID:-pentest-foundation3-observation-local}
+      PENTEST_RUNNER_V3_OBSERVATION_SIGNING_SEED: ${PENTEST_SCOPE_OBSERVATION_SIGNING_SEED:-}
+      PENTEST_RUNNER_V3_OBSERVATION_AUDIENCE: ${PENTEST_SCOPE_OBSERVATION_AUDIENCE:-pentest-resolution:foundation3}
+      PENTEST_RUNNER_V3_DECISION_PUBLIC_KEYS: ${PENTEST_RUNNER_V3_DECISION_PUBLIC_KEYS:-}
+      PENTEST_RUNNER_V3_DECISION_AUDIENCE: ${PENTEST_SCOPE_DECISION_AUDIENCE:-pentest-scope-decision:foundation3}
+      PENTEST_RUNNER_V3_RESULT_KEY_ID: ${PENTEST_RESULT_SIGNING_KEY_ID:-pentest-foundation2-result-local}
+      PENTEST_RUNNER_V3_RESULT_SIGNING_SEED: ${PENTEST_RESULT_SIGNING_SEED:-}
+      PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS: ${PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS:-}
+      PENTEST_RUNNER_V3_RESOLVER_ID: ${PENTEST_RUNNER_V3_RESOLVER_ID:-foundation3-approved-resolver}
+      PENTEST_RUNNER_V3_WORKSPACE_ROOT: /work
+    read_only: true
+    tmpfs:
+      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
+      - /work:size=8388608,mode=0700,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 8
+    mem_limit: 256m
+    cpus: 0.50
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks:
+      - pentest-control
+      - pentest-egress
+    command: ["python", "-m", "app.infrastructure.pentesting.runner_v3.main"]
 
   patch-validator:
     build:
@@ -628,4 +676,9 @@ volumes:
 
 networks:
   scpnetwork:
+    driver: bridge
+  pentest-control:
+    driver: bridge
+    internal: true
+  pentest-egress:
     driver: bridge

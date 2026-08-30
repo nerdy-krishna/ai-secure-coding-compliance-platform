@@ -179,3 +179,13 @@ specialist, or model cannot directly confirm a finding.
   readable while v2 production is feature-gated. Coverage is characterization-only and zero
   findings are asserted. Gray-box, white-box, credentials, active scanners, target mutations,
   adaptive orchestration, Code Scan invocation, and full reporting remain unimplemented.
+- Pentesting Foundation 3 retains that harmless tracer but moves all target/DNS traffic into a
+  dedicated default-off runner-v3. Each v3 Execution is bound to an immutable policy snapshot,
+  signed complete DNS observation, deterministic signed Scope Decision, generation-fenced runner
+  session, and short-lived one-shot egress grant. The runner uses an explicit resolver, rejects
+  mixed or special address sets, revalidates the exact set before a pinned Host/SNI-preserving
+  connection, receives no database/object-store/cloud/LLM/operator credentials, and runs with a
+  read-only root plus bounded workspace and network envelope. Cancellation durably revokes grants
+  and independently closes network activity; v3 effects join the Foundation 2 atomic commit.
+  Private-network access, authenticated sessions, browsers/scanners, mutations, adaptive
+  orchestration, Code Scan invocation, and external qualification targets remain unimplemented.

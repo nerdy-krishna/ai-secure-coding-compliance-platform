@@ -1,12 +1,13 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $root := . -}}
-{{- $components := list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "otel-collector" "migration" -}}
+{{- $components := list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "pentest-runner-v3" "otel-collector" "migration" -}}
 {{- range $component := $components }}
 {{- $enabled := true -}}
 {{- if and (eq $component "worker-unified") (not $root.Values.workerPools.unified.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (has $component (list "worker-scanner" "worker-llm" "worker-report")) (not $root.Values.workerPools.splitEnabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (eq $component "otel-collector") (not $root.Values.otel.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (eq $component "migration") (not $root.Values.migrations.enabled) }}{{- $enabled = false -}}{{- end }}
+{{- if and (eq $component "pentest-runner-v3") (not $root.Values.runnerV3.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if $enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -47,6 +48,21 @@ spec:
     []
     {{- end }}
   egress:
+    {{- if eq $component "pentest-runner-v3" }}
+    # Control gateway and RabbitMQ only; never PostgreSQL, object store, LLM,
+    # cloud metadata, or another worker pool.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "sccap.selectorLabels" $root | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports: [{protocol: TCP, port: 8000}]
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rabbitmq
+      ports: [{protocol: TCP, port: 5671}, {protocol: TCP, port: 5672}]
+    {{- else }}
     # Runtime dependencies deployed in the SCCAP namespace only.
     - to:
         - podSelector: {}
@@ -61,6 +77,7 @@ spec:
         - {protocol: TCP, port: 9000}
         - {protocol: TCP, port: 4318}
         {{- end }}
+    {{- end }}
     # DNS only in the configured DNS namespace.
     - to:
         - namespaceSelector:
@@ -76,6 +93,17 @@ spec:
             except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
       ports:
         - {protocol: TCP, port: 443}
+    {{- end }}
+    {{- if eq $component "pentest-runner-v3" }}
+    # Coarse public envelope; the short-lived signed egress grant narrows this
+    # to one exact pinned address/port and is independently revoked on cancel.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 100.100.100.200/32, 127.0.0.0/8, 168.63.129.16/32, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4]
+        - ipBlock:
+            cidr: 2000::/3
+            except: [2001::/23, 2001:2::/48, 2001:db8::/32, 2002::/16, 3fff::/20]
     {{- end }}
     {{- range $destination := $root.Values.networkPolicy.externalInfrastructure }}
     - to:

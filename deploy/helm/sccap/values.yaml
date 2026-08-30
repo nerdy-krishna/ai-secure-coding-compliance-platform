@@ -18,6 +18,7 @@ runtime:
   reportSecret: sccap-report-runtime
   unifiedSecret: sccap-unified-runtime
   migrationSecret: sccap-migration-runtime
+  runnerV3Secret: sccap-pentest-runner-v3-runtime
   existingConfigMap: ""
 
 serviceAccount:
@@ -77,6 +78,14 @@ workerPools:
     resources:
       requests: {cpu: "1", memory: 2Gi, ephemeral-storage: 2Gi}
       limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}
+
+runnerV3:
+  enabled: false
+  replicas: 1
+  queue: pentest_execution_v3_queue
+  resources:
+    requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 16Mi}
+    limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 32Mi}
 
 autoscaling:
   keda:

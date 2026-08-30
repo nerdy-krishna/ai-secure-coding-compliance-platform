@@ -20,3 +20,5 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-012: KMS-first supply chain and cross-store evidence governance](012-supply-chain-and-evidence-governance.md)
 - [ADR-013: Pentesting bounded context and versioned Foundation 0 contracts](013-pentesting-bounded-context-contracts.md)
 - [ADR-014: Pentesting Foundation 1 exact-origin tracer](014-pentesting-foundation1-exact-origin-tracer.md)
+- [ADR-015: Pentesting Foundation 2 durable execution and evidence commit](015-pentesting-foundation2-execution-evidence.md)
+- [ADR-016: Pentesting Foundation 3 deterministic scope and isolated gateway](016-pentesting-foundation3-scope-execution-gateway.md)

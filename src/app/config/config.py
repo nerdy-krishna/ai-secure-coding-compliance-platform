@@ -6,9 +6,8 @@ import urllib.parse
 from pathlib import Path
 from typing import List, Literal, Optional
 
-from pydantic import SecretStr, field_validator, model_validator, Field
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 _KMS_KEY_ID_PATTERN = re.compile(
     r"^(?:"
@@ -89,6 +88,7 @@ class Settings(BaseSettings):
     RABBITMQ_REPORT_QUEUE: str = "report_export_queue"
     RABBITMQ_PENTEST_QUEUE: str = "pentest_execution_queue"
     RABBITMQ_PENTEST_V2_QUEUE: str = "pentest_execution_v2_queue"
+    RABBITMQ_PENTEST_V3_QUEUE: str = "pentest_execution_v3_queue"
 
     # Foundation 1 signed worker tasks. Production must provide an independent
     # 32-byte base64url seed and may provide comma-separated kid:public-key
@@ -101,6 +101,25 @@ class Settings(BaseSettings):
     PENTEST_RESULT_VERIFY_PUBLIC_KEYS: str = ""
     PENTEST_RESULT_KEY_AUDIENCE: str = "pentest-result:foundation2"
     PENTEST_FOUNDATION2_ENABLED: bool = False
+    PENTEST_FOUNDATION3_ENABLED: bool = False
+    PENTEST_SCOPE_OBSERVATION_SIGNING_KEY_ID: str = (
+        "pentest-foundation3-observation-local"
+    )
+    PENTEST_SCOPE_OBSERVATION_SIGNING_SEED: Optional[SecretStr] = None
+    PENTEST_SCOPE_OBSERVATION_VERIFY_PUBLIC_KEYS: str = ""
+    PENTEST_SCOPE_OBSERVATION_AUDIENCE: str = "pentest-resolution:foundation3"
+    PENTEST_SCOPE_DECISION_SIGNING_KEY_ID: str = "pentest-foundation3-decision-local"
+    PENTEST_SCOPE_DECISION_SIGNING_SEED: Optional[SecretStr] = None
+    PENTEST_SCOPE_DECISION_VERIFY_PUBLIC_KEYS: str = ""
+    PENTEST_SCOPE_DECISION_AUDIENCE: str = "pentest-scope-decision:foundation3"
+    PENTEST_RUNNER_V3_GATEWAY_AUDIENCE: str = "pentest-gateway:foundation3"
+    PENTEST_RUNNER_V3_GATEWAY_URL: str = (
+        "http://app:8000/api/v1/pentesting/internal/gateway"
+    )
+    PENTEST_RUNNER_V3_GATEWAY_TOKEN: Optional[SecretStr] = None
+    PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS: str = ""
+    PENTEST_RUNNER_V3_RESOLVER_ID: str = "foundation3-approved-resolver"
+    PENTEST_RUNNER_V3_CAPABILITY_VERSION: str = "foundation3-v1"
     PENTEST_EXECUTION_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
     PENTEST_EXECUTION_HEARTBEAT_SECONDS: int = Field(default=10, ge=1, le=60)
     PENTEST_EXECUTION_RECOVERY_GRACE_SECONDS: int = Field(default=20, ge=1, le=300)

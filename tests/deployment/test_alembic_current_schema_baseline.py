@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from hashlib import sha256
 import importlib.util
 import inspect
-from pathlib import Path
 import re
 import unittest
+from hashlib import sha256
+from pathlib import Path
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION_PATH = (
@@ -18,7 +17,7 @@ MIGRATION_PATH = (
 BASELINE_PATH = ROOT / "alembic" / "baselines" / "2026_08_28_current_schema.sql"
 BASELINE_ROOT = "4d5e6f708192"
 FOUNDATION1_HEAD = "92a3b4c5d6e7"
-CURRENT_HEAD = "c5d6e7f8091a"
+CURRENT_HEAD = "d6e7f8091a2b"
 PENTEST_REFERENCE_MIGRATION_PATH = (
     ROOT
     / "alembic"
@@ -26,6 +25,7 @@ PENTEST_REFERENCE_MIGRATION_PATH = (
     / "2026_08_30_0500_harden_pentest_reference_integrity.py"
 )
 ACTIVE_CHAIN = (
+    ("d6e7f8091a2b", "c5d6e7f8091a"),
     ("c5d6e7f8091a", "b4c5d6e7f809"),
     ("b4c5d6e7f809", "a3b4c5d6e7f8"),
     ("a3b4c5d6e7f8", FOUNDATION1_HEAD),
