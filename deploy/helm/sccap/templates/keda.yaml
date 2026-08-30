@@ -48,3 +48,27 @@ spec:
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if and .Values.autoscaling.keda.enabled .Values.pentestController.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "sccap.fullname" . }}-pentest-controller
+  labels:
+    {{- include "sccap.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "sccap.fullname" . }}-pentest-controller
+  pollingInterval: {{ .Values.autoscaling.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.autoscaling.keda.cooldownPeriod }}
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: auto
+        mode: QueueLength
+        queueName: {{ .Values.pentestController.queue | quote }}
+        value: "1"
+        hostFromEnv: RABBITMQ_PENTEST_CONTROLLER_URL
+{{- end }}

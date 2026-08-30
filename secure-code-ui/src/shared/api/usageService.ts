@@ -26,7 +26,7 @@ export type ReconciliationSummary = Schemas["ReconciliationSummaryRead"];
 export interface UsageFilters {
   from_at: string;
   to_at: string;
-  operation_kind?: "scan" | "chat" | "rag";
+  operation_kind?: "scan" | "chat" | "rag" | "pentest";
   cost_status?: UsageCostStatus;
   stage?: string;
   provider?: string;

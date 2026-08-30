@@ -22,3 +22,4 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-014: Pentesting Foundation 1 exact-origin tracer](014-pentesting-foundation1-exact-origin-tracer.md)
 - [ADR-015: Pentesting Foundation 2 durable execution and evidence commit](015-pentesting-foundation2-execution-evidence.md)
 - [ADR-016: Pentesting Foundation 3 deterministic scope and isolated gateway](016-pentesting-foundation3-scope-execution-gateway.md)
+- [ADR-017: Pentesting Capability 4 bounded adaptive controller](017-pentesting-capability4-adaptive-controller.md)

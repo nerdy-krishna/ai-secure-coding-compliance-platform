@@ -107,6 +107,8 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_PENTEST_CONTROLLER_USER: ${RABBITMQ_PENTEST_CONTROLLER_USER:-pentest_controller}
+      RABBITMQ_PENTEST_CONTROLLER_PASS: ${RABBITMQ_PENTEST_CONTROLLER_PASS:-pentest-controller-local-only}
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -setcookie ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
     ports:
@@ -129,6 +131,7 @@ services:
         max-file: "5"
     networks:
       - scpnetwork
+      - pentest-control
 
   # ------------------------------------------------------------------
   # Qdrant — the only vector store (ADR-008). SHA-pinned; no host
@@ -232,11 +235,80 @@ services:
       - scpnetwork
     command: [ "python", "-m", "app.workers.consumer" ]
 
+  # Capability 4 cognition runtime. It is default-off, has no target network,
+  # result-signing key, evidence-store credential, browser/session credential,
+  # or ambient proxy. Local compose therefore blocks provider egress too; a
+  # configured production NetworkPolicy may allow only explicit model CIDRs.
+  pentest-controller:
+    profiles: ["pentesting-v4"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: sccap_pentest_controller
+    volumes:
+      - ./src:/app/src:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./alembic:/app/alembic:ro
+    environment:
+      PYTHONPATH: /app/src
+      SERVICE_NAME: pentest-controller
+      OTEL_SERVICE_NAME: sccap-pentest-controller
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST_ALEMBIC: db
+      RABBITMQ_DEFAULT_USER: controller-unused
+      RABBITMQ_DEFAULT_PASS: controller-unused-not-authority
+      RABBITMQ_HOST: rabbitmq
+      SECRET_KEY: ${PENTEST_CONTROLLER_INTERNAL_SECRET:-capability4-controller-runtime-only-change-me}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ALLOWED_ORIGINS: http://pentest-controller.invalid
+      QDRANT_API_KEY: controller-qdrant-unreachable-not-authority
+      PENTEST_FOUNDATION3_ENABLED: "true"
+      PENTEST_CAPABILITY4_ENABLED: "true"
+      PENTEST_CONTROLLER_LLM_CONFIG_ID: ${PENTEST_CONTROLLER_LLM_CONFIG_ID:-}
+      PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS: ${PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS:-60}
+      RABBITMQ_PENTEST_CONTROLLER_QUEUE: ${RABBITMQ_PENTEST_CONTROLLER_QUEUE:-pentest_controller_queue}
+      RABBITMQ_PENTEST_CONTROLLER_URL: ${RABBITMQ_PENTEST_CONTROLLER_URL:-amqp://pentest_controller:pentest-controller-local-only@rabbitmq/}
+      PENTEST_RESULT_SIGNING_SEED: ""
+      PENTEST_SCOPE_OBSERVATION_SIGNING_SEED: ""
+      PENTEST_SCOPE_DECISION_SIGNING_SEED: ""
+      PENTEST_RUNNER_V3_GATEWAY_TOKEN: ""
+      EVIDENCE_STORE_ENABLED: "false"
+      EVIDENCE_S3_ACCESS_KEY_ID: ""
+      EVIDENCE_S3_SECRET_ACCESS_KEY: ""
+      AWS_ACCESS_KEY_ID: ""
+      AWS_SECRET_ACCESS_KEY: ""
+      AWS_SESSION_TOKEN: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: ""
+    read_only: true
+    tmpfs:
+      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 512m
+    cpus: 1.0
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - pentest-control
+    command: ["python", "-m", "app.workers.pentest_controller"]
+
   # Foundation 3 target-traffic runtime. It is deliberately not the unified
   # worker, receives no database/object-store/provider credentials, and starts
   # only under the explicit pentesting-v3 profile.
   pentest-runner-v3:
-    profiles: ["pentesting-v3"]
+    profiles: ["pentesting-v3", "pentesting-v4"]
     build:
       context: .
       dockerfile: Dockerfile

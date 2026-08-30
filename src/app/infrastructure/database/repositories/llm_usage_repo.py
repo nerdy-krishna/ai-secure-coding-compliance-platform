@@ -31,7 +31,7 @@ _QUALITY_ORDER = {"exact": 0, "normalized": 1, "estimated": 2, "unknown": 3}
 
 def build_usage_idempotency_key(
     *,
-    operation_kind: Literal["scan", "chat", "rag"],
+    operation_kind: Literal["scan", "chat", "rag", "pentest"],
     operation_id: str | uuid.UUID,
     stage: str,
     agent_name: str,
@@ -62,7 +62,7 @@ def build_usage_idempotency_key(
 
 @dataclass(frozen=True)
 class LLMUsageContext:
-    operation_kind: Literal["scan", "chat", "rag"]
+    operation_kind: Literal["scan", "chat", "rag", "pentest"]
     operation_id: str
     stage: str
     agent_name: str
@@ -70,6 +70,7 @@ class LLMUsageContext:
     scan_id: uuid.UUID | None = None
     chat_session_id: uuid.UUID | None = None
     rag_job_id: uuid.UUID | None = None
+    pentest_attempt_id: uuid.UUID | None = None
     scan_task_id: uuid.UUID | None = None
     actor_user_id: int | None = None
 
@@ -283,16 +284,25 @@ class LLMUsageRepository:
         self,
         *,
         idempotency_key: str,
-        scan_id: uuid.UUID,
+        scan_id: uuid.UUID | None = None,
+        pentest_attempt_id: uuid.UUID | None = None,
         llm_config_id: uuid.UUID,
         stage: str,
     ) -> uuid.UUID | None:
         """Claim a logical provider call once before any billable request."""
-        owner_token = uuid.uuid4()
-        attempt_id = await self.db.scalar(
-            select(db_models.Scan.current_attempt_id).where(
-                db_models.Scan.id == scan_id
+        if (scan_id is None) == (pentest_attempt_id is None):
+            raise ValueError(
+                "provider reservation requires exactly one scan or Pentest Attempt"
             )
+        owner_token = uuid.uuid4()
+        attempt_id = (
+            await self.db.scalar(
+                select(db_models.Scan.current_attempt_id).where(
+                    db_models.Scan.id == scan_id
+                )
+            )
+            if scan_id is not None
+            else None
         )
         inserted = await self.db.scalar(
             pg_insert(db_models.LLMCallReservation)
@@ -302,6 +312,7 @@ class LLMUsageRepository:
                 owner_token=owner_token,
                 scan_id=scan_id,
                 attempt_id=attempt_id,
+                pentest_attempt_id=pentest_attempt_id,
                 llm_config_id=llm_config_id,
                 stage=stage,
                 status="reserved",
@@ -311,6 +322,41 @@ class LLMUsageRepository:
         )
         await self.db.commit()
         return inserted
+
+    async def reclaim_unstarted_provider_call(
+        self, *, idempotency_key: str
+    ) -> uuid.UUID | None:
+        """Take over a claim only while no provider request could have started."""
+
+        owner_token = uuid.uuid4()
+        reclaimed = await self.db.scalar(
+            update(db_models.LLMCallReservation)
+            .where(
+                db_models.LLMCallReservation.idempotency_key == idempotency_key,
+                db_models.LLMCallReservation.status == "reserved",
+                db_models.LLMCallReservation.provider_started_at.is_(None),
+            )
+            .values(owner_token=owner_token)
+            .returning(db_models.LLMCallReservation.owner_token)
+        )
+        await self.db.commit()
+        return reclaimed
+
+    async def mark_provider_call_started(
+        self, *, idempotency_key: str, owner_token: uuid.UUID
+    ) -> bool:
+        result = await self.db.execute(
+            update(db_models.LLMCallReservation)
+            .where(
+                db_models.LLMCallReservation.idempotency_key == idempotency_key,
+                db_models.LLMCallReservation.owner_token == owner_token,
+                db_models.LLMCallReservation.status == "reserved",
+                db_models.LLMCallReservation.provider_started_at.is_(None),
+            )
+            .values(provider_started_at=datetime.now(timezone.utc))
+        )
+        await self.db.commit()
+        return bool(result.rowcount)
 
     async def has_provider_call_reservation(self, *, idempotency_key: str) -> bool:
         return (
@@ -532,7 +578,7 @@ class LLMUsageRepository:
                 raise ValueError(
                     "chat usage context requires chat_session_id or actor_user_id"
                 )
-        else:
+        elif context.operation_kind == "rag":
             if context.rag_job_id is None:
                 raise ValueError("rag usage context requires rag_job_id")
             row = (
@@ -546,6 +592,27 @@ class LLMUsageRepository:
                         db_models.User.id == db_models.RAGPreprocessingJob.user_id,
                     )
                     .where(db_models.RAGPreprocessingJob.id == context.rag_job_id)
+                )
+            ).one_or_none()
+        else:
+            if context.pentest_attempt_id is None:
+                raise ValueError("pentest usage context requires pentest_attempt_id")
+            from app.pentesting.persistence.models import (
+                PentestAttempt,
+                PentestEngagement,
+            )
+
+            row = (
+                await self.db.execute(
+                    select(
+                        PentestEngagement.owner_user_id,
+                        PentestAttempt.tenant_id,
+                    )
+                    .join(
+                        PentestEngagement,
+                        PentestEngagement.id == PentestAttempt.engagement_id,
+                    )
+                    .where(PentestAttempt.id == context.pentest_attempt_id)
                 )
             ).one_or_none()
         if row is None:
@@ -631,6 +698,7 @@ class LLMUsageRepository:
             "attempt_id": attempt_id,
             "chat_session_id": context.chat_session_id,
             "rag_job_id": context.rag_job_id,
+            "pentest_attempt_id": context.pentest_attempt_id,
             "scan_task_id": context.scan_task_id,
             "stage": context.stage,
             "agent_name": context.agent_name,

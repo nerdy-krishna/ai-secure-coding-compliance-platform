@@ -19,6 +19,7 @@ runtime:
   unifiedSecret: sccap-unified-runtime
   migrationSecret: sccap-migration-runtime
   runnerV3Secret: sccap-pentest-runner-v3-runtime
+  pentestControllerSecret: sccap-pentest-controller-runtime
   existingConfigMap: ""
 
 serviceAccount:
@@ -86,6 +87,16 @@ runnerV3:
   resources:
     requests: {cpu: 100m, memory: 128Mi, ephemeral-storage: 16Mi}
     limits: {cpu: 500m, memory: 256Mi, ephemeral-storage: 32Mi}
+
+pentestController:
+  enabled: false
+  replicas: 1
+  queue: pentest_controller_queue
+  externalModelCidrs: []
+  internalDependencyCidrs: []
+  resources:
+    requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 16Mi}
+    limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 64Mi}
 
 autoscaling:
   keda:

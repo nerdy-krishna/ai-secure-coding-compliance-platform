@@ -57,13 +57,14 @@ class BudgetAttribution:
     actor_user_id: int | None
     group_ids: tuple[uuid.UUID, ...]
     scan_attempt_id: uuid.UUID | None
+    pentest_attempt_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
 class BudgetReservationRequest:
     tenant_id: uuid.UUID
     idempotency_key: str
-    operation_kind: Literal["scan", "chat", "rag"]
+    operation_kind: Literal["scan", "chat", "rag", "pentest"]
     request_key: str
     stage: str
     estimate: BudgetAmounts
@@ -71,6 +72,7 @@ class BudgetReservationRequest:
     actor_user_id: int | None = None
     group_ids: tuple[uuid.UUID, ...] = ()
     scan_attempt_id: uuid.UUID | None = None
+    pentest_attempt_id: uuid.UUID | None = None
     llm_config_id: uuid.UUID | None = None
     parent_reservation_id: uuid.UUID | None = None
     window_kinds: tuple[str, ...] = ("request", "scan", "day", "month")
@@ -102,6 +104,7 @@ def utc_window(
     at: datetime,
     request_key: str,
     scan_attempt_id: uuid.UUID | None,
+    pentest_attempt_id: uuid.UUID | None = None,
     expires_at: datetime,
 ) -> tuple[str, datetime, datetime]:
     """Return the stable key and half-open UTC interval for a policy window."""
@@ -122,6 +125,11 @@ def utc_window(
         if scan_attempt_id is None:
             raise ValueError("scan-window policy requires a scan attempt")
         return f"scan:{scan_attempt_id}", current, expires_at
+    if window_kind == "attempt":
+        attempt_id = pentest_attempt_id or scan_attempt_id
+        if attempt_id is None:
+            raise ValueError("attempt-window policy requires an attempt")
+        return f"attempt:{attempt_id}", current, expires_at
     raise ValueError(f"unsupported budget window: {window_kind}")
 
 
@@ -212,6 +220,28 @@ class UsageBudgetRepository:
                 )
             ).one_or_none()
             row = (*found, None) if found is not None else None
+        elif context.operation_kind == "pentest":
+            if context.pentest_attempt_id is None:
+                raise ValueError("pentest usage context requires pentest_attempt_id")
+            from app.pentesting.persistence.models import (
+                PentestAttempt,
+                PentestEngagement,
+            )
+
+            found = (
+                await self.db.execute(
+                    select(
+                        PentestAttempt.tenant_id,
+                        PentestEngagement.owner_user_id,
+                    )
+                    .join(
+                        PentestEngagement,
+                        PentestEngagement.id == PentestAttempt.engagement_id,
+                    )
+                    .where(PentestAttempt.id == context.pentest_attempt_id)
+                )
+            ).one_or_none()
+            row = (*found, None) if found is not None else None
         else:  # pragma: no cover - Literal protects typed call sites
             raise ValueError(f"unsupported usage operation: {context.operation_kind}")
         if row is None:
@@ -246,7 +276,13 @@ class UsageBudgetRepository:
             )
         else:
             groups = ()
-        return BudgetAttribution(tenant_id, actor_user_id, groups, attempt_id)
+        return BudgetAttribution(
+            tenant_id,
+            actor_user_id,
+            groups,
+            attempt_id,
+            context.pentest_attempt_id,
+        )
 
     async def list_policies(
         self, tenant_id: uuid.UUID, *, include_disabled: bool = False
@@ -365,7 +401,7 @@ class UsageBudgetRepository:
         *,
         tenant_id: uuid.UUID,
         scope_kind: Literal["tenant", "group", "user"],
-        window_kind: Literal["request", "scan", "day", "month"],
+        window_kind: Literal["request", "scan", "attempt", "day", "month"],
         reason: str,
         created_by_user_id: int,
         target_group_id: uuid.UUID | None = None,
@@ -604,6 +640,7 @@ class UsageBudgetRepository:
                 at=now,
                 request_key=request.request_key,
                 scan_attempt_id=request.scan_attempt_id,
+                pentest_attempt_id=request.pentest_attempt_id,
                 expires_at=request.expires_at,
             )
             key, start, end = windows[policy.id]
@@ -748,6 +785,7 @@ class UsageBudgetRepository:
             group_ids=list(request.group_ids),
             request_key=request.request_key,
             scan_attempt_id=request.scan_attempt_id,
+            pentest_attempt_id=request.pentest_attempt_id,
             llm_config_id=request.llm_config_id,
             stage=request.stage,
             parent_reservation_id=request.parent_reservation_id,

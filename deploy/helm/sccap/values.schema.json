@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["images", "runtime", "workerPools", "runnerV3", "autoscaling", "drain"],
+  "required": ["images", "runtime", "workerPools", "runnerV3", "pentestController", "autoscaling", "drain"],
   "properties": {
     "images": {
       "type": "object",
@@ -13,7 +13,7 @@
     },
     "runtime": {
       "type": "object",
-      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret"],
+      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret", "pentestControllerSecret"],
       "properties": {
         "apiSecret": {"type": "string", "minLength": 1},
         "scannerSecret": {"type": "string", "minLength": 1},
@@ -21,7 +21,8 @@
         "reportSecret": {"type": "string", "minLength": 1},
         "unifiedSecret": {"type": "string", "minLength": 1},
         "migrationSecret": {"type": "string", "minLength": 1},
-        "runnerV3Secret": {"type": "string", "minLength": 1}
+        "runnerV3Secret": {"type": "string", "minLength": 1},
+        "pentestControllerSecret": {"type": "string", "minLength": 1}
       }
     },
     "workerPools": {
@@ -40,6 +41,24 @@
         "enabled": {"type": "boolean"},
         "replicas": {"type": "integer", "minimum": 1},
         "queue": {"type": "string", "minLength": 1},
+        "resources": {"type": "object"}
+      }
+    },
+    "pentestController": {
+      "type": "object",
+      "required": ["enabled", "replicas", "queue", "externalModelCidrs", "internalDependencyCidrs", "resources"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicas": {"type": "integer", "minimum": 1},
+        "queue": {"type": "string", "minLength": 1},
+        "externalModelCidrs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "internalDependencyCidrs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
         "resources": {"type": "object"}
       }
     },

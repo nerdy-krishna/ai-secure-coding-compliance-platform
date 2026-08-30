@@ -82,7 +82,7 @@ class UsageEventRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    operation_kind: Literal["scan", "chat", "rag"]
+    operation_kind: Literal["scan", "chat", "rag", "pentest"]
     operation_id: str
     scan_id: uuid.UUID | None
     stage: str

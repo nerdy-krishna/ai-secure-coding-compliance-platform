@@ -1457,6 +1457,10 @@ class LLMCallReservation(Base):
             "status IN ('reserved', 'completed', 'failed')",
             name="ck_llm_call_reservations_status",
         ),
+        sa.CheckConstraint(
+            "num_nonnulls(scan_id, pentest_attempt_id) <= 1",
+            name="ck_llm_call_reservation_operation_identity",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1474,6 +1478,11 @@ class LLMCallReservation(Base):
     attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    pentest_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
     )
@@ -1485,6 +1494,9 @@ class LLMCallReservation(Base):
         ForeignKey("llm_usage_events.id", ondelete="SET NULL"),
         nullable=True,
         unique=True,
+    )
+    provider_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -1514,6 +1526,19 @@ class LLMUsageEvent(Base):
             "cost_status IN ('exact', 'estimated', 'unknown', 'reconciled')",
             name="ck_llm_usage_events_cost_status",
         ),
+        sa.CheckConstraint(
+            "(operation_kind = 'pentest' AND pentest_attempt_id IS NOT NULL "
+            "AND scan_id IS NULL AND attempt_id IS NULL AND chat_session_id IS NULL "
+            "AND rag_job_id IS NULL AND scan_task_id IS NULL) OR "
+            "(operation_kind <> 'pentest' AND pentest_attempt_id IS NULL)",
+            name="ck_llm_usage_event_pentest_identity",
+        ),
+        sa.Index(
+            "ix_llm_usage_event_tenant_pentest_attempt",
+            "tenant_id",
+            "pentest_attempt_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1529,6 +1554,11 @@ class LLMUsageEvent(Base):
     )
     attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    pentest_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
         nullable=True,
         index=True,
     )
@@ -1731,7 +1761,7 @@ class UsageBudgetPolicy(Base):
             name="ck_usage_budget_policies_scope_kind",
         ),
         sa.CheckConstraint(
-            "window_kind IN ('request', 'scan', 'day', 'month')",
+            "window_kind IN ('request', 'scan', 'attempt', 'day', 'month')",
             name="ck_usage_budget_policies_window_kind",
         ),
         sa.CheckConstraint(
@@ -1907,6 +1937,18 @@ class UsageBudgetReservation(Base):
             "state IN ('held', 'settled', 'released', 'expired', 'accounting_unknown')",
             name="ck_usage_budget_reservations_state",
         ),
+        sa.CheckConstraint(
+            "(operation_kind = 'pentest' AND pentest_attempt_id IS NOT NULL "
+            "AND scan_attempt_id IS NULL) OR "
+            "(operation_kind <> 'pentest' AND pentest_attempt_id IS NULL)",
+            name="ck_usage_budget_reservation_pentest_identity",
+        ),
+        sa.Index(
+            "ix_usage_budget_reservation_tenant_pentest_attempt",
+            "tenant_id",
+            "pentest_attempt_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1928,6 +1970,11 @@ class UsageBudgetReservation(Base):
     request_key: Mapped[str] = mapped_column(String(512), nullable=False)
     scan_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    pentest_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+        index=True,
     )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True

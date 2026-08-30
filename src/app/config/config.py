@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     RABBITMQ_PENTEST_QUEUE: str = "pentest_execution_queue"
     RABBITMQ_PENTEST_V2_QUEUE: str = "pentest_execution_v2_queue"
     RABBITMQ_PENTEST_V3_QUEUE: str = "pentest_execution_v3_queue"
+    RABBITMQ_PENTEST_CONTROLLER_QUEUE: str = "pentest_controller_queue"
+    RABBITMQ_PENTEST_CONTROLLER_URL: Optional[str] = None
 
     # Foundation 1 signed worker tasks. Production must provide an independent
     # 32-byte base64url seed and may provide comma-separated kid:public-key
@@ -102,6 +104,9 @@ class Settings(BaseSettings):
     PENTEST_RESULT_KEY_AUDIENCE: str = "pentest-result:foundation2"
     PENTEST_FOUNDATION2_ENABLED: bool = False
     PENTEST_FOUNDATION3_ENABLED: bool = False
+    PENTEST_CAPABILITY4_ENABLED: bool = False
+    PENTEST_CONTROLLER_LLM_CONFIG_ID: Optional[str] = None
+    PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=300)
     PENTEST_SCOPE_OBSERVATION_SIGNING_KEY_ID: str = (
         "pentest-foundation3-observation-local"
     )
