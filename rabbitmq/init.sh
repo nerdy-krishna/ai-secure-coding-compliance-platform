@@ -30,6 +30,18 @@ ensure_user() {
     rabbitmqctl set_permissions -p / "$controller_user" \
       '^pentest_controller_queue$' '^$' '^pentest_controller_queue$'
   fi
+
+  local tool_user="${RABBITMQ_PENTEST_TOOL_USER:-}"
+  local tool_pass="${RABBITMQ_PENTEST_TOOL_PASS:-}"
+  if [[ -n "$tool_user" && -n "$tool_pass" ]]; then
+    if ! rabbitmqctl list_users -q --no-table-headers \
+        | awk '{print $1}' | grep -qx "$tool_user"; then
+      echo "rabbitmq-init: creating bounded tool-worker user '$tool_user'"
+      rabbitmqctl add_user "$tool_user" "$tool_pass"
+    fi
+    rabbitmqctl set_permissions -p / "$tool_user" \
+      '^pentest_tool_queue_v1$' '^$' '^pentest_tool_queue_v1$'
+  fi
 }
 
 ensure_user &

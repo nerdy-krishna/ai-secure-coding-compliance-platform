@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     RABBITMQ_PENTEST_V3_QUEUE: str = "pentest_execution_v3_queue"
     RABBITMQ_PENTEST_CONTROLLER_QUEUE: str = "pentest_controller_queue"
     RABBITMQ_PENTEST_CONTROLLER_URL: Optional[str] = None
+    RABBITMQ_PENTEST_TOOL_QUEUE: str = "pentest_tool_queue_v1"
+    RABBITMQ_PENTEST_TOOL_URL: Optional[str] = None
 
     # Foundation 1 signed worker tasks. Production must provide an independent
     # 32-byte base64url seed and may provide comma-separated kid:public-key
@@ -105,6 +107,19 @@ class Settings(BaseSettings):
     PENTEST_FOUNDATION2_ENABLED: bool = False
     PENTEST_FOUNDATION3_ENABLED: bool = False
     PENTEST_CAPABILITY4_ENABLED: bool = False
+    PENTEST_CAPABILITY5_ENABLED: bool = False
+    PENTEST_TOOL_GATEWAY_TOKEN: Optional[SecretStr] = None
+    PENTEST_TOOL_WORKER_GATEWAY_URL: str = "http://app:8000"
+    PENTEST_TOOL_WORKER_ID: str = "pentest-tool-worker-v1"
+    PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: str = "0" * 64
+    PENTEST_CONNECTION_PERMIT_SIGNING_KEY_ID: str = "pentest-capability5-permit-local"
+    PENTEST_CONNECTION_PERMIT_SIGNING_SEED: Optional[SecretStr] = None
+    PENTEST_CONNECTION_PERMIT_VERIFY_PUBLIC_KEYS: str = ""
+    PENTEST_CONNECTION_PERMIT_AUDIENCE: str = "pentest-connection-permit:capability5"
+    PENTEST_RELAY_GRANT_SIGNING_KEY_ID: str = "pentest-capability5-relay-grant-local"
+    PENTEST_RELAY_GRANT_SIGNING_SEED: Optional[SecretStr] = None
+    PENTEST_RELAY_GRANT_VERIFY_PUBLIC_KEYS: str = ""
+    PENTEST_RELAY_GRANT_AUDIENCE: str = "pentest-scope-relay:capability5"
     PENTEST_CONTROLLER_LLM_CONFIG_ID: Optional[str] = None
     PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=300)
     PENTEST_SCOPE_OBSERVATION_SIGNING_KEY_ID: str = (
@@ -131,6 +146,11 @@ class Settings(BaseSettings):
     PENTEST_EVIDENCE_ORPHAN_GRACE_SECONDS: int = Field(
         default=24 * 60 * 60, ge=300, le=30 * 24 * 60 * 60
     )
+
+    @field_validator("PENTEST_TOOL_GATEWAY_TOKEN", mode="before")
+    @classmethod
+    def normalize_tool_gateway_token(cls, value):
+        return None if value is None or not str(value).strip() else value
 
     @field_validator("RABBITMQ_URL", mode="before")
     def assemble_rabbitmq_connection(cls, v, info):

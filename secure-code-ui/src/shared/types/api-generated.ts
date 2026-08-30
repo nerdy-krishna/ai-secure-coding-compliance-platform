@@ -881,6 +881,169 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pentesting/internal/tool-gateway/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Gateway Claim */
+        post: operations["tool_gateway_claim_api_v1_pentesting_internal_tool_gateway_claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/tool-gateway/isolation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Gateway Isolation */
+        post: operations["tool_gateway_isolation_api_v1_pentesting_internal_tool_gateway_isolation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/tool-gateway/invocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Gateway Invocation */
+        post: operations["tool_gateway_invocation_api_v1_pentesting_internal_tool_gateway_invocation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/tool-gateway/stage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Gateway Stage */
+        post: operations["tool_gateway_stage_api_v1_pentesting_internal_tool_gateway_stage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/tool-gateway/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Gateway Evidence */
+        post: operations["tool_gateway_evidence_api_v1_pentesting_internal_tool_gateway_evidence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/tool-gateway/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Gateway Result */
+        post: operations["tool_gateway_result_api_v1_pentesting_internal_tool_gateway_result_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/tool-gateway/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tool Gateway Cleanup */
+        post: operations["tool_gateway_cleanup_api_v1_pentesting_internal_tool_gateway_cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/relay/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relay Authorize Connection
+         * @description Authorize exactly one relay connection using signed grant plus PoP.
+         *
+         *     Deliberately has no general tool-gateway bearer-token dependency. The
+         *     short-lived grant, request digest, and relay workload signature are the
+         *     narrow workload identity and are reconciled against PostgreSQL authority.
+         */
+        post: operations["relay_authorize_connection_api_v1_pentesting_internal_relay_authorize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/relay/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relay Revoke Connection
+         * @description Idempotently revoke current permits through the same PoP identity.
+         */
+        post: operations["relay_revoke_connection_api_v1_pentesting_internal_relay_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pentesting/internal/gateway/isolation": {
         parameters: {
             query?: never;
@@ -4341,6 +4504,120 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** AdapterHealthV1 */
+        AdapterHealthV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.adapter-health.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.adapter-health.v1";
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "degraded" | "unavailable";
+            /** Reason Code */
+            reason_code: string;
+            /** Isolation Verified */
+            isolation_verified: boolean;
+            /** Network Policy Verified */
+            network_policy_verified: boolean;
+            /** Version Verified */
+            version_verified: boolean;
+            /** Content Verified */
+            content_verified: boolean;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Canonical Digest */
+            canonical_digest: string;
+        };
+        /** AdapterSnapshotV1 */
+        AdapterSnapshotV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.adapter-snapshot.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.adapter-snapshot.v1";
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Id
+             * @enum {string}
+             */
+            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            /** Adapter Contract Version */
+            adapter_contract_version: string;
+            /** Runtime Version */
+            runtime_version: string;
+            /** Runtime Image Digest */
+            runtime_image_digest: string;
+            /** Configuration Digest */
+            configuration_digest: string;
+            /** Content Bundle Digest */
+            content_bundle_digest?: string | null;
+            /**
+             * Supported Interaction Class
+             * @enum {string}
+             */
+            supported_interaction_class: "read_only_bootstrap" | "read_only_discovery";
+            /** Maximum Requests */
+            maximum_requests: number;
+            /** Maximum Connections */
+            maximum_connections: number;
+            /** Maximum Duration Ms */
+            maximum_duration_ms: number;
+            /** Maximum Ports */
+            maximum_ports: number;
+            /** Allowed Profile Ids */
+            allowed_profile_ids: string[];
+            /** Allowed Capability Ids */
+            allowed_capability_ids: string[];
+            /**
+             * Runtime Updates Enabled
+             * @default false
+             * @constant
+             */
+            runtime_updates_enabled: false;
+            /**
+             * Truth Authority
+             * @default observation_only
+             * @constant
+             */
+            truth_authority: "observation_only";
+            /** Snapshot Digest */
+            snapshot_digest: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** AdaptiveProgressV1 */
         AdaptiveProgressV1: {
             /** Extensions */
@@ -5201,6 +5478,25 @@ export interface components {
             /** Utility Llm Config Id */
             utility_llm_config_id?: string | null;
         };
+        /** BootstrapObservationArgumentsV1 */
+        BootstrapObservationArgumentsV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            argument_kind: "bootstrap";
+            /**
+             * Target Ref
+             * Format: uuid
+             */
+            target_ref: string;
+            /**
+             * Mode
+             * @default root_bootstrap
+             * @constant
+             */
+            mode: "root_bootstrap";
+        };
         /** BootstrapRulesV1 */
         BootstrapRulesV1: {
             /** Maximum Duration Seconds */
@@ -5223,6 +5519,76 @@ export interface components {
              * @constant
              */
             mode: "root_bootstrap";
+        };
+        /** BrowserInvocationMaterialV1 */
+        BrowserInvocationMaterialV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            material_kind: "browser";
+            /**
+             * Operation Ref
+             * Format: uuid
+             */
+            operation_ref: string;
+            /**
+             * Relay Capability Handle
+             * Format: uuid
+             */
+            relay_capability_handle: string;
+            /**
+             * Viewport Profile
+             * @default desktop_1280x720
+             * @constant
+             */
+            viewport_profile: "desktop_1280x720";
+            /**
+             * Capture Profile
+             * @default metadata_dom_a11y_screenshot
+             * @constant
+             */
+            capture_profile: "metadata_dom_a11y_screenshot";
+        };
+        /** BrowserObservationArgumentsV1 */
+        BrowserObservationArgumentsV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            argument_kind: "browser_observation";
+            /**
+             * Target Ref
+             * Format: uuid
+             */
+            target_ref: string;
+            /**
+             * Start Operation Ref
+             * Format: uuid
+             */
+            start_operation_ref: string;
+            /**
+             * Action
+             * @default navigate_and_observe
+             * @constant
+             */
+            action: "navigate_and_observe";
+            /**
+             * Browser Engine
+             * @default chromium
+             * @constant
+             */
+            browser_engine: "chromium";
+            /**
+             * Viewport Profile Ref
+             * Format: uuid
+             */
+            viewport_profile_ref: string;
+            /**
+             * Capture Profile Ref
+             * Format: uuid
+             */
+            capture_profile_ref: string;
         };
         /** BudgetAmountsRead */
         BudgetAmountsRead: {
@@ -6027,6 +6393,394 @@ export interface components {
              */
             created_at: string;
         };
+        /** ConnectionAuthorizationRequestV1 */
+        ConnectionAuthorizationRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.connection-authorization.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.connection-authorization.v1";
+            grant: components["schemas"]["RelaySessionGrantV1"];
+            /** Relay Capability Digest */
+            relay_capability_digest: string;
+            /**
+             * Operation Ref
+             * Format: uuid
+             */
+            operation_ref: string;
+            /** Operation Digest */
+            operation_digest: string;
+            intent: components["schemas"]["ConnectionIntentV1"];
+            observation: components["schemas"]["ResolutionObservationV1"];
+            /** Selected Address */
+            selected_address: string;
+            /**
+             * Revalidate At
+             * Format: date-time
+             */
+            revalidate_at: string;
+            /** Proof Nonce */
+            proof_nonce: string;
+            /**
+             * Proof Issued At
+             * Format: date-time
+             */
+            proof_issued_at: string;
+            /** Request Digest */
+            request_digest: string;
+            /** Workload Signature */
+            workload_signature: string;
+        };
+        /**
+         * ConnectionAuthorizationRequestV2
+         * @description Successor request carrying one untrusted exact connection candidate.
+         */
+        ConnectionAuthorizationRequestV2: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.connection-authorization.v2
+             * @constant
+             */
+            schema_version: "sccap.pentest.connection-authorization.v2";
+            grant: components["schemas"]["RelaySessionGrantV2"];
+            /** Relay Capability Digest */
+            relay_capability_digest: string;
+            /**
+             * Operation Ref
+             * Format: uuid
+             */
+            operation_ref: string;
+            /** Operation Digest */
+            operation_digest: string;
+            intent: components["schemas"]["ConnectionIntentV1"];
+            observation: components["schemas"]["ResolutionObservationV1"];
+            /** Selected Address */
+            selected_address: string;
+            /**
+             * Revalidate At
+             * Format: date-time
+             */
+            revalidate_at: string;
+            /** Proof Nonce */
+            proof_nonce: string;
+            /**
+             * Proof Issued At
+             * Format: date-time
+             */
+            proof_issued_at: string;
+            /** Request Digest */
+            request_digest: string;
+            /** Workload Signature */
+            workload_signature: string;
+            candidate: components["schemas"]["RelayConnectionCandidateV1"];
+        };
+        /** ConnectionIntentV1 */
+        ConnectionIntentV1: {
+            /**
+             * Intent Id
+             * Format: uuid
+             */
+            intent_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Relay Workload Id */
+            relay_workload_id: string;
+            /** Lease Owner Id */
+            lease_owner_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /**
+             * Policy Snapshot Id
+             * Format: uuid
+             */
+            policy_snapshot_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Policy Digest */
+            policy_digest: string;
+            /** Proposal Digest */
+            proposal_digest: string;
+            /**
+             * Destination Ref
+             * Format: uuid
+             */
+            destination_ref: string;
+            /** Destination Host */
+            destination_host: string;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "http" | "https" | "tcp" | "tls";
+            /** Port */
+            port: number;
+            /**
+             * Path
+             * @default /
+             */
+            path: string;
+            /**
+             * Method
+             * @default GET
+             * @enum {string}
+             */
+            method: "GET" | "HEAD" | "OPTIONS";
+            /**
+             * Connection Class
+             * @enum {string}
+             */
+            connection_class: "primary" | "redirect" | "secondary" | "callback";
+            /** Parent Intent Id */
+            parent_intent_id?: string | null;
+            /**
+             * Lineage Depth
+             * @default 0
+             */
+            lineage_depth: number;
+            /** Generation */
+            generation: number;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Intent Digest */
+            intent_digest: string;
+        };
+        /** ConnectionPermitRevocationV1 */
+        ConnectionPermitRevocationV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.connection-permit-revocation.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.connection-permit-revocation.v1";
+            grant: components["schemas"]["RelaySessionGrantV1"];
+            /** Permit Id */
+            permit_id?: string | null;
+            /** Revocation Generation */
+            revocation_generation: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Proof Nonce */
+            proof_nonce: string;
+            /**
+             * Proof Issued At
+             * Format: date-time
+             */
+            proof_issued_at: string;
+            /** Request Digest */
+            request_digest: string;
+            /** Workload Signature */
+            workload_signature: string;
+        };
+        /**
+         * ConnectionPermitRevocationV2
+         * @description Successor revocation request for a V2 relay session grant.
+         */
+        ConnectionPermitRevocationV2: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.connection-permit-revocation.v2
+             * @constant
+             */
+            schema_version: "sccap.pentest.connection-permit-revocation.v2";
+            grant: components["schemas"]["RelaySessionGrantV2"];
+            /** Permit Id */
+            permit_id?: string | null;
+            /** Revocation Generation */
+            revocation_generation: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Proof Nonce */
+            proof_nonce: string;
+            /**
+             * Proof Issued At
+             * Format: date-time
+             */
+            proof_issued_at: string;
+            /** Request Digest */
+            request_digest: string;
+            /** Workload Signature */
+            workload_signature: string;
+        };
+        /** ConnectionPermitV1 */
+        ConnectionPermitV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.connection-permit.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.connection-permit.v1";
+            /**
+             * Connection Permit Id
+             * Format: uuid
+             */
+            connection_permit_id: string;
+            /**
+             * Connection Intent Id
+             * Format: uuid
+             */
+            connection_intent_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Session Id
+             * Format: uuid
+             */
+            adapter_session_id: string;
+            /** Runner Id */
+            runner_id: string;
+            /**
+             * Scope Decision Id
+             * Format: uuid
+             */
+            scope_decision_id: string;
+            /** Policy Digest */
+            policy_digest: string;
+            /** Selected Address */
+            selected_address: string;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "tcp" | "tls" | "http" | "https" | "websocket" | "websocket_tls";
+            /** Port */
+            port: number;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /**
+             * Maximum Uses
+             * @default 1
+             * @constant
+             */
+            maximum_uses: 1;
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Permit Digest */
+            permit_digest: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /** Signature Audience */
+            signature_audience: string;
+            /** Signature */
+            signature: string;
+        };
         /** ConnectorCreate */
         ConnectorCreate: {
             /**
@@ -6338,6 +7092,15 @@ export interface components {
             orchestrator_decision_v1?: components["schemas"]["OrchestratorDecisionV1"] | null;
             specialist_task_v2?: components["schemas"]["SpecialistTaskV2"] | null;
             tool_proposal_v2?: components["schemas"]["ToolProposalV2"] | null;
+            tool_proposal_v3?: components["schemas"]["ToolProposalV3"] | null;
+            tool_request_v1?: components["schemas"]["ToolRequestV1"] | null;
+            tool_task_locator_v1?: components["schemas"]["ToolTaskLocatorV1"] | null;
+            adapter_snapshot_v1?: components["schemas"]["AdapterSnapshotV1"] | null;
+            adapter_health_v1?: components["schemas"]["AdapterHealthV1"] | null;
+            tool_connection_intent_v1?: components["schemas"]["ToolConnectionIntentV1"] | null;
+            tool_execution_task_v1?: components["schemas"]["ToolExecutionTaskV1"] | null;
+            connection_permit_v1?: components["schemas"]["ConnectionPermitV1"] | null;
+            tool_result_v1?: components["schemas"]["ToolResultV1"] | null;
             specialist_interpretation_v1?: components["schemas"]["SpecialistInterpretationV1"] | null;
             controller_validation_v1?: components["schemas"]["ControllerValidationV1"] | null;
             controller_locator_v1?: components["schemas"]["ControllerLocatorV1"] | null;
@@ -8793,6 +9556,23 @@ export interface components {
             /** Sweep Interval Seconds */
             sweep_interval_seconds?: number | null;
         };
+        /** InvocationLimitsV1 */
+        InvocationLimitsV1: {
+            /** Maximum Requests */
+            maximum_requests: number;
+            /** Maximum Connections */
+            maximum_connections: number;
+            /** Maximum Duration Ms */
+            maximum_duration_ms: number;
+            /** Maximum Response Bytes */
+            maximum_response_bytes: number;
+            /** Maximum Artifact Bytes */
+            maximum_artifact_bytes: number;
+            /** Maximum Artifacts */
+            maximum_artifacts: number;
+            /** Maximum Observations */
+            maximum_observations: number;
+        };
         /** LLMConfigurationCreate */
         LLMConfigurationCreate: {
             /**
@@ -9180,6 +9960,29 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /** LocalArtifactDescriptorV1 */
+        LocalArtifactDescriptorV1: {
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Relative Path */
+            relative_path: string;
+            /** Artifact Kind */
+            artifact_kind: string;
+            /** Media Type */
+            media_type: string;
+            /** Byte Count */
+            byte_count: number;
+            /** Content Digest */
+            content_digest: string;
+            /**
+             * Redaction Required
+             * @default true
+             */
+            redaction_required: boolean;
+        };
         /** LogLevelResponse */
         LogLevelResponse: {
             /** Level */
@@ -9295,6 +10098,138 @@ export interface components {
             created_at: string;
             /** Executed At */
             executed_at?: string | null;
+        };
+        /** NmapDiscoveryArgumentsV1 */
+        NmapDiscoveryArgumentsV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            argument_kind: "nmap_discovery";
+            /**
+             * Target Ref
+             * Format: uuid
+             */
+            target_ref: string;
+            /** Pinned Address Refs */
+            pinned_address_refs: string[];
+            /**
+             * Approved Port Set Ref
+             * Format: uuid
+             */
+            approved_port_set_ref: string;
+            /**
+             * Probe Level
+             * @default connect_only
+             * @enum {string}
+             */
+            probe_level: "connect_only" | "version_light";
+        };
+        /** NmapInvocationMaterialV1 */
+        NmapInvocationMaterialV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            material_kind: "nmap";
+            /** Pinned Address */
+            pinned_address: string;
+            /** Approved Ports */
+            approved_ports: number[];
+            /**
+             * Probe Level
+             * @default connect_only
+             * @enum {string}
+             */
+            probe_level: "connect_only" | "version_light";
+            /** Network Policy Receipt Digest */
+            network_policy_receipt_digest: string;
+            /**
+             * Scope Decision Id
+             * Format: uuid
+             */
+            scope_decision_id: string;
+            /** Scope Decision Digest */
+            scope_decision_digest: string;
+        };
+        /** NormalizedToolObservationV1 */
+        NormalizedToolObservationV1: {
+            /** Observation Type */
+            observation_type: string;
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "observed" | "hint";
+            /** Normalized Values */
+            normalized_values?: {
+                [key: string]: unknown;
+            };
+            /** Raw Evidence Refs */
+            raw_evidence_refs: string[];
+            /** Limitations */
+            limitations?: string[];
+        };
+        /** NucleiInvocationMaterialV1 */
+        NucleiInvocationMaterialV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            material_kind: "nuclei";
+            /** Operation Refs */
+            operation_refs: string[];
+            /**
+             * Relay Capability Handle
+             * Format: uuid
+             */
+            relay_capability_handle: string;
+            /**
+             * Bundle Id
+             * Format: uuid
+             */
+            bundle_id: string;
+            /** Bundle Version */
+            bundle_version: string;
+            /** Bundle Digest */
+            bundle_digest: string;
+            /** Manifest Digest */
+            manifest_digest: string;
+            /** Bundle Signature */
+            bundle_signature: string;
+            /** Trust Root Key Id */
+            trust_root_key_id: string;
+            /** Template Entries */
+            template_entries: string[];
+            /** Template Digests */
+            template_digests: string[];
+        };
+        /** NucleiObservationArgumentsV1 */
+        NucleiObservationArgumentsV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            argument_kind: "nuclei_observation";
+            /**
+             * Target Ref
+             * Format: uuid
+             */
+            target_ref: string;
+            /** Operation Refs */
+            operation_refs: string[];
+            /**
+             * Template Bundle Ref
+             * Format: uuid
+             */
+            template_bundle_ref: string;
+            /** Template Ids */
+            template_ids: string[];
+            /**
+             * Response Capture Profile Ref
+             * Format: uuid
+             */
+            response_capture_profile_ref: string;
         };
         /** ObservationProposalV1 */
         ObservationProposalV1: {
@@ -10348,6 +11283,446 @@ export interface components {
             /** Friendly Name */
             friendly_name: string;
         };
+        /**
+         * RelayAuthorizedOperationV1
+         * @description One immutable relay-only mapping from an opaque operation to authority.
+         */
+        RelayAuthorizedOperationV1: {
+            /**
+             * Operation Ref
+             * Format: uuid
+             */
+            operation_ref: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Destination Ref
+             * Format: uuid
+             */
+            destination_ref: string;
+            /**
+             * Scheme
+             * @enum {string}
+             */
+            scheme: "http" | "https";
+            /** Host Ascii */
+            host_ascii: string;
+            /** Port */
+            port: number;
+            /** Path */
+            path: string;
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "GET" | "HEAD" | "OPTIONS";
+            /**
+             * Interaction Class
+             * @default read_only_discovery
+             * @constant
+             */
+            interaction_class: "read_only_discovery";
+            /**
+             * Redirect Policy
+             * @enum {string}
+             */
+            redirect_policy: "deny" | "scope_reauthorize";
+            /**
+             * Secondary Connection Policy
+             * @enum {string}
+             */
+            secondary_connection_policy: "deny" | "scope_reauthorize";
+            limits: components["schemas"]["RelaySessionLimitsV1"];
+            /** Operation Digest */
+            operation_digest: string;
+        };
+        /**
+         * RelayConnectionCandidateV1
+         * @description Untrusted, exactly normalized connection proposal for one operation.
+         */
+        RelayConnectionCandidateV1: {
+            /**
+             * Scheme
+             * @enum {string}
+             */
+            scheme: "http" | "https";
+            /** Host Ascii */
+            host_ascii: string;
+            /** Port */
+            port: number;
+            /** Path */
+            path: string;
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "GET" | "HEAD" | "OPTIONS";
+            /**
+             * Connection Class
+             * @enum {string}
+             */
+            connection_class: "primary" | "redirect" | "secondary";
+            /** Candidate Digest */
+            candidate_digest: string;
+        };
+        /**
+         * RelayDescendantAuthorizationEnvelopeV1
+         * @description Non-authoritative ceilings for fresh policy evaluation of descendants.
+         */
+        RelayDescendantAuthorizationEnvelopeV1: {
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /** Allowed Connection Classes */
+            allowed_connection_classes: ("redirect" | "secondary")[];
+            /** Allowed Methods */
+            allowed_methods: ("GET" | "HEAD" | "OPTIONS")[];
+            /**
+             * Interaction Class
+             * @default read_only_discovery
+             * @constant
+             */
+            interaction_class: "read_only_discovery";
+            /** Maximum Lineage Depth */
+            maximum_lineage_depth: number;
+            /** Maximum Redirects */
+            maximum_redirects: number;
+            /** Maximum Secondary Connections */
+            maximum_secondary_connections: number;
+            /** Envelope Digest */
+            envelope_digest: string;
+        };
+        /**
+         * RelayPrimaryOperationSeedV1
+         * @description Signed non-authoritative input for one adapter primary request.
+         */
+        RelayPrimaryOperationSeedV1: {
+            /**
+             * Operation Ref
+             * Format: uuid
+             */
+            operation_ref: string;
+            candidate: components["schemas"]["RelayConnectionCandidateV1"];
+            /** Seed Digest */
+            seed_digest: string;
+        };
+        /** RelaySessionGrantV1 */
+        RelaySessionGrantV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.relay-session-grant.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.relay-session-grant.v1";
+            /**
+             * Grant Id
+             * Format: uuid
+             */
+            grant_id: string;
+            /**
+             * Issuer
+             * @default sccap.pentest.tool-gateway
+             * @constant
+             */
+            issuer: "sccap.pentest.tool-gateway";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Id
+             * @enum {string}
+             */
+            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Invocation Digest */
+            invocation_digest: string;
+            /** Relay Capability Digest */
+            relay_capability_digest: string;
+            /** Relay Workload Id */
+            relay_workload_id: string;
+            /** Relay Workload Public Key */
+            relay_workload_public_key: string;
+            /** Relay Workload Key Thumbprint */
+            relay_workload_key_thumbprint: string;
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /**
+             * Orchestrator Decision Id
+             * Format: uuid
+             */
+            orchestrator_decision_id: string;
+            /** Orchestrator Decision Digest */
+            orchestrator_decision_digest: string;
+            /** Proposal Digest */
+            proposal_digest: string;
+            /** Lease Owner Id */
+            lease_owner_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            limits: components["schemas"]["InvocationLimitsV1"];
+            relay_limits: components["schemas"]["RelaySessionLimitsV1"];
+            /** Authorized Operations */
+            authorized_operations: components["schemas"]["RelayAuthorizedOperationV1"][];
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Grant Digest */
+            grant_digest: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /**
+             * Signature Audience
+             * @default pentest-scope-relay:capability5
+             * @constant
+             */
+            signature_audience: "pentest-scope-relay:capability5";
+            /** Signature */
+            signature: string;
+        };
+        /**
+         * RelaySessionGrantV2
+         * @description Successor grant allowing only fresh policy evaluation of descendants.
+         */
+        RelaySessionGrantV2: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.relay-session-grant.v2
+             * @constant
+             */
+            schema_version: "sccap.pentest.relay-session-grant.v2";
+            /**
+             * Grant Id
+             * Format: uuid
+             */
+            grant_id: string;
+            /**
+             * Issuer
+             * @default sccap.pentest.tool-gateway
+             * @constant
+             */
+            issuer: "sccap.pentest.tool-gateway";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Id
+             * @enum {string}
+             */
+            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Invocation Digest */
+            invocation_digest: string;
+            /** Relay Capability Digest */
+            relay_capability_digest: string;
+            /** Relay Workload Id */
+            relay_workload_id: string;
+            /** Relay Workload Public Key */
+            relay_workload_public_key: string;
+            /** Relay Workload Key Thumbprint */
+            relay_workload_key_thumbprint: string;
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /**
+             * Orchestrator Decision Id
+             * Format: uuid
+             */
+            orchestrator_decision_id: string;
+            /** Orchestrator Decision Digest */
+            orchestrator_decision_digest: string;
+            /** Proposal Digest */
+            proposal_digest: string;
+            /** Lease Owner Id */
+            lease_owner_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            limits: components["schemas"]["InvocationLimitsV1"];
+            relay_limits: components["schemas"]["RelaySessionLimitsV1"];
+            /** Authorized Operations */
+            authorized_operations: components["schemas"]["RelayAuthorizedOperationV1"][];
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Grant Digest */
+            grant_digest: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /**
+             * Signature Audience
+             * @default pentest-scope-relay:capability5
+             * @constant
+             */
+            signature_audience: "pentest-scope-relay:capability5";
+            /** Signature */
+            signature: string;
+            descendant_authorization: components["schemas"]["RelayDescendantAuthorizationEnvelopeV1"];
+        };
+        /**
+         * RelaySessionLimitsV1
+         * @description Inclusive per-ToolRequest relay ceilings; zero is deny-all, not unlimited.
+         */
+        RelaySessionLimitsV1: {
+            /** Maximum Requests */
+            maximum_requests: number;
+            /** Maximum Connections */
+            maximum_connections: number;
+            /** Maximum Concurrent Connections */
+            maximum_concurrent_connections: number;
+            /** Maximum Redirects */
+            maximum_redirects: number;
+            /** Maximum Secondary Connections */
+            maximum_secondary_connections: number;
+            /** Maximum Request Bytes */
+            maximum_request_bytes: number;
+            /** Maximum Response Bytes */
+            maximum_response_bytes: number;
+            /** Maximum Upload Bytes */
+            maximum_upload_bytes: number;
+            /** Maximum Duration Ms */
+            maximum_duration_ms: number;
+        };
         /** RemediationCandidateCounts */
         RemediationCandidateCounts: {
             /**
@@ -10432,6 +11807,20 @@ export interface components {
              */
             llm_config_id: string;
         };
+        /** ResolutionObservationV1 */
+        ResolutionObservationV1: {
+            /** Query Name */
+            query_name: string;
+            /** Addresses */
+            addresses: string[];
+            /** Complete */
+            complete: boolean;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+        };
         /** ResolutionSubmissionV1 */
         ResolutionSubmissionV1: {
             /**
@@ -10459,6 +11848,269 @@ export interface components {
             signed_observation: {
                 [key: string]: unknown;
             };
+        };
+        /** ResolvedAdapterInvocationV1 */
+        ResolvedAdapterInvocationV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.resolved-adapter-invocation.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.resolved-adapter-invocation.v1";
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Nonce */
+            nonce: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Id
+             * @enum {string}
+             */
+            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Runner Id */
+            runner_id: string;
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /**
+             * Orchestrator Decision Id
+             * Format: uuid
+             */
+            orchestrator_decision_id: string;
+            /** Decision Digest */
+            decision_digest: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Relay Capability Handle */
+            relay_capability_handle: string | null;
+            /**
+             * Evidence Sink Handle
+             * Format: uuid
+             */
+            evidence_sink_handle: string;
+            /**
+             * Evidence Sink Name
+             * @default evidence
+             * @constant
+             */
+            evidence_sink_name: "evidence";
+            limits: components["schemas"]["InvocationLimitsV1"];
+            /** Material */
+            material: components["schemas"]["BrowserInvocationMaterialV1"] | components["schemas"]["ZapInvocationMaterialV1"] | components["schemas"]["NucleiInvocationMaterialV1"] | components["schemas"]["NmapInvocationMaterialV1"];
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Invocation Digest */
+            invocation_digest: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /**
+             * Signature Audience
+             * @default pentest-adapter-process:v1
+             * @constant
+             */
+            signature_audience: "pentest-adapter-process:v1";
+            /** Signature */
+            signature: string;
+        };
+        /**
+         * ResolvedAdapterInvocationV2
+         * @description Successor invocation carrying exact, signed primary proposal seeds.
+         */
+        ResolvedAdapterInvocationV2: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.resolved-adapter-invocation.v2
+             * @constant
+             */
+            schema_version: "sccap.pentest.resolved-adapter-invocation.v2";
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Nonce */
+            nonce: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Id
+             * @enum {string}
+             */
+            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Runner Id */
+            runner_id: string;
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /**
+             * Orchestrator Decision Id
+             * Format: uuid
+             */
+            orchestrator_decision_id: string;
+            /** Decision Digest */
+            decision_digest: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Relay Capability Handle */
+            relay_capability_handle: string | null;
+            /**
+             * Evidence Sink Handle
+             * Format: uuid
+             */
+            evidence_sink_handle: string;
+            /**
+             * Evidence Sink Name
+             * @default evidence
+             * @constant
+             */
+            evidence_sink_name: "evidence";
+            limits: components["schemas"]["InvocationLimitsV1"];
+            /** Material */
+            material: components["schemas"]["BrowserInvocationMaterialV1"] | components["schemas"]["ZapInvocationMaterialV1"] | components["schemas"]["NucleiInvocationMaterialV1"] | components["schemas"]["NmapInvocationMaterialV1"];
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Invocation Digest */
+            invocation_digest: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /**
+             * Signature Audience
+             * @default pentest-adapter-process:v2
+             * @constant
+             */
+            signature_audience: "pentest-adapter-process:v2";
+            /** Signature */
+            signature: string;
+            /** Primary Operation Seeds */
+            primary_operation_seeds?: components["schemas"]["RelayPrimaryOperationSeedV1"][];
         };
         /** ResolvedAddressV1 */
         ResolvedAddressV1: {
@@ -11906,6 +13558,163 @@ export interface components {
              */
             INFORMATIONAL: number;
         };
+        /** SignedConnectionPermitV1 */
+        SignedConnectionPermitV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.signed-connection-permit.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.signed-connection-permit.v1";
+            /**
+             * Issuer
+             * @default sccap.pentest.tool-gateway
+             * @constant
+             */
+            issuer: "sccap.pentest.tool-gateway";
+            /**
+             * Permit Id
+             * Format: uuid
+             */
+            permit_id: string;
+            /**
+             * Intent Id
+             * Format: uuid
+             */
+            intent_id: string;
+            /** Intent Digest */
+            intent_digest: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Relay Workload Id */
+            relay_workload_id: string;
+            /** Lease Owner Id */
+            lease_owner_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /**
+             * Policy Snapshot Id
+             * Format: uuid
+             */
+            policy_snapshot_id: string;
+            /** Policy Version */
+            policy_version: number;
+            /** Policy Digest */
+            policy_digest: string;
+            /**
+             * Scope Decision Id
+             * Format: uuid
+             */
+            scope_decision_id: string;
+            /** Decision Digest */
+            decision_digest: string;
+            /** Resolution Digest */
+            resolution_digest: string;
+            /** Resolution Addresses */
+            resolution_addresses: string[];
+            /** Selected Address */
+            selected_address: string;
+            /** Destination Host */
+            destination_host: string;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "http" | "https" | "tcp" | "tls";
+            /** Port */
+            port: number;
+            /**
+             * Connection Class
+             * @enum {string}
+             */
+            connection_class: "primary" | "redirect" | "secondary";
+            /** Parent Intent Id */
+            parent_intent_id?: string | null;
+            /** Generation */
+            generation: number;
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Revalidate At
+             * Format: date-time
+             */
+            revalidate_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Permit Digest */
+            permit_digest: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /**
+             * Signature Audience
+             * @default pentest-connection-permit:capability5
+             * @constant
+             */
+            signature_audience: "pentest-connection-permit:capability5";
+            /** Signature */
+            signature: string;
+        };
         /** SignedVersionRead */
         SignedVersionRead: {
             /**
@@ -12331,6 +14140,12 @@ export interface components {
             files_analyzed_count: number;
             severity_counts?: components["schemas"]["SeverityCountsResponse"];
         };
+        /** SupervisorArtifactUploadV1 */
+        SupervisorArtifactUploadV1: {
+            descriptor: components["schemas"]["LocalArtifactDescriptorV1"];
+            /** Content Base64 */
+            content_base64: string;
+        };
         /** SyncRunRead */
         SyncRunRead: {
             /**
@@ -12546,6 +14361,197 @@ export interface components {
             /** Authorized View */
             authorized_view: string;
         };
+        /** ToolConnectionIntentV1 */
+        ToolConnectionIntentV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.connection-intent.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.connection-intent.v1";
+            /**
+             * Connection Intent Id
+             * Format: uuid
+             */
+            connection_intent_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Session Id
+             * Format: uuid
+             */
+            adapter_session_id: string;
+            /**
+             * Destination Ref
+             * Format: uuid
+             */
+            destination_ref: string;
+            /** Parent Intent Id */
+            parent_intent_id?: string | null;
+            /**
+             * Connection Class
+             * @enum {string}
+             */
+            connection_class: "primary" | "redirect" | "secondary";
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "tcp" | "tls" | "http" | "https" | "websocket" | "websocket_tls";
+            /** Port */
+            port: number;
+            /** Sequence */
+            sequence: number;
+            /** Canonical Digest */
+            canonical_digest: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ToolExecutionTaskV1 */
+        ToolExecutionTaskV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-execution-task.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-execution-task.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Tool Proposal Id
+             * Format: uuid
+             */
+            tool_proposal_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Dispatch Id
+             * Format: uuid
+             */
+            dispatch_id: string;
+            /** Dispatch Generation */
+            dispatch_generation: number;
+            /** Expected Lease Generation */
+            expected_lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /** Request Digest */
+            request_digest: string;
+            /** Effective Limits Digest */
+            effective_limits_digest: string;
+            /** Result Key Audience */
+            result_key_audience: string;
+            /**
+             * Task Audience
+             * @default pentest-tool-worker:v1
+             * @constant
+             */
+            task_audience: "pentest-tool-worker:v1";
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Nonce */
+            nonce: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /** Signature */
+            signature: string;
+        };
         /** ToolProposalV1 */
         ToolProposalV1: {
             /**
@@ -12722,6 +14728,869 @@ export interface components {
              */
             expires_at: string;
         };
+        /** ToolProposalV3 */
+        ToolProposalV3: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-proposal.v3
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-proposal.v3";
+            /**
+             * Tool Proposal Id
+             * Format: uuid
+             */
+            tool_proposal_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Orchestrator Decision Id
+             * Format: uuid
+             */
+            orchestrator_decision_id: string;
+            /**
+             * Specialist Task Id
+             * Format: uuid
+             */
+            specialist_task_id: string;
+            /**
+             * Preceding Decision Delta Id
+             * Format: uuid
+             */
+            preceding_decision_delta_id: string;
+            /** Preceding Decision Delta Digest */
+            preceding_decision_delta_digest: string;
+            /** Target Refs */
+            target_refs: string[];
+            /** Opaque Identity Refs */
+            opaque_identity_refs?: string[];
+            /** Profile Id */
+            profile_id: string;
+            /** Profile Version */
+            profile_version: string;
+            /** Capability Id */
+            capability_id: string;
+            /**
+             * Adapter Id
+             * @enum {string}
+             */
+            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            /** Adapter Contract Version */
+            adapter_contract_version: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /** Typed Arguments */
+            typed_arguments: components["schemas"]["BootstrapObservationArgumentsV1"] | components["schemas"]["BrowserObservationArgumentsV1"] | components["schemas"]["ZapPassiveArgumentsV1"] | components["schemas"]["NucleiObservationArgumentsV1"] | components["schemas"]["NmapDiscoveryArgumentsV1"];
+            /** Expected Evidence Types */
+            expected_evidence_types: string[];
+            /** Estimated Requests */
+            estimated_requests: number;
+            /** Estimated Connections */
+            estimated_connections: number;
+            /** Estimated Duration Ms */
+            estimated_duration_ms: number;
+            /** Estimated Cost Microusd */
+            estimated_cost_microusd: number;
+            /**
+             * Risk Class
+             * @default low
+             * @constant
+             */
+            risk_class: "low";
+            /**
+             * Side Effect Class
+             * @default read_only
+             * @constant
+             */
+            side_effect_class: "read_only";
+            /**
+             * Interaction Class
+             * @enum {string}
+             */
+            interaction_class: "read_only_bootstrap" | "read_only_discovery";
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Proposal Digest */
+            proposal_digest: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** ToolRequestV1 */
+        ToolRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-request.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-request.v1";
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Proposal Id
+             * Format: uuid
+             */
+            tool_proposal_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Scope Policy Snapshot Id
+             * Format: uuid
+             */
+            scope_policy_snapshot_id: string;
+            /** Scope Policy Digest */
+            scope_policy_digest: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Effective Limits Digest */
+            effective_limits_digest: string;
+            /** Result Key Audience */
+            result_key_audience: string;
+            /** Request Digest */
+            request_digest: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "accepted" | "dispatched" | "running" | "terminal";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** ToolResultV1 */
+        ToolResultV1: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-result.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-result.v1";
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Runner Protocol Version
+             * @default sccap.pentest.tool-worker.v1
+             * @constant
+             */
+            runner_protocol_version: "sccap.pentest.tool-worker.v1";
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Dispatch Generation */
+            dispatch_generation: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "completed" | "failed" | "cancelled" | "timed_out" | "blocked" | "inconclusive";
+            /** Terminal */
+            terminal: boolean;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Adapter Id */
+            adapter_id: string;
+            /** Adapter Contract Version */
+            adapter_contract_version: string;
+            /** Tool Runtime Version */
+            tool_runtime_version: string;
+            /** Configuration Digest */
+            configuration_digest: string;
+            /** Evidence Refs */
+            evidence_refs?: string[];
+            /** Normalized Result Refs */
+            normalized_result_refs?: string[];
+            /** Requests Consumed */
+            requests_consumed: number;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Side Effects Observed */
+            side_effects_observed?: string[];
+            /** Mutation Refs */
+            mutation_refs?: string[];
+            /** Cleanup Obligation Refs */
+            cleanup_obligation_refs?: string[];
+            /** Callback Expectation Refs */
+            callback_expectation_refs?: string[];
+            error?: components["schemas"]["PentestErrorV1"] | null;
+            /** Cancellation Generation Observed */
+            cancellation_generation_observed: number;
+            /** Runner Id */
+            runner_id: string;
+            /** Nonce */
+            nonce: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /** Signature */
+            signature: string;
+            /**
+             * Dispatch Id
+             * Format: uuid
+             */
+            dispatch_id: string;
+            /** Lease Owner Id */
+            lease_owner_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /**
+             * Interaction State
+             * @enum {string}
+             */
+            interaction_state: "not_started" | "prepared" | "interaction_started" | "interaction_observed_complete" | "evidence_uploading" | "result_submitted";
+            /** Result Key Audience */
+            result_key_audience: string;
+            /** Result Idempotency Key */
+            result_idempotency_key: string;
+            /** Verified Upload Receipt Digests */
+            verified_upload_receipt_digests?: string[];
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "completed" | "failed" | "cancelled" | "timed_out" | "blocked" | "inconclusive";
+            /**
+             * Result Id
+             * Format: uuid
+             */
+            result_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Adapter Session Id
+             * Format: uuid
+             */
+            adapter_session_id: string;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Reason Code */
+            reason_code: string;
+            /** Observations */
+            observations?: components["schemas"]["NormalizedToolObservationV1"][];
+            /** Raw Evidence Refs */
+            raw_evidence_refs?: string[];
+            /** Derived Evidence Refs */
+            derived_evidence_refs?: string[];
+            /** Request Count */
+            request_count: number;
+            /** Connection Count */
+            connection_count: number;
+            /** Response Bytes */
+            response_bytes: number;
+            /** Runtime Receipt Digest */
+            runtime_receipt_digest: string;
+            /** Cleanup Receipt Digest */
+            cleanup_receipt_digest?: string | null;
+            /** Canonical Digest */
+            canonical_digest: string;
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /** Signature Audience */
+            signature_audience: string;
+        };
+        /** ToolTaskLocatorV1 */
+        ToolTaskLocatorV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-locator.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-locator.v1";
+            /**
+             * Outbox Id
+             * Format: uuid
+             */
+            outbox_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Dispatch Id
+             * Format: uuid
+             */
+            dispatch_id: string;
+            /** Dispatch Generation */
+            dispatch_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Task Digest */
+            task_digest: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Locator Digest */
+            locator_digest: string;
+            /** Signing Key Id */
+            signing_key_id: string;
+            /**
+             * Signature Algorithm
+             * @default Ed25519
+             * @constant
+             */
+            signature_algorithm: "Ed25519";
+            /** Signature Audience */
+            signature_audience: string;
+            /** Signature */
+            signature: string;
+        };
+        /** ToolWorkerClaimRequestV1 */
+        ToolWorkerClaimRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-claim.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-claim.v1";
+            locator: components["schemas"]["ToolTaskLocatorV1"];
+            /** Worker Id */
+            worker_id: string;
+            /** Capability Digest */
+            capability_digest: string;
+        };
+        /** ToolWorkerClaimResponseV1 */
+        ToolWorkerClaimResponseV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-claim-response.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-claim-response.v1";
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Lease State Version */
+            lease_state_version: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /**
+             * Lease Expires At
+             * Format: date-time
+             */
+            lease_expires_at: string;
+            signed_task: components["schemas"]["ToolExecutionTaskV1"];
+            adapter_snapshot: components["schemas"]["AdapterSnapshotV1"];
+            /** Typed Arguments */
+            typed_arguments: components["schemas"]["BootstrapObservationArgumentsV1"] | components["schemas"]["BrowserObservationArgumentsV1"] | components["schemas"]["ZapPassiveArgumentsV1"] | components["schemas"]["NucleiObservationArgumentsV1"] | components["schemas"]["NmapDiscoveryArgumentsV1"];
+            /** Terminal Result */
+            terminal_result?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** ToolWorkerCleanupRequestV1 */
+        ToolWorkerCleanupRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-cleanup.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-cleanup.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Worker Id */
+            worker_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Verified */
+            verified: boolean;
+            /** Reason Code */
+            reason_code: string;
+            /** Cleanup Receipt Digest */
+            cleanup_receipt_digest: string;
+        };
+        /** ToolWorkerEvidenceUploadRequestV1 */
+        ToolWorkerEvidenceUploadRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-evidence-upload.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-evidence-upload.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /**
+             * Invocation Id
+             * Format: uuid
+             */
+            invocation_id: string;
+            /** Invocation Digest */
+            invocation_digest: string;
+            /** Worker Id */
+            worker_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Process Result Digest */
+            process_result_digest: string;
+            /** Artifacts */
+            artifacts: components["schemas"]["SupervisorArtifactUploadV1"][];
+        };
+        /** ToolWorkerEvidenceUploadResponseV1 */
+        ToolWorkerEvidenceUploadResponseV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-evidence-upload-result.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-evidence-upload-result.v1";
+            /** Receipts */
+            receipts?: components["schemas"]["UploadedArtifactReceiptV1"][];
+            /** Evidence Bytes */
+            evidence_bytes: number;
+            /** Upload Set Digest */
+            upload_set_digest: string;
+        };
+        /** ToolWorkerInvocationRequestV1 */
+        ToolWorkerInvocationRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-invocation-request.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-invocation-request.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Worker Id */
+            worker_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Isolation Receipt Digest */
+            isolation_receipt_digest: string;
+            /** Relay Workload Id */
+            relay_workload_id?: string | null;
+            /** Relay Workload Public Key */
+            relay_workload_public_key?: string | null;
+            /** Relay Workload Key Thumbprint */
+            relay_workload_key_thumbprint?: string | null;
+        };
+        /** ToolWorkerInvocationRequestV2 */
+        ToolWorkerInvocationRequestV2: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-invocation-request.v2
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-invocation-request.v2";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Adapter Snapshot Id
+             * Format: uuid
+             */
+            adapter_snapshot_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Worker Id */
+            worker_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Isolation Receipt Digest */
+            isolation_receipt_digest: string;
+            /** Relay Workload Id */
+            relay_workload_id?: string | null;
+            /** Relay Workload Public Key */
+            relay_workload_public_key?: string | null;
+            /** Relay Workload Key Thumbprint */
+            relay_workload_key_thumbprint?: string | null;
+        };
+        /** ToolWorkerIsolationRequestV1 */
+        ToolWorkerIsolationRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-isolation.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-isolation.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Worker Id */
+            worker_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /** Isolation Receipt Digest */
+            isolation_receipt_digest: string;
+        };
+        /** ToolWorkerResolvedAuthorityV1 */
+        ToolWorkerResolvedAuthorityV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-authority.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-authority.v1";
+            invocation: components["schemas"]["ResolvedAdapterInvocationV1"];
+            relay_grant?: components["schemas"]["RelaySessionGrantV1"] | null;
+        };
+        /** ToolWorkerResolvedAuthorityV2 */
+        ToolWorkerResolvedAuthorityV2: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-authority.v2
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-authority.v2";
+            invocation: components["schemas"]["ResolvedAdapterInvocationV2"];
+            relay_grant?: components["schemas"]["RelaySessionGrantV2"] | null;
+        };
+        /** ToolWorkerStageRequestV1 */
+        ToolWorkerStageRequestV1: {
+            /** Extensions */
+            extensions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Schema Version
+             * @default sccap.pentest.tool-worker-stage.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.tool-worker-stage.v1";
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /**
+             * Tool Request Id
+             * Format: uuid
+             */
+            tool_request_id: string;
+            /**
+             * Runtime Session Id
+             * Format: uuid
+             */
+            runtime_session_id: string;
+            /** Worker Id */
+            worker_id: string;
+            /** Lease Generation */
+            lease_generation: number;
+            /** Lease State Version */
+            lease_state_version: number;
+            /** Cancellation Generation */
+            cancellation_generation: number;
+            /**
+             * Next State
+             * @enum {string}
+             */
+            next_state: "prepared" | "interaction_started" | "interaction_observed_complete" | "evidence_uploading" | "result_submitted";
+        };
         /** TransitionRequest */
         TransitionRequest: {
             /** Reason */
@@ -12745,6 +15614,21 @@ export interface components {
             ssl?: boolean | null;
             /** Password */
             password?: string | null;
+        };
+        /** UploadedArtifactReceiptV1 */
+        UploadedArtifactReceiptV1: {
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /**
+             * Evidence Id
+             * Format: uuid
+             */
+            evidence_id: string;
+            /** Receipt Digest */
+            receipt_digest: string;
         };
         /** UsageBreakdownItem */
         UsageBreakdownItem: {
@@ -13821,6 +16705,74 @@ export interface components {
             disposition_at?: string | null;
             /** Disposition Note */
             disposition_note?: string | null;
+        };
+        /** ZapInvocationMaterialV1 */
+        ZapInvocationMaterialV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            material_kind: "zap";
+            /**
+             * Traffic Manifest Ref
+             * Format: uuid
+             */
+            traffic_manifest_ref: string;
+            /**
+             * Assessment Runtime Id
+             * Format: uuid
+             */
+            assessment_runtime_id: string;
+            /**
+             * Relay Capability Handle
+             * Format: uuid
+             */
+            relay_capability_handle: string;
+            /**
+             * Api Capability Handle
+             * Format: uuid
+             */
+            api_capability_handle: string;
+            /**
+             * Ca Public Ref
+             * Format: uuid
+             */
+            ca_public_ref: string;
+            /**
+             * Context Ref
+             * Format: uuid
+             */
+            context_ref: string;
+            /** Passive Rule Bundle Digest */
+            passive_rule_bundle_digest: string;
+        };
+        /** ZapPassiveArgumentsV1 */
+        ZapPassiveArgumentsV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            argument_kind: "zap_passive";
+            /**
+             * Traffic Manifest Ref
+             * Format: uuid
+             */
+            traffic_manifest_ref: string;
+            /**
+             * Zap Runtime Ref
+             * Format: uuid
+             */
+            zap_runtime_ref: string;
+            /**
+             * Passive Rule Bundle Ref
+             * Format: uuid
+             */
+            passive_rule_bundle_ref: string;
+            /**
+             * Context Policy Ref
+             * Format: uuid
+             */
+            context_policy_ref: string;
         };
         /** _SubscriptionKeys */
         _SubscriptionKeys: {
@@ -15349,6 +18301,323 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RunnerClaimResponseV1"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_gateway_claim_api_v1_pentesting_internal_tool_gateway_claim_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Tool-Worker-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolWorkerClaimRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolWorkerClaimResponseV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_gateway_isolation_api_v1_pentesting_internal_tool_gateway_isolation_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Tool-Worker-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolWorkerIsolationRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_gateway_invocation_api_v1_pentesting_internal_tool_gateway_invocation_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Tool-Worker-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolWorkerInvocationRequestV1"] | components["schemas"]["ToolWorkerInvocationRequestV2"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolWorkerResolvedAuthorityV1"] | components["schemas"]["ToolWorkerResolvedAuthorityV2"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_gateway_stage_api_v1_pentesting_internal_tool_gateway_stage_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Tool-Worker-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolWorkerStageRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_gateway_evidence_api_v1_pentesting_internal_tool_gateway_evidence_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Tool-Worker-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolWorkerEvidenceUploadRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolWorkerEvidenceUploadResponseV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_gateway_result_api_v1_pentesting_internal_tool_gateway_result_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Tool-Worker-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolResultV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tool_gateway_cleanup_api_v1_pentesting_internal_tool_gateway_cleanup_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Tool-Worker-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToolWorkerCleanupRequestV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relay_authorize_connection_api_v1_pentesting_internal_relay_authorize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionAuthorizationRequestV1"] | components["schemas"]["ConnectionAuthorizationRequestV2"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedConnectionPermitV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relay_revoke_connection_api_v1_pentesting_internal_relay_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionPermitRevocationV1"] | components["schemas"]["ConnectionPermitRevocationV2"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

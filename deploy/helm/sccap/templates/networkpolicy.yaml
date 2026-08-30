@@ -1,6 +1,6 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $root := . -}}
-{{- $components := list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "pentest-controller" "pentest-runner-v3" "otel-collector" "migration" -}}
+{{- $components := list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "pentest-controller" "pentest-runner-v3" "pentest-tool-worker" "otel-collector" "migration" -}}
 {{- range $component := $components }}
 {{- $enabled := true -}}
 {{- if and (eq $component "worker-unified") (not $root.Values.workerPools.unified.enabled) }}{{- $enabled = false -}}{{- end }}
@@ -9,6 +9,7 @@
 {{- if and (eq $component "migration") (not $root.Values.migrations.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (eq $component "pentest-runner-v3") (not $root.Values.runnerV3.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (eq $component "pentest-controller") (not $root.Values.pentestController.enabled) }}{{- $enabled = false -}}{{- end }}
+{{- if and (eq $component "pentest-tool-worker") (not $root.Values.pentestToolPack.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if $enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -93,6 +94,25 @@ spec:
         - ipBlock: {cidr: {{ $cidr | quote }}}
       ports: [{protocol: TCP, port: 443}]
     {{- end }}
+    {{- else if eq $component "pentest-tool-worker" }}
+    # The supervisor has no target route. It can reconcile via the API,
+    # consume one queue, and create/delete only allowlisted runtime resources
+    # through the namespace-scoped Kubernetes identity.
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "sccap.selectorLabels" $root | nindent 14 }}
+              app.kubernetes.io/component: api
+      ports: [{protocol: TCP, port: 8000}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: rabbitmq}
+      ports: [{protocol: TCP, port: 5671}, {protocol: TCP, port: 5672}]
+    {{- range $cidr := $root.Values.pentestToolPack.runtimeManager.apiServerCidrs }}
+    - to:
+        - ipBlock: {cidr: {{ $cidr | quote }}}
+      ports: [{protocol: TCP, port: 443}, {protocol: TCP, port: 6443}]
+    {{- end }}
     {{- else }}
     # Runtime dependencies deployed in the SCCAP namespace only.
     - to:
@@ -136,7 +156,7 @@ spec:
             cidr: 2000::/3
             except: [2001::/23, 2001:2::/48, 2001:db8::/32, 2002::/16, 3fff::/20]
     {{- end }}
-    {{- if ne $component "pentest-controller" }}
+    {{- if not (has $component (list "pentest-controller" "pentest-tool-worker")) }}
     {{- range $destination := $root.Values.networkPolicy.externalInfrastructure }}
     - to:
         - ipBlock: {cidr: {{ $destination.cidr | quote }}}

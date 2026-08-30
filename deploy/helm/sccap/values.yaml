@@ -20,6 +20,8 @@ runtime:
   migrationSecret: sccap-migration-runtime
   runnerV3Secret: sccap-pentest-runner-v3-runtime
   pentestControllerSecret: sccap-pentest-controller-runtime
+  pentestToolWorkerSecret: sccap-pentest-tool-worker-runtime
+  pentestRelayTrustConfigMap: sccap-pentest-relay-trust
   existingConfigMap: ""
 
 serviceAccount:
@@ -97,6 +99,61 @@ pentestController:
   resources:
     requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 16Mi}
     limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 64Mi}
+
+# Capability 5 is default-off. Enabling it requires immutable image references
+# for every admitted runtime and explicit Kubernetes API CIDRs for the
+# namespace-scoped runtime manager. Registration alone never implies ready.
+pentestToolPack:
+  enabled: false
+  queue: pentest_tool_queue_v1
+  minReplicas: 1
+  maxReplicas: 8
+  backlogTarget: 1
+  oldestAgeTargetSeconds: 60
+  capabilityDigest: "0000000000000000000000000000000000000000000000000000000000000000"
+  resultSigningKey: result-signing-seed
+  resultSigningKeyId: pentest-capability5-result-v1
+  supervisor:
+    replicas: 1
+    resources:
+      requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 256Mi}
+      limits: {cpu: "1", memory: 1Gi, ephemeral-storage: 1Gi}
+  runtimeManager:
+    serviceAccountName: ""
+    apiServerCidrs: []
+    jobTtlSeconds: 600
+    # Release automation supplies a dedicated immutable relay runtime image.
+    relayImage: ""
+    # Enabling the tool pack in Kubernetes also requires the cluster operator
+    # to attest that the namespace's ephemeral relay Secrets are encrypted.
+    secretEncryptionAtRestReady: false
+    # Immutable public-only relay configuration. Release automation supplies
+    # active/retiring Ed25519 public-key metadata for distinct grant and
+    # one-connection permit authorities. No private material is accepted here.
+    relayPublicConfig:
+      version: 1
+      gatewayEndpoint: ""
+      grantKeys: []
+      permitKeys: []
+  # Exact repository@sha256 references are supplied by the release pipeline.
+  # Empty values fail Helm rendering when pentestToolPack.enabled=true.
+  runtimes:
+    playwright:
+      image: ""
+      command: [/opt/sccap-tool-runtimes/playwright-observe, --kubernetes-attach-v1]
+      egressMode: relay
+    zap:
+      image: ""
+      command: [/opt/sccap-tool-runtimes/zap-passive, --kubernetes-attach-v1]
+      egressMode: relay
+    nuclei:
+      image: ""
+      command: [/opt/sccap-tool-runtimes/nuclei-observe, --kubernetes-attach-v1]
+      egressMode: relay
+    nmap:
+      image: ""
+      command: [/opt/sccap-tool-runtimes/nmap-connect, --kubernetes-attach-v1]
+      egressMode: exact-pinned
 
 autoscaling:
   keda:

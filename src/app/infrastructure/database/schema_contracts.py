@@ -58,8 +58,7 @@ def _add_index(
     if any(index.name == name for index in table.indexes):
         return
     expressions = [
-        table.c[column].desc() if descending else table.c[column]
-        for column in columns
+        table.c[column].desc() if descending else table.c[column] for column in columns
     ]
     options: dict[str, object] = {"unique": unique}
     if where is not None:
@@ -86,9 +85,7 @@ def _register_offline_bundle_ledger() -> None:
             sa.Column(
                 "previous_deployment_id",
                 PG_UUID(as_uuid=True),
-                sa.ForeignKey(
-                    "offline_bundle_deployments.id", ondelete="RESTRICT"
-                ),
+                sa.ForeignKey("offline_bundle_deployments.id", ondelete="RESTRICT"),
             ),
             sa.Column("manifest", JSONB(), nullable=False),
             sa.Column("actor", sa.String(128), nullable=False),
@@ -133,7 +130,11 @@ def _register_indexes() -> None:
             "state IN ('pending', 'decided', 'resume_claimed')",
         ),
         ("auth_audit_events", "ix_auth_audit_events_tenant_id", ("tenant_id",)),
-        ("evidence_objects", "ix_evidence_objects_retention", ("state", "legal_hold", "retain_until")),
+        (
+            "evidence_objects",
+            "ix_evidence_objects_retention",
+            ("state", "legal_hold", "retain_until"),
+        ),
         ("findings", "ix_findings_scan_bucket", ("scan_id", "finding_bucket")),
         (
             "governance_legal_holds",
@@ -161,14 +162,42 @@ def _register_indexes() -> None:
             "ix_provider_reconciliation_runs_completed_at",
             ("completed_at",),
         ),
-        ("rule_foundry_candidates", "ix_rule_foundry_candidates_expires_at", ("expires_at",)),
-        ("rule_foundry_candidates", "ix_rule_foundry_candidates_source_attempt_id", ("source_attempt_id",)),
-        ("rule_foundry_candidates", "ix_rule_foundry_candidates_source_finding_id", ("source_finding_id",)),
-        ("rule_foundry_candidates", "ix_rule_foundry_candidates_source_scan_id", ("source_scan_id",)),
-        ("rule_foundry_deployments", "ix_rule_foundry_deployments_candidate_id", ("candidate_id",)),
+        (
+            "rule_foundry_candidates",
+            "ix_rule_foundry_candidates_expires_at",
+            ("expires_at",),
+        ),
+        (
+            "rule_foundry_candidates",
+            "ix_rule_foundry_candidates_source_attempt_id",
+            ("source_attempt_id",),
+        ),
+        (
+            "rule_foundry_candidates",
+            "ix_rule_foundry_candidates_source_finding_id",
+            ("source_finding_id",),
+        ),
+        (
+            "rule_foundry_candidates",
+            "ix_rule_foundry_candidates_source_scan_id",
+            ("source_scan_id",),
+        ),
+        (
+            "rule_foundry_deployments",
+            "ix_rule_foundry_deployments_candidate_id",
+            ("candidate_id",),
+        ),
         ("rule_foundry_deployments", "ix_rule_foundry_deployments_state", ("state",)),
-        ("rule_foundry_deployments", "ix_rule_foundry_deployments_tenant_id", ("tenant_id",)),
-        ("rule_foundry_deployments", "ix_rule_foundry_deployments_version_id", ("version_id",)),
+        (
+            "rule_foundry_deployments",
+            "ix_rule_foundry_deployments_tenant_id",
+            ("tenant_id",),
+        ),
+        (
+            "rule_foundry_deployments",
+            "ix_rule_foundry_deployments_version_id",
+            ("version_id",),
+        ),
         (
             "rule_foundry_deployments",
             "uq_rule_foundry_active_deployment",
@@ -176,18 +205,58 @@ def _register_indexes() -> None:
             True,
             "ended_at IS NULL",
         ),
-        ("rule_foundry_events", "ix_rule_foundry_events_candidate_id", ("candidate_id",)),
+        (
+            "rule_foundry_events",
+            "ix_rule_foundry_events_candidate_id",
+            ("candidate_id",),
+        ),
         ("rule_foundry_events", "ix_rule_foundry_events_created_at", ("created_at",)),
         ("rule_foundry_events", "ix_rule_foundry_events_tenant_id", ("tenant_id",)),
-        ("rule_foundry_gitleaks_candidates", "ix_rule_foundry_gitleaks_candidates_tenant_id", ("tenant_id",)),
-        ("rule_foundry_osv_candidates", "ix_rule_foundry_osv_candidates_tenant_id", ("tenant_id",)),
-        ("rule_foundry_semgrep_candidates", "ix_rule_foundry_semgrep_candidates_tenant_id", ("tenant_id",)),
-        ("rule_foundry_shadow_observations", "ix_rule_foundry_shadow_observations_attempt_id", ("attempt_id",)),
-        ("rule_foundry_shadow_observations", "ix_rule_foundry_shadow_observations_deployment_id", ("deployment_id",)),
-        ("rule_foundry_shadow_observations", "ix_rule_foundry_shadow_observations_scan_id", ("scan_id",)),
-        ("rule_foundry_shadow_observations", "ix_rule_foundry_shadow_observations_tenant_id", ("tenant_id",)),
-        ("rule_foundry_versions", "ix_rule_foundry_versions_candidate_id", ("candidate_id",)),
-        ("rule_foundry_versions", "ix_rule_foundry_versions_payload_sha256", ("payload_sha256",)),
+        (
+            "rule_foundry_gitleaks_candidates",
+            "ix_rule_foundry_gitleaks_candidates_tenant_id",
+            ("tenant_id",),
+        ),
+        (
+            "rule_foundry_osv_candidates",
+            "ix_rule_foundry_osv_candidates_tenant_id",
+            ("tenant_id",),
+        ),
+        (
+            "rule_foundry_semgrep_candidates",
+            "ix_rule_foundry_semgrep_candidates_tenant_id",
+            ("tenant_id",),
+        ),
+        (
+            "rule_foundry_shadow_observations",
+            "ix_rule_foundry_shadow_observations_attempt_id",
+            ("attempt_id",),
+        ),
+        (
+            "rule_foundry_shadow_observations",
+            "ix_rule_foundry_shadow_observations_deployment_id",
+            ("deployment_id",),
+        ),
+        (
+            "rule_foundry_shadow_observations",
+            "ix_rule_foundry_shadow_observations_scan_id",
+            ("scan_id",),
+        ),
+        (
+            "rule_foundry_shadow_observations",
+            "ix_rule_foundry_shadow_observations_tenant_id",
+            ("tenant_id",),
+        ),
+        (
+            "rule_foundry_versions",
+            "ix_rule_foundry_versions_candidate_id",
+            ("candidate_id",),
+        ),
+        (
+            "rule_foundry_versions",
+            "ix_rule_foundry_versions_payload_sha256",
+            ("payload_sha256",),
+        ),
         ("rule_foundry_versions", "ix_rule_foundry_versions_tenant_id", ("tenant_id",)),
         (
             "scan_attempts",
@@ -203,7 +272,11 @@ def _register_indexes() -> None:
             False,
             "published_at IS NULL",
         ),
-        ("scan_tasks", "ix_scan_tasks_scan_type_input_hash", ("scan_id", "task_type", "input_hash")),
+        (
+            "scan_tasks",
+            "ix_scan_tasks_scan_type_input_hash",
+            ("scan_id", "task_type", "input_hash"),
+        ),
         ("user", "ix_user_tenant_id", ("tenant_id",)),
         ("user_group_memberships", "ix_user_group_memberships_user_id", ("user_id",)),
     )
@@ -241,7 +314,11 @@ def _register_indexes() -> None:
 
 def _register_checks() -> None:
     checks = (
-        ("integration_delivery_audit", "ck_integration_delivery_audit_attempt", "attempt > 0"),
+        (
+            "integration_delivery_audit",
+            "ck_integration_delivery_audit_attempt",
+            "attempt > 0",
+        ),
         (
             "integration_outbox",
             "ck_integration_outbox_attempts",
@@ -293,8 +370,7 @@ def _register_checks() -> None:
             "usage_budget_policies",
             "ck_usage_budget_policies_caps_nonnegative",
             " AND ".join(
-                f"cap_{name} IS NULL OR cap_{name} >= 0"
-                for name in _TOKEN_AMOUNT_NAMES
+                f"cap_{name} IS NULL OR cap_{name} >= 0" for name in _TOKEN_AMOUNT_NAMES
             ),
         ),
         (
@@ -320,6 +396,14 @@ def _register_checks() -> None:
 def register_schema_contracts() -> None:
     """Idempotently register every non-column PostgreSQL schema contract."""
 
+    # Pentesting may already be present in ``sys.modules`` when Alembic loads
+    # the shared ledger models. Re-run the idempotent cross-context FK hook
+    # after every model module is populated so metadata is import-order safe.
+    from app.pentesting.persistence.models import (
+        register_shared_pentest_attempt_foreign_keys,
+    )
+
+    register_shared_pentest_attempt_foreign_keys()
     _register_offline_bundle_ledger()
     _register_indexes()
     _register_checks()

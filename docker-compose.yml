@@ -23,6 +23,10 @@ services:
       - EVIDENCE_S3_ENDPOINT=http://evidence-minio:9000
       - EVIDENCE_S3_ACCESS_KEY_ID=${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
       - EVIDENCE_S3_SECRET_ACCESS_KEY=${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
+      - PENTEST_CAPABILITY5_ENABLED=${PENTEST_CAPABILITY5_ENABLED:-false}
+      - RABBITMQ_PENTEST_TOOL_QUEUE=${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
+      - PENTEST_TOOL_GATEWAY_TOKEN=${PENTEST_TOOL_GATEWAY_TOKEN:-}
+      - PENTEST_TOOL_WORKER_CAPABILITY_DIGEST=${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
@@ -109,6 +113,8 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
       RABBITMQ_PENTEST_CONTROLLER_USER: ${RABBITMQ_PENTEST_CONTROLLER_USER:-pentest_controller}
       RABBITMQ_PENTEST_CONTROLLER_PASS: ${RABBITMQ_PENTEST_CONTROLLER_PASS:-pentest-controller-local-only}
+      RABBITMQ_PENTEST_TOOL_USER: ${RABBITMQ_PENTEST_TOOL_USER:-pentest_tool_worker}
+      RABBITMQ_PENTEST_TOOL_PASS: ${RABBITMQ_PENTEST_TOOL_PASS:-pentest-tool-local-only}
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -setcookie ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
     ports:
@@ -349,6 +355,60 @@ services:
       - pentest-control
       - pentest-egress
     command: ["python", "-m", "app.infrastructure.pentesting.runner_v3.main"]
+
+  # Capability 5 supervisor. It reconciles signed notifications and launches
+  # only digest-qualified adapter processes. This container has no target,
+  # database, object-store, provider, Docker/Kubernetes API, or ambient proxy.
+  pentest-tool-worker:
+    profiles: ["pentesting-v5"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tool-supervisor
+    container_name: sccap_pentest_tool_worker
+    user: "1001:1001"
+    volumes:
+      - ./src:/app/src:ro
+      - ${PENTEST_TOOL_RESULT_SIGNING_KEY_FILE:-./.secrets/pentest-tool-result-signing.key}:/run/secrets/pentest-tool-result-signing.key:ro
+    environment:
+      PYTHONPATH: /app/src
+      PENTEST_TOOL_WORKER_RABBIT_URL: ${RABBITMQ_PENTEST_TOOL_URL:-amqp://pentest_tool_worker:pentest-tool-local-only@rabbitmq/}
+      PENTEST_TOOL_WORKER_QUEUE: ${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
+      PENTEST_TOOL_WORKER_GATEWAY_URL: http://app:8000
+      PENTEST_TOOL_WORKER_GATEWAY_TOKEN: ${PENTEST_TOOL_GATEWAY_TOKEN:-}
+      PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS: ${PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS:-}
+      PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: ${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
+      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: '${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{"playwright_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","zap_passive.v1":"0000000000000000000000000000000000000000000000000000000000000000","nuclei_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","nmap_connect.v1":"0000000000000000000000000000000000000000000000000000000000000000"}}'
+      PENTEST_TOOL_WORKER_ID: ${PENTEST_TOOL_WORKER_ID:-pentest-tool-worker-v1}
+      PENTEST_TOOL_WORKER_WORKSPACE_ROOT: /work
+      PENTEST_TOOL_RESULT_SIGNING_KEY_FILE: /run/secrets/pentest-tool-result-signing.key
+      PENTEST_TOOL_RESULT_SIGNING_KEY_ID: ${PENTEST_TOOL_RESULT_SIGNING_KEY_ID:-pentest-capability5-result-local}
+      PENTEST_TOOL_RESULT_KEY_AUDIENCE: ${PENTEST_TOOL_RESULT_KEY_AUDIENCE:-pentest-result:foundation2}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: ""
+    read_only: true
+    tmpfs:
+      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
+      - /work:size=536870912,mode=0700,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1.0
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+      app: {condition: service_started}
+    networks:
+      - pentest-control
+    command: ["python", "-m", "app.infrastructure.pentesting.tool_worker.main"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.infrastructure.pentesting.tool_worker.main", "--health-check"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
 
   patch-validator:
     build:
@@ -754,3 +814,6 @@ networks:
     internal: true
   pentest-egress:
     driver: bridge
+  pentest-tool-runtime:
+    driver: bridge
+    internal: true

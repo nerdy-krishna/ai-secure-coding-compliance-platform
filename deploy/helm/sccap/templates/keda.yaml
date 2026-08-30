@@ -72,3 +72,40 @@ spec:
         value: "1"
         hostFromEnv: RABBITMQ_PENTEST_CONTROLLER_URL
 {{- end }}
+{{- if and .Values.autoscaling.keda.enabled .Values.pentestToolPack.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "sccap.fullname" . }}-pentest-tool-worker
+  labels:
+    {{- include "sccap.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "sccap.fullname" . }}-pentest-tool-worker
+  pollingInterval: {{ .Values.autoscaling.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.autoscaling.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.pentestToolPack.minReplicas }}
+  maxReplicaCount: {{ .Values.pentestToolPack.maxReplicas }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.autoscaling.keda.scaleDownStabilizationSeconds }}
+          policies: [{type: Percent, value: 25, periodSeconds: 60}]
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: auto
+        mode: QueueLength
+        queueName: {{ .Values.pentestToolPack.queue | quote }}
+        value: {{ .Values.pentestToolPack.backlogTarget | quote }}
+        hostFromEnv: PENTEST_TOOL_WORKER_RABBIT_URL
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.autoscaling.keda.rabbitmqPrometheusAddress | quote }}
+        metricName: sccap_pentest_tool_oldest_message_age_seconds
+        threshold: {{ .Values.pentestToolPack.oldestAgeTargetSeconds | quote }}
+        query: >-
+          clamp_min(time() - (max(rabbitmq_detailed_queue_head_message_timestamp{queue="{{ .Values.pentestToolPack.queue }}"}) or vector(time())), 0)
+{{- end }}

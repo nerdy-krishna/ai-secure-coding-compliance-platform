@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["images", "runtime", "workerPools", "runnerV3", "pentestController", "autoscaling", "drain"],
+  "required": ["images", "runtime", "workerPools", "runnerV3", "pentestController", "pentestToolPack", "autoscaling", "drain"],
   "properties": {
     "images": {
       "type": "object",
@@ -13,7 +13,7 @@
     },
     "runtime": {
       "type": "object",
-      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret", "pentestControllerSecret"],
+      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret", "pentestControllerSecret", "pentestToolWorkerSecret", "pentestRelayTrustConfigMap"],
       "properties": {
         "apiSecret": {"type": "string", "minLength": 1},
         "scannerSecret": {"type": "string", "minLength": 1},
@@ -22,7 +22,9 @@
         "unifiedSecret": {"type": "string", "minLength": 1},
         "migrationSecret": {"type": "string", "minLength": 1},
         "runnerV3Secret": {"type": "string", "minLength": 1},
-        "pentestControllerSecret": {"type": "string", "minLength": 1}
+        "pentestControllerSecret": {"type": "string", "minLength": 1},
+        "pentestToolWorkerSecret": {"type": "string", "minLength": 1},
+        "pentestRelayTrustConfigMap": {"type": "string", "minLength": 1}
       }
     },
     "workerPools": {
@@ -62,6 +64,55 @@
         "resources": {"type": "object"}
       }
     },
+    "pentestToolPack": {
+      "type": "object",
+      "required": ["enabled", "queue", "minReplicas", "maxReplicas", "backlogTarget", "oldestAgeTargetSeconds", "capabilityDigest", "resultSigningKey", "resultSigningKeyId", "supervisor", "runtimeManager", "runtimes"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "queue": {"type": "string", "minLength": 1},
+        "minReplicas": {"type": "integer", "minimum": 1},
+        "maxReplicas": {"type": "integer", "minimum": 1},
+        "backlogTarget": {"type": "integer", "minimum": 1},
+        "oldestAgeTargetSeconds": {"type": "integer", "minimum": 1},
+        "capabilityDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "resultSigningKey": {"type": "string", "minLength": 1},
+        "resultSigningKeyId": {"type": "string", "minLength": 1},
+        "supervisor": {"$ref": "#/$defs/toolWorkload"},
+        "runtimeManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["serviceAccountName", "apiServerCidrs", "jobTtlSeconds", "relayImage", "secretEncryptionAtRestReady", "relayPublicConfig"],
+          "properties": {
+            "serviceAccountName": {"type": "string"},
+            "apiServerCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "jobTtlSeconds": {"type": "integer", "minimum": 60},
+            "relayImage": {"type": "string"},
+            "secretEncryptionAtRestReady": {"type": "boolean"},
+            "relayPublicConfig": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["version", "gatewayEndpoint", "grantKeys", "permitKeys"],
+              "properties": {
+                "version": {"type": "integer", "minimum": 1},
+                "gatewayEndpoint": {"type": "string"},
+                "grantKeys": {"type": "array", "items": {"$ref": "#/$defs/relayPublicKey"}},
+                "permitKeys": {"type": "array", "items": {"$ref": "#/$defs/relayPublicKey"}}
+              }
+            }
+          }
+        },
+        "runtimes": {
+          "type": "object",
+          "required": ["playwright", "zap", "nuclei", "nmap"],
+          "properties": {
+            "playwright": {"$ref": "#/$defs/toolRuntime"},
+            "zap": {"$ref": "#/$defs/toolRuntime"},
+            "nuclei": {"$ref": "#/$defs/toolRuntime"},
+            "nmap": {"$ref": "#/$defs/toolRuntime"}
+          }
+        }
+      }
+    },
     "drain": {
       "type": "object",
       "properties": {
@@ -88,6 +139,39 @@
         "minReplicas": {"type": "integer", "minimum": 1},
         "maxReplicas": {"type": "integer", "minimum": 1},
         "prefetch": {"type": "integer", "minimum": 1, "maximum": 20}
+      }
+    },
+    "toolWorkload": {
+      "type": "object",
+      "required": ["replicas", "resources"],
+      "properties": {
+        "replicas": {"type": "integer", "minimum": 1},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "resources": {"type": "object"}
+      }
+    },
+    "toolRuntime": {
+      "type": "object",
+      "required": ["image", "command", "egressMode"],
+      "properties": {
+        "image": {"type": "string"},
+        "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "egressMode": {"enum": ["relay", "exact-pinned"]}
+      }
+    },
+    "relayPublicKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key_id", "status", "algorithm", "public_key", "not_before", "not_after", "revoked_at", "revocation_code"],
+      "properties": {
+        "key_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "status": {"enum": ["active", "retiring", "revoked"]},
+        "algorithm": {"const": "Ed25519"},
+        "public_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+        "not_before": {"type": "string", "minLength": 20},
+        "not_after": {"type": "string", "minLength": 20},
+        "revoked_at": {"type": ["string", "null"]},
+        "revocation_code": {"type": ["string", "null"]}
       }
     }
   }
