@@ -42,6 +42,18 @@ ensure_user() {
     rabbitmqctl set_permissions -p / "$tool_user" \
       '^pentest_tool_queue_v1$' '^$' '^pentest_tool_queue_v1$'
   fi
+
+  local verifier_user="${RABBITMQ_PENTEST_VERIFICATION_USER:-}"
+  local verifier_pass="${RABBITMQ_PENTEST_VERIFICATION_PASS:-}"
+  if [[ -n "$verifier_user" && -n "$verifier_pass" ]]; then
+    if ! rabbitmqctl list_users -q --no-table-headers \
+        | awk '{print $1}' | grep -qx "$verifier_user"; then
+      echo "rabbitmq-init: creating bounded verification user '$verifier_user'"
+      rabbitmqctl add_user "$verifier_user" "$verifier_pass"
+    fi
+    rabbitmqctl set_permissions -p / "$verifier_user" \
+      '^pentest_verification_queue_v1$' '^$' '^pentest_verification_queue_v1$'
+  fi
 }
 
 ensure_user &

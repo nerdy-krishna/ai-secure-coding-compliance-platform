@@ -1,6 +1,10 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $root := . -}}
-{{- $components := list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "pentest-controller" "pentest-runner-v3" "pentest-tool-worker" "otel-collector" "migration" -}}
+{{- $gatewayControlServiceCidr := printf "%s/32" $root.Values.pentestSessionBroker.gatewayControlServiceAddress -}}
+{{- if contains ":" $root.Values.pentestSessionBroker.gatewayControlServiceAddress -}}
+{{- $gatewayControlServiceCidr = printf "%s/128" $root.Values.pentestSessionBroker.gatewayControlServiceAddress -}}
+{{- end -}}
+{{- $components := list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "pentest-controller" "c67-pipeline" "pentest-verification" "pentest-runner-v3" "pentest-tool-worker" "otel-collector" "migration" -}}
 {{- range $component := $components }}
 {{- $enabled := true -}}
 {{- if and (eq $component "worker-unified") (not $root.Values.workerPools.unified.enabled) }}{{- $enabled = false -}}{{- end }}
@@ -9,6 +13,8 @@
 {{- if and (eq $component "migration") (not $root.Values.migrations.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (eq $component "pentest-runner-v3") (not $root.Values.runnerV3.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (eq $component "pentest-controller") (not $root.Values.pentestController.enabled) }}{{- $enabled = false -}}{{- end }}
+{{- if and (eq $component "c67-pipeline") (not $root.Values.pentestC67Pipeline.enabled) }}{{- $enabled = false -}}{{- end }}
+{{- if and (eq $component "pentest-verification") (not $root.Values.pentestVerification.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if and (eq $component "pentest-tool-worker") (not $root.Values.pentestToolPack.enabled) }}{{- $enabled = false -}}{{- end }}
 {{- if $enabled }}
 apiVersion: networking.k8s.io/v1
@@ -94,6 +100,39 @@ spec:
         - ipBlock: {cidr: {{ $cidr | quote }}}
       ports: [{protocol: TCP, port: 443}]
     {{- end }}
+    {{- else if eq $component "c67-pipeline" }}
+    # PostgreSQL polling and one exact private mTLS control facade only. No
+    # queue, target, broker, KMS, model, object-store or Kubernetes API route.
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgresql}
+      ports: [{protocol: TCP, port: 5432}]
+    {{- range $cidr := $root.Values.pentestC67Pipeline.internalDatabaseCidrs }}
+    - to:
+        - ipBlock: {cidr: {{ $cidr | quote }}}
+      ports: [{protocol: TCP, port: 5432}]
+    {{- end }}
+    - to:
+        - ipBlock: {cidr: {{ $gatewayControlServiceCidr | quote }}}
+      ports: [{protocol: TCP, port: {{ $root.Values.pentestSessionBroker.gatewayControlServicePort }}}]
+    {{- else if eq $component "pentest-verification" }}
+    # No target, model, API, object-store, KMS or Kubernetes API route.
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgresql}
+      ports: [{protocol: TCP, port: 5432}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: rabbitmq}
+      ports: [{protocol: TCP, port: 5671}, {protocol: TCP, port: 5672}]
+    {{- range $cidr := $root.Values.pentestVerification.internalDependencyCidrs }}
+    - to:
+        - ipBlock: {cidr: {{ $cidr | quote }}}
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 5671}
+        - {protocol: TCP, port: 5672}
+    {{- end }}
     {{- else if eq $component "pentest-tool-worker" }}
     # The supervisor has no target route. It can reconcile via the API,
     # consume one queue, and create/delete only allowlisted runtime resources
@@ -156,7 +195,7 @@ spec:
             cidr: 2000::/3
             except: [2001::/23, 2001:2::/48, 2001:db8::/32, 2002::/16, 3fff::/20]
     {{- end }}
-    {{- if not (has $component (list "pentest-controller" "pentest-tool-worker")) }}
+    {{- if not (has $component (list "pentest-controller" "c67-pipeline" "pentest-verification" "pentest-tool-worker")) }}
     {{- range $destination := $root.Values.networkPolicy.externalInfrastructure }}
     - to:
         - ipBlock: {cidr: {{ $destination.cidr | quote }}}
@@ -169,4 +208,94 @@ spec:
 ---
 {{- end }}
 {{- end }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.pentestSessionBroker.enabled }}
+{{- $a25BrokerPort := .Values.pentestSessionBroker.servicePort -}}
+{{- $controlBrokerAddress := .Values.pentestSessionBroker.gatewayControlBrokerAddress -}}
+{{- $controlBrokerCidr := printf "%s/32" $controlBrokerAddress -}}
+{{- if contains ":" $controlBrokerAddress -}}
+{{- $controlBrokerCidr = printf "%s/128" $controlBrokerAddress -}}
+{{- end -}}
+# Exact assigned-relay, Session Broker and pinned-kms rules are generated per
+# Execution by the runtime manager and destroyed with that Pod. This
+# release-level selector is default-deny only; otherwise Kubernetes' additive
+# NetworkPolicy semantics would silently widen every identity Pod to every
+# relay or broker selected by one static rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sccap.fullname" . }}-identity-runtime-a25
+spec:
+  podSelector:
+    matchLabels: {pentest.sccap/identity-runtime: "true"}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []
+# BEGIN C67-A25 IDENTITY EGRESS
+# Per-Execution assigned-relay, pentest-session-broker and pinned-kms only.
+# END C67-A25 IDENTITY EGRESS
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sccap.fullname" . }}-session-broker-a25
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/component: pentest-session-broker}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {pentest.sccap/identity-runtime: "true"}
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.pentestSessionBroker.gatewayControlSelector | nindent 14 }}
+      ports: [{protocol: TCP, port: {{ .Values.pentestSessionBroker.servicePort }}}]
+  egress:
+# BEGIN C67-A25 SESSION BROKER EGRESS
+    {{- range $address := .Values.pentestSessionBroker.databaseEndpointCidrs }}
+    - to:
+        - ipBlock:
+            {{- toYaml (dict "cidr" $address) | nindent 12 }}
+      ports: [{protocol: TCP, port: 5432}]
+    {{- end }}
+    {{- range $address := .Values.pentestSessionBroker.tokenReviewEndpointCidrs }}
+    - to:
+        - ipBlock:
+            {{- toYaml (dict "cidr" $address) | nindent 12 }}
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+    {{- range $address := .Values.pentestSessionBroker.stsEndpointCidrs }}
+    - to:
+        - ipBlock:
+            {{- toYaml (dict "cidr" $address) | nindent 12 }}
+      ports: [{protocol: TCP, port: 443}]
+    {{- end }}
+# kubernetes-token-review
+# pinned-sts
+    # Endpoint addresses are exact private /32 or /128 values. TLS uses the
+    # separately pinned server names; the broker deliberately has no DNS route.
+# END C67-A25 SESSION BROKER EGRESS
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "sccap.fullname" . }}-pentest-tool-gateway-control
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml .Values.pentestSessionBroker.gatewayControlSelector | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml .Values.pentestSessionBroker.gatewayControlCallerSelector | nindent 14 }}
+      ports: [{protocol: TCP, port: {{ .Values.pentestSessionBroker.gatewayControlServicePort }}}]
+  egress:
+    # One selected private broker address and port. No DNS, API, database,
+    # queue, KMS, target, metadata, default or external-infrastructure route.
+    - to:
+        - ipBlock: {cidr: {{ $controlBrokerCidr | quote }}}
+      ports: [{protocol: TCP, port: {{ $a25BrokerPort }}}]
 {{- end }}

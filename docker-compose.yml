@@ -115,6 +115,8 @@ services:
       RABBITMQ_PENTEST_CONTROLLER_PASS: ${RABBITMQ_PENTEST_CONTROLLER_PASS:-pentest-controller-local-only}
       RABBITMQ_PENTEST_TOOL_USER: ${RABBITMQ_PENTEST_TOOL_USER:-pentest_tool_worker}
       RABBITMQ_PENTEST_TOOL_PASS: ${RABBITMQ_PENTEST_TOOL_PASS:-pentest-tool-local-only}
+      RABBITMQ_PENTEST_VERIFICATION_USER: ${RABBITMQ_PENTEST_VERIFICATION_USER:-pentest_verifier}
+      RABBITMQ_PENTEST_VERIFICATION_PASS: ${RABBITMQ_PENTEST_VERIFICATION_PASS:-pentest-verifier-local-only}
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -setcookie ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
     ports:
@@ -409,6 +411,49 @@ services:
       timeout: 5s
       retries: 6
       start_period: 5s
+
+  # Capability 6 no-target coordinator. It receives only database/RabbitMQ
+  # control-plane authority and public verification keys. It has no app auth,
+  # encryption, KMS, evidence-store, model, browser, adapter, or target secret.
+  pentest-verification-coordinator:
+    profiles: ["pentesting-c67"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: sccap_pentest_verification_coordinator
+    volumes:
+      - ./src:/app/src:ro
+    environment:
+      PYTHONPATH: /app/src
+      SERVICE_NAME: pentest-verification-coordinator
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      ASYNC_DATABASE_URL: ${PENTEST_VERIFICATION_DATABASE_URL:-}
+      RABBITMQ_PENTEST_VERIFICATION_URL: ${RABBITMQ_PENTEST_VERIFICATION_URL:-amqp://pentest_verifier:pentest-verifier-local-only@rabbitmq/}
+      RABBITMQ_PENTEST_VERIFICATION_QUEUE: pentest_verification_queue_v1
+      PENTEST_VERIFICATION_COORDINATOR_ENABLED: ${PENTEST_VERIFICATION_COORDINATOR_ENABLED:-false}
+      PENTEST_C67_INGRESS_ENABLED: ${PENTEST_C67_INGRESS_ENABLED:-false}
+      PENTEST_VERIFICATION_LOCATOR_VERIFY_PUBLIC_KEYS: ${PENTEST_VERIFICATION_LOCATOR_VERIFY_PUBLIC_KEYS:-}
+      PENTEST_VERIFICATION_LOCATOR_AUDIENCE: ${PENTEST_VERIFICATION_LOCATOR_AUDIENCE:-pentest-verifier:v1}
+      PENTEST_VERIFICATION_LEASE_TTL_SECONDS: ${PENTEST_VERIFICATION_LEASE_TTL_SECONDS:-60}
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: ""
+    read_only: true
+    tmpfs:
+      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 512m
+    cpus: 1.0
+    depends_on:
+      db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    networks:
+      - pentest-control
+    command: ["python", "-m", "app.workers.pentest_verification"]
 
   patch-validator:
     build:

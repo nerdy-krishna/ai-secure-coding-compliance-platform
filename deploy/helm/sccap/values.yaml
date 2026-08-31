@@ -21,6 +21,9 @@ runtime:
   runnerV3Secret: sccap-pentest-runner-v3-runtime
   pentestControllerSecret: sccap-pentest-controller-runtime
   pentestToolWorkerSecret: sccap-pentest-tool-worker-runtime
+  pentestVerificationSecret: sccap-pentest-verification-runtime
+  pentestC67PipelineSecret: sccap-pentest-c67-pipeline-runtime
+  pentestSessionBrokerSecret: sccap-pentest-session-broker-runtime
   pentestRelayTrustConfigMap: sccap-pentest-relay-trust
   existingConfigMap: ""
 
@@ -100,6 +103,103 @@ pentestController:
     requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 16Mi}
     limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 64Mi}
 
+pentestVerification:
+  enabled: false
+  ingressEnabled: false
+  # C67-A27 remains independently default-off. Enable only after every
+  # SQL/C5/provider implementation below has a qualified immutable digest.
+  behavioralQualification:
+    enabled: false
+    sourceContextProviderDigest: ""
+    delegatedExecutionProviderDigest: ""
+    sessionBaselineProviderDigest: ""
+    recoveryProviderDigest: ""
+    truthCommitProviderDigest: ""
+    identityPlaywrightProviderDigest: ""
+  replicas: 1
+  queue: pentest_verification_queue_v1
+  leaseTtlSeconds: 60
+  internalDependencyCidrs: []
+  resources:
+    requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 16Mi}
+    limits: {cpu: "1", memory: 512Mi, ephemeral-storage: 64Mi}
+
+# Dedicated C67 production pipeline. PostgreSQL polling and the private mTLS
+# gateway-control facade are its only runtime dependencies.
+pentestC67Pipeline:
+  enabled: false
+  replicas: 1
+  serviceAccountName: sccap-pentest-c67-pipeline
+  pollIntervalSeconds: 1
+  # Public identifier only. The corresponding private Ed25519 seed is read
+  # from PENTEST_VERIFICATION_LOCATOR_SIGNING_SEED in pentestC67PipelineSecret.
+  locatorSigningKeyId: ""
+  internalDatabaseCidrs: []
+  resources:
+    requests: {cpu: 100m, memory: 192Mi, ephemeral-storage: 16Mi}
+    limits: {cpu: 500m, memory: 384Mi, ephemeral-storage: 32Mi}
+
+# C67-A25 dedicated internal broker. It is not the general API workload and
+# remains disabled until DB-role, TokenReview, STS and private-endpoint gates pass.
+pentestSessionBroker:
+  enabled: false
+  replicas: 1
+  serviceAccountName: sccap-pentest-session-broker
+  serviceAccountUid: ""
+  tlsSecretName: sccap-pentest-session-broker-tls
+  identityTokenAudience: sccap-pentest-session-broker
+  brokerStsTokenAudience: sts.amazonaws.com
+  brokerStsTokenExpirationSeconds: 600
+  servicePort: 8443
+  gatewayControlServiceAccountName: ""
+  gatewayControlServiceAccountUid: ""
+  gatewayControlSelector: {}
+  gatewayControlCallerSelector: {}
+  gatewayControlTokenAudience: sccap-pentest-session-broker-control
+  gatewayControlTokenExpirationSeconds: 600
+  gatewayControlReplicas: 1
+  gatewayControlServicePort: 8444
+  gatewayControlServiceAddress: ""
+  gatewayControlTlsSecretName: ""
+  gatewayControlClientCaConfigMap: ""
+  gatewayControlPipelineClientTlsSecretName: ""
+  gatewayControlServerCaConfigMap: ""
+  gatewayControlServerTlsServerName: ""
+  gatewayControlServerSpkiSha256: ""
+  gatewayControlServerTrustBundleDigest: ""
+  gatewayControlBrokerCaConfigMap: ""
+  gatewayControlBrokerAddress: ""
+  gatewayControlBrokerTlsServerName: ""
+  gatewayControlBrokerSpkiSha256: ""
+  gatewayControlBrokerTrustBundleDigest: ""
+  gatewayControlResources:
+    requests: {cpu: 50m, memory: 96Mi, ephemeral-storage: 8Mi}
+    limits: {cpu: 250m, memory: 192Mi, ephemeral-storage: 16Mi}
+  endpointTrustBundleConfigMap: ""
+  endpointTrustBundleDigest: ""
+  databaseEndpointCidrs: []
+  tokenReviewEndpointCidrs: []
+  tokenReviewAddress: ""
+  tokenReviewCaConfigMap: ""
+  stsEndpointCidrs: []
+  stsAddress: ""
+  stsTlsServerName: ""
+  stsCaConfigMap: ""
+  roleArn: ""
+  region: us-east-1
+  kmsKeyArn: ""
+  workerCapabilityDigest: ""
+  deploymentConfigurationDigest: ""
+  relayReceiptPublicKeys: {}
+  resources:
+    requests: {cpu: 100m, memory: 192Mi, ephemeral-storage: 16Mi}
+    limits: {cpu: 500m, memory: 384Mi, ephemeral-storage: 32Mi}
+
+# Release-level readiness mirror. Dynamic identity Pods are still rendered by
+# pentestToolPack.runtimeManager.identityRuntime and receive no authority while off.
+pentestIdentityRuntime:
+  enabled: false
+
 # Capability 5 is default-off. Enabling it requires immutable image references
 # for every admitted runtime and explicit Kubernetes API CIDRs for the
 # namespace-scoped runtime manager. Registration alone never implies ready.
@@ -135,6 +235,26 @@ pentestToolPack:
       gatewayEndpoint: ""
       grantKeys: []
       permitKeys: []
+    # C67-A25: only dynamically created V4 identity Pods receive a token for
+    # the dedicated Session Broker. AWS STS trust belongs to the broker only.
+    identityRuntime:
+      enabled: false
+      identityServiceAccountName: "sccap-pentest-identity-runtime"
+      identityServiceAccountUid: ""
+      identityTokenAudience: "sccap-pentest-session-broker"
+      identityTokenExpirationSeconds: 600
+      identityRuntimeMaximumSeconds: 300
+      tokenIssuer: ""
+      region: "us-east-1"
+      kmsKeyArn: ""
+      sessionBrokerEndpoint: ""
+      sessionBrokerSelector:
+        app.kubernetes.io/component: session-broker
+      sessionBrokerPort: 8443
+      identityKmsEgressCidrs: []
+      awsApiPort: 443
+      taskPublicKeys: {}
+      identityGrantPublicKeys: {}
   # Exact repository@sha256 references are supplied by the release pipeline.
   # Empty values fail Helm rendering when pentestToolPack.enabled=true.
   runtimes:

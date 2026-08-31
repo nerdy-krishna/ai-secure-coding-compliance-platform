@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["images", "runtime", "workerPools", "runnerV3", "pentestController", "pentestToolPack", "autoscaling", "drain"],
+  "required": ["images", "runtime", "workerPools", "runnerV3", "pentestController", "pentestVerification", "pentestC67Pipeline", "pentestSessionBroker", "pentestIdentityRuntime", "pentestToolPack", "autoscaling", "drain"],
   "properties": {
     "images": {
       "type": "object",
@@ -13,7 +13,7 @@
     },
     "runtime": {
       "type": "object",
-      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret", "pentestControllerSecret", "pentestToolWorkerSecret", "pentestRelayTrustConfigMap"],
+      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret", "pentestControllerSecret", "pentestToolWorkerSecret", "pentestVerificationSecret", "pentestC67PipelineSecret", "pentestSessionBrokerSecret", "pentestRelayTrustConfigMap"],
       "properties": {
         "apiSecret": {"type": "string", "minLength": 1},
         "scannerSecret": {"type": "string", "minLength": 1},
@@ -24,6 +24,9 @@
         "runnerV3Secret": {"type": "string", "minLength": 1},
         "pentestControllerSecret": {"type": "string", "minLength": 1},
         "pentestToolWorkerSecret": {"type": "string", "minLength": 1},
+        "pentestVerificationSecret": {"type": "string", "minLength": 1},
+        "pentestC67PipelineSecret": {"type": "string", "minLength": 1},
+        "pentestSessionBrokerSecret": {"type": "string", "minLength": 1},
         "pentestRelayTrustConfigMap": {"type": "string", "minLength": 1}
       }
     },
@@ -64,6 +67,109 @@
         "resources": {"type": "object"}
       }
     },
+    "pentestVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "ingressEnabled", "behavioralQualification", "replicas", "queue", "leaseTtlSeconds", "internalDependencyCidrs", "resources"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "ingressEnabled": {"type": "boolean"},
+        "behavioralQualification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "sourceContextProviderDigest", "delegatedExecutionProviderDigest", "sessionBaselineProviderDigest", "recoveryProviderDigest", "truthCommitProviderDigest", "identityPlaywrightProviderDigest"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "sourceContextProviderDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+            "delegatedExecutionProviderDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+            "sessionBaselineProviderDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+            "recoveryProviderDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+            "truthCommitProviderDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+            "identityPlaywrightProviderDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"}
+          }
+        },
+        "replicas": {"type": "integer", "minimum": 1, "maximum": 1},
+        "queue": {"const": "pentest_verification_queue_v1"},
+        "leaseTtlSeconds": {"type": "integer", "minimum": 15, "maximum": 300},
+        "internalDependencyCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "resources": {"type": "object"}
+      }
+    },
+    "pentestC67Pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "replicas", "serviceAccountName", "pollIntervalSeconds", "locatorSigningKeyId", "internalDatabaseCidrs", "resources"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicas": {"const": 1},
+        "serviceAccountName": {"type": "string", "minLength": 1},
+        "pollIntervalSeconds": {"type": "integer", "minimum": 1, "maximum": 60},
+        "locatorSigningKeyId": {"type": "string", "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "internalDatabaseCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "resources": {"type": "object"}
+      }
+    },
+    "pentestSessionBroker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "replicas", "serviceAccountName", "serviceAccountUid", "tlsSecretName", "identityTokenAudience", "brokerStsTokenAudience", "brokerStsTokenExpirationSeconds", "servicePort", "gatewayControlServiceAccountName", "gatewayControlServiceAccountUid", "gatewayControlSelector", "gatewayControlCallerSelector", "gatewayControlTokenAudience", "gatewayControlTokenExpirationSeconds", "gatewayControlReplicas", "gatewayControlServicePort", "gatewayControlServiceAddress", "gatewayControlTlsSecretName", "gatewayControlClientCaConfigMap", "gatewayControlPipelineClientTlsSecretName", "gatewayControlServerCaConfigMap", "gatewayControlServerTlsServerName", "gatewayControlServerSpkiSha256", "gatewayControlServerTrustBundleDigest", "gatewayControlBrokerCaConfigMap", "gatewayControlBrokerAddress", "gatewayControlBrokerTlsServerName", "gatewayControlBrokerSpkiSha256", "gatewayControlBrokerTrustBundleDigest", "gatewayControlResources", "endpointTrustBundleConfigMap", "endpointTrustBundleDigest", "databaseEndpointCidrs", "tokenReviewEndpointCidrs", "tokenReviewAddress", "tokenReviewCaConfigMap", "stsEndpointCidrs", "stsAddress", "stsTlsServerName", "stsCaConfigMap", "roleArn", "region", "kmsKeyArn", "workerCapabilityDigest", "deploymentConfigurationDigest", "relayReceiptPublicKeys", "resources"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "replicas": {"const": 1},
+        "serviceAccountName": {"type": "string", "minLength": 1},
+        "serviceAccountUid": {"type": "string"},
+        "tlsSecretName": {"type": "string", "minLength": 1},
+        "identityTokenAudience": {"const": "sccap-pentest-session-broker"},
+        "brokerStsTokenAudience": {"const": "sts.amazonaws.com"},
+        "brokerStsTokenExpirationSeconds": {"const": 600},
+        "servicePort": {"const": 8443},
+        "gatewayControlServiceAccountName": {"type": "string"},
+        "gatewayControlServiceAccountUid": {"type": "string", "pattern": "^$|^[0-9a-fA-F-]{36}$"},
+        "gatewayControlSelector": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "gatewayControlCallerSelector": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "gatewayControlTokenAudience": {"const": "sccap-pentest-session-broker-control"},
+        "gatewayControlTokenExpirationSeconds": {"const": 600},
+        "gatewayControlReplicas": {"const": 1},
+        "gatewayControlServicePort": {"const": 8444},
+        "gatewayControlServiceAddress": {"type": "string"},
+        "gatewayControlTlsSecretName": {"type": "string"},
+        "gatewayControlClientCaConfigMap": {"type": "string"},
+        "gatewayControlPipelineClientTlsSecretName": {"type": "string"},
+        "gatewayControlServerCaConfigMap": {"type": "string"},
+        "gatewayControlServerTlsServerName": {"type": "string"},
+        "gatewayControlServerSpkiSha256": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "gatewayControlServerTrustBundleDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "gatewayControlBrokerCaConfigMap": {"type": "string"},
+        "gatewayControlBrokerAddress": {"type": "string"},
+        "gatewayControlBrokerTlsServerName": {"type": "string"},
+        "gatewayControlBrokerSpkiSha256": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "gatewayControlBrokerTrustBundleDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "gatewayControlResources": {"type": "object"},
+        "endpointTrustBundleConfigMap": {"type": "string"},
+        "endpointTrustBundleDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+        "databaseEndpointCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "tokenReviewEndpointCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "tokenReviewAddress": {"type": "string"},
+        "tokenReviewCaConfigMap": {"type": "string"},
+        "stsEndpointCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "stsAddress": {"type": "string"},
+        "stsTlsServerName": {"type": "string"},
+        "stsCaConfigMap": {"type": "string"},
+        "roleArn": {"type": "string"},
+        "region": {"type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"},
+        "kmsKeyArn": {"type": "string"},
+        "workerCapabilityDigest": {"type": "string"},
+        "deploymentConfigurationDigest": {"type": "string"},
+        "relayReceiptPublicKeys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 43}},
+        "resources": {"type": "object"}
+      }
+    },
+    "pentestIdentityRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {"enabled": {"type": "boolean"}}
+    },
     "pentestToolPack": {
       "type": "object",
       "required": ["enabled", "queue", "minReplicas", "maxReplicas", "backlogTarget", "oldestAgeTargetSeconds", "capabilityDigest", "resultSigningKey", "resultSigningKeyId", "supervisor", "runtimeManager", "runtimes"],
@@ -81,7 +187,7 @@
         "runtimeManager": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["serviceAccountName", "apiServerCidrs", "jobTtlSeconds", "relayImage", "secretEncryptionAtRestReady", "relayPublicConfig"],
+          "required": ["serviceAccountName", "apiServerCidrs", "jobTtlSeconds", "relayImage", "secretEncryptionAtRestReady", "relayPublicConfig", "identityRuntime"],
           "properties": {
             "serviceAccountName": {"type": "string"},
             "apiServerCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -97,6 +203,29 @@
                 "gatewayEndpoint": {"type": "string"},
                 "grantKeys": {"type": "array", "items": {"$ref": "#/$defs/relayPublicKey"}},
                 "permitKeys": {"type": "array", "items": {"$ref": "#/$defs/relayPublicKey"}}
+              }
+            },
+            "identityRuntime": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled", "identityServiceAccountName", "identityServiceAccountUid", "identityTokenAudience", "identityTokenExpirationSeconds", "identityRuntimeMaximumSeconds", "tokenIssuer", "region", "kmsKeyArn", "sessionBrokerEndpoint", "sessionBrokerSelector", "sessionBrokerPort", "identityKmsEgressCidrs", "awsApiPort", "taskPublicKeys", "identityGrantPublicKeys"],
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "identityServiceAccountName": {"type": "string", "minLength": 1},
+                "identityServiceAccountUid": {"type": "string"},
+                "identityTokenAudience": {"type": "string", "minLength": 8},
+                "identityTokenExpirationSeconds": {"const": 600},
+                "identityRuntimeMaximumSeconds": {"const": 300},
+                "tokenIssuer": {"type": "string"},
+                "region": {"type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"},
+                "kmsKeyArn": {"type": "string"},
+                "sessionBrokerEndpoint": {"type": "string"},
+                "sessionBrokerSelector": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}},
+                "sessionBrokerPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "identityKmsEgressCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "awsApiPort": {"const": 443},
+                "taskPublicKeys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 43}},
+                "identityGrantPublicKeys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 43}}
               }
             }
           }

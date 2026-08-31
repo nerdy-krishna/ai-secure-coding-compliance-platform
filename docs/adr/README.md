@@ -23,3 +23,5 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-015: Pentesting Foundation 2 durable execution and evidence commit](015-pentesting-foundation2-execution-evidence.md)
 - [ADR-016: Pentesting Foundation 3 deterministic scope and isolated gateway](016-pentesting-foundation3-scope-execution-gateway.md)
 - [ADR-017: Pentesting Capability 4 bounded adaptive controller](017-pentesting-capability4-adaptive-controller.md)
+- [ADR-018: Pentesting Capability 5 initial Web/API tool pack](018-pentesting-capability5-initial-web-api-tool-pack.md)
+- [ADR-019: Pentesting Capabilities 6 and 7 identity-aware verification](019-pentesting-capabilities6-7-identity-verification.md)

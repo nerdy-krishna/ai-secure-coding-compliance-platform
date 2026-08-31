@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     RABBITMQ_PENTEST_CONTROLLER_URL: Optional[str] = None
     RABBITMQ_PENTEST_TOOL_QUEUE: str = "pentest_tool_queue_v1"
     RABBITMQ_PENTEST_TOOL_URL: Optional[str] = None
+    RABBITMQ_PENTEST_VERIFICATION_QUEUE: str = "pentest_verification_queue_v1"
+    RABBITMQ_PENTEST_VERIFICATION_URL: Optional[str] = None
 
     # Foundation 1 signed worker tasks. Production must provide an independent
     # 32-byte base64url seed and may provide comma-separated kid:public-key
@@ -108,10 +110,36 @@ class Settings(BaseSettings):
     PENTEST_FOUNDATION3_ENABLED: bool = False
     PENTEST_CAPABILITY4_ENABLED: bool = False
     PENTEST_CAPABILITY5_ENABLED: bool = False
+    PENTEST_CAPABILITY6_ENABLED: bool = False
+    PENTEST_CAPABILITY7_ENABLED: bool = False
+    PENTEST_C67_INGRESS_ENABLED: bool = False
+    PENTEST_VERIFICATION_COORDINATOR_ENABLED: bool = False
+    PENTEST_IDENTITY_RUNTIME_ENABLED: bool = False
+    PENTEST_VERIFICATION_LOCATOR_SIGNING_KEY_ID: str = (
+        "pentest-capability6-verification-local"
+    )
+    PENTEST_VERIFICATION_LOCATOR_SIGNING_SEED: Optional[SecretStr] = None
+    PENTEST_VERIFICATION_LOCATOR_VERIFY_PUBLIC_KEYS: str = ""
+    PENTEST_VERIFICATION_LOCATOR_AUDIENCE: str = "pentest-verifier:v1"
+    PENTEST_VERIFICATION_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
+    PENTEST_C67_INGRESS_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
+    PENTEST_IDENTITY_KMS_KEY_ID: Optional[str] = None
+    PENTEST_IDENTITY_KMS_REGION: str = "us-east-1"
+    PENTEST_IDENTITY_RUNTIME_MODE: Literal["one_daemon_per_identity"] = (
+        "one_daemon_per_identity"
+    )
     PENTEST_TOOL_GATEWAY_TOKEN: Optional[SecretStr] = None
     PENTEST_TOOL_WORKER_GATEWAY_URL: str = "http://app:8000"
     PENTEST_TOOL_WORKER_ID: str = "pentest-tool-worker-v1"
     PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: str = "0" * 64
+    PENTEST_IDENTITY_TOOL_WORKER_ID: str = "pentest-identity-tool-worker-v1"
+    PENTEST_IDENTITY_TOOL_WORKER_CAPABILITY_DIGEST: str = "0" * 64
+    PENTEST_IDENTITY_TOOL_WORKER_DEPLOYMENT_CONFIGURATION_DIGEST: str = "0" * 64
+    PENTEST_IDENTITY_TOOL_WORKER_READINESS: Literal[
+        "ready", "degraded", "unavailable"
+    ] = "unavailable"
+    PENTEST_IDENTITY_GRANT_SIGNING_KEY_ID: str = "pentest-identity-grant-local"
+    PENTEST_IDENTITY_GRANT_SIGNING_SEED: Optional[SecretStr] = None
     PENTEST_CONNECTION_PERMIT_SIGNING_KEY_ID: str = "pentest-capability5-permit-local"
     PENTEST_CONNECTION_PERMIT_SIGNING_SEED: Optional[SecretStr] = None
     PENTEST_CONNECTION_PERMIT_VERIFY_PUBLIC_KEYS: str = ""
@@ -634,6 +662,10 @@ class Settings(BaseSettings):
                 )
             if not self.EVIDENCE_KMS_KEY_ID:
                 raise ValueError("EVIDENCE_KMS_KEY_ID is required outside development.")
+            if self.PENTEST_CAPABILITY7_ENABLED and not self.PENTEST_IDENTITY_KMS_KEY_ID:
+                raise ValueError(
+                    "PENTEST_IDENTITY_KMS_KEY_ID is required when Capability 7 is enabled."
+                )
         if self.ENVIRONMENT == "production":
             if self.ALLOW_INSECURE_COOKIES:
                 raise ValueError("ALLOW_INSECURE_COOKIES must be False in production.")
