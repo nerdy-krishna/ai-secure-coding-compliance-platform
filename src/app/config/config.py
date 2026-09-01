@@ -112,6 +112,13 @@ class Settings(BaseSettings):
     PENTEST_CAPABILITY5_ENABLED: bool = False
     PENTEST_CAPABILITY6_ENABLED: bool = False
     PENTEST_CAPABILITY7_ENABLED: bool = False
+    PENTEST_CAPABILITY8_SCHEMA_READ: bool = False
+    PENTEST_CAPABILITY8_ADAPTER_RECONCILE: bool = False
+    PENTEST_CAPABILITY8_C6_INGRESS_RECONCILE: bool = False
+    PENTEST_CAPABILITY8_WHITE_BOX_API: bool = False
+    PENTEST_CAPABILITY8_SOURCE_PROFILES: bool = False
+    PENTEST_CAPABILITY8_EVENT_V3: bool = False
+    PENTEST_CAPABILITY8_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
     PENTEST_C67_INGRESS_ENABLED: bool = False
     PENTEST_VERIFICATION_COORDINATOR_ENABLED: bool = False
     PENTEST_IDENTITY_RUNTIME_ENABLED: bool = False
@@ -628,6 +635,43 @@ class Settings(BaseSettings):
         if not pin_hosts.issubset(outbound_hosts):
             raise ValueError(
                 "INTEGRATION_OUTBOUND_HOST_PINS keys must be deployment-allowlisted hosts"
+            )
+        if self.PENTEST_CAPABILITY8_WHITE_BOX_API and not (
+            self.PENTEST_CAPABILITY8_SCHEMA_READ
+            and self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE
+        ):
+            raise ValueError(
+                "Capability 8 white-box API requires schema-read and adapter reconciliation."
+            )
+        if self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE and not self.PENTEST_CAPABILITY8_SCHEMA_READ:
+            raise ValueError(
+                "Capability 8 adapter reconciliation requires schema-read enablement."
+            )
+        if self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE and not self.EVIDENCE_STORE_ENABLED:
+            raise ValueError(
+                "Capability 8 adapter reconciliation requires the encrypted evidence store."
+            )
+        if (
+            self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE
+            and not self.PENTEST_FOUNDATION2_ENABLED
+        ):
+            raise ValueError(
+                "Capability 8 adapter reconciliation requires Foundation 2 recovery."
+            )
+        if self.PENTEST_CAPABILITY8_C6_INGRESS_RECONCILE and not (
+            self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE
+            and self.PENTEST_CAPABILITY6_ENABLED
+        ):
+            raise ValueError(
+                "Capability 8 C6 ingress requires the C8 adapter and Capability 6."
+            )
+        if self.PENTEST_CAPABILITY8_SOURCE_PROFILES and not self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE:
+            raise ValueError(
+                "Capability 8 source profiles require qualified adapter reconciliation."
+            )
+        if self.PENTEST_CAPABILITY8_EVENT_V3 and not self.PENTEST_CAPABILITY8_SCHEMA_READ:
+            raise ValueError(
+                "Capability 8 V3 events require C8 schema-read enablement."
             )
         # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
         # When disabled the host URL is irrelevant — skip the check so
