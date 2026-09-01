@@ -119,6 +119,12 @@ class Settings(BaseSettings):
     PENTEST_CAPABILITY8_SOURCE_PROFILES: bool = False
     PENTEST_CAPABILITY8_EVENT_V3: bool = False
     PENTEST_CAPABILITY8_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
+    PENTEST_CAPABILITY9_SCHEMA_READ: bool = False
+    PENTEST_CAPABILITY9_PIN_NEW_ATTEMPTS: bool = False
+    PENTEST_CAPABILITY9_RECONCILE: bool = False
+    PENTEST_CAPABILITY9_API: bool = False
+    PENTEST_CAPABILITY9_EVENT_V4: bool = False
+    PENTEST_CAPABILITY9_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
     PENTEST_C67_INGRESS_ENABLED: bool = False
     PENTEST_VERIFICATION_COORDINATOR_ENABLED: bool = False
     PENTEST_IDENTITY_RUNTIME_ENABLED: bool = False
@@ -673,6 +679,24 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Capability 8 V3 events require C8 schema-read enablement."
             )
+        if self.PENTEST_CAPABILITY9_RECONCILE and not (
+            self.PENTEST_CAPABILITY9_SCHEMA_READ
+            and self.PENTEST_CAPABILITY4_ENABLED
+            and self.PENTEST_CAPABILITY8_SCHEMA_READ
+            and self.PENTEST_CAPABILITY6_ENABLED
+            and self.PENTEST_CAPABILITY7_ENABLED
+        ):
+            raise ValueError(
+                "Capability 9 reconciliation requires C9 schema-read, C4 delta authority, and C6/C7/C8 reads."
+            )
+        if self.PENTEST_CAPABILITY9_PIN_NEW_ATTEMPTS and not self.PENTEST_CAPABILITY9_SCHEMA_READ:
+            raise ValueError(
+                "Capability 9 Attempt pinning requires C9 schema-read enablement."
+            )
+        if self.PENTEST_CAPABILITY9_API and not self.PENTEST_CAPABILITY9_SCHEMA_READ:
+            raise ValueError("Capability 9 API requires C9 schema-read enablement.")
+        if self.PENTEST_CAPABILITY9_EVENT_V4 and not self.PENTEST_CAPABILITY9_RECONCILE:
+            raise ValueError("Capability 9 V4 events require C9 reconciliation.")
         # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
         # When disabled the host URL is irrelevant — skip the check so
         # Docker service hostnames (e.g. http://langfuse-web:3000) don't
