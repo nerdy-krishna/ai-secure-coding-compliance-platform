@@ -26,3 +26,5 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-018: Pentesting Capability 5 initial Web/API tool pack](018-pentesting-capability5-initial-web-api-tool-pack.md)
 - [ADR-019: Pentesting Capabilities 6 and 7 identity-aware verification](019-pentesting-capabilities6-7-identity-verification.md)
 - [ADR-020: Pentesting Capability 8 white-box Code Scan integration](020-pentesting-capability8-white-box-sccap-integration.md)
+- [ADR-021: Pentesting Capability 9 canonical tests, operations and coverage](021-pentesting-capability9-canonical-tests-operations-coverage.md)
+- [ADR-022: Pentesting Capability 10 reversible mutations, locking and restoration](022-pentesting-capability10-reversible-mutations-cleanup.md)

@@ -248,6 +248,10 @@ pentestToolPack:
       region: "us-east-1"
       kmsKeyArn: ""
       sessionBrokerEndpoint: ""
+      endpointTrustBundleConfigMap: ""
+      endpointTrustBundleDigest: ""
+      sessionBrokerCaConfigMap: ""
+      kmsCaConfigMap: ""
       sessionBrokerSelector:
         app.kubernetes.io/component: session-broker
       sessionBrokerPort: 8443
@@ -255,6 +259,7 @@ pentestToolPack:
       awsApiPort: 443
       taskPublicKeys: {}
       identityGrantPublicKeys: {}
+      relayGrantPublicKeys: {}
   # Exact repository@sha256 references are supplied by the release pipeline.
   # Empty values fail Helm rendering when pentestToolPack.enabled=true.
   runtimes:

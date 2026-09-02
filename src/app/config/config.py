@@ -125,6 +125,18 @@ class Settings(BaseSettings):
     PENTEST_CAPABILITY9_API: bool = False
     PENTEST_CAPABILITY9_EVENT_V4: bool = False
     PENTEST_CAPABILITY9_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
+    PENTEST_CAPABILITY10_SCHEMA_READ: bool = False
+    PENTEST_CAPABILITY10_SAFE_API: bool = False
+    PENTEST_CAPABILITY10_BOUNDARY_WRITES: bool = False
+    PENTEST_CAPABILITY10_REGISTRATION: bool = False
+    PENTEST_CAPABILITY10_MUTATION_GATEWAY: bool = False
+    PENTEST_CAPABILITY10_CLEANUP_RECONCILE: bool = False
+    PENTEST_CAPABILITY10_EVENT_V5: bool = False
+    PENTEST_CAPABILITY10_HIGH_IMPACT_ENABLED: bool = False
+    PENTEST_CAPABILITY10_D16_QUALIFICATION_DIGEST: str = ""
+    PENTEST_CAPABILITY10_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=60)
+    PENTEST_CAPABILITY10_HEARTBEAT_SECONDS: int = Field(default=10, ge=1, le=20)
+    PENTEST_CAPABILITY10_RENEWAL_MARGIN_SECONDS: int = Field(default=20, ge=5, le=30)
     PENTEST_C67_INGRESS_ENABLED: bool = False
     PENTEST_VERIFICATION_COORDINATOR_ENABLED: bool = False
     PENTEST_IDENTITY_RUNTIME_ENABLED: bool = False
@@ -192,6 +204,17 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_tool_gateway_token(cls, value):
         return None if value is None or not str(value).strip() else value
+
+    @field_validator("PENTEST_CAPABILITY10_D16_QUALIFICATION_DIGEST", mode="before")
+    @classmethod
+    def normalize_c10_d16_qualification_digest(cls, value: object) -> str:
+        normalized = "" if value is None else str(value).strip().lower()
+        if normalized and re.fullmatch(r"[0-9a-f]{64}", normalized) is None:
+            raise ValueError(
+                "PENTEST_CAPABILITY10_D16_QUALIFICATION_DIGEST must be empty or "
+                "one lowercase SHA-256 digest."
+            )
+        return normalized
 
     @field_validator("RABBITMQ_URL", mode="before")
     def assemble_rabbitmq_connection(cls, v, info):
@@ -697,6 +720,63 @@ class Settings(BaseSettings):
             raise ValueError("Capability 9 API requires C9 schema-read enablement.")
         if self.PENTEST_CAPABILITY9_EVENT_V4 and not self.PENTEST_CAPABILITY9_RECONCILE:
             raise ValueError("Capability 9 V4 events require C9 reconciliation.")
+        c10_runtime_enabled = any(
+            (
+                self.PENTEST_CAPABILITY10_BOUNDARY_WRITES,
+                self.PENTEST_CAPABILITY10_REGISTRATION,
+                self.PENTEST_CAPABILITY10_MUTATION_GATEWAY,
+                self.PENTEST_CAPABILITY10_CLEANUP_RECONCILE,
+                self.PENTEST_CAPABILITY10_EVENT_V5,
+            )
+        )
+        if c10_runtime_enabled and not self.PENTEST_CAPABILITY10_SCHEMA_READ:
+            raise ValueError("Capability 10 runtime flags require schema-read enablement.")
+        if self.PENTEST_CAPABILITY10_SAFE_API and not self.PENTEST_CAPABILITY10_SCHEMA_READ:
+            raise ValueError("Capability 10 safe API requires schema-read enablement.")
+        if self.PENTEST_CAPABILITY10_REGISTRATION and not (
+            self.PENTEST_CAPABILITY9_SCHEMA_READ
+            and self.PENTEST_CAPABILITY4_ENABLED
+            and self.PENTEST_CAPABILITY5_ENABLED
+            and self.PENTEST_FOUNDATION2_ENABLED
+            and self.PENTEST_FOUNDATION3_ENABLED
+        ):
+            raise ValueError(
+                "Capability 10 registration requires C9 planning, C4 selection, and C5/F2/F3 execution."
+            )
+        if self.PENTEST_CAPABILITY10_MUTATION_GATEWAY and not (
+            self.PENTEST_CAPABILITY10_REGISTRATION
+            and self.PENTEST_CAPABILITY10_CLEANUP_RECONCILE
+        ):
+            raise ValueError(
+                "Capability 10 mutation gateway requires registration and cleanup reconciliation."
+            )
+        if (
+            self.PENTEST_CAPABILITY10_MUTATION_GATEWAY
+            and not self.PENTEST_CAPABILITY10_D16_QUALIFICATION_DIGEST
+        ):
+            raise ValueError(
+                "Capability 10 mutation gateway requires one exact approved D16 "
+                "adapter qualification digest."
+            )
+        if self.PENTEST_CAPABILITY10_EVENT_V5 and not (
+            self.PENTEST_CAPABILITY10_SCHEMA_READ
+            and self.PENTEST_CAPABILITY9_EVENT_V4
+        ):
+            raise ValueError(
+                "Capability 10 V5 events require C10 schema-read and qualified V4 events."
+            )
+        if self.PENTEST_CAPABILITY10_HIGH_IMPACT_ENABLED:
+            raise ValueError(
+                "Capability 10 high-impact execution requires a separate approval and is disabled in v1."
+            )
+        if (
+            self.PENTEST_CAPABILITY10_HEARTBEAT_SECONDS
+            + self.PENTEST_CAPABILITY10_RENEWAL_MARGIN_SECONDS
+            >= self.PENTEST_CAPABILITY10_LEASE_TTL_SECONDS
+        ):
+            raise ValueError(
+                "Capability 10 heartbeat plus renewal margin must be below the lease TTL."
+            )
         # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
         # When disabled the host URL is irrelevant — skip the check so
         # Docker service hostnames (e.g. http://langfuse-web:3000) don't

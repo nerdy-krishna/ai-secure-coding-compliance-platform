@@ -59,6 +59,9 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "engagement_id",
         "execution_id",
         "task_digest",
+        # Signed, secret-free C5 tool locator. Capability 10 reuses this
+        # existing worker notification and binds its phase server-side.
+        "locator",
         "traceparent",
         "tracestate",
     }
@@ -100,6 +103,37 @@ async def publish_message(
         return False
 
     safe_body = {k: v for k, v in message_body.items() if k in ALLOWED_OUTBOX_KEYS}
+    if "locator" in safe_body:
+        locator = safe_body["locator"]
+        allowed_locator_keys = {
+            "schema_version",
+            "extensions",
+            "outbox_id",
+            "tenant_id",
+            "engagement_id",
+            "attempt_id",
+            "execution_id",
+            "tool_request_id",
+            "dispatch_id",
+            "dispatch_generation",
+            "cancellation_generation",
+            "task_digest",
+            "expires_at",
+            "locator_digest",
+            "signing_key_id",
+            "signature_algorithm",
+            "signature_audience",
+            "signature",
+        }
+        if (
+            not isinstance(locator, dict)
+            or set(locator) - allowed_locator_keys
+            or locator.get("extensions") != {}
+            or locator.get("schema_version")
+            != "sccap.pentest.tool-locator.v1"
+        ):
+            logger.error("Rejected unsafe tool notification locator.")
+            return False
     with span(
         "sccap.rabbitmq.publish",
         {

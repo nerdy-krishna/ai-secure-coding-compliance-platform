@@ -208,7 +208,7 @@
             "identityRuntime": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["enabled", "identityServiceAccountName", "identityServiceAccountUid", "identityTokenAudience", "identityTokenExpirationSeconds", "identityRuntimeMaximumSeconds", "tokenIssuer", "region", "kmsKeyArn", "sessionBrokerEndpoint", "sessionBrokerSelector", "sessionBrokerPort", "identityKmsEgressCidrs", "awsApiPort", "taskPublicKeys", "identityGrantPublicKeys"],
+              "required": ["enabled", "identityServiceAccountName", "identityServiceAccountUid", "identityTokenAudience", "identityTokenExpirationSeconds", "identityRuntimeMaximumSeconds", "tokenIssuer", "region", "kmsKeyArn", "sessionBrokerEndpoint", "endpointTrustBundleConfigMap", "endpointTrustBundleDigest", "sessionBrokerCaConfigMap", "kmsCaConfigMap", "sessionBrokerSelector", "sessionBrokerPort", "identityKmsEgressCidrs", "awsApiPort", "taskPublicKeys", "identityGrantPublicKeys", "relayGrantPublicKeys"],
               "properties": {
                 "enabled": {"type": "boolean"},
                 "identityServiceAccountName": {"type": "string", "minLength": 1},
@@ -220,12 +220,17 @@
                 "region": {"type": "string", "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"},
                 "kmsKeyArn": {"type": "string"},
                 "sessionBrokerEndpoint": {"type": "string"},
+                "endpointTrustBundleConfigMap": {"type": "string"},
+                "endpointTrustBundleDigest": {"type": "string", "pattern": "^$|^[0-9a-f]{64}$"},
+                "sessionBrokerCaConfigMap": {"type": "string"},
+                "kmsCaConfigMap": {"type": "string"},
                 "sessionBrokerSelector": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}},
                 "sessionBrokerPort": {"type": "integer", "minimum": 1, "maximum": 65535},
                 "identityKmsEgressCidrs": {"type": "array", "items": {"type": "string", "minLength": 1}},
                 "awsApiPort": {"const": 443},
                 "taskPublicKeys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 43}},
-                "identityGrantPublicKeys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 43}}
+                "identityGrantPublicKeys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 43}},
+                "relayGrantPublicKeys": {"type": "object", "additionalProperties": {"type": "string", "minLength": 43}}
               }
             }
           }

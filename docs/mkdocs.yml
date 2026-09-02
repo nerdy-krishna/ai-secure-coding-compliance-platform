@@ -194,6 +194,8 @@ nav:
       - Pentesting Initial Web/API Tool Pack: operations/pentesting-initial-web-api-tool-pack.md
       - Pentesting Identity-aware Verification: operations/pentesting-identity-verification.md
       - Pentesting White-box Code Scan Integration: operations/pentesting-white-box-code-scan-integration.md
+      - Pentesting Canonical Coverage: operations/pentesting-canonical-coverage.md
+      - Pentesting Reversible Mutations and Cleanup: operations/pentesting-reversible-mutations-cleanup.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md
