@@ -1,0 +1,182 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c11-reconciler
+spec:
+  replicas: 0
+  selector: {matchLabels: {app.kubernetes.io/name: c11-reconciler}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: c11-reconciler, sccap.io/c11-evidence-access: "true"}
+    spec:
+      serviceAccountName: c11-reconciler
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        -
+          name: worker
+          image: registry.invalid/sccap/c11-maintenance@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          command: ["python"]
+          args: ["-m", "app.infrastructure.pentesting.callback_maintenance_worker", "--config", "/etc/c11/config.json"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          livenessProbe:
+            exec: {command: ["python", "-c", "import os; os.kill(1, 0)"]}
+            periodSeconds: 30
+          volumeMounts:
+            - {name: config, mountPath: /etc/c11, readOnly: true}
+            - {name: database, mountPath: /var/run/secrets/c11-database, readOnly: true}
+            - {name: evidence, mountPath: /var/run/secrets/c11-evidence, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: c11-reconciler-config}}
+        - {name: database, secret: {secretName: c11-reconciler-database, optional: false}}
+        - {name: evidence, secret: {secretName: c11-reconciler-evidence, optional: false}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c11-expiry
+spec:
+  replicas: 0
+  selector: {matchLabels: {app.kubernetes.io/name: c11-expiry}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: c11-expiry}
+    spec:
+      serviceAccountName: c11-expiry
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: registry.invalid/sccap/c11-maintenance@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          command: ["python"]
+          args: ["-m", "app.infrastructure.pentesting.callback_maintenance_worker", "--config", "/etc/c11/config.json"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          livenessProbe:
+            exec: {command: ["python", "-c", "import os; os.kill(1, 0)"]}
+            periodSeconds: 30
+          volumeMounts:
+            - {name: config, mountPath: /etc/c11, readOnly: true}
+            - {name: database, mountPath: /var/run/secrets/c11-database, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: c11-expiry-config}}
+        - {name: database, secret: {secretName: c11-expiry-database, optional: false}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c11-retention-deleter
+spec:
+  replicas: 0
+  selector: {matchLabels: {app.kubernetes.io/name: c11-retention-deleter}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: c11-retention-deleter, sccap.io/c11-evidence-access: "true"}
+    spec:
+      serviceAccountName: c11-retention-deleter
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: registry.invalid/sccap/c11-maintenance@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          command: ["python"]
+          args: ["-m", "app.infrastructure.pentesting.callback_maintenance_worker", "--config", "/etc/c11/config.json"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          livenessProbe:
+            exec: {command: ["python", "-c", "import os; os.kill(1, 0)"]}
+            periodSeconds: 30
+          volumeMounts:
+            - {name: config, mountPath: /etc/c11, readOnly: true}
+            - {name: database, mountPath: /var/run/secrets/c11-database, readOnly: true}
+            - {name: evidence, mountPath: /var/run/secrets/c11-evidence, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: c11-retention-deleter-config}}
+        - {name: database, secret: {secretName: c11-retention-deleter-database, optional: false}}
+        - {name: evidence, secret: {secretName: c11-retention-deleter-evidence, optional: false}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c11-retention-verifier
+spec:
+  replicas: 0
+  selector: {matchLabels: {app.kubernetes.io/name: c11-retention-verifier}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: c11-retention-verifier, sccap.io/c11-evidence-access: "true"}
+    spec:
+      serviceAccountName: c11-retention-verifier
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: worker
+          image: registry.invalid/sccap/c11-maintenance@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          command: ["python"]
+          args: ["-m", "app.infrastructure.pentesting.callback_maintenance_worker", "--config", "/etc/c11/config.json"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+          livenessProbe:
+            exec: {command: ["python", "-c", "import os; os.kill(1, 0)"]}
+            periodSeconds: 30
+          volumeMounts:
+            - {name: config, mountPath: /etc/c11, readOnly: true}
+            - {name: database, mountPath: /var/run/secrets/c11-database, readOnly: true}
+            - {name: evidence, mountPath: /var/run/secrets/c11-evidence, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: config, configMap: {name: c11-retention-verifier-config}}
+        - {name: database, secret: {secretName: c11-retention-verifier-database, optional: false}}
+        - {name: evidence, secret: {secretName: c11-retention-verifier-evidence, optional: false}}
+        - {name: tmp, emptyDir: {medium: Memory, sizeLimit: 32Mi}}

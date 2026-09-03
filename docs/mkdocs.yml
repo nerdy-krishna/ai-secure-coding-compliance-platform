@@ -196,6 +196,7 @@ nav:
       - Pentesting White-box Code Scan Integration: operations/pentesting-white-box-code-scan-integration.md
       - Pentesting Canonical Coverage: operations/pentesting-canonical-coverage.md
       - Pentesting Reversible Mutations and Cleanup: operations/pentesting-reversible-mutations-cleanup.md
+      - Pentesting Asynchronous Callback Correlation: operations/pentesting-asynchronous-callback-correlation.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

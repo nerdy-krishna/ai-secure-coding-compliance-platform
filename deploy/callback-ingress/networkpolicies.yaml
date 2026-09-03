@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: c11-ingress-default-deny
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/part-of: c11-callback-ingress}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: c11-ingress-from-approved-public-entry
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/part-of: c11-callback-ingress}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {sccap.io/c11-public-entry: "approved"}
+          podSelector:
+            matchLabels: {sccap.io/c11-public-entry: "approved"}
+      ports:
+        - {port: 8053, protocol: UDP}
+        - {port: 8053, protocol: TCP}
+        - {port: 8443, protocol: TCP}
+        - {port: 8025, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: c11-ingress-only-to-private-writer
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/part-of: c11-callback-ingress}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {sccap.io/c11-private-writer: "approved"}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: c11-private-writer}
+      ports:
+        - {port: 9443, protocol: TCP}

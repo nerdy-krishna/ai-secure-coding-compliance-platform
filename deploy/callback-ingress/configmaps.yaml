@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-dns-ingress-config
+data:
+  config.json: |
+    {"mode":"dns","bind_ip":"0.0.0.0","port":8053,"callback_zone":"callbacks.example.invalid","mail_zone":"mail-callbacks.example.invalid","fixed_ipv4":"192.0.2.1","fixed_ipv6":"2001:db8::1","private_writer":{"ip":"10.77.0.2","port":9443,"server_name":"c11-private-writer.svc.invalid","ca_path":"/var/run/c11-writer/ca.crt","certificate_path":"/var/run/c11-writer/tls.crt","private_key_path":"/var/run/c11-writer/tls.key"}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-https-ingress-config
+data:
+  config.json: |
+    {"mode":"https","bind_ip":"0.0.0.0","port":8443,"callback_zone":"callbacks.example.invalid","mail_zone":"mail-callbacks.example.invalid","tls_certificate_path":"/var/run/c11-edge-tls/tls.crt","tls_private_key_path":"/var/run/c11-edge-tls/tls.key","private_writer":{"ip":"10.77.0.2","port":9443,"server_name":"c11-private-writer.svc.invalid","ca_path":"/var/run/c11-writer/ca.crt","certificate_path":"/var/run/c11-writer/tls.crt","private_key_path":"/var/run/c11-writer/tls.key"}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-smtp-ingress-config
+data:
+  config.json: |
+    {"mode":"smtp","bind_ip":"0.0.0.0","port":8025,"callback_zone":"callbacks.example.invalid","mail_zone":"mail-callbacks.example.invalid","tls_certificate_path":"/var/run/c11-edge-tls/tls.crt","tls_private_key_path":"/var/run/c11-edge-tls/tls.key","private_writer":{"ip":"10.77.0.2","port":9443,"server_name":"c11-private-writer.svc.invalid","ca_path":"/var/run/c11-writer/ca.crt","certificate_path":"/var/run/c11-writer/tls.crt","private_key_path":"/var/run/c11-writer/tls.key"}}

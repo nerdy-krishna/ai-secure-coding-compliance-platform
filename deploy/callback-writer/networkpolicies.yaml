@@ -1,0 +1,47 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: c11-private-writer-default-deny
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: c11-private-writer}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: c11-private-writer-from-edges-only
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: c11-private-writer}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {sccap.io/c11-public-edge: "approved"}
+          podSelector:
+            matchExpressions:
+              - {key: app.kubernetes.io/name, operator: In, values: [c11-dns-ingress, c11-https-ingress, c11-smtp-ingress]}
+      ports: [{port: 9443, protocol: TCP}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: c11-private-writer-fixed-dependencies-only
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: c11-private-writer}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {sccap.io/c11-data-plane: "approved"}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: postgresql}
+      ports: [{port: 5432, protocol: TCP}]
+    - to:
+        - ipBlock: {cidr: 10.77.0.3/32}
+      ports: [{port: 9000, protocol: TCP}]
+    - to:
+        - ipBlock: {cidr: 10.77.0.4/32}
+      ports: [{port: 443, protocol: TCP}]

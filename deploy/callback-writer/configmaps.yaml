@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-private-writer-config
+data:
+  config.json: |
+    {"bind_ip":"0.0.0.0","port":9443,"callback_zone":"callbacks.example.invalid","https_port":443,"database_url_file":"/var/run/secrets/c11-database/url","namespace_key_file":"/var/run/secrets/c11-namespace-key/key","token_key_directory":"/var/run/secrets/c11-lookup-keys","tls_certificate_path":"/var/run/c11-writer-server/tls.crt","tls_private_key_path":"/var/run/c11-writer-server/tls.key","client_ca_path":"/etc/c11-writer-client-ca/ca.crt","allowed_client_certificate_sha256":["0000000000000000000000000000000000000000000000000000000000000000"],"max_connections":128,"evidence_bucket":"sccap-c11-restricted","evidence_region":"us-east-1","evidence_s3_endpoint":"https://10.77.0.3:9000","evidence_kms_endpoint":"https://10.77.0.4:443","evidence_kms_key_id":"arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000","aws_credentials_file":"/var/run/secrets/c11-evidence/credentials.json"}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-private-writer-client-ca
+data:
+  ca.crt: "REPLACE_WITH_APPROVED_EDGE_CLIENT_CA_BEFORE_ENABLEMENT"

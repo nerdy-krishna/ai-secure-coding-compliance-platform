@@ -137,6 +137,37 @@ class Settings(BaseSettings):
     PENTEST_CAPABILITY10_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=60)
     PENTEST_CAPABILITY10_HEARTBEAT_SECONDS: int = Field(default=10, ge=1, le=20)
     PENTEST_CAPABILITY10_RENEWAL_MARGIN_SECONDS: int = Field(default=20, ge=5, le=30)
+    PENTEST_CAPABILITY11_SCHEMA_READ: bool = False
+    PENTEST_CAPABILITY11_SAFE_API: bool = False
+    PENTEST_CAPABILITY11_ISSUER: bool = False
+    PENTEST_CAPABILITY11_INGRESS_WRITER: bool = False
+    PENTEST_CAPABILITY11_RECONCILE: bool = False
+    PENTEST_CAPABILITY11_RETENTION: bool = False
+    PENTEST_CAPABILITY11_EVENT_V6: bool = False
+    PENTEST_CAPABILITY11_HTTP_CLEARTEXT: bool = False
+    PENTEST_CAPABILITY11_SMTP_CLEARTEXT: bool = False
+    PENTEST_CAPABILITY11_CALLBACK_ZONE: str = ""
+    PENTEST_CAPABILITY11_MAIL_ZONE: str = ""
+    PENTEST_CAPABILITY11_FIXED_PUBLIC_IPV4: str = ""
+    PENTEST_CAPABILITY11_FIXED_PUBLIC_IPV6: str = ""
+    PENTEST_CAPABILITY11_LOOKUP_KEY_FILE: Path | None = None
+    PENTEST_CAPABILITY11_LOOKUP_KEY_DIRECTORY: Path | None = None
+    PENTEST_CAPABILITY11_NAMESPACE_KEY_FILE: Path | None = None
+    PENTEST_CAPABILITY11_MATERIAL_KMS_KEY_ID: str | None = None
+    PENTEST_CAPABILITY11_MATERIAL_KMS_REGION: str = "us-east-1"
+    PENTEST_CAPABILITY11_WRITER_CA_FILE: Path | None = None
+    PENTEST_CAPABILITY11_WRITER_CERT_FILE: Path | None = None
+    PENTEST_CAPABILITY11_WRITER_KEY_FILE: Path | None = None
+    PENTEST_CAPABILITY11_MAX_ACCEPTED_RECEIPTS: int = Field(default=64, ge=1, le=64)
+    PENTEST_CAPABILITY11_ORDINARY_WINDOW_SECONDS: int = Field(
+        default=900, ge=30, le=86_400
+    )
+    PENTEST_CAPABILITY11_EXTENDED_WINDOW_SECONDS: int = Field(
+        default=86_400, ge=300, le=604_800
+    )
+    PENTEST_CAPABILITY11_LATE_ACCEPT_SECONDS: int = Field(
+        default=604_800, ge=0, le=2_592_000
+    )
     PENTEST_C67_INGRESS_ENABLED: bool = False
     PENTEST_VERIFICATION_COORDINATOR_ENABLED: bool = False
     PENTEST_IDENTITY_RUNTIME_ENABLED: bool = False
@@ -776,6 +807,77 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "Capability 10 heartbeat plus renewal margin must be below the lease TTL."
+            )
+        c11_runtime_enabled = any(
+            (
+                self.PENTEST_CAPABILITY11_ISSUER,
+                self.PENTEST_CAPABILITY11_INGRESS_WRITER,
+                self.PENTEST_CAPABILITY11_RECONCILE,
+                self.PENTEST_CAPABILITY11_RETENTION,
+                self.PENTEST_CAPABILITY11_EVENT_V6,
+            )
+        )
+        if c11_runtime_enabled and not self.PENTEST_CAPABILITY11_SCHEMA_READ:
+            raise ValueError("Capability 11 runtime flags require schema-read enablement.")
+        if self.PENTEST_CAPABILITY11_SAFE_API and not self.PENTEST_CAPABILITY11_SCHEMA_READ:
+            raise ValueError("Capability 11 safe API requires schema-read enablement.")
+        if self.PENTEST_CAPABILITY11_ISSUER and not (
+            self.PENTEST_CAPABILITY9_SCHEMA_READ
+            and self.PENTEST_CAPABILITY10_SCHEMA_READ
+            and self.PENTEST_CAPABILITY6_ENABLED
+            and self.PENTEST_CAPABILITY4_ENABLED
+        ):
+            raise ValueError(
+                "Capability 11 issuance requires C9 applicability, C10 cleanup reads, C6 evidence, and C4 delta authority."
+            )
+        if self.PENTEST_CAPABILITY11_INGRESS_WRITER and not (
+            self.PENTEST_CAPABILITY11_ISSUER
+            and self.PENTEST_CAPABILITY11_RECONCILE
+            and self.EVIDENCE_STORE_ENABLED
+        ):
+            raise ValueError(
+                "Capability 11 ingress requires issuance, reconciliation, and encrypted evidence storage."
+            )
+        if self.PENTEST_CAPABILITY11_EVENT_V6 and not (
+            self.PENTEST_CAPABILITY11_RECONCILE
+            and self.PENTEST_CAPABILITY10_EVENT_V5
+        ):
+            raise ValueError(
+                "Capability 11 V6 events require qualified reconciliation and V5 event compatibility."
+            )
+        if (
+            self.PENTEST_CAPABILITY11_HTTP_CLEARTEXT
+            or self.PENTEST_CAPABILITY11_SMTP_CLEARTEXT
+        ) and self.ENVIRONMENT != "development":
+            raise ValueError(
+                "Capability 11 cleartext HTTP/SMTP profiles are local-development exceptions only."
+            )
+        if self.PENTEST_CAPABILITY11_INGRESS_WRITER:
+            required_files = (
+                self.PENTEST_CAPABILITY11_LOOKUP_KEY_DIRECTORY,
+                self.PENTEST_CAPABILITY11_NAMESPACE_KEY_FILE,
+                self.PENTEST_CAPABILITY11_WRITER_CA_FILE,
+                self.PENTEST_CAPABILITY11_WRITER_CERT_FILE,
+                self.PENTEST_CAPABILITY11_WRITER_KEY_FILE,
+            )
+            if any(path is None for path in required_files):
+                raise ValueError(
+                    "Capability 11 ingress requires file-mounted lookup/namespace keys and writer mTLS material."
+                )
+            if not (
+                self.PENTEST_CAPABILITY11_CALLBACK_ZONE
+                and self.PENTEST_CAPABILITY11_MAIL_ZONE
+            ):
+                raise ValueError(
+                    "Capability 11 ingress requires dedicated callback and mail zones."
+                )
+        if (
+            self.PENTEST_CAPABILITY11_ISSUER
+            and self.ENVIRONMENT != "development"
+            and not self.PENTEST_CAPABILITY11_MATERIAL_KMS_KEY_ID
+        ):
+            raise ValueError(
+                "Capability 11 production issuance requires an exact-AAD material KMS key."
             )
         # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
         # When disabled the host URL is irrelevant — skip the check so

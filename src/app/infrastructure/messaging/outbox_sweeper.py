@@ -81,6 +81,7 @@ async def _tick() -> None:
                 extra={"scan_count": len(rows), "pentest_count": len(pentest_rows)},
             )
             for row in pentest_rows:
+                engagement_id = str(row.engagement_id)
                 try:
                     payload = dict(row.payload)
                     correlation_id = payload.pop("correlation_id", None)
@@ -98,7 +99,7 @@ async def _tick() -> None:
                     await db.rollback()
                     logger.error(
                         "outbox_sweep.pentest_republish_failed",
-                        extra={"engagement_id": str(row.engagement_id)},
+                        extra={"engagement_id": engagement_id},
                         exc_info=True,
                     )
 

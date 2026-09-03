@@ -114,6 +114,7 @@ croniter = "^5.0"
 # python3-saml is OneLogin's SAML 2.0 SP library; it requires libxmlsec1
 # system packages (added to Dockerfile in the same change).
 httpx-oauth = ">=0.16,<1.0"
+h2 = ">=4.2,<5.0"
 pyjwt = {extras = ["crypto"], version = ">=2.10,<3.0"}
 python3-saml = ">=1.16,<2.0"
 # Phase WebAuthn — passkey / FIDO2 support. Duo's py_webauthn library

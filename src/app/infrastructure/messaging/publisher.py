@@ -59,6 +59,16 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "engagement_id",
         "execution_id",
         "task_digest",
+        # Existing C4 controller locator fields.  These are opaque authority
+        # coordinates already committed in PostgreSQL; the sweeper must
+        # forward them unchanged for the worker's exact reconciliation.
+        "schema_version",
+        "extensions",
+        "phase",
+        "preceding_delta_id",
+        "preceding_delta_digest",
+        "controller_generation",
+        "locator_digest",
         # Signed, secret-free C5 tool locator. Capability 10 reuses this
         # existing worker notification and binds its phase server-side.
         "locator",

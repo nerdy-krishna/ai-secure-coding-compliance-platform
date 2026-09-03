@@ -200,6 +200,92 @@ pentestSessionBroker:
 pentestIdentityRuntime:
   enabled: false
 
+# Capability 11 is a separately isolated public-edge/private-writer subsystem.
+# It is deliberately absent from a default render. Enabling it requires
+# digest-pinned images, dedicated TLS/key/credential objects and exact endpoint
+# CIDRs; templates fail closed when any prerequisite is missing.
+pentestCallbacks:
+  enabled: false
+  namespaces:
+    edge: ""
+    private: ""
+  callbackDomain: ""
+  domainRetentionAttested: false
+  accessLogsSanitized: false
+  images:
+    edge: ""
+    writer: ""
+    maintenance: ""
+  channels:
+    dns: false
+    https: false
+    email: false
+  replicas:
+    edge: 2
+    writer: 2
+    maintenance: 1
+  publicSourceCidrs: []
+  writerEndpoint:
+    address: ""
+    port: 9443
+  endpointCidrs:
+    database: []
+    objectStore: []
+    kms: []
+    otel: []
+  secrets:
+    dnsWriterClientMtls: ""
+    httpsWriterClientMtls: ""
+    emailWriterClientMtls: ""
+    httpsServerTls: ""
+    emailServerTls: ""
+    writerServerMtls: ""
+    writerClientCaConfigMap: ""
+    writerDatabase: ""
+    writerEvidence: ""
+    lookupKeys: ""
+    namespaceKey: ""
+    reconcilerDatabase: ""
+    reconcilerEvidence: ""
+    expiryDatabase: ""
+    retentionDeleterDatabase: ""
+    retentionDeleterEvidence: ""
+    retentionVerifierDatabase: ""
+    retentionVerifierEvidence: ""
+  configMaps:
+    dnsEdge: ""
+    httpsEdge: ""
+    emailEdge: ""
+    writer: ""
+    reconciler: ""
+    expiry: ""
+    retentionDeleter: ""
+    retentionVerifier: ""
+  configDigests:
+    dnsEdge: ""
+    httpsEdge: ""
+    emailEdge: ""
+    writer: ""
+    reconciler: ""
+    expiry: ""
+    retentionDeleter: ""
+    retentionVerifier: ""
+  maintenance:
+    reconciler: true
+    expiry: true
+    retentionDeleter: true
+    retentionVerifier: true
+  resources:
+    edge:
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {cpu: 500m, memory: 256Mi}
+    writer:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {cpu: "1", memory: 512Mi}
+    maintenance:
+      requests: {cpu: 50m, memory: 96Mi}
+      limits: {cpu: 500m, memory: 384Mi}
+
 # Capability 5 is default-off. Enabling it requires immutable image references
 # for every admitted runtime and explicit Kubernetes API CIDRs for the
 # namespace-scoped runtime manager. Registration alone never implies ready.

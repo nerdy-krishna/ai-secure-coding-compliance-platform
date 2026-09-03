@@ -59,9 +59,10 @@ class EvidenceObjectStore:
         *,
         key_provider: KeyProvider | None = None,
         client: Any | None = None,
+        bucket: str | None = None,
     ) -> None:
         self.config = config
-        self.bucket = config.EVIDENCE_S3_BUCKET
+        self.bucket = bucket or config.EVIDENCE_S3_BUCKET
         self.key_provider = key_provider or build_key_provider(config)
         if client is not None:
             self.client = client
