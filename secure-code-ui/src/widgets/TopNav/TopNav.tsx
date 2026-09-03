@@ -5,6 +5,7 @@
 // useAuth for logout + superuser gate, useTheme for theme toggle.
 
 import React, { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { useFeatures } from "../../shared/hooks/useFeatures";
@@ -30,6 +31,7 @@ interface NavItem {
   to: string;
   /** When set, the item is hidden unless this feature flag is enabled. */
   feature?: string;
+  permission?: string;
 }
 
 // Order matches the design's center nav.
@@ -37,6 +39,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", match: "/account/dashboard", to: "/account/dashboard" },
   { id: "submit", label: "Submit", match: "/submission", to: "/submission/submit" },
   { id: "projects", label: "Projects", match: "/analysis", to: "/analysis/results" },
+  { id: "pentesting", label: "Pentesting", match: "/pentesting", to: "/pentesting/engagements", feature: "pentesting_capability13", permission: Permission.pentestRead },
   { id: "compliance", label: "Compliance", match: "/compliance", to: "/compliance", feature: "compliance" },
   { id: "advisor", label: "Advisor", match: "/advisor", to: "/advisor", feature: "chat" },
   { id: "history", label: "History", match: "/account/history", to: "/account/history" },
@@ -47,7 +50,7 @@ export const TopNav: React.FC = () => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
-  const { isFeatureEnabled } = useFeatures();
+  const { isFeatureEnabled, featuresLoading } = useFeatures();
   const isSuperuser = !!user?.is_superuser;
   const hasAdminAccess = hasAnyPermission(
     user?.permissions,
@@ -60,7 +63,9 @@ export const TopNav: React.FC = () => {
 
   // Hide nav items whose backing feature is disabled (modular setup).
   const navItems = NAV_ITEMS.filter(
-    (it) => !it.feature || isFeatureEnabled(it.feature),
+    (it) =>
+      (!it.feature || (!featuresLoading && isFeatureEnabled(it.feature))) &&
+      (!it.permission || hasPermission(user?.permissions, it.permission)),
   );
 
   // Stable capabilities, not the compatibility superuser bit, expose admin UX.
@@ -250,6 +255,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
   const [tenantsLoading, setTenantsLoading] = useState(false);
   const [switchingTenant, setSwitchingTenant] = useState(false);
   const { logout } = useAuth();
+  const queryClient = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -296,6 +302,8 @@ const UserMenu: React.FC<UserMenuProps> = ({
     if (!tenantId || tenantId === activeTenantId || switchingTenant) return;
     setSwitchingTenant(true);
     try {
+      await queryClient.cancelQueries({ queryKey: ["capability13"] });
+      queryClient.removeQueries({ queryKey: ["capability13"] });
       const selected = await tenantService.enter(tenantId);
       toast.success(`Switched to ${selected.display_name}.`);
       window.location.assign("/account/dashboard");

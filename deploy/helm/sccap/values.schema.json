@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["images", "runtime", "workerPools", "runnerV3", "pentestController", "pentestVerification", "pentestC67Pipeline", "pentestSessionBroker", "pentestIdentityRuntime", "pentestCallbacks", "pentestToolPack", "autoscaling", "drain"],
+  "required": ["images", "runtime", "workerPools", "capability13", "runnerV3", "pentestController", "pentestVerification", "pentestC67Pipeline", "pentestSessionBroker", "pentestIdentityRuntime", "pentestCallbacks", "pentestToolPack", "autoscaling", "drain"],
   "properties": {
     "images": {
       "type": "object",
@@ -13,12 +13,13 @@
     },
     "runtime": {
       "type": "object",
-      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret", "pentestControllerSecret", "pentestToolWorkerSecret", "pentestVerificationSecret", "pentestC67PipelineSecret", "pentestSessionBrokerSecret", "pentestRelayTrustConfigMap"],
+      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "capability13ProtectedExportSecret", "unifiedSecret", "migrationSecret", "runnerV3Secret", "pentestControllerSecret", "pentestToolWorkerSecret", "pentestVerificationSecret", "pentestC67PipelineSecret", "pentestSessionBrokerSecret", "pentestRelayTrustConfigMap"],
       "properties": {
         "apiSecret": {"type": "string", "minLength": 1},
         "scannerSecret": {"type": "string", "minLength": 1},
         "llmSecret": {"type": "string", "minLength": 1},
         "reportSecret": {"type": "string", "minLength": 1},
+        "capability13ProtectedExportSecret": {"type": "string", "minLength": 1},
         "unifiedSecret": {"type": "string", "minLength": 1},
         "migrationSecret": {"type": "string", "minLength": 1},
         "runnerV3Secret": {"type": "string", "minLength": 1},
@@ -37,6 +38,22 @@
         "scanner": {"$ref": "#/$defs/pool"},
         "llm": {"$ref": "#/$defs/pool"},
         "report": {"$ref": "#/$defs/pool"}
+      }
+    },
+    "capability13": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protectedExport"],
+      "properties": {
+        "protectedExport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "serviceAccountName"],
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "serviceAccountName": {"type": "string", "minLength": 1}
+          }
+        }
       }
     },
     "runnerV3": {

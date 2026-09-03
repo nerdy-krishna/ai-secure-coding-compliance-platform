@@ -69,6 +69,11 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "preceding_delta_digest",
         "controller_generation",
         "locator_digest",
+        # Closed C13 report/export locator fields. These are opaque database
+        # coordinates; evidence bytes and storage locators are never allowed.
+        "locator_version",
+        "request_id",
+        "request_kind",
         # Signed, secret-free C5 tool locator. Capability 10 reuses this
         # existing worker notification and binds its phase server-side.
         "locator",

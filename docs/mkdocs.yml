@@ -197,6 +197,7 @@ nav:
       - Pentesting Canonical Coverage: operations/pentesting-canonical-coverage.md
       - Pentesting Reversible Mutations and Cleanup: operations/pentesting-reversible-mutations-cleanup.md
       - Pentesting Asynchronous Callback Correlation: operations/pentesting-asynchronous-callback-correlation.md
+      - Pentesting Cockpit, Reporting, and Governance: operations/pentesting-cockpit-reporting-governance.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

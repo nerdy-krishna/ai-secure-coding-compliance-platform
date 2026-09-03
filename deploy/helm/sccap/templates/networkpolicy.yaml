@@ -70,6 +70,27 @@ spec:
             matchLabels:
               app.kubernetes.io/name: rabbitmq
       ports: [{protocol: TCP, port: 5671}, {protocol: TCP, port: 5672}]
+    {{- else if eq $component "worker-report" }}
+    # Report/export queue, PostgreSQL, private evidence store and telemetry
+    # only. No target, model, integration, public object store or public HTTPS.
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: postgresql}
+      ports: [{protocol: TCP, port: 5432}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: rabbitmq}
+      ports: [{protocol: TCP, port: 5671}, {protocol: TCP, port: 5672}]
+    - to:
+        - podSelector:
+            matchLabels: {app.kubernetes.io/name: minio}
+      ports: [{protocol: TCP, port: 9000}]
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "sccap.selectorLabels" $root | nindent 14 }}
+              app.kubernetes.io/component: otel-collector
+      ports: [{protocol: TCP, port: 4318}]
     {{- else if eq $component "pentest-controller" }}
     # Named SCCAP dependencies only. Target egress is absent.
     - to:
@@ -176,7 +197,7 @@ spec:
       ports:
         - {protocol: UDP, port: 53}
         - {protocol: TCP, port: 53}
-    {{- if and $root.Values.networkPolicy.allowExternalHttps (has $component (list "api" "worker-scanner" "worker-llm" "worker-report" "worker-unified" "otel-collector")) }}
+    {{- if and $root.Values.networkPolicy.allowExternalHttps (has $component (list "api" "worker-scanner" "worker-llm" "worker-unified" "otel-collector")) }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -195,7 +216,7 @@ spec:
             cidr: 2000::/3
             except: [2001::/23, 2001:2::/48, 2001:db8::/32, 2002::/16, 3fff::/20]
     {{- end }}
-    {{- if not (has $component (list "pentest-controller" "c67-pipeline" "pentest-verification" "pentest-tool-worker")) }}
+    {{- if not (has $component (list "worker-report" "pentest-controller" "c67-pipeline" "pentest-verification" "pentest-tool-worker")) }}
     {{- range $destination := $root.Values.networkPolicy.externalInfrastructure }}
     - to:
         - ipBlock: {cidr: {{ $destination.cidr | quote }}}

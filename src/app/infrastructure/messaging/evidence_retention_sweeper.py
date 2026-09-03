@@ -11,7 +11,7 @@ from sqlalchemy import select, text
 from app.config.config import settings
 from app.infrastructure.database import AsyncSessionLocal, models as db_models
 from app.infrastructure.database.repositories.evidence_repo import EvidenceRepository
-from app.infrastructure.database.tenant_context import system_principal_task
+from app.infrastructure.database.tenant_context import principal_scope, system_principal_task
 from app.infrastructure.evidence.object_store import EvidenceObjectStore
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,12 @@ async def _delete_orphan_uploads() -> int:
     deleted = 0
     async with AsyncSessionLocal() as db:
         for object_key, object_version in candidates:
+            # Capability 13 export artifacts and immutable redaction children
+            # have their own digest-bound retention ledger.  Treating them as
+            # legacy evidence orphans would bypass legal holds, exact-version
+            # absence proofs, and crypto-shredding ordering.
+            if "/capability13/" in object_key:
+                continue
             exists = await db.scalar(
                 select(db_models.EvidenceObject.id).where(
                     db_models.EvidenceObject.object_key == object_key,
@@ -149,14 +155,41 @@ async def _delete_orphan_uploads() -> int:
     return deleted
 
 
+async def _process_capability13_retention() -> int:
+    """Extend the existing sweeper only behind the qualified retention gate."""
+    if not settings.PENTEST_CAPABILITY13_EXPORT_RETENTION:
+        return 0
+    from app.core.services.pentesting.capability13_retention_service import (
+        Capability13RetentionService,
+    )
+
+    async with AsyncSessionLocal() as db:
+        tenant_ids = list((await db.scalars(select(db_models.Tenant.id))).all())
+    processed = 0
+    store = EvidenceObjectStore()
+    for tenant_id in tenant_ids:
+        with principal_scope(
+            tenant_id=tenant_id,
+            principal_kind="system",
+            principal_id="c13-retention-sweeper",
+            system_scope=True,
+        ):
+            async with AsyncSessionLocal() as db:
+                service = Capability13RetentionService(db, store)
+                processed += await service.process_due(limit=BATCH_SIZE)
+                processed += await service.delete_orphans(limit=BATCH_SIZE)
+    return processed
+
+
 @system_principal_task("evidence-retention-sweeper")
-async def _sweep_once() -> tuple[int, int, int]:
+async def _sweep_once() -> tuple[int, int, int, int]:
     if not settings.EVIDENCE_STORE_ENABLED:
-        return (0, 0, 0)
+        return (0, 0, 0, 0)
     return (
         await _schedule_expired(),
         await _process_deletions(),
         await _delete_orphan_uploads(),
+        await _process_capability13_retention(),
     )
 
 
@@ -167,14 +200,15 @@ async def run_evidence_retention_sweeper(stop_event: asyncio.Event) -> None:
     logger.info("evidence_retention.started")
     while not stop_event.is_set():
         try:
-            scheduled, deleted, orphans = await _sweep_once()
-            if scheduled or deleted or orphans:
+            scheduled, deleted, orphans, c13_deleted = await _sweep_once()
+            if scheduled or deleted or orphans or c13_deleted:
                 logger.info(
                     "evidence_retention.completed",
                     extra={
                         "scheduled": scheduled,
                         "deleted": deleted,
                         "orphans": orphans,
+                        "capability13_deleted": c13_deleted,
                     },
                 )
         except Exception:  # noqa: BLE001

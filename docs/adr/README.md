@@ -29,3 +29,4 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-021: Pentesting Capability 9 canonical tests, operations and coverage](021-pentesting-capability9-canonical-tests-operations-coverage.md)
 - [ADR-022: Pentesting Capability 10 reversible mutations, locking and restoration](022-pentesting-capability10-reversible-mutations-cleanup.md)
 - [ADR-023: Pentesting Capability 11 asynchronous callback correlation](023-pentesting-capability11-asynchronous-callback-correlation.md)
+- [ADR-024: Pentesting Capability 13 cockpit, reports, governance, and retesting](024-pentesting-capability13-cockpit-reports-governance-retesting.md)

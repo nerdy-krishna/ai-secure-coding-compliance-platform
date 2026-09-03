@@ -15,7 +15,11 @@ runtime:
   apiSecret: sccap-api-runtime
   scannerSecret: sccap-scanner-runtime
   llmSecret: sccap-llm-runtime
+  # Contains database, report-queue, evidence-store, audit and telemetry
+  # credentials only; never model, target, integration, recipient-private-key
+  # or public object-store credentials.
   reportSecret: sccap-report-runtime
+  capability13ProtectedExportSecret: sccap-c13-protected-export-runtime
   unifiedSecret: sccap-unified-runtime
   migrationSecret: sccap-migration-runtime
   runnerV3Secret: sccap-pentest-runner-v3-runtime
@@ -84,6 +88,12 @@ workerPools:
     resources:
       requests: {cpu: "1", memory: 2Gi, ephemeral-storage: 2Gi}
       limits: {cpu: "4", memory: 8Gi, ephemeral-storage: 20Gi}
+
+capability13:
+  protectedExport:
+    # Default-off until every A25 and Q031-Q038/Q066/Q068 gate passes.
+    enabled: false
+    serviceAccountName: sccap-c13-protected-export
 
 runnerV3:
   enabled: false

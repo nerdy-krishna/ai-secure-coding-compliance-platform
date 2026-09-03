@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     PENTEST_TASK_SIGNING_KEY_ID: str = "pentest-foundation1-local"
     PENTEST_TASK_SIGNING_SEED: Optional[SecretStr] = None
     PENTEST_TASK_VERIFY_PUBLIC_KEYS: str = ""
+    # Development-only exact-origin fixture authority. This is deliberately
+    # empty by default and cannot authorize public, link-local, multicast, or
+    # unspecified addresses. It exists only so the committed local smoke
+    # profile can exercise the real worker against a named Docker fixture.
+    PENTEST_LOCAL_FIXTURE_ORIGINS: str = ""
     PENTEST_RESULT_SIGNING_KEY_ID: str = "pentest-foundation2-result-local"
     PENTEST_RESULT_SIGNING_SEED: Optional[SecretStr] = None
     PENTEST_RESULT_VERIFY_PUBLIC_KEYS: str = ""
@@ -168,6 +173,16 @@ class Settings(BaseSettings):
     PENTEST_CAPABILITY11_LATE_ACCEPT_SECONDS: int = Field(
         default=604_800, ge=0, le=2_592_000
     )
+    PENTEST_CAPABILITY13_SCHEMA_READ: bool = False
+    PENTEST_CAPABILITY13_SAFE_API: bool = False
+    PENTEST_CAPABILITY13_COCKPIT: bool = False
+    PENTEST_CAPABILITY13_GOVERNANCE_WRITES: bool = False
+    PENTEST_CAPABILITY13_REPORT_BUILDS: bool = False
+    PENTEST_CAPABILITY13_REDACTED_EXPORT: bool = False
+    PENTEST_CAPABILITY13_PROTECTED_EXPORT: bool = False
+    PENTEST_CAPABILITY13_EXPORT_RETENTION: bool = False
+    PENTEST_CAPABILITY13_RETEST: bool = False
+    PENTEST_CAPABILITY13_INTEGRATIONS: bool = False
     PENTEST_C67_INGRESS_ENABLED: bool = False
     PENTEST_VERIFICATION_COORDINATOR_ENABLED: bool = False
     PENTEST_IDENTITY_RUNTIME_ENABLED: bool = False
@@ -235,6 +250,34 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_tool_gateway_token(cls, value):
         return None if value is None or not str(value).strip() else value
+
+    @field_validator("PENTEST_LOCAL_FIXTURE_ORIGINS", mode="before")
+    @classmethod
+    def normalize_local_fixture_origins(cls, value: object) -> str:
+        origins = []
+        for raw in str(value or "").split(","):
+            origin = raw.strip().rstrip("/")
+            if not origin:
+                continue
+            parsed = urllib.parse.urlsplit(origin)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+                or "*" in origin
+            ):
+                raise ValueError(
+                    "PENTEST_LOCAL_FIXTURE_ORIGINS must contain exact HTTP(S) origins"
+                )
+            normalized = f"{parsed.scheme.lower()}://{parsed.hostname.lower()}"
+            if parsed.port is not None:
+                normalized += f":{parsed.port}"
+            origins.append(normalized)
+        return ",".join(dict.fromkeys(origins))
 
     @field_validator("PENTEST_CAPABILITY10_D16_QUALIFICATION_DIGEST", mode="before")
     @classmethod
@@ -878,6 +921,57 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "Capability 11 production issuance requires an exact-AAD material KMS key."
+            )
+        c13_runtime_enabled = any(
+            (
+                self.PENTEST_CAPABILITY13_SAFE_API,
+                self.PENTEST_CAPABILITY13_COCKPIT,
+                self.PENTEST_CAPABILITY13_GOVERNANCE_WRITES,
+                self.PENTEST_CAPABILITY13_REPORT_BUILDS,
+                self.PENTEST_CAPABILITY13_REDACTED_EXPORT,
+                self.PENTEST_CAPABILITY13_PROTECTED_EXPORT,
+                self.PENTEST_CAPABILITY13_EXPORT_RETENTION,
+                self.PENTEST_CAPABILITY13_RETEST,
+                self.PENTEST_CAPABILITY13_INTEGRATIONS,
+            )
+        )
+        if c13_runtime_enabled and not self.PENTEST_CAPABILITY13_SCHEMA_READ:
+            raise ValueError("Capability 13 runtime flags require schema-read enablement.")
+        if self.PENTEST_CAPABILITY13_COCKPIT and not self.PENTEST_CAPABILITY13_SAFE_API:
+            raise ValueError("Capability 13 cockpit requires the safe API.")
+        if self.PENTEST_CAPABILITY13_GOVERNANCE_WRITES and not self.PENTEST_CAPABILITY13_COCKPIT:
+            raise ValueError("Capability 13 governance requires the qualified cockpit.")
+        if self.PENTEST_CAPABILITY13_REPORT_BUILDS and not self.PENTEST_CAPABILITY13_COCKPIT:
+            raise ValueError("Capability 13 report builds require cutoff-pinned cockpit reads.")
+        if self.PENTEST_CAPABILITY13_REDACTED_EXPORT and not self.PENTEST_CAPABILITY13_REPORT_BUILDS:
+            raise ValueError("Capability 13 redacted exports require qualified report builds.")
+        if self.PENTEST_CAPABILITY13_PROTECTED_EXPORT and not (
+            self.PENTEST_CAPABILITY13_REDACTED_EXPORT and self.EVIDENCE_STORE_ENABLED
+        ):
+            raise ValueError(
+                "Capability 13 protected exports require redacted-export qualification and encrypted evidence storage."
+            )
+        if self.PENTEST_CAPABILITY13_EXPORT_RETENTION and not (
+            self.PENTEST_CAPABILITY13_REDACTED_EXPORT
+            and self.EVIDENCE_STORE_ENABLED
+        ):
+            raise ValueError(
+                "Capability 13 export retention requires qualified export and encrypted evidence storage."
+            )
+        if self.PENTEST_CAPABILITY13_RETEST and not (
+            self.PENTEST_CAPABILITY13_COCKPIT
+            and self.PENTEST_CAPABILITY6_ENABLED
+            and self.PENTEST_CAPABILITY9_SCHEMA_READ
+            and self.PENTEST_CAPABILITY9_PIN_NEW_ATTEMPTS
+        ):
+            raise ValueError(
+                "Capability 13 retests require C6/C9 authority, fresh C9 attempt pins, and the qualified cockpit."
+            )
+        if self.PENTEST_CAPABILITY13_INTEGRATIONS and not self.PENTEST_CAPABILITY13_GOVERNANCE_WRITES:
+            raise ValueError("Capability 13 integrations require qualified governance writes.")
+        if self.PENTEST_LOCAL_FIXTURE_ORIGINS and self.ENVIRONMENT != "development":
+            raise ValueError(
+                "PENTEST_LOCAL_FIXTURE_ORIGINS is restricted to development."
             )
         # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
         # When disabled the host URL is irrelevant — skip the check so

@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import logging.config
+import re
 import signal
 import time
 import uuid
@@ -89,6 +90,8 @@ from app.shared.lib.scan_progress import (
 logging.config.dictConfig(LOGGING_CONFIG)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
+
+_CORRELATION_ID_RE = re.compile(r"[A-Za-z0-9._:\-]{1,128}")
 
 
 def _safe(s: Any) -> str:
@@ -1007,11 +1010,80 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
     semaphore retains the unified worker's three-scan concurrency limit while
     pool-specific prefetch values bound broker delivery in Kubernetes.
     """
+    raw_correlation_id = message.correlation_id or ""
+    correlation_id_var.set(
+        raw_correlation_id
+        if _CORRELATION_ID_RE.fullmatch(raw_correlation_id)
+        else str(uuid.uuid4())
+    )
     logger.info(
         "MSG: Received from queue '%s' (delivery_tag=%s).",
         _safe(message.routing_key),
         message.delivery_tag,
     )
+
+    # C13 reuses the existing report queue with a closed opaque locator. It is
+    # intentionally dispatched before the legacy scan envelope parser because
+    # it has no scan_id and must never enter the LangGraph/report-handoff path.
+    if (message.routing_key or "") == settings.RABBITMQ_REPORT_QUEUE:
+        try:
+            c13_body = json.loads(message.body.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            c13_body = None
+        if isinstance(c13_body, dict) and c13_body.get("kind") == "capability13_report_export":
+            # The split report worker is the sole C13 protected-evidence
+            # plaintext boundary. Unified workers can share this legacy queue
+            # during rollout, but may only return the locator to the broker.
+            if settings.WORKER_POOL != "report":
+                logger.warning("c13.report.delivery.wrong_worker_pool")
+                await message.reject(requeue=True)
+                return
+            try:
+                from app.infrastructure.database.repositories.pentesting.capability13_report_locator import (
+                    Capability13ReportLocatorV1,
+                )
+
+                c13_locator = Capability13ReportLocatorV1.model_validate(c13_body)
+            except Exception:
+                logger.error("c13.report.delivery.invalid_locator")
+                await message.reject(requeue=False)
+                return
+            if not settings.PENTEST_CAPABILITY13_REPORT_BUILDS:
+                logger.warning("c13.report.delivery.feature_disabled")
+                await message.reject(requeue=True)
+                return
+
+            async def _run_c13_report_delivery() -> None:
+                try:
+                    from app.workers.pentesting import (
+                        handle_capability13_export_delivery,
+                        handle_capability13_report_delivery,
+                    )
+
+                    with principal_scope(
+                        tenant_id=c13_locator.tenant_id,
+                        principal_kind="system",
+                        principal_id=f"c13-report-worker:{c13_locator.outbox_id}",
+                        system_scope=True,
+                    ):
+                        if c13_locator.request_kind == "report":
+                            await handle_capability13_report_delivery(c13_body)
+                        else:
+                            await handle_capability13_export_delivery(c13_body)
+                    await message.ack()
+                except asyncio.CancelledError:
+                    raise
+                except ValueError:
+                    logger.error("c13.report.delivery.rejected")
+                    if not message.processed:
+                        await message.reject(requeue=False)
+                except Exception:
+                    logger.error("c13.report.delivery.failed")
+                    if not message.processed:
+                        await message.reject(requeue=True)
+
+            _track_delivery(_run_c13_report_delivery())
+            return
 
     if (message.routing_key or "") in {
         settings.RABBITMQ_PENTEST_QUEUE,

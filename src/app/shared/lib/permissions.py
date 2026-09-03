@@ -53,6 +53,12 @@ PENTEST_READ_TENANT = "pentest.read.tenant"
 PENTEST_CONTROL = "pentest.control"
 PENTEST_APPROVE = "pentest.approve"
 PENTEST_EVIDENCE_READ = "pentest.evidence.read"
+PENTEST_REPORT_CREATE = "pentest.report.create"
+PENTEST_REPORT_PUBLISH = "pentest.report.publish"
+PENTEST_EVIDENCE_EXPORT = "pentest.evidence.export"
+PENTEST_GOVERNANCE_REQUEST = "pentest.governance.request"
+PENTEST_GOVERNANCE_APPROVE = "pentest.governance.approve"
+PENTEST_RETEST_CREATE = "pentest.retest.create"
 
 ALL_PERMISSION_KEYS = frozenset(
     {
@@ -82,6 +88,12 @@ ALL_PERMISSION_KEYS = frozenset(
         PENTEST_CONTROL,
         PENTEST_APPROVE,
         PENTEST_EVIDENCE_READ,
+        PENTEST_REPORT_CREATE,
+        PENTEST_REPORT_PUBLISH,
+        PENTEST_EVIDENCE_EXPORT,
+        PENTEST_GOVERNANCE_REQUEST,
+        PENTEST_GOVERNANCE_APPROVE,
+        PENTEST_RETEST_CREATE,
     }
 )
 
@@ -101,6 +113,9 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PENTEST_READ,
             PENTEST_READ_TENANT,
             PENTEST_EVIDENCE_READ,
+            PENTEST_REPORT_CREATE,
+            PENTEST_EVIDENCE_EXPORT,
+            PENTEST_GOVERNANCE_REQUEST,
         }
     ),
     SECURITY_APPROVER: frozenset(
@@ -119,6 +134,11 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PENTEST_READ_TENANT,
             PENTEST_APPROVE,
             PENTEST_EVIDENCE_READ,
+            PENTEST_REPORT_CREATE,
+            PENTEST_REPORT_PUBLISH,
+            PENTEST_EVIDENCE_EXPORT,
+            PENTEST_GOVERNANCE_REQUEST,
+            PENTEST_GOVERNANCE_APPROVE,
         }
     ),
     ANALYST: frozenset(
@@ -133,6 +153,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PENTEST_READ,
             PENTEST_CONTROL,
             PENTEST_EVIDENCE_READ,
+            PENTEST_REPORT_CREATE,
+            PENTEST_EVIDENCE_EXPORT,
+            PENTEST_GOVERNANCE_REQUEST,
+            PENTEST_RETEST_CREATE,
         }
     ),
     DEVELOPER: frozenset(

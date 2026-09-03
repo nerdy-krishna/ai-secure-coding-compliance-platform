@@ -58,6 +58,11 @@ const CompliancePage = React.lazy(() => import("../pages/compliance/CompliancePa
 const SubmitPage = React.lazy(() => import("../pages/submission/SubmitPage"));
 const ScanRunningPage = React.lazy(() => import("../pages/submission/ScanRunningPage"));
 const SetupPage = React.lazy(() => import("../pages/setup/SetupPage"));
+const PentestEngagementsPage = React.lazy(() => import("../pages/pentesting/PentestEngagementsPage"));
+const PentestEngagementPage = React.lazy(() => import("../pages/pentesting/PentestEngagementPage"));
+const PentestAttemptPage = React.lazy(() => import("../pages/pentesting/PentestAttemptPage"));
+const PentestReportPage = React.lazy(() => import("../pages/pentesting/PentestReportPage"));
+const PentestDeltaPage = React.lazy(() => import("../pages/pentesting/PentestDeltaPage"));
 
 const NotFoundPage: React.FC = () => (
   <div style={{ textAlign: "center", marginTop: "50px", padding: "20px" }}>
@@ -259,6 +264,30 @@ function AppContent() {
           <Route path="/admin/findings" element={routeContent(<AdminFindingsPage />)} />
           <Route element={<FeatureRoute feature="sso" />}>
             <Route path="/admin/sso/audit" element={routeContent(<SsoAuditPage />)} />
+          </Route>
+        </Route>
+        <Route element={<RouteGuard requires="permission" anyPermission={["pentest.read"]} />}>
+          <Route element={<FeatureRoute feature="pentesting_capability13" />}>
+            <Route
+              path="/pentesting/engagements"
+              element={routeContent(<PentestEngagementsPage />)}
+            />
+            <Route
+              path="/pentesting/engagements/:engagementId"
+              element={routeContent(<PentestEngagementPage />)}
+            />
+            <Route
+              path="/pentesting/engagements/:engagementId/attempts/:attemptId/reports/:reportId"
+              element={routeContent(<PentestReportPage />)}
+            />
+            <Route
+              path="/pentesting/engagements/:engagementId/attempts/:attemptId/deltas/:deltaId"
+              element={routeContent(<PentestDeltaPage />)}
+            />
+            <Route
+              path="/pentesting/engagements/:engagementId/attempts/:attemptId/:section"
+              element={routeContent(<PentestAttemptPage />)}
+            />
           </Route>
         </Route>
         <Route element={<RouteGuard requires="permission" anyPermission={["identity.read"]} />}>
