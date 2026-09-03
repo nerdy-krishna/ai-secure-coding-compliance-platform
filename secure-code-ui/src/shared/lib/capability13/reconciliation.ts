@@ -17,7 +17,7 @@ const sameOwner = (left: OwnerTuple, right: OwnerTuple): boolean =>
   left.attempt_id === right.attempt_id;
 
 const SHA256 = /^[0-9a-f]{64}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parseC13Event(value: unknown): C13Event | null {
   if (!value || typeof value !== "object") return null;
@@ -63,7 +63,17 @@ export function validateSnapshot(snapshot: C13CockpitSnapshot, expected: Expecte
   if (!Number.isSafeInteger(snapshot.source_cutoff.aggregate_sequence) || snapshot.source_cutoff.aggregate_sequence < 0) {
     return "invalid_sequence";
   }
-  if (!UUID.test(snapshot.snapshot_id) || Object.values(snapshot.owner).some((id) => !UUID.test(id))) return "invalid_identifier";
+  const ownerIds = [
+    snapshot.owner.tenant_id,
+    snapshot.owner.project_id,
+    snapshot.owner.engagement_id,
+    snapshot.owner.attempt_id,
+  ];
+  if (!UUID.test(snapshot.snapshot_id) || ownerIds.some((id) => !UUID.test(id)) ||
+    (snapshot.owner.resource_owner_user_id !== undefined &&
+      (!Number.isSafeInteger(snapshot.owner.resource_owner_user_id) || snapshot.owner.resource_owner_user_id < 1))) {
+    return "invalid_identifier";
+  }
   if (!SHA256.test(snapshot.source_cutoff.event_digest) || !SHA256.test(snapshot.snapshot_digest)) return "invalid_digest";
   if (!Number.isFinite(Date.parse(snapshot.source_cutoff.captured_at))) return "invalid_cutoff_time";
   const owners = new Set(snapshot.source_pins.map((pin) => pin.owner));

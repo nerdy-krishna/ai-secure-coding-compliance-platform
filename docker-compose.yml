@@ -12,6 +12,9 @@ services:
     environment:
       - PYTHONPATH=/app/src
       - SERVICE_NAME=app
+      # Compose has one explicit migration owner. Worker-derived services use
+      # the image's fail-closed wait role.
+      - SCCAP_MIGRATION_ROLE=owner
       # Share the UI's explicit HTTP-only local-development opt-in with the
       # refresh-cookie issuer. Settings reject this in ENVIRONMENT=production.
       - ALLOW_INSECURE_COOKIES=${SSL_DEV_INSECURE:-false}
@@ -207,8 +210,8 @@ services:
       - .env
     volumes:
       - ./src:/app/src
-      # The shared entrypoint runs Alembic before the consumer starts. Keep
-      # live source and live migration revisions in sync during development.
+      # The API is the Compose migration owner. Worker images use the shared
+      # entrypoint only to wait until Alembic reports every head applied.
       - ./alembic.ini:/app/alembic.ini:ro
       - ./alembic:/app/alembic:ro
       - validation_jobs:/var/lib/sccap-validation/jobs

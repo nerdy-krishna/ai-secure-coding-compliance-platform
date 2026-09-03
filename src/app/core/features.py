@@ -254,6 +254,33 @@ def prune_unsatisfied(enabled: Iterable[str]) -> Set[str]:
     return current
 
 
+def apply_development_feature_overrides(enabled: Iterable[str]) -> Set[str]:
+    """Apply an explicit, non-persistent local-development feature overlay.
+
+    Router mounting happens before the asynchronous feature repository is
+    available. A committed development profile therefore needs one narrowly
+    scoped way to mount an opt-in router without editing an existing local
+    database. The override is additive, dependency-resolved, and rejected in
+    every environment except ``development``.
+    """
+
+    current = set(enabled)
+    raw = os.environ.get("SCCAP_DEVELOPMENT_FEATURES", "").strip()
+    if not raw:
+        return current
+    if os.environ.get("ENVIRONMENT", "").strip().casefold() != "development":
+        raise RuntimeError(
+            "SCCAP_DEVELOPMENT_FEATURES is permitted only in development"
+        )
+    requested = {name.strip() for name in raw.split(",") if name.strip()}
+    unsupported = requested - {"pentesting"}
+    if unsupported:
+        raise RuntimeError(
+            "SCCAP_DEVELOPMENT_FEATURES supports only the pentesting local profile"
+        )
+    return prune_unsatisfied(resolve_dependencies(current | requested))
+
+
 def parse_enabled_from_rows(rows: Iterable) -> Set[str]:
     """Derive the enabled-feature set from ``system_config`` rows.
 
@@ -310,8 +337,8 @@ async def load_or_seed_enabled_features(repo: "SystemConfigRepository") -> Set[s
                 "enabled": sorted(target),
             },
         )
-        return target
-    return parse_enabled_from_rows(rows)
+        return apply_development_feature_overrides(target)
+    return apply_development_feature_overrides(parse_enabled_from_rows(rows))
 
 
 async def _seed_feature_rows(repo: "SystemConfigRepository", enabled: Set[str]) -> None:
@@ -394,10 +421,14 @@ def bootstrap_enabled_features_sync() -> Set[str]:
             "features.bootstrap_failed; falling back to SCCAP_VARIANT preset",
             exc_info=True,
         )
-        return expand_variant(os.environ.get("SCCAP_VARIANT", ""))
+        return apply_development_feature_overrides(
+            expand_variant(os.environ.get("SCCAP_VARIANT", ""))
+        )
     if not rows:
-        return expand_variant(os.environ.get("SCCAP_VARIANT", ""))
-    return parse_enabled_from_rows(rows)
+        return apply_development_feature_overrides(
+            expand_variant(os.environ.get("SCCAP_VARIANT", ""))
+        )
+    return apply_development_feature_overrides(parse_enabled_from_rows(rows))
 
 
 def _read_feature_rows_sync() -> List[_FeatureRow]:

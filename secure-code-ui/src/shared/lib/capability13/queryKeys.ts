@@ -14,6 +14,10 @@ export const capability13Keys = {
     ["capability13", tenantId, "engagements", normalizedFilters(filters)] as const,
   attempts: (tenantId: string, engagementId: string) =>
     ["capability13", tenantId, engagementId, "attempts"] as const,
+  snapshot: (
+    tenantId: string,
+    owner: Pick<OwnerTuple, "engagement_id" | "attempt_id">,
+  ) => ["capability13", tenantId, owner.engagement_id, owner.attempt_id, "snapshot", "head"] as const,
   resourceFamily: (
     tenantId: string,
     owner: Pick<OwnerTuple, "engagement_id" | "attempt_id">,

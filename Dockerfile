@@ -172,6 +172,7 @@ COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
 
 RUN chmod +x /app/app-entrypoint.sh
+ENV SCCAP_MIGRATION_ROLE=wait
 EXPOSE 8000
 ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -287,6 +288,7 @@ RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(Te
 # invoked explicitly with OSV-Scanner's offline flags.
 
 RUN chmod +x /app/app-entrypoint.sh
+ENV SCCAP_MIGRATION_ROLE=wait
 ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["python", "-m", "app.workers.consumer"]
 

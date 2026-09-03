@@ -136,6 +136,9 @@ export const capability13Service = {
   listCallbacks: async (engagementId: string, attemptId: string, filters: C13Filters = {}, signal?: AbortSignal) =>
     safePage(engagementId, attemptId, "callbacks", filters, signal),
 
+  listEvidenceExports: async (engagementId: string, attemptId: string, filters: C13Filters = {}, signal?: AbortSignal) =>
+    safePage(engagementId, attemptId, "exports", filters, signal),
+
   listReports: async (engagementId: string, attemptId: string, filters: C13Filters = {}, signal?: AbortSignal) =>
     safePage(engagementId, attemptId, "reports", filters, signal),
 
