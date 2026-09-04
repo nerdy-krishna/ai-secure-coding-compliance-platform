@@ -952,6 +952,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pentesting/configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pentest Configuration */
+        get: operations["get_pentest_configuration_api_v1_pentesting_configuration_get"];
+        /** Update Pentest Configuration */
+        put: operations["update_pentest_configuration_api_v1_pentesting_configuration_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pentesting/projects/{pentest_project_id}/credentials": {
         parameters: {
             query?: never;
@@ -25122,6 +25140,59 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /**
+         * PentestConfigurationUpdateRequest
+         * @description Tenant Pentesting defaults and the ceilings users may select.
+         */
+        PentestConfigurationUpdateRequest: {
+            /**
+             * Default Duration Minutes
+             * @default 180
+             */
+            default_duration_minutes: number;
+            /**
+             * Maximum Duration Minutes
+             * @default 2880
+             */
+            maximum_duration_minutes: number;
+            /**
+             * Default Response Mebibytes
+             * @default 256
+             */
+            default_response_mebibytes: number;
+            /**
+             * Maximum Response Mebibytes
+             * @default 4096
+             */
+            maximum_response_mebibytes: number;
+        };
+        /** PentestConfigurationV1 */
+        PentestConfigurationV1: {
+            /**
+             * Default Duration Minutes
+             * @default 180
+             */
+            default_duration_minutes: number;
+            /**
+             * Maximum Duration Minutes
+             * @default 2880
+             */
+            maximum_duration_minutes: number;
+            /**
+             * Default Response Mebibytes
+             * @default 256
+             */
+            default_response_mebibytes: number;
+            /**
+             * Maximum Response Mebibytes
+             * @default 4096
+             */
+            maximum_response_mebibytes: number;
+            /** Revision */
+            revision: number;
+            /** Updated At */
+            updated_at: string | null;
+        };
         /** PentestCredentialListV1 */
         PentestCredentialListV1: {
             /** Items */
@@ -26014,12 +26085,12 @@ export interface components {
         ProductAssessmentRulesRequest: {
             /**
              * Maximum Duration Minutes
-             * @default 30
+             * @default 180
              */
             maximum_duration_minutes: number;
             /**
              * Maximum Response Mebibytes
-             * @default 64
+             * @default 256
              */
             maximum_response_mebibytes: number;
             /**
@@ -35480,6 +35551,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PentestProjectV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pentest_configuration_api_v1_pentesting_configuration_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PentestConfigurationV1"];
+                };
+            };
+        };
+    };
+    update_pentest_configuration_api_v1_pentesting_configuration_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PentestConfigurationUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PentestConfigurationV1"];
                 };
             };
             /** @description Validation Error */

@@ -61,6 +61,7 @@ const SetupPage = React.lazy(() => import("../pages/setup/SetupPage"));
 const PentestEngagementsPage = React.lazy(() => import("../pages/pentesting/PentestEngagementsPage"));
 const PentestProjectsPage = React.lazy(() => import("../pages/pentesting/PentestProjectsPage"));
 const PentestCredentialsPage = React.lazy(() => import("../pages/pentesting/PentestCredentialsPage"));
+const PentestConfigurationPage = React.lazy(() => import("../pages/pentesting/PentestConfigurationPage"));
 const PentestEngagementPage = React.lazy(() => import("../pages/pentesting/PentestEngagementPage"));
 const PentestAttemptPage = React.lazy(() => import("../pages/pentesting/PentestAttemptPage"));
 const PentestReportPage = React.lazy(() => import("../pages/pentesting/PentestReportPage"));
@@ -276,6 +277,7 @@ function AppContent() {
             />
             <Route path="/pentesting/projects" element={routeContent(<PentestProjectsPage />)} />
             <Route path="/pentesting/credentials" element={routeContent(<PentestCredentialsPage />)} />
+            <Route path="/pentesting/configuration" element={routeContent(<PentestConfigurationPage />)} />
             <Route
               path="/pentesting/engagements/:engagementId"
               element={routeContent(<PentestEngagementPage />)}
