@@ -73,14 +73,20 @@ class User(SQLAlchemyBaseUserTable[int], Base):
 
 class Project(Base):
     __tablename__ = "projects"
-    # `(user_id, name)` is the natural key the upsert in
+    # `(user_id, project_kind, name)` is the natural key the Code Scan upsert in
     # scan_repo.get_or_create_project relies on (V15.4.2 — atomic
     # `INSERT ... ON CONFLICT DO NOTHING` to defeat the TOCTOU race
     # between two concurrent submitters of the same project name).
     # Without this constraint Postgres rejects the ON CONFLICT clause
     # outright and every scan submission 500s.
     __table_args__ = (
-        UniqueConstraint("user_id", "name", name="uq_projects_user_id_name"),
+        UniqueConstraint(
+            "user_id", "project_kind", "name", name="uq_projects_user_kind_name"
+        ),
+        sa.CheckConstraint(
+            "project_kind IN ('code_scan', 'pentest_authority')",
+            name="ck_projects_project_kind",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -88,6 +94,11 @@ class Project(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Product-facing Code Scan projects and opaque Pentesting authority rows
+    # share this mature ownership root, but are never listed interchangeably.
+    project_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="code_scan", server_default="code_scan"
+    )
     repository_url: Mapped[Optional[str]] = mapped_column(Text)
     # Mandatory tenant ownership; repository checks and RLS enforce isolation.
     tenant_id: Mapped[uuid.UUID] = mapped_column(

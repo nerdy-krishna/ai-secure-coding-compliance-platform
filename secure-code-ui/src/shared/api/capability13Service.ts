@@ -6,6 +6,7 @@ import type {
   CreateEngagementInput,
   CursorPage,
   EngagementSummary,
+  EngagementDetail,
   EngagementCreatedReceipt,
   ExportProjection,
   ExportRequestInput,
@@ -20,6 +21,7 @@ import type {
   RetestRequestInput,
   SourcePin,
   SourceCutoff,
+  StopEngagementReceipt,
 } from "../lib/capability13/types";
 
 const apiRoot = `${import.meta.env.VITE_API_BASE_URL || "/api/v1"}/pentesting`;
@@ -115,6 +117,16 @@ export const capability13Service = {
   listAttempts: async (engagementId: string, signal?: AbortSignal) =>
     (await apiClient.get<CursorPage<AttemptSummary>>(`/pentesting/engagements/${part(engagementId)}/attempts`, { signal })).data,
 
+  getEngagement: async (engagementId: string, signal?: AbortSignal) =>
+    (await apiClient.get<EngagementDetail>(`/pentesting/engagements/${part(engagementId)}`, { signal })).data,
+
+  stopEngagement: async (engagementId: string, expectedStateVersion: number) =>
+    (await apiClient.post<StopEngagementReceipt>(`/pentesting/engagements/${part(engagementId)}/commands/stop`, {
+      schema_version: "sccap.pentest.v1",
+      command_idempotency_key: `ui-stop-${crypto.randomUUID()}`,
+      expected_state_version: expectedStateVersion,
+    })).data,
+
   getSnapshot: async (engagementId: string, attemptId: string, signal?: AbortSignal) =>
     adaptSnapshot((await apiClient.get<ApiSnapshot>(`${attemptPath(engagementId, attemptId)}/cockpit-snapshot`, { signal })).data),
 
@@ -164,7 +176,7 @@ export const capability13Service = {
       if (!page.next_cursor) return null;
       cursor = page.next_cursor;
     }
-    throw new Error("C13 delta lookup exceeded its bounded page limit");
+    throw new Error("Delta lookup exceeded its bounded page limit");
   },
 
   listAudit: async (engagementId: string, attemptId: string, filters: C13Filters = {}, signal?: AbortSignal) =>
@@ -218,14 +230,14 @@ export const capability13Service = {
 
 export function evidenceExportDownloadUrl(engagementId: string, attemptId: string, exportId: string, artifactId: string): string {
   const url = new URL(`${apiRoot}/engagements/${part(engagementId)}/attempts/${part(attemptId)}/evidence-exports/${part(exportId)}/artifacts/${part(artifactId)}/download`, window.location.origin);
-  if (url.origin !== window.location.origin) throw new Error("C13 protected downloads require same-origin delivery");
+  if (url.origin !== window.location.origin) throw new Error("Protected downloads require same-origin delivery");
   return url.toString();
 }
 
 export function capability13StreamUrl(engagementId: string, attemptId: string, cursor: number): string {
   const url = new URL(`${apiRoot}/engagements/${part(engagementId)}/attempts/${part(attemptId)}/cockpit-stream`, window.location.origin);
   if (url.origin !== window.location.origin) {
-    throw new Error("C13 SSE requires a same-origin HttpOnly browser session");
+    throw new Error("Live updates require a same-origin HttpOnly browser session");
   }
   if (cursor > 0) url.searchParams.set("cursor", String(cursor));
   return url.toString();

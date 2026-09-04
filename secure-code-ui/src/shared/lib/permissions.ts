@@ -6,6 +6,7 @@ export const Permission = {
   platformConfigManage: "platform.config.manage",
   platformTenantManage: "platform.tenant.manage",
   pentestRead: "pentest.read",
+  pentestControl: "pentest.control",
   pentestReportCreate: "pentest.report.create",
   pentestReportPublish: "pentest.report.publish",
   pentestEvidenceExport: "pentest.evidence.export",

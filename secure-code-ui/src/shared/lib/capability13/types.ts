@@ -292,6 +292,30 @@ export interface EngagementSummary {
   projection_state: ProjectionHealth;
 }
 
+export interface EngagementDetail {
+  schema_version: "sccap.pentest.v1";
+  engagement_id: string;
+  project_id: string;
+  owner_user_id: number;
+  name: string;
+  mode: string;
+  state: string;
+  state_version: number;
+  current_attempt_id: string | null;
+  normalized_origin: string;
+  authorization: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StopEngagementReceipt {
+  schema_version: "sccap.pentest.v1";
+  engagement_id: string;
+  attempt_id: string;
+  cancellation_generation: number;
+  state: string;
+}
+
 export interface AttemptSummary {
   id: string;
   generation: number;

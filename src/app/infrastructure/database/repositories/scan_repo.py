@@ -60,13 +60,14 @@ class ScanRepository:
             "name": name,
             "user_id": user_id,
             "repository_url": repo_url,
+            "project_kind": "code_scan",
         }
         if tenant_id is not None:
             values["tenant_id"] = tenant_id
         insert_stmt = (
             pg_insert(db_models.Project)
             .values(**values)
-            .on_conflict_do_nothing(index_elements=["name", "user_id"])
+            .on_conflict_do_nothing(index_elements=["name", "user_id", "project_kind"])
         )
         try:
             await self.db.execute(insert_stmt)
@@ -86,7 +87,9 @@ class ScanRepository:
             )
             raise
 
-        stmt = select(db_models.Project).filter_by(name=name, user_id=user_id)
+        stmt = select(db_models.Project).filter_by(
+            name=name, user_id=user_id, project_kind="code_scan"
+        )
         result = await self.db.execute(stmt)
         project = result.scalars().first()
         if project is None:
@@ -1528,7 +1531,10 @@ class ScanRepository:
         """Retrieves a single project by its ID."""
         logger.debug("Fetching project from DB.", extra={"project_id": str(project_id)})
         result = await self.db.execute(
-            select(db_models.Project).filter(db_models.Project.id == project_id)
+            select(db_models.Project).filter(
+                db_models.Project.id == project_id,
+                db_models.Project.project_kind == "code_scan",
+            )
         )
         return result.scalars().first()
 
@@ -1626,6 +1632,7 @@ class ScanRepository:
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
             .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
+            .where(db_models.Project.project_kind == "code_scan")
             .where(db_models.Project.name.ilike(f"%{name_query}%"))
             .order_by(db_models.Project.name)
             .limit(10)
@@ -1735,6 +1742,7 @@ class ScanRepository:
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
             .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
+            .where(db_models.Project.project_kind == "code_scan")
         )
         if search:
             stmt = stmt.filter(db_models.Project.name.ilike(f"%{search}%"))
@@ -1758,6 +1766,7 @@ class ScanRepository:
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
             .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
+            .where(db_models.Project.project_kind == "code_scan")
         )
         if search:
             stmt = stmt.filter(db_models.Project.name.ilike(f"%{search}%"))

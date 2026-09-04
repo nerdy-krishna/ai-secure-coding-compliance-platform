@@ -10,18 +10,13 @@
 // (/account/settings/appearance).
 
 import React from "react";
-import { useLocation } from "react-router-dom";
-import AdminSubNav from "./AdminSubNav";
 import { TopNav } from "./TopNav/TopNav";
 import { ConnectivityStatus } from "../shared/ui/ConnectivityStatus";
+import { SidebarNav } from "./SidebarNav";
 
 const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
   children,
 }) => {
-  const { pathname } = useLocation();
-  const isAdminArea =
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/account/settings/llm");
   return (
     <div
       style={{
@@ -36,14 +31,10 @@ const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
       </a>
       <TopNav />
       <ConnectivityStatus />
-      <main
-        id="main-content"
-        className="dashboard-main"
-        tabIndex={-1}
-      >
-        {isAdminArea && <AdminSubNav />}
-        {children}
-      </main>
+      <div className="dashboard-shell">
+        <SidebarNav />
+        <main id="main-content" className="dashboard-main" tabIndex={-1}>{children}</main>
+      </div>
     </div>
   );
 };

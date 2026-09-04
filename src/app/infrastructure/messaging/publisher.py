@@ -58,6 +58,8 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "tenant_id",
         "engagement_id",
         "execution_id",
+        "dispatch_id",
+        "dispatch_generation",
         "task_digest",
         # Existing C4 controller locator fields.  These are opaque authority
         # coordinates already committed in PostgreSQL; the sweeper must

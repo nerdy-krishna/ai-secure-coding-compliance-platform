@@ -12,7 +12,7 @@ import { useFeatures } from "../shared/hooks/useFeatures";
 import { isSafeHttpUrl } from "../shared/lib/safeUrl";
 import { hasAnyPermission, Permission } from "../shared/lib/permissions";
 
-interface AdminLink {
+export interface AdminLink {
   to: string;
   label: string;
   /** When set, the link is hidden unless this feature flag is enabled. */
@@ -20,7 +20,7 @@ interface AdminLink {
   permissions?: readonly string[];
 }
 
-const ADMIN_LINKS: AdminLink[] = [
+export const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/authorization", label: "Authorization" },
   { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
   { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
