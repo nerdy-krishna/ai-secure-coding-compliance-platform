@@ -49,6 +49,22 @@ interface ApiSnapshot {
   can_approve_governance: boolean; can_create_retest: boolean;
 }
 
+export interface AttemptToolRun {
+  tool: string;
+  status: "completed" | "failed";
+  observations: number;
+  requests: number;
+  duration_ms: number;
+  authority: "observation_only";
+}
+
+export interface AttemptRuntimeSummary {
+  state: string;
+  outcome: string | null;
+  bootstrap: { status?: string };
+  local_blackbox_tools: AttemptToolRun[];
+}
+
 interface ApiReportDetail {
   id: string; request_id: string; version: number; state: "validated";
   profile: string; completeness: ReportProjection["completeness"];
@@ -129,6 +145,9 @@ export const capability13Service = {
 
   getSnapshot: async (engagementId: string, attemptId: string, signal?: AbortSignal) =>
     adaptSnapshot((await apiClient.get<ApiSnapshot>(`${attemptPath(engagementId, attemptId)}/cockpit-snapshot`, { signal })).data),
+
+  getAttemptSummary: async (engagementId: string, attemptId: string, signal?: AbortSignal) =>
+    (await apiClient.get<AttemptRuntimeSummary>(`${attemptPath(engagementId, attemptId)}/summary`, { signal })).data,
 
   listActivity: async (engagementId: string, attemptId: string, filters: C13Filters = {}, signal?: AbortSignal) =>
     safePage(engagementId, attemptId, "activity", filters, signal),

@@ -6757,6 +6757,10 @@ export interface components {
             bootstrap: {
                 [key: string]: unknown;
             };
+            /** Local Blackbox Tools */
+            local_blackbox_tools?: {
+                [key: string]: unknown;
+            }[];
             /** Coverage */
             coverage: {
                 [key: string]: unknown;
@@ -26003,6 +26007,27 @@ export interface components {
             /** Configuration Digest */
             configuration_digest: string;
         };
+        /**
+         * ProductAssessmentRulesRequest
+         * @description Human-scale browser inputs translated into strict internal limits.
+         */
+        ProductAssessmentRulesRequest: {
+            /**
+             * Maximum Duration Minutes
+             * @default 10
+             */
+            maximum_duration_minutes: number;
+            /**
+             * Maximum Response Mebibytes
+             * @default 16
+             */
+            maximum_response_mebibytes: number;
+            /**
+             * Evidence Retention Days
+             * @default 30
+             */
+            evidence_retention_days: number;
+        };
         /** ProductBlackBoxCreateRequest */
         ProductBlackBoxCreateRequest: {
             /** Name */
@@ -26021,7 +26046,13 @@ export interface components {
             authorization_statement_version: string;
             /** Client Idempotency Key */
             client_idempotency_key: string;
-            rules?: components["schemas"]["BootstrapRulesV1"] | null;
+            /**
+             * Assessment Profile
+             * @default single_root_probe
+             * @enum {string}
+             */
+            assessment_profile: "single_root_probe" | "safe_black_box_benchmark";
+            rules?: components["schemas"]["ProductAssessmentRulesRequest"] | null;
         };
         /** ProductWhiteBoxCreateRequest */
         ProductWhiteBoxCreateRequest: {
@@ -26041,7 +26072,13 @@ export interface components {
             authorization_statement_version: string;
             /** Client Idempotency Key */
             client_idempotency_key: string;
-            rules?: components["schemas"]["BootstrapRulesV1"] | null;
+            /**
+             * Assessment Profile
+             * @default single_root_probe
+             * @constant
+             */
+            assessment_profile: "single_root_probe";
+            rules?: components["schemas"]["ProductAssessmentRulesRequest"] | null;
             /**
              * Source Review Authorized
              * @constant

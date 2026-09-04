@@ -414,6 +414,19 @@ USER appuser
 ENTRYPOINT ["/opt/sccap-tool-runtimes/nmap-connect"]
 CMD ["--kubernetes-attach-v1"]
 
+# ---------- development-only local benchmark worker -------------------
+# The ordinary production worker image does not contain target scanners.
+# This successor is selected only by docker-compose.pentesting-local.yml.
+FROM worker AS worker-pentest-local
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends "nmap=7.93+dfsg1-1" \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
+RUN chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap
+USER appuser
+
 # ---------- patch validator ----------------------------------------------
 # Deliberately contains no SCCAP application, configuration, or credentials.
 # Compose gives it no network namespace and only a bounded shared job spool.

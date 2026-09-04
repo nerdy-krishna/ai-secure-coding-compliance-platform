@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # unspecified addresses. It exists only so the committed local smoke
     # profile can exercise the real worker against a named Docker fixture.
     PENTEST_LOCAL_FIXTURE_ORIGINS: str = ""
+    # Explicit development-only tool suite. It is accepted only for an origin
+    # already present in PENTEST_LOCAL_FIXTURE_ORIGINS and is never enabled by
+    # production defaults.
+    PENTEST_LOCAL_BLACKBOX_BENCHMARK_ENABLED: bool = False
     PENTEST_RESULT_SIGNING_KEY_ID: str = "pentest-foundation2-result-local"
     PENTEST_RESULT_SIGNING_SEED: Optional[SecretStr] = None
     PENTEST_RESULT_VERIFY_PUBLIC_KEYS: str = ""
