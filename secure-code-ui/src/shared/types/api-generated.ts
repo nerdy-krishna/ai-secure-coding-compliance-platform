@@ -26014,12 +26014,12 @@ export interface components {
         ProductAssessmentRulesRequest: {
             /**
              * Maximum Duration Minutes
-             * @default 10
+             * @default 30
              */
             maximum_duration_minutes: number;
             /**
              * Maximum Response Mebibytes
-             * @default 16
+             * @default 64
              */
             maximum_response_mebibytes: number;
             /**
