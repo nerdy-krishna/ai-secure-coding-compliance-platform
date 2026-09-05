@@ -44,6 +44,7 @@ from app.infrastructure.database.repositories.usage_budget_repo import (
 )
 from app.infrastructure.llm_client_rate_limiter import get_rate_limiter_for_config
 from app.infrastructure.llm_usage_capture import (
+    _run_usage,
     build_request_writes,
     load_active_price_override,
     record_run_usage,
@@ -95,6 +96,14 @@ _OUTPUT_RETRIES = 2
 # Once a model lands here, later calls skip straight to prompt-based
 # structured output instead of paying a failed tool call first.
 _PROMPTED_OUTPUT_MODELS: set[str] = set()
+
+
+def _prefers_prompted_output(provider: str, model_name: str) -> bool:
+    """Avoid a known rejected tool request for DeepSeek-compatible endpoints."""
+
+    return provider.strip().lower() == "deepseek" or model_name.strip().lower().startswith(
+        "deepseek-"
+    )
 
 
 async def _reserve_usage_budget(
@@ -400,7 +409,9 @@ class LLMClient:
                 kwargs["model_settings"] = ModelSettings(temperature=temperature)
             return Agent(model, **kwargs)
 
-        use_prompted = model_key in _PROMPTED_OUTPUT_MODELS
+        use_prompted = model_key in _PROMPTED_OUTPUT_MODELS or _prefers_prompted_output(
+            self.provider_name, self.db_llm_config.model_name
+        )
         agent: Agent = _make_agent(prompted=use_prompted, temperature=self.temperature)
 
         # V14.2.4 / V16.2.5 / V13.4.2: mask prompt payload before logging to
@@ -430,7 +441,7 @@ class LLMClient:
             nonlocal captured_run_result
             captured_run_result = rr
             parsed_output_value = rr.output  # type: ignore[assignment]
-            usage = rr.usage()
+            usage = _run_usage(rr)
             prompt_tokens = int(usage.input_tokens or 0)
             completion_tokens = int(usage.output_tokens or 0)
             cache_write_tokens = int(getattr(usage, "cache_write_tokens", 0) or 0)

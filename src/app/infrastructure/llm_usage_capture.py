@@ -25,6 +25,17 @@ from app.shared.lib.llm_usage import (
 )
 
 
+def _run_usage(run_result: Any) -> Any:
+    """Read Pydantic AI's property API while tolerating pre-migration doubles."""
+
+    usage = run_result.usage
+    if hasattr(usage, "input_tokens"):
+        return usage
+    if callable(usage):
+        return usage()
+    return usage
+
+
 def _effective_at(config: Any) -> datetime:
     value = getattr(config, "updated_at", None) or getattr(config, "created_at", None)
     if not isinstance(value, datetime):
@@ -205,7 +216,7 @@ async def record_run_usage(
     requests = build_request_writes(run_result, config, effective_override)
     if not requests:
         raise ValueError("successful LLM run exposed no provider response usage")
-    run_usage = run_result.usage()
+    run_usage = _run_usage(run_result)
     async with async_session_factory() as db:
         result = await LLMUsageRepository(db).record(
             context=context,
