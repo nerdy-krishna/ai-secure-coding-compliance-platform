@@ -9,6 +9,7 @@ from typing import Optional
 
 import aio_pika
 from aio_pika.abc import AbstractRobustChannel, AbstractRobustConnection
+from pydantic import ValidationError
 
 from app.config.config import settings
 from app.infrastructure.observability import (
@@ -17,6 +18,8 @@ from app.infrastructure.observability import (
     span,
     trace_carrier,
 )
+from app.pentesting.contracts.finding_truth_v2 import VerificationLocatorV1
+from app.pentesting.contracts.tooling_v1 import ToolTaskLocatorV1
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +88,28 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
 )
 
 
+def _is_safe_notification_locator(message_body: dict) -> bool:
+    """Validate each opaque locator against the contract selected by its kind."""
+
+    if "locator" not in message_body:
+        return True
+    locator = message_body["locator"]
+    contract = {
+        "pentest_tool_v1": ToolTaskLocatorV1,
+        "pentest_verification_v1": VerificationLocatorV1,
+    }.get(message_body.get("kind"))
+    if contract is None or not isinstance(locator, dict):
+        return False
+    try:
+        validated = contract.model_validate_json(json.dumps(locator))
+    except (TypeError, ValueError, ValidationError):
+        return False
+
+    # Capability 5 reserves extensions for a future version. Keep the current
+    # queue boundary narrower than the reusable contract base model.
+    return not isinstance(validated, ToolTaskLocatorV1) or validated.extensions == {}
+
+
 async def _get_channel() -> AbstractRobustChannel:
     global _connection, _channel
 
@@ -120,37 +145,12 @@ async def publish_message(
         return False
 
     safe_body = {k: v for k, v in message_body.items() if k in ALLOWED_OUTBOX_KEYS}
-    if "locator" in safe_body:
-        locator = safe_body["locator"]
-        allowed_locator_keys = {
-            "schema_version",
-            "extensions",
-            "outbox_id",
-            "tenant_id",
-            "engagement_id",
-            "attempt_id",
-            "execution_id",
-            "tool_request_id",
-            "dispatch_id",
-            "dispatch_generation",
-            "cancellation_generation",
-            "task_digest",
-            "expires_at",
-            "locator_digest",
-            "signing_key_id",
-            "signature_algorithm",
-            "signature_audience",
-            "signature",
-        }
-        if (
-            not isinstance(locator, dict)
-            or set(locator) - allowed_locator_keys
-            or locator.get("extensions") != {}
-            or locator.get("schema_version")
-            != "sccap.pentest.tool-locator.v1"
-        ):
-            logger.error("Rejected unsafe tool notification locator.")
-            return False
+    if not _is_safe_notification_locator(safe_body):
+        logger.error(
+            "Rejected unsafe pentest notification locator.",
+            extra={"notification_kind": safe_body.get("kind")},
+        )
+        return False
     with span(
         "sccap.rabbitmq.publish",
         {
