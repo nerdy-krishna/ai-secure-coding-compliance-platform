@@ -42,6 +42,12 @@ class KmsConfigurationTests(unittest.TestCase):
             EVIDENCE_STORE_ENABLED=False,
             EVIDENCE_KMS_KEY_ID="",
             EVIDENCE_KMS_PREVIOUS_KEY_IDS=[],
+            PENTEST_CAPABILITY8_ADAPTER_RECONCILE=False,
+            PENTEST_CAPABILITY8_WHITE_BOX_API=False,
+            PENTEST_CAPABILITY8_SOURCE_PROFILES=False,
+            PENTEST_CAPABILITY8_C6_INGRESS_RECONCILE=False,
+            PENTEST_CAPABILITY13_PROTECTED_EXPORT=False,
+            PENTEST_CAPABILITY13_EXPORT_RETENTION=False,
         )
 
         self.assertEqual(configured.EVIDENCE_KMS_KEY_ID, "")

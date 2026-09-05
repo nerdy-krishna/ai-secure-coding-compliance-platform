@@ -114,6 +114,9 @@ class SecretEnvelopeTests(unittest.TestCase):
             ENVIRONMENT="staging",
             EVIDENCE_KEY_PROVIDER="local",
             EVIDENCE_KMS_KEY_ID=None,
+            PENTEST_LOCAL_FIXTURE_ORIGINS="",
+            PENTEST_LOCAL_BLACKBOX_BENCHMARK_ENABLED=False,
+            PENTEST_LOCAL_MODEL_ANALYSIS_ENABLED=False,
         )
         with self.assertRaisesRegex(ValueError, "Non-development secret envelopes"):
             Settings.model_validate(payload)
