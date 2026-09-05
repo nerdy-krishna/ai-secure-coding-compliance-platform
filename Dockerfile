@@ -421,10 +421,41 @@ FROM worker AS worker-pentest-local
 
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends "nmap=7.93+dfsg1-1" \
+    && apt-get install -y --no-install-recommends \
+        "nmap=7.93+dfsg1-1" \
+        default-jre-headless \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libatspi2.0-0 \
+        libcairo2 \
+        libcups2 \
+        libdbus-1-3 \
+        libdrm2 \
+        libgbm1 \
+        libglib2.0-0 \
+        libnspr4 \
+        libnss3 \
+        libpango-1.0-0 \
+        libx11-6 \
+        libxcb1 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
-RUN chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap
+COPY --from=pentest-adapter-playwright /ms-playwright /ms-playwright
+COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/playwright /app/.venv/lib/python3.12/site-packages/playwright
+COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/pyee /app/.venv/lib/python3.12/site-packages/pyee
+COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/greenlet /app/.venv/lib/python3.12/site-packages/greenlet
+COPY --from=pentest-adapter-zap /zap /zap
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN chmod -R a+rX /ms-playwright /zap \
+    && chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap /zap/zap.sh
 USER appuser
 
 # ---------- patch validator ----------------------------------------------

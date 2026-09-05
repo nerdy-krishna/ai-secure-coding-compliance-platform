@@ -65,6 +65,134 @@ export interface AttemptRuntimeSummary {
   local_blackbox_tools: AttemptToolRun[];
 }
 
+export interface AttemptActivityItem {
+  id: string;
+  source: "assessment" | "workflow" | "orchestrator" | "findings";
+  sequence: number;
+  occurred_at: string;
+  title: string;
+  detail: string;
+  status: string;
+  command: string | null;
+  result: string | null;
+  is_current: boolean;
+}
+
+export interface AttemptActivityFeed {
+  schema_version: "sccap.pentest.activity-feed.v1";
+  engagement_id: string;
+  attempt_id: string;
+  attempt_state: string;
+  is_terminal: boolean;
+  items: AttemptActivityItem[];
+}
+
+export interface AttemptToolObservation {
+  id: string;
+  tool: "Nmap" | "Nuclei" | "HTTP surface probe" | "DNS discovery" | "TLS characterization" | "Technology fingerprint" | "Content discovery" | "Playwright browser" | "OWASP ZAP passive scan";
+  category: "network_service" | "template_match" | "http_surface" | "form_interaction" | "dns_resolution" | "tls_configuration" | "technology_fingerprint" | "content_discovery" | "browser_surface" | "passive_alert";
+  title: string;
+  detail: string;
+  severity: string | null;
+  status: string | null;
+  fields: { label: string; value: string }[];
+}
+
+export interface AttemptToolCommand {
+  tool: "Controller" | "Nmap" | "Nuclei" | "HTTP surface probe" | "DNS discovery" | "TLS characterization" | "Technology fingerprint" | "Content discovery" | "Playwright browser" | "OWASP ZAP passive scan";
+  command: string;
+  result: string;
+  status: string;
+}
+
+export interface AttemptToolObservations {
+  schema_version: "sccap.pentest.tool-observations.v1";
+  engagement_id: string;
+  attempt_id: string;
+  total_observations: number;
+  detail_status: "available" | "partial" | "unavailable";
+  commands: AttemptToolCommand[];
+  items: AttemptToolObservation[];
+  limitation: string;
+}
+
+export interface FindingSurface {
+  target_ref: string;
+  operation_ref: string;
+  opaque_identity_ref: string | null;
+  component_ref: string | null;
+  object_ref: string | null;
+}
+
+export interface FindingCandidate {
+  candidate_finding_id: string;
+  current_revision_id: string;
+  current_revision: number;
+  lifecycle_state: string;
+  truth_disposition: string;
+  title: string;
+  claim_kind: string;
+  verification_route: "deterministic_predicate" | "independent_reproduction";
+  confidence: "low" | "moderate" | "high";
+  affected_surfaces: FindingSurface[];
+  supporting_evidence_refs: string[];
+  refuting_evidence_refs: string[];
+  contradiction_state: "none" | "suspected" | "material";
+  limitations: string[];
+  updated_at: string;
+}
+
+export interface FindingVerification {
+  verification_request_id: string;
+  candidate_finding_id: string;
+  candidate_revision_id: string;
+  cycle: number;
+  trigger: string;
+  route: "deterministic_predicate" | "independent_reproduction";
+  state: string;
+  disposition: string;
+  reason_code: string | null;
+  limitations: string[];
+  created_at: string;
+  expires_at: string;
+}
+
+export interface ConfirmedFinding {
+  confirmed_finding_id: string;
+  candidate_finding_id: string;
+  current_revision_id: string;
+  current_revision: number;
+  current_state: "active" | "contested" | "invalidated" | "superseded";
+  verification_assurance: "deterministic_exact_fact" | "independent_behavioral_reproduction";
+  title: string;
+  expected_behavior: string;
+  observed_behavior: string;
+  security_impact: string;
+  surfaces: FindingSurface[];
+  evidence_refs: string[];
+  severity: {
+    technical_score: number;
+    technical_vector: string;
+    technical_band: "informational" | "low" | "medium" | "high" | "critical";
+    business_impact: string;
+    final_band: "informational" | "low" | "medium" | "high" | "critical";
+    reason_codes: string[];
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+interface FindingTruthPage<T> {
+  items: T[];
+  next_cursor: string | null;
+}
+
+export interface FindingLifecycle {
+  candidates: FindingCandidate[];
+  verifications: FindingVerification[];
+  confirmed: ConfirmedFinding[];
+}
+
 interface ApiReportDetail {
   id: string; request_id: string; version: number; state: "validated";
   profile: string; completeness: ReportProjection["completeness"];
@@ -148,6 +276,26 @@ export const capability13Service = {
 
   getAttemptSummary: async (engagementId: string, attemptId: string, signal?: AbortSignal) =>
     (await apiClient.get<AttemptRuntimeSummary>(`${attemptPath(engagementId, attemptId)}/summary`, { signal })).data,
+
+  getActivityFeed: async (engagementId: string, attemptId: string, signal?: AbortSignal) =>
+    (await apiClient.get<AttemptActivityFeed>(`${attemptPath(engagementId, attemptId)}/activity-feed`, { signal })).data,
+
+  getToolObservations: async (engagementId: string, attemptId: string, signal?: AbortSignal) =>
+    (await apiClient.get<AttemptToolObservations>(`${attemptPath(engagementId, attemptId)}/tool-observations`, { signal })).data,
+
+  getFindingLifecycle: async (engagementId: string, attemptId: string, signal?: AbortSignal): Promise<FindingLifecycle> => {
+    const path = attemptPath(engagementId, attemptId);
+    const [candidates, verifications, confirmed] = await Promise.all([
+      apiClient.get<FindingTruthPage<FindingCandidate>>(`${path}/candidates`, { params: { limit: 200 }, signal }),
+      apiClient.get<FindingTruthPage<FindingVerification>>(`${path}/verifications`, { params: { limit: 200 }, signal }),
+      apiClient.get<FindingTruthPage<ConfirmedFinding>>(`${path}/confirmed-findings`, { params: { limit: 200 }, signal }),
+    ]);
+    return {
+      candidates: candidates.data.items,
+      verifications: verifications.data.items,
+      confirmed: confirmed.data.items,
+    };
+  },
 
   listActivity: async (engagementId: string, attemptId: string, filters: C13Filters = {}, signal?: AbortSignal) =>
     safePage(engagementId, attemptId, "activity", filters, signal),

@@ -7,10 +7,10 @@ const KIB = 1024;
 const LIMITS = Object.freeze({
   entryJavaScript: 360 * KIB,
   asyncJavaScript: 315 * KIB,
-  // C13 adds five lazy cockpit/report/governance route chunks. Keep the
-  // per-entry and per-async caps unchanged while reserving their measured
-  // aggregate footprint.
-  totalJavaScript: 1_250 * KIB,
+  // Pentesting adds lazy cockpit, report, governance, tool-observation, and
+  // finding-lifecycle views. Keep the per-entry and per-async caps unchanged
+  // while reserving their measured aggregate footprint.
+  totalJavaScript: 1_260 * KIB,
   stylesheet: 64 * KIB,
 });
 

@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # already present in PENTEST_LOCAL_FIXTURE_ORIGINS and is never enabled by
     # production defaults.
     PENTEST_LOCAL_BLACKBOX_BENCHMARK_ENABLED: bool = False
+    # Counts-only advisory model review for the development benchmark. This
+    # remains default-off and never grants target or finding authority.
+    PENTEST_LOCAL_MODEL_ANALYSIS_ENABLED: bool = False
     PENTEST_RESULT_SIGNING_KEY_ID: str = "pentest-foundation2-result-local"
     PENTEST_RESULT_SIGNING_SEED: Optional[SecretStr] = None
     PENTEST_RESULT_VERIFY_PUBLIC_KEYS: str = ""
@@ -750,11 +753,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Capability 8 white-box API requires schema-read and adapter reconciliation."
             )
-        if self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE and not self.PENTEST_CAPABILITY8_SCHEMA_READ:
+        if (
+            self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE
+            and not self.PENTEST_CAPABILITY8_SCHEMA_READ
+        ):
             raise ValueError(
                 "Capability 8 adapter reconciliation requires schema-read enablement."
             )
-        if self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE and not self.EVIDENCE_STORE_ENABLED:
+        if (
+            self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE
+            and not self.EVIDENCE_STORE_ENABLED
+        ):
             raise ValueError(
                 "Capability 8 adapter reconciliation requires the encrypted evidence store."
             )
@@ -772,11 +781,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Capability 8 C6 ingress requires the C8 adapter and Capability 6."
             )
-        if self.PENTEST_CAPABILITY8_SOURCE_PROFILES and not self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE:
+        if (
+            self.PENTEST_CAPABILITY8_SOURCE_PROFILES
+            and not self.PENTEST_CAPABILITY8_ADAPTER_RECONCILE
+        ):
             raise ValueError(
                 "Capability 8 source profiles require qualified adapter reconciliation."
             )
-        if self.PENTEST_CAPABILITY8_EVENT_V3 and not self.PENTEST_CAPABILITY8_SCHEMA_READ:
+        if (
+            self.PENTEST_CAPABILITY8_EVENT_V3
+            and not self.PENTEST_CAPABILITY8_SCHEMA_READ
+        ):
             raise ValueError(
                 "Capability 8 V3 events require C8 schema-read enablement."
             )
@@ -790,7 +805,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Capability 9 reconciliation requires C9 schema-read, C4 delta authority, and C6/C7/C8 reads."
             )
-        if self.PENTEST_CAPABILITY9_PIN_NEW_ATTEMPTS and not self.PENTEST_CAPABILITY9_SCHEMA_READ:
+        if (
+            self.PENTEST_CAPABILITY9_PIN_NEW_ATTEMPTS
+            and not self.PENTEST_CAPABILITY9_SCHEMA_READ
+        ):
             raise ValueError(
                 "Capability 9 Attempt pinning requires C9 schema-read enablement."
             )
@@ -808,8 +826,13 @@ class Settings(BaseSettings):
             )
         )
         if c10_runtime_enabled and not self.PENTEST_CAPABILITY10_SCHEMA_READ:
-            raise ValueError("Capability 10 runtime flags require schema-read enablement.")
-        if self.PENTEST_CAPABILITY10_SAFE_API and not self.PENTEST_CAPABILITY10_SCHEMA_READ:
+            raise ValueError(
+                "Capability 10 runtime flags require schema-read enablement."
+            )
+        if (
+            self.PENTEST_CAPABILITY10_SAFE_API
+            and not self.PENTEST_CAPABILITY10_SCHEMA_READ
+        ):
             raise ValueError("Capability 10 safe API requires schema-read enablement.")
         if self.PENTEST_CAPABILITY10_REGISTRATION and not (
             self.PENTEST_CAPABILITY9_SCHEMA_READ
@@ -837,8 +860,7 @@ class Settings(BaseSettings):
                 "adapter qualification digest."
             )
         if self.PENTEST_CAPABILITY10_EVENT_V5 and not (
-            self.PENTEST_CAPABILITY10_SCHEMA_READ
-            and self.PENTEST_CAPABILITY9_EVENT_V4
+            self.PENTEST_CAPABILITY10_SCHEMA_READ and self.PENTEST_CAPABILITY9_EVENT_V4
         ):
             raise ValueError(
                 "Capability 10 V5 events require C10 schema-read and qualified V4 events."
@@ -865,8 +887,13 @@ class Settings(BaseSettings):
             )
         )
         if c11_runtime_enabled and not self.PENTEST_CAPABILITY11_SCHEMA_READ:
-            raise ValueError("Capability 11 runtime flags require schema-read enablement.")
-        if self.PENTEST_CAPABILITY11_SAFE_API and not self.PENTEST_CAPABILITY11_SCHEMA_READ:
+            raise ValueError(
+                "Capability 11 runtime flags require schema-read enablement."
+            )
+        if (
+            self.PENTEST_CAPABILITY11_SAFE_API
+            and not self.PENTEST_CAPABILITY11_SCHEMA_READ
+        ):
             raise ValueError("Capability 11 safe API requires schema-read enablement.")
         if self.PENTEST_CAPABILITY11_ISSUER and not (
             self.PENTEST_CAPABILITY9_SCHEMA_READ
@@ -886,8 +913,7 @@ class Settings(BaseSettings):
                 "Capability 11 ingress requires issuance, reconciliation, and encrypted evidence storage."
             )
         if self.PENTEST_CAPABILITY11_EVENT_V6 and not (
-            self.PENTEST_CAPABILITY11_RECONCILE
-            and self.PENTEST_CAPABILITY10_EVENT_V5
+            self.PENTEST_CAPABILITY11_RECONCILE and self.PENTEST_CAPABILITY10_EVENT_V5
         ):
             raise ValueError(
                 "Capability 11 V6 events require qualified reconciliation and V5 event compatibility."
@@ -940,15 +966,30 @@ class Settings(BaseSettings):
             )
         )
         if c13_runtime_enabled and not self.PENTEST_CAPABILITY13_SCHEMA_READ:
-            raise ValueError("Capability 13 runtime flags require schema-read enablement.")
+            raise ValueError(
+                "Capability 13 runtime flags require schema-read enablement."
+            )
         if self.PENTEST_CAPABILITY13_COCKPIT and not self.PENTEST_CAPABILITY13_SAFE_API:
             raise ValueError("Capability 13 cockpit requires the safe API.")
-        if self.PENTEST_CAPABILITY13_GOVERNANCE_WRITES and not self.PENTEST_CAPABILITY13_COCKPIT:
+        if (
+            self.PENTEST_CAPABILITY13_GOVERNANCE_WRITES
+            and not self.PENTEST_CAPABILITY13_COCKPIT
+        ):
             raise ValueError("Capability 13 governance requires the qualified cockpit.")
-        if self.PENTEST_CAPABILITY13_REPORT_BUILDS and not self.PENTEST_CAPABILITY13_COCKPIT:
-            raise ValueError("Capability 13 report builds require cutoff-pinned cockpit reads.")
-        if self.PENTEST_CAPABILITY13_REDACTED_EXPORT and not self.PENTEST_CAPABILITY13_REPORT_BUILDS:
-            raise ValueError("Capability 13 redacted exports require qualified report builds.")
+        if (
+            self.PENTEST_CAPABILITY13_REPORT_BUILDS
+            and not self.PENTEST_CAPABILITY13_COCKPIT
+        ):
+            raise ValueError(
+                "Capability 13 report builds require cutoff-pinned cockpit reads."
+            )
+        if (
+            self.PENTEST_CAPABILITY13_REDACTED_EXPORT
+            and not self.PENTEST_CAPABILITY13_REPORT_BUILDS
+        ):
+            raise ValueError(
+                "Capability 13 redacted exports require qualified report builds."
+            )
         if self.PENTEST_CAPABILITY13_PROTECTED_EXPORT and not (
             self.PENTEST_CAPABILITY13_REDACTED_EXPORT and self.EVIDENCE_STORE_ENABLED
         ):
@@ -956,8 +997,7 @@ class Settings(BaseSettings):
                 "Capability 13 protected exports require redacted-export qualification and encrypted evidence storage."
             )
         if self.PENTEST_CAPABILITY13_EXPORT_RETENTION and not (
-            self.PENTEST_CAPABILITY13_REDACTED_EXPORT
-            and self.EVIDENCE_STORE_ENABLED
+            self.PENTEST_CAPABILITY13_REDACTED_EXPORT and self.EVIDENCE_STORE_ENABLED
         ):
             raise ValueError(
                 "Capability 13 export retention requires qualified export and encrypted evidence storage."
@@ -971,11 +1011,24 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Capability 13 retests require C6/C9 authority, fresh C9 attempt pins, and the qualified cockpit."
             )
-        if self.PENTEST_CAPABILITY13_INTEGRATIONS and not self.PENTEST_CAPABILITY13_GOVERNANCE_WRITES:
-            raise ValueError("Capability 13 integrations require qualified governance writes.")
+        if (
+            self.PENTEST_CAPABILITY13_INTEGRATIONS
+            and not self.PENTEST_CAPABILITY13_GOVERNANCE_WRITES
+        ):
+            raise ValueError(
+                "Capability 13 integrations require qualified governance writes."
+            )
         if self.PENTEST_LOCAL_FIXTURE_ORIGINS and self.ENVIRONMENT != "development":
             raise ValueError(
                 "PENTEST_LOCAL_FIXTURE_ORIGINS is restricted to development."
+            )
+        if self.PENTEST_LOCAL_MODEL_ANALYSIS_ENABLED and (
+            self.ENVIRONMENT != "development"
+            or not self.PENTEST_LOCAL_BLACKBOX_BENCHMARK_ENABLED
+            or not self.PENTEST_CAPABILITY6_ENABLED
+        ):
+            raise ValueError(
+                "Local pentest model analysis requires the development benchmark and Capability 6."
             )
         # Langfuse: when enabled, enforce HTTPS for non-loopback hosts.
         # When disabled the host URL is irrelevant — skip the check so
@@ -1010,7 +1063,10 @@ class Settings(BaseSettings):
                 )
             if not self.EVIDENCE_KMS_KEY_ID:
                 raise ValueError("EVIDENCE_KMS_KEY_ID is required outside development.")
-            if self.PENTEST_CAPABILITY7_ENABLED and not self.PENTEST_IDENTITY_KMS_KEY_ID:
+            if (
+                self.PENTEST_CAPABILITY7_ENABLED
+                and not self.PENTEST_IDENTITY_KMS_KEY_ID
+            ):
                 raise ValueError(
                     "PENTEST_IDENTITY_KMS_KEY_ID is required when Capability 7 is enabled."
                 )

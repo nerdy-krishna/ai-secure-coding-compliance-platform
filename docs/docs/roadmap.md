@@ -18,11 +18,14 @@ scan events, downloadable HTML/CSV/PDF/SARIF reports, scanner-native JSON,
 finding dispositions, user groups, SAML/OIDC SSO, SCIM, passkeys, and an
 administrative audit surface.
 
-The `ai-pentester` integration also contains the C0–C11 execution path and the
-default-off Capability 13 operator cockpit, immutable reporting/export,
-governance overlay, and fresh-retest workflow. A committed development profile
-enables an exact internal fixture for local frontend smoke testing; arbitrary
-private targets and production-dangerous integrations remain out of scope.
+The `ai-pentester` integration also contains the Pentesting execution path,
+operator cockpit, immutable reporting/export, governance overlay, and
+fresh-retest workflow. A committed development profile enables explicitly
+allowlisted internal fixtures for frontend-driven assessments and ordinary
+report downloads. External vault providers, blind-callback receivers,
+recipient-encrypted evidence packages, and SIEM delivery are optional future
+enterprise integrations; their absence is not a blocker for the core local
+product path. Arbitrary target expansion remains out of scope.
 
 The remaining work is primarily correctness under failure, durable evidence,
 operator visibility, tenant enforcement, and repeatable enterprise operation.

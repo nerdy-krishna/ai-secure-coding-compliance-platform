@@ -17,7 +17,7 @@ MIGRATION_PATH = (
 BASELINE_PATH = ROOT / "alembic" / "baselines" / "2026_08_28_current_schema.sql"
 BASELINE_ROOT = "4d5e6f708192"
 FOUNDATION1_HEAD = "92a3b4c5d6e7"
-CURRENT_HEAD = "d6e7f8091a2b"
+CURRENT_HEAD = "c13product0003"
 PENTEST_REFERENCE_MIGRATION_PATH = (
     ROOT
     / "alembic"
@@ -25,6 +25,21 @@ PENTEST_REFERENCE_MIGRATION_PATH = (
     / "2026_08_30_0500_harden_pentest_reference_integrity.py"
 )
 ACTIVE_CHAIN = (
+    ("c13product0003", "c13product0002"),
+    ("c13product0002", "c13product0001"),
+    ("c13product0001", "c13a1b2c3d4e5"),
+    ("c13a1b2c3d4e5", "c11a1b2c3d4e5"),
+    ("c11a1b2c3d4e5", "c10a1b2c3d4e5"),
+    ("c10a1b2c3d4e5", "c9a1b2c3d4e5"),
+    ("c9a1b2c3d4e5", "c8a1b2c3d4e5"),
+    ("c8a1b2c3d4e5", "c8p1tctx0001"),
+    ("c8p1tctx0001", "c67a27p4d5e6"),
+    ("c67a27p4d5e6", "c67a27d1e2f3"),
+    ("c67a27d1e2f3", "c7a2b3c4d5e6"),
+    ("c7a2b3c4d5e6", "c6f1a2b3c4d5"),
+    ("c6f1a2b3c4d5", "f8091a2b3c4d"),
+    ("f8091a2b3c4d", "e7f8091a2b3c"),
+    ("e7f8091a2b3c", "d6e7f8091a2b"),
     ("d6e7f8091a2b", "c5d6e7f8091a"),
     ("c5d6e7f8091a", "b4c5d6e7f809"),
     ("b4c5d6e7f809", "a3b4c5d6e7f8"),
