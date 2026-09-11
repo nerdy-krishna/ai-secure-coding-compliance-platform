@@ -523,8 +523,15 @@ async def lifespan(app: FastAPI):
         from app.infrastructure.messaging.pentest_recovery_sweeper import (
             run_pentest_recovery_sweeper,
         )
+        from app.infrastructure.messaging.pentest_finding_sweeper import (
+            run_pentest_finding_sweeper,
+        )
 
         pentest_foundation2_tasks = [
+            asyncio.create_task(
+                run_pentest_finding_sweeper(pentest_foundation2_stop),
+                name="pentest-finding-sweeper",
+            ),
             asyncio.create_task(
                 run_pentest_recovery_sweeper(pentest_foundation2_stop),
                 name="pentest-recovery-sweeper",

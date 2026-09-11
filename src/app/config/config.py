@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     RABBITMQ_PENTEST_V2_QUEUE: str = "pentest_execution_v2_queue"
     RABBITMQ_PENTEST_V3_QUEUE: str = "pentest_execution_v3_queue"
     RABBITMQ_PENTEST_CONTROLLER_QUEUE: str = "pentest_controller_queue"
+    RABBITMQ_PENTEST_AUTHENTICATION_QUEUE: str = "pentest_authentication_queue_v1"
+    PENTEST_PROJECT_AUTHENTICATION_ENABLED: bool = False
+    PENTEST_PROJECT_SESSION_REUSE_ENABLED: bool = False
+    PENTEST_AUTHENTICATION_CONCURRENCY: int = Field(default=2, ge=1, le=4)
     RABBITMQ_PENTEST_CONTROLLER_URL: Optional[str] = None
     RABBITMQ_PENTEST_TOOL_QUEUE: str = "pentest_tool_queue_v1"
     RABBITMQ_PENTEST_TOOL_URL: Optional[str] = None
@@ -107,6 +111,10 @@ class Settings(BaseSettings):
     # unspecified addresses. It exists only so the committed local smoke
     # profile can exercise the real worker against a named Docker fixture.
     PENTEST_LOCAL_FIXTURE_ORIGINS: str = ""
+    # Tenant-bound private CIDRs and runner identity; empty keeps public-only execution.
+    PENTEST_PRIVATE_NETWORK_PROFILES: str = "[]"
+    PENTEST_PROTECTED_NETWORKS: str = "[]"
+    PENTEST_AUTOMATIC_RUNNER_ID: str = "runner-v3"
     # Explicit development-only tool suite. It is accepted only for an origin
     # already present in PENTEST_LOCAL_FIXTURE_ORIGINS and is never enabled by
     # production defaults.
@@ -122,6 +130,7 @@ class Settings(BaseSettings):
     PENTEST_FOUNDATION3_ENABLED: bool = False
     PENTEST_CAPABILITY4_ENABLED: bool = False
     PENTEST_CAPABILITY5_ENABLED: bool = False
+    PENTEST_ADAPTER_REPORTER_TOKEN: Optional[SecretStr] = None
     PENTEST_CAPABILITY6_ENABLED: bool = False
     PENTEST_CAPABILITY7_ENABLED: bool = False
     PENTEST_CAPABILITY8_SCHEMA_READ: bool = False

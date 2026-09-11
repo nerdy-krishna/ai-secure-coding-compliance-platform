@@ -952,6 +952,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pentesting/projects/{pentest_project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pentest Project */
+        get: operations["get_pentest_project_api_v1_pentesting_projects__pentest_project_id__get"];
+        /** Update Pentest Project */
+        put: operations["update_pentest_project_api_v1_pentesting_projects__pentest_project_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pentesting/configuration": {
         parameters: {
             query?: never;
@@ -963,6 +981,23 @@ export interface paths {
         get: operations["get_pentest_configuration_api_v1_pentesting_configuration_get"];
         /** Update Pentest Configuration */
         put: operations["update_pentest_configuration_api_v1_pentesting_configuration_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/network-profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pentest Network Profiles */
+        get: operations["list_pentest_network_profiles_api_v1_pentesting_network_profiles_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1010,6 +1045,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pentesting/internal/tool-gateway/adapter-inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Adapter Inventory
+         * @description Accept deployment health from the separately authenticated reconciler.
+         */
+        post: operations["publish_adapter_inventory_api_v1_pentesting_internal_tool_gateway_adapter_inventory_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pentesting/projects/{pentest_project_id}/credentials": {
         parameters: {
             query?: never;
@@ -1022,6 +1077,108 @@ export interface paths {
         put?: never;
         /** Create Pentest Credential */
         post: operations["create_pentest_credential_api_v1_pentesting_projects__pentest_project_id__credentials_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/attempts/{attempt_id}/authentication-browser": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authentication Browser Frame */
+        get: operations["authentication_browser_frame_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__authentication_browser_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/attempts/{attempt_id}/authentication-browser/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Authentication Browser Input */
+        post: operations["authentication_browser_input_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__authentication_browser_input_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/projects/{pentest_project_id}/authentication-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Authentication Jobs */
+        get: operations["list_authentication_jobs_api_v1_pentesting_projects__pentest_project_id__authentication_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/projects/{pentest_project_id}/authentication-jobs/{job_id}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Supply Authentication Input */
+        post: operations["supply_authentication_input_api_v1_pentesting_projects__pentest_project_id__authentication_jobs__job_id__input_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/projects/{pentest_project_id}/credential-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pentest Credential Sessions */
+        get: operations["list_pentest_credential_sessions_api_v1_pentesting_projects__pentest_project_id__credential_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/projects/{pentest_project_id}/credential-sessions/{session_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Pentest Credential Session */
+        post: operations["revoke_pentest_credential_session_api_v1_pentesting_projects__pentest_project_id__credential_sessions__session_id__revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1729,6 +1886,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pentesting/assessments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pentest Assessments */
+        get: operations["list_pentest_assessments_api_v1_pentesting_assessments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pentest Reusable Settings */
+        get: operations["get_pentest_reusable_settings_api_v1_pentesting_engagements__engagement_id__settings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pentesting/engagements/{engagement_id}/attempts": {
         parameters: {
             query?: never;
@@ -1757,6 +1948,40 @@ export interface paths {
         get: operations["list_capability13_projection_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__c13_projections__resource__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/attempts/{attempt_id}/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discover Business Workflows */
+        get: operations["discover_business_workflows_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__workflows_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/engagements/{engagement_id}/attempts/{attempt_id}/workflows/{proposal_digest}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Business Workflow */
+        post: operations["review_business_workflow_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__workflows__proposal_digest__review_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2556,6 +2781,23 @@ export interface paths {
          *     narrow workload identity and are reconciled against PostgreSQL authority.
          */
         post: operations["relay_authorize_connection_api_v1_pentesting_internal_relay_authorize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pentesting/internal/relay/authenticated-exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Relay Authenticated Exchange */
+        post: operations["relay_authenticated_exchange_api_v1_pentesting_internal_relay_authenticated_exchange_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6108,7 +6350,7 @@ export interface components {
              * Adapter Id
              * @enum {string}
              */
-            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            adapter_id: "authorization_readonly.v1" | "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
             /** Adapter Contract Version */
             adapter_contract_version: string;
             /** Runtime Version */
@@ -6743,6 +6985,30 @@ export interface components {
              */
             is_current: boolean;
         };
+        /** AttemptCollectedEvidenceV1 */
+        AttemptCollectedEvidenceV1: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Execution Id
+             * Format: uuid
+             */
+            execution_id: string;
+            /** Evidence Type */
+            evidence_type: string;
+            /** Media Type */
+            media_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Committed At
+             * Format: date-time
+             */
+            committed_at: string;
+        };
         /** AttemptCommandRequestV2 */
         AttemptCommandRequestV2: {
             /**
@@ -7035,6 +7301,8 @@ export interface components {
             status?: string | null;
             /** Fields */
             fields?: components["schemas"]["AttemptToolObservationFieldV1"][];
+            /** Evidence Refs */
+            evidence_refs?: string[];
         };
         /** AttemptToolObservationsV1 */
         AttemptToolObservationsV1: {
@@ -7065,6 +7333,8 @@ export interface components {
             commands?: components["schemas"]["AttemptToolCommandV1"][];
             /** Items */
             items?: components["schemas"]["AttemptToolObservationV1"][];
+            /** Evidence */
+            evidence?: components["schemas"]["AttemptCollectedEvidenceV1"][];
             /** Limitation */
             limitation: string;
         };
@@ -7282,6 +7552,64 @@ export interface components {
              */
             created_at: string;
         };
+        /** AuthenticationSettings */
+        AuthenticationSettings: {
+            /** Login Url */
+            login_url?: string | null;
+            /** Verification Url */
+            verification_url?: string | null;
+            /**
+             * Mechanism
+             * @default auto
+             * @enum {string}
+             */
+            mechanism: "auto" | "form" | "json_api" | "basic" | "api_key" | "bearer" | "oidc" | "saml";
+            /** Api Key Header */
+            api_key_header?: string | null;
+            /** Username Field */
+            username_field?: string | null;
+            /** Password Field */
+            password_field?: string | null;
+            /** Token Url */
+            token_url?: string | null;
+            /** Credential Origin */
+            credential_origin?: string | null;
+            /** Sso Origins */
+            sso_origins?: string[];
+        };
+        /** AuthorizationBaseline */
+        AuthorizationBaseline: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "primary" | "secondary";
+            /** Resource Ref */
+            resource_ref: string;
+            /**
+             * Identity Operation Ref
+             * Format: uuid
+             */
+            identity_operation_ref: string;
+            /**
+             * Anonymous Operation Ref
+             * Format: uuid
+             */
+            anonymous_operation_ref: string;
+        };
+        /** AuthorizationComparisonArgumentsV1 */
+        AuthorizationComparisonArgumentsV1: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            argument_kind: "authorization_comparison";
+            /**
+             * Target Ref
+             * Format: uuid
+             */
+            target_ref: string;
+        };
         /** AuthorizationConfirmationV1 */
         AuthorizationConfirmationV1: {
             /**
@@ -7309,6 +7637,23 @@ export interface components {
              */
             source_review_authorized: boolean;
         };
+        /** AuthorizationInvocationMaterial */
+        AuthorizationInvocationMaterial: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            material_kind: "authorization";
+            /**
+             * Relay Capability Handle
+             * Format: uuid
+             */
+            relay_capability_handle: string;
+            /** Resources */
+            resources: components["schemas"]["AuthorizationResource"][];
+            /** Baselines */
+            baselines: components["schemas"]["AuthorizationBaseline"][];
+        };
         /** AuthorizationPolicyRead */
         AuthorizationPolicyRead: {
             /**
@@ -7326,6 +7671,37 @@ export interface components {
             separation_of_duties_mode: "off" | "critical";
             /** Action Request Id */
             action_request_id?: string | null;
+        };
+        /** AuthorizationResource */
+        AuthorizationResource: {
+            /** Resource Ref */
+            resource_ref: string;
+            /**
+             * Owner
+             * @enum {string}
+             */
+            owner: "primary" | "secondary";
+            /**
+             * Expectation
+             * @default unknown
+             * @enum {string}
+             */
+            expectation: "operator_owner_only" | "unknown";
+            /**
+             * Owner Operation Ref
+             * Format: uuid
+             */
+            owner_operation_ref: string;
+            /**
+             * Peer Operation Ref
+             * Format: uuid
+             */
+            peer_operation_ref: string;
+            /**
+             * Anonymous Operation Ref
+             * Format: uuid
+             */
+            anonymous_operation_ref: string;
         };
         /** BaselineAttestationV1 */
         BaselineAttestationV1: {
@@ -7735,6 +8111,46 @@ export interface components {
             /** Manual Escalation Role */
             manual_escalation_role: string;
         };
+        /** BrowserCommand */
+        BrowserCommand: {
+            /**
+             * Frame Id
+             * Format: uuid
+             */
+            frame_id: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "click" | "text" | "key" | "scroll" | "resume";
+            /**
+             * X
+             * @default 0
+             */
+            x: number;
+            /**
+             * Y
+             * @default 0
+             */
+            y: number;
+            /**
+             * Text
+             * Format: password
+             * @default
+             */
+            text: string;
+            /**
+             * Key
+             * @default Tab
+             * @enum {string}
+             */
+            key: "Tab" | "Enter" | "Backspace" | "Escape" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight";
+            /**
+             * Delta
+             * @default 0
+             */
+            delta: number;
+        };
         /** BrowserExplorationOptions */
         BrowserExplorationOptions: {
             /**
@@ -7822,6 +8238,18 @@ export interface components {
              * Format: uuid
              */
             capture_profile_ref: string;
+        };
+        /**
+         * BrowserRouteHint
+         * @description An observed client-side link, not an executed HTTP operation.
+         */
+        BrowserRouteHint: {
+            /** Origin */
+            origin: string;
+            /** Route */
+            route: string;
+            /** Evidence Digest */
+            evidence_digest: string;
         };
         /** BrowserWorkflowArgumentsV1 */
         BrowserWorkflowArgumentsV1: {
@@ -9204,6 +9632,75 @@ export interface components {
             /** Content Digest */
             content_digest: string;
         };
+        /** C13AssessmentItemV1 */
+        C13AssessmentItemV1: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Assessment Mode
+             * @enum {string}
+             */
+            assessment_mode: "black_box" | "gray_box" | "white_box";
+            /** State */
+            state: string;
+            /** Owner Ref */
+            owner_ref: string;
+            /** Project Name */
+            project_name?: string | null;
+            /** Normalized Origin */
+            normalized_origin?: string | null;
+            /** Attempt Number */
+            attempt_number?: number | null;
+            /** Attempt Started At */
+            attempt_started_at?: string | null;
+            /** Attempt Ended At */
+            attempt_ended_at?: string | null;
+            /** Attempt State */
+            attempt_state?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Current Attempt Id */
+            current_attempt_id?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Projection State
+             * @default complete
+             * @enum {string}
+             */
+            projection_state: "complete" | "partial" | "stale" | "conflict";
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Pentest Project Id */
+            pentest_project_id?: string | null;
+            /** Is Current */
+            is_current: boolean;
+            /** Engagement State */
+            engagement_state: string;
+            /** State Version */
+            state_version: number;
+        };
         /** C13AttemptItemV1 */
         C13AttemptItemV1: {
             /**
@@ -9401,6 +9898,21 @@ export interface components {
             limitation_codes?: string[];
             /** Canonical Digest */
             canonical_digest: string;
+        };
+        /** C13CursorPageV1[C13AssessmentItemV1] */
+        C13CursorPageV1_C13AssessmentItemV1_: {
+            /** Items */
+            items?: components["schemas"]["C13AssessmentItemV1"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            source_cutoff: components["schemas"]["C13SourceCutoffApiV1"];
+            /**
+             * Projection State
+             * @enum {string}
+             */
+            projection_state: "complete" | "partial" | "stale" | "conflict";
+            /** Limitation Codes */
+            limitation_codes?: string[];
         };
         /** C13CursorPageV1[C13AttemptItemV1] */
         C13CursorPageV1_C13AttemptItemV1_: {
@@ -10142,6 +10654,20 @@ export interface components {
             state: string;
             /** Owner Ref */
             owner_ref: string;
+            /** Project Name */
+            project_name?: string | null;
+            /** Normalized Origin */
+            normalized_origin?: string | null;
+            /** Attempt Number */
+            attempt_number?: number | null;
+            /** Attempt Started At */
+            attempt_started_at?: string | null;
+            /** Attempt Ended At */
+            attempt_ended_at?: string | null;
+            /** Attempt State */
+            attempt_state?: string | null;
+            /** Created At */
+            created_at?: string | null;
             /** Current Attempt Id */
             current_attempt_id?: string | null;
             /**
@@ -24713,7 +25239,10 @@ export interface components {
              * Format: uuid
              */
             target_ref: string;
-            /** Pinned Address Refs */
+            /**
+             * Pinned Address Refs
+             * @default []
+             */
             pinned_address_refs: string[];
             /**
              * Approved Port Set Ref
@@ -24734,6 +25263,8 @@ export interface components {
              * @enum {string}
              */
             material_kind: "nmap";
+            resolution_observation?: components["schemas"]["NmapResolutionObservationV1"] | null;
+            network_scope?: components["schemas"]["PrivateNetworkScope"] | null;
             /** Pinned Address */
             pinned_address: string;
             /** Approved Ports */
@@ -24753,6 +25284,33 @@ export interface components {
             scope_decision_id: string;
             /** Scope Decision Digest */
             scope_decision_digest: string;
+        };
+        /** NmapResolutionObservationV1 */
+        NmapResolutionObservationV1: {
+            /** Host */
+            host: string;
+            /** Addresses */
+            addresses: string[];
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Complete
+             * @default true
+             * @constant
+             */
+            complete: true;
+            /** Runtime Receipt Digest */
+            runtime_receipt_digest: string;
+            /** Dns Ttl Seconds */
+            dns_ttl_seconds?: number | null;
         };
         /** NormalizedHttpOperationV1 */
         NormalizedHttpOperationV1: {
@@ -25661,6 +26219,52 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /** PentestAuthenticationInputRequest */
+        PentestAuthenticationInputRequest: {
+            /** Handoff Generation */
+            handoff_generation: number;
+            /**
+             * Code
+             * Format: password
+             */
+            code: string;
+        };
+        /** PentestAuthenticationJobListV1 */
+        PentestAuthenticationJobListV1: {
+            /** Items */
+            items: components["schemas"]["PentestAuthenticationJobV1"][];
+        };
+        /** PentestAuthenticationJobV1 */
+        PentestAuthenticationJobV1: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Credential Id
+             * Format: uuid
+             */
+            credential_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** State */
+            state: string;
+            /** Reason */
+            reason: string | null;
+            /** Handoff Generation */
+            handoff_generation: number;
+            /** Lease Expires At */
+            lease_expires_at: string | null;
+        };
         /**
          * PentestConfigurationUpdateRequest
          * @description Tenant Pentesting defaults and the ceilings users may select.
@@ -25719,6 +26323,51 @@ export interface components {
             /** Items */
             items: components["schemas"]["PentestCredentialV1"][];
         };
+        /** PentestCredentialSessionListV1 */
+        PentestCredentialSessionListV1: {
+            /** Items */
+            items: components["schemas"]["PentestCredentialSessionV1"][];
+        };
+        /** PentestCredentialSessionV1 */
+        PentestCredentialSessionV1: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Credential Id
+             * Format: uuid
+             */
+            credential_id: string;
+            /**
+             * Engagement Id
+             * Format: uuid
+             */
+            engagement_id: string;
+            /**
+             * Attempt Id
+             * Format: uuid
+             */
+            attempt_id: string;
+            /** Credential Version */
+            credential_version: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "expired" | "revoked" | "stale";
+            /**
+             * Verified At
+             * Format: date-time
+             */
+            verified_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
         /** PentestCredentialV1 */
         PentestCredentialV1: {
             /**
@@ -25737,6 +26386,7 @@ export interface components {
             credential_kind: string;
             /** Username Present */
             username_present: boolean;
+            authentication?: components["schemas"]["AuthenticationSettings"];
             /** Version */
             version: number;
             /** Revoked */
@@ -25768,6 +26418,7 @@ export interface components {
              * Format: password
              */
             secret: string;
+            authentication?: components["schemas"]["AuthenticationSettings"] | null;
         };
         /** PentestErrorV1 */
         PentestErrorV1: {
@@ -26326,6 +26977,11 @@ export interface components {
             requires_credentials: boolean;
             /** Requires Mutation Authority */
             requires_mutation_authority: boolean;
+            /**
+             * Requires Source Snapshot
+             * @default false
+             */
+            requires_source_snapshot: boolean;
             /** Adapter Ids */
             adapter_ids: string[];
         };
@@ -26334,13 +26990,85 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** PentestProjectDefaults */
+        PentestProjectDefaults: {
+            /** Target Url */
+            target_url?: string | null;
+            /**
+             * Mode
+             * @default black_box
+             * @enum {string}
+             */
+            mode: "black_box" | "gray_box" | "white_box";
+            /** Llm Configuration Id */
+            llm_configuration_id?: string | null;
+            /**
+             * Maximum Duration Minutes
+             * @default 180
+             */
+            maximum_duration_minutes: number;
+            /**
+             * Maximum Response Mebibytes
+             * @default 256
+             */
+            maximum_response_mebibytes: number;
+            /**
+             * Evidence Retention Days
+             * @default 30
+             */
+            evidence_retention_days: number;
+        };
         /** PentestProjectListV1 */
         PentestProjectListV1: {
             /** Items */
             items: components["schemas"]["PentestProjectV1"][];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Page
+             * @default 1
+             */
+            page: number;
+            /**
+             * Page Size
+             * @default 200
+             */
+            page_size: number;
+        };
+        /** PentestProjectUpdateRequest */
+        PentestProjectUpdateRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            defaults?: components["schemas"]["PentestProjectDefaults"];
         };
         /** PentestProjectV1 */
         PentestProjectV1: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            defaults?: components["schemas"]["PentestProjectDefaults"];
+            /**
+             * Assessment Count
+             * @default 0
+             */
+            assessment_count: number;
+            /**
+             * Active Count
+             * @default 0
+             */
+            active_count: number;
+            /** Last Started At */
+            last_started_at?: string | null;
             /**
              * Id
              * Format: uuid
@@ -26372,6 +27100,12 @@ export interface components {
              * @constant
              */
             schema_version: "sccap.pentest.product-readiness.v1";
+            /**
+             * Assessment Profile
+             * @default safe_black_box_benchmark
+             * @enum {string}
+             */
+            assessment_profile: "safe_black_box_benchmark" | "scoped_web_assessment";
             /**
              * Testing Intensities
              * @default [
@@ -26655,6 +27389,39 @@ export interface components {
             /** Canonical Digest */
             canonical_digest: string;
         };
+        /** PrivateNetworkScope */
+        PrivateNetworkScope: {
+            /**
+             * Schema Version
+             * @default sccap.pentest.private-network-scope.v1
+             * @constant
+             */
+            schema_version: "sccap.pentest.private-network-scope.v1";
+            /** Profile Id */
+            profile_id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Runner Id */
+            runner_id: string;
+            /**
+             * Allowed Cidrs
+             * @default []
+             */
+            allowed_cidrs: string[];
+            /**
+             * Denied Cidrs
+             * @default []
+             */
+            denied_cidrs: string[];
+            /**
+             * Allow Public
+             * @default false
+             */
+            allow_public: boolean;
+        };
         /** ProducerRefV1 */
         ProducerRefV1: {
             /**
@@ -26713,17 +27480,19 @@ export interface components {
              * @default single_root_probe
              * @enum {string}
              */
-            assessment_profile: "single_root_probe" | "safe_black_box_benchmark";
+            assessment_profile: "single_root_probe" | "safe_black_box_benchmark" | "scoped_web_assessment";
             /** Llm Configuration Id */
             llm_configuration_id?: string | null;
             rules?: components["schemas"]["ProductAssessmentRulesRequest"] | null;
             execution_options?: components["schemas"]["ProductExecutionOptionsRequest"];
         };
-        /**
-         * ProductExecutionOptionsRequest
-         * @description Explicit browser choices for one product-managed assessment.
-         */
+        /** ProductExecutionOptionsRequest */
         ProductExecutionOptionsRequest: {
+            /**
+             * Network Profile Id
+             * @default automatic
+             */
+            network_profile_id: string;
             /**
              * Enabled Scanners
              * @default [
@@ -26807,9 +27576,9 @@ export interface components {
             /**
              * Assessment Profile
              * @default safe_black_box_benchmark
-             * @constant
+             * @enum {string}
              */
-            assessment_profile: "safe_black_box_benchmark";
+            assessment_profile: "safe_black_box_benchmark" | "scoped_web_assessment";
             /** Llm Configuration Id */
             llm_configuration_id?: string | null;
             rules?: components["schemas"]["ProductAssessmentRulesRequest"] | null;
@@ -26903,9 +27672,9 @@ export interface components {
             /**
              * Assessment Profile
              * @default single_root_probe
-             * @constant
+             * @enum {string}
              */
-            assessment_profile: "single_root_probe";
+            assessment_profile: "single_root_probe" | "scoped_web_assessment";
             /** Llm Configuration Id */
             llm_configuration_id?: string | null;
             rules?: components["schemas"]["ProductAssessmentRulesRequest"] | null;
@@ -27714,7 +28483,7 @@ export interface components {
              * Adapter Id
              * @enum {string}
              */
-            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            adapter_id: "authorization_readonly.v1" | "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
             /**
              * Runtime Session Id
              * Format: uuid
@@ -27857,7 +28626,7 @@ export interface components {
              * Adapter Id
              * @enum {string}
              */
-            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            adapter_id: "authorization_readonly.v1" | "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
             /**
              * Runtime Session Id
              * Format: uuid
@@ -28001,7 +28770,7 @@ export interface components {
              * Adapter Id
              * @enum {string}
              */
-            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            adapter_id: "authorization_readonly.v1" | "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
             /**
              * Runtime Session Id
              * Format: uuid
@@ -28313,7 +29082,7 @@ export interface components {
              * Adapter Id
              * @enum {string}
              */
-            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            adapter_id: "authorization_readonly.v1" | "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
             /**
              * Runtime Session Id
              * Format: uuid
@@ -28354,7 +29123,7 @@ export interface components {
             evidence_sink_name: "evidence";
             limits: components["schemas"]["InvocationLimitsV1"];
             /** Material */
-            material: components["schemas"]["BrowserInvocationMaterialV1"] | components["schemas"]["ZapInvocationMaterialV1"] | components["schemas"]["NucleiInvocationMaterialV1"] | components["schemas"]["NmapInvocationMaterialV1"];
+            material: components["schemas"]["AuthorizationInvocationMaterial"] | components["schemas"]["BrowserInvocationMaterialV1"] | components["schemas"]["ZapInvocationMaterialV1"] | components["schemas"]["NucleiInvocationMaterialV1"] | components["schemas"]["NmapInvocationMaterialV1"];
             /**
              * Issued At
              * Format: date-time
@@ -28445,7 +29214,7 @@ export interface components {
              * Adapter Id
              * @enum {string}
              */
-            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            adapter_id: "authorization_readonly.v1" | "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
             /**
              * Runtime Session Id
              * Format: uuid
@@ -28486,7 +29255,7 @@ export interface components {
             evidence_sink_name: "evidence";
             limits: components["schemas"]["InvocationLimitsV1"];
             /** Material */
-            material: components["schemas"]["BrowserInvocationMaterialV1"] | components["schemas"]["ZapInvocationMaterialV1"] | components["schemas"]["NucleiInvocationMaterialV1"] | components["schemas"]["NmapInvocationMaterialV1"];
+            material: components["schemas"]["AuthorizationInvocationMaterial"] | components["schemas"]["BrowserInvocationMaterialV1"] | components["schemas"]["ZapInvocationMaterialV1"] | components["schemas"]["NucleiInvocationMaterialV1"] | components["schemas"]["NmapInvocationMaterialV1"];
             /**
              * Issued At
              * Format: date-time
@@ -29180,6 +29949,8 @@ export interface components {
             verified: boolean;
             /** Error Code */
             error_code?: string | null;
+            /** Execution Error Code */
+            execution_error_code?: ("PENTEST_SCOPE_DNS_UNCERTAIN" | "PENTEST_SCOPE_DENIED" | "PENTEST_RUNNER_EXECUTION_FAILED") | null;
         };
         /** RunnerCommitRequestV1 */
         RunnerCommitRequestV1: {
@@ -32194,7 +32965,7 @@ export interface components {
              * Adapter Id
              * @enum {string}
              */
-            adapter_id: "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
+            adapter_id: "authorization_readonly.v1" | "bootstrap_http_tls.v3" | "playwright_observe.v1" | "zap_passive.v1" | "nuclei_observe.v1" | "nmap_connect.v1";
             /** Adapter Contract Version */
             adapter_contract_version: string;
             /**
@@ -32203,7 +32974,7 @@ export interface components {
              */
             adapter_snapshot_id: string;
             /** Typed Arguments */
-            typed_arguments: components["schemas"]["BootstrapObservationArgumentsV1"] | components["schemas"]["BrowserObservationArgumentsV1"] | components["schemas"]["ZapPassiveArgumentsV1"] | components["schemas"]["NucleiObservationArgumentsV1"] | components["schemas"]["NmapDiscoveryArgumentsV1"];
+            typed_arguments: components["schemas"]["AuthorizationComparisonArgumentsV1"] | components["schemas"]["BootstrapObservationArgumentsV1"] | components["schemas"]["BrowserObservationArgumentsV1"] | components["schemas"]["ZapPassiveArgumentsV1"] | components["schemas"]["NucleiObservationArgumentsV1"] | components["schemas"]["NmapDiscoveryArgumentsV1"];
             /** Expected Evidence Types */
             expected_evidence_types: string[];
             /** Estimated Requests */
@@ -32633,7 +33404,7 @@ export interface components {
             signed_task: components["schemas"]["ToolExecutionTaskV1"];
             adapter_snapshot: components["schemas"]["AdapterSnapshotV1"];
             /** Typed Arguments */
-            typed_arguments: components["schemas"]["BootstrapObservationArgumentsV1"] | components["schemas"]["BrowserObservationArgumentsV1"] | components["schemas"]["ZapPassiveArgumentsV1"] | components["schemas"]["NucleiObservationArgumentsV1"] | components["schemas"]["NmapDiscoveryArgumentsV1"];
+            typed_arguments: components["schemas"]["AuthorizationComparisonArgumentsV1"] | components["schemas"]["BootstrapObservationArgumentsV1"] | components["schemas"]["BrowserObservationArgumentsV1"] | components["schemas"]["ZapPassiveArgumentsV1"] | components["schemas"]["NucleiObservationArgumentsV1"] | components["schemas"]["NmapDiscoveryArgumentsV1"];
             /** Terminal Result */
             terminal_result?: {
                 [key: string]: unknown;
@@ -32814,6 +33585,7 @@ export interface components {
             relay_workload_public_key?: string | null;
             /** Relay Workload Key Thumbprint */
             relay_workload_key_thumbprint?: string | null;
+            nmap_resolution?: components["schemas"]["NmapResolutionObservationV1"] | null;
         };
         /** ToolWorkerInvocationRequestV2 */
         ToolWorkerInvocationRequestV2: {
@@ -32876,6 +33648,7 @@ export interface components {
             relay_workload_public_key?: string | null;
             /** Relay Workload Key Thumbprint */
             relay_workload_key_thumbprint?: string | null;
+            nmap_resolution?: components["schemas"]["NmapResolutionObservationV1"] | null;
         };
         /** ToolWorkerIsolationRequestV1 */
         ToolWorkerIsolationRequestV1: {
@@ -34586,6 +35359,92 @@ export interface components {
             /** Workflow Digest */
             workflow_digest: string;
         };
+        /** WorkflowDiscoveryView */
+        WorkflowDiscoveryView: {
+            /** Items */
+            items: components["schemas"]["WorkflowProposalView"][];
+            /** Operation Count */
+            operation_count: number;
+            /** Limitations */
+            limitations: string[];
+            /** Browser Routes */
+            browser_routes?: components["schemas"]["BrowserRouteHint"][];
+            /**
+             * Execution Status
+             * @default unavailable
+             * @constant
+             */
+            execution_status: "unavailable";
+        };
+        /** WorkflowProposal */
+        WorkflowProposal: {
+            /** Digest */
+            digest: string;
+            /** Title */
+            title: string;
+            /** Origin */
+            origin: string;
+            /** Steps */
+            steps: components["schemas"]["WorkflowStep"][];
+            /** Proposed Rules */
+            proposed_rules: string[];
+            /** Limitations */
+            limitations: string[];
+        };
+        /** WorkflowProposalView */
+        WorkflowProposalView: {
+            proposal: components["schemas"]["WorkflowProposal"];
+            review: components["schemas"]["WorkflowReviewView"];
+        };
+        /** WorkflowReviewRequest */
+        WorkflowReviewRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approved" | "rejected";
+            /** Rules */
+            rules: string[];
+            /** Operation Order */
+            operation_order: string[];
+        };
+        /** WorkflowReviewView */
+        WorkflowReviewView: {
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /**
+             * Decision
+             * @default proposed
+             * @enum {string}
+             */
+            decision: "proposed" | "approved" | "rejected";
+            /** Rules */
+            rules?: string[];
+            /** Operation Order */
+            operation_order?: string[];
+            /** Reviewed At */
+            reviewed_at?: string | null;
+        };
+        /** WorkflowStep */
+        WorkflowStep: {
+            /** Operation Key */
+            operation_key: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Method */
+            method: string;
+            /** Path */
+            path: string;
+            /** Source */
+            source: string;
+            /** Side Effect Class */
+            side_effect_class: string;
+        };
         /** WorkflowTransitionRecordV1 */
         WorkflowTransitionRecordV1: {
             /**
@@ -36270,7 +37129,11 @@ export interface operations {
     };
     list_pentest_projects_api_v1_pentesting_projects_get: {
         parameters: {
-            query?: never;
+            query?: {
+                query?: string | null;
+                page?: number;
+                page_size?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -36284,6 +37147,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PentestProjectListV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -36303,6 +37175,72 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PentestProjectV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pentest_project_api_v1_pentesting_projects__pentest_project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pentest_project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PentestProjectV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_pentest_project_api_v1_pentesting_projects__pentest_project_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pentest_project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PentestProjectUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -36374,6 +37312,28 @@ export interface operations {
             };
         };
     };
+    list_pentest_network_profiles_api_v1_pentesting_network_profiles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     list_pentest_model_options_api_v1_pentesting_model_options_get: {
         parameters: {
             query?: never;
@@ -36410,6 +37370,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PentestReadinessV1"];
+                };
+            };
+        };
+    };
+    publish_adapter_inventory_api_v1_pentesting_internal_tool_gateway_adapter_inventory_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-SCCAP-Adapter-Reporter-Token": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -36468,6 +37457,198 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PentestCredentialV1"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authentication_browser_frame_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__authentication_browser_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+                attempt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authentication_browser_input_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__authentication_browser_input_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+                attempt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrowserCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_authentication_jobs_api_v1_pentesting_projects__pentest_project_id__authentication_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pentest_project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PentestAuthenticationJobListV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    supply_authentication_input_api_v1_pentesting_projects__pentest_project_id__authentication_jobs__job_id__input_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pentest_project_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PentestAuthenticationInputRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pentest_credential_sessions_api_v1_pentesting_projects__pentest_project_id__credential_sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pentest_project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PentestCredentialSessionListV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_pentest_credential_session_api_v1_pentesting_projects__pentest_project_id__credential_sessions__session_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pentest_project_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -37914,6 +39095,72 @@ export interface operations {
             };
         };
     };
+    list_pentest_assessments_api_v1_pentesting_assessments_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                query?: string | null;
+                state?: string | null;
+                project_id?: string | null;
+                engagement_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["C13CursorPageV1_C13AssessmentItemV1_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pentest_reusable_settings_api_v1_pentesting_engagements__engagement_id__settings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_capability13_attempts_api_v1_pentesting_engagements__engagement_id__attempts_get: {
         parameters: {
             query?: {
@@ -37969,6 +39216,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["C13CursorPageV1_C13SafeItemV1_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discover_business_workflows_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__workflows_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+                attempt_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowDiscoveryView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_business_workflow_api_v1_pentesting_engagements__engagement_id__attempts__attempt_id__workflows__proposal_digest__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                engagement_id: string;
+                attempt_id: string;
+                proposal_digest: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkflowReviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowReviewView"];
                 };
             };
             /** @description Validation Error */
@@ -39655,6 +40971,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignedConnectionPermitV1"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relay_authenticated_exchange_api_v1_pentesting_internal_relay_authenticated_exchange_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionAuthorizationRequestV2"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

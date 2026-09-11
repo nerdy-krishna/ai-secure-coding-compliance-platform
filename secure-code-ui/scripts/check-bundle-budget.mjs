@@ -10,7 +10,16 @@ const LIMITS = Object.freeze({
   // Pentesting adds lazy cockpit, report, governance, tool-observation,
   // finding-lifecycle, threat-model, durable work-ledger and protocol/state views. Keep the per-entry and
   // per-async caps unchanged while reserving their measured aggregate footprint.
-  totalJavaScript: 1_268 * KIB,
+  // Dedicated Pentesting project/settings/submission pages and shared run management are lazy-loaded.
+  // Tenant network selection and terminal failure details add less than 2 KiB.
+  // Collected-artifact detail viewer adds about 2 KiB in the lazy cockpit.
+  // Unified observations, per-row validation history and evidence links add about 4 KiB.
+  // Visible stop controls with stale-attempt protection add about 1.4 KiB.
+  // Credential login settings and encrypted-session management add about 4 KiB.
+  // MFA request controls and explicit SSO destinations add about 3 KiB.
+  // Live authentication browser controls add about 3.4 KiB to the lazy cockpit.
+  // Evidence-derived workflow review adds about 4 KiB in the lazy cockpit.
+  totalJavaScript: 1_312 * KIB,
   stylesheet: 64 * KIB,
 });
 

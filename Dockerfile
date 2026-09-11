@@ -305,10 +305,13 @@ COPY --chown=appuser:appuser ./src /app/src
 USER root
 RUN install -d -o appuser -g appuser -m 0700 /work \
     && install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
     && chmod 0555 /opt/sccap-tool-runtimes/*
 USER appuser
 
@@ -377,6 +380,8 @@ FROM base AS pentest-adapter-nuclei
 
 COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
 COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
+COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/bundles /opt/sccap-nuclei-bundles
+COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/trust /opt/sccap-nuclei-trust
 COPY --chown=appuser:appuser ./src /app/src
 USER root
 RUN install -d -o appuser -g appuser -m 0700 /work \
@@ -405,7 +410,7 @@ COPY --from=api-builder /app/.venv /app/.venv
 COPY --chown=appuser:appuser ./src /app/src
 RUN install -d -o appuser -g appuser -m 0700 /work \
     && install -d -o root -g root -m 0755 /opt/sccap-tools /opt/sccap-tool-runtimes \
-    && ln -s /usr/bin/nmap /opt/sccap-tools/nmap \
+    && install -o root -g root -m 0555 /usr/bin/nmap /opt/sccap-tools/nmap \
     && ln -s /usr/share/nmap /opt/sccap-tools/nmap-data \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
     && chmod 0555 /opt/sccap-tool-runtimes/nmap-connect
@@ -448,6 +453,8 @@ RUN apt-get update \
         libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
+COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/bundles /opt/sccap-nuclei-bundles
+COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/trust /opt/sccap-nuclei-trust
 COPY --from=pentest-adapter-playwright /ms-playwright /ms-playwright
 COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/playwright /app/.venv/lib/python3.12/site-packages/playwright
 COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/pyee /app/.venv/lib/python3.12/site-packages/pyee

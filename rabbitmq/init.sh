@@ -43,6 +43,17 @@ ensure_user() {
       '^pentest_tool_queue_v1$' '^$' '^pentest_tool_queue_v1$'
   fi
 
+  local runner_user="${RABBITMQ_PENTEST_RUNNER_USER:-}"
+  local runner_pass="${RABBITMQ_PENTEST_RUNNER_PASS:-}"
+  if [[ -n "$runner_user" && -n "$runner_pass" ]]; then
+    if ! rabbitmqctl list_users -q --no-table-headers \
+        | awk '{print $1}' | grep -qx "$runner_user"; then
+      rabbitmqctl add_user "$runner_user" "$runner_pass"
+    fi
+    rabbitmqctl set_permissions -p / "$runner_user" \
+      '^pentest_execution_v3_queue$' '^$' '^pentest_execution_v3_queue$'
+  fi
+
   local verifier_user="${RABBITMQ_PENTEST_VERIFICATION_USER:-}"
   local verifier_pass="${RABBITMQ_PENTEST_VERIFICATION_PASS:-}"
   if [[ -n "$verifier_user" && -n "$verifier_pass" ]]; then

@@ -58,6 +58,7 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "handoff_checkpoint_node",
         "handoff_retry",
         "outbox_id",
+        "authentication_job_id",
         "tenant_id",
         "engagement_id",
         "execution_id",

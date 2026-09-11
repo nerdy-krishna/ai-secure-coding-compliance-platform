@@ -27,6 +27,7 @@ services:
       - EVIDENCE_S3_ACCESS_KEY_ID=${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
       - EVIDENCE_S3_SECRET_ACCESS_KEY=${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
       - PENTEST_CAPABILITY5_ENABLED=${PENTEST_CAPABILITY5_ENABLED:-false}
+      - PENTEST_ADAPTER_REPORTER_TOKEN=${PENTEST_ADAPTER_REPORTER_TOKEN:-sccap-local-adapter-reporter}
       - RABBITMQ_PENTEST_TOOL_QUEUE=${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
       - PENTEST_TOOL_GATEWAY_TOKEN=${PENTEST_TOOL_GATEWAY_TOKEN:-}
       - PENTEST_TOOL_WORKER_CAPABILITY_DIGEST=${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
@@ -118,6 +119,8 @@ services:
       RABBITMQ_PENTEST_CONTROLLER_PASS: ${RABBITMQ_PENTEST_CONTROLLER_PASS:-pentest-controller-local-only}
       RABBITMQ_PENTEST_TOOL_USER: ${RABBITMQ_PENTEST_TOOL_USER:-pentest_tool_worker}
       RABBITMQ_PENTEST_TOOL_PASS: ${RABBITMQ_PENTEST_TOOL_PASS:-pentest-tool-local-only}
+      RABBITMQ_PENTEST_RUNNER_USER: ${RABBITMQ_PENTEST_RUNNER_USER:-pentest_runner_v3}
+      RABBITMQ_PENTEST_RUNNER_PASS: ${RABBITMQ_PENTEST_RUNNER_PASS:-pentest-runner-local-only}
       RABBITMQ_PENTEST_VERIFICATION_USER: ${RABBITMQ_PENTEST_VERIFICATION_USER:-pentest_verifier}
       RABBITMQ_PENTEST_VERIFICATION_PASS: ${RABBITMQ_PENTEST_VERIFICATION_PASS:-pentest-verifier-local-only}
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
@@ -280,6 +283,7 @@ services:
       QDRANT_API_KEY: controller-qdrant-unreachable-not-authority
       PENTEST_FOUNDATION3_ENABLED: "true"
       PENTEST_CAPABILITY4_ENABLED: "true"
+      PENTEST_CAPABILITY6_ENABLED: ${PENTEST_CAPABILITY6_ENABLED:-false}
       PENTEST_CONTROLLER_LLM_CONFIG_ID: ${PENTEST_CONTROLLER_LLM_CONFIG_ID:-}
       PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS: ${PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS:-60}
       RABBITMQ_PENTEST_CONTROLLER_QUEUE: ${RABBITMQ_PENTEST_CONTROLLER_QUEUE:-pentest_controller_queue}
@@ -320,6 +324,9 @@ services:
   # only under the explicit pentesting-v3 profile.
   pentest-runner-v3:
     profiles: ["pentesting-v3", "pentesting-v4"]
+    env_file:
+      - path: ./.secrets/pentest-runner-v3.env
+        required: false
     build:
       context: .
       dockerfile: Dockerfile
@@ -327,7 +334,7 @@ services:
     container_name: sccap_pentest_runner_v3
     environment:
       PYTHONPATH: /app/src
-      PENTEST_RUNNER_V3_RABBIT_URL: ${PENTEST_RUNNER_V3_RABBIT_URL:-}
+      PENTEST_RUNNER_V3_RABBIT_URL: ${PENTEST_RUNNER_V3_RABBIT_URL:-amqp://pentest_runner_v3:pentest-runner-local-only@rabbitmq/}
       PENTEST_RUNNER_V3_QUEUE: ${RABBITMQ_PENTEST_V3_QUEUE:-pentest_execution_v3_queue}
       PENTEST_RUNNER_V3_GATEWAY_URL: http://app:8000
       PENTEST_RUNNER_V3_GATEWAY_SERVICE_IDENTITY: ${PENTEST_RUNNER_V3_GATEWAY_TOKEN:-}
@@ -349,7 +356,7 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 8
-    mem_limit: 256m
+    mem_limit: 512m
     cpus: 0.50
     depends_on:
       rabbitmq:
@@ -381,9 +388,10 @@ services:
       PENTEST_TOOL_WORKER_QUEUE: ${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
       PENTEST_TOOL_WORKER_GATEWAY_URL: http://app:8000
       PENTEST_TOOL_WORKER_GATEWAY_TOKEN: ${PENTEST_TOOL_GATEWAY_TOKEN:-}
-      PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS: ${PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS:-}
+      PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS: ${PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS:-local:AA}
+      PENTEST_TOOL_WORKER_RELAY_GRANT_PUBLIC_KEYS: ${PENTEST_TOOL_WORKER_RELAY_GRANT_PUBLIC_KEYS:-local:AA}
       PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: ${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
-      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: '${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{"playwright_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","zap_passive.v1":"0000000000000000000000000000000000000000000000000000000000000000","nuclei_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","nmap_connect.v1":"0000000000000000000000000000000000000000000000000000000000000000"}}'
+      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: '${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{"authorization_readonly.v1":"0000000000000000000000000000000000000000000000000000000000000000","playwright_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","zap_passive.v1":"0000000000000000000000000000000000000000000000000000000000000000","nuclei_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","nmap_connect.v1":"0000000000000000000000000000000000000000000000000000000000000000","graphql_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","realtime_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000"}}'
       PENTEST_TOOL_WORKER_ID: ${PENTEST_TOOL_WORKER_ID:-pentest-tool-worker-v1}
       PENTEST_TOOL_WORKER_WORKSPACE_ROOT: /work
       PENTEST_TOOL_RESULT_SIGNING_KEY_FILE: /run/secrets/pentest-tool-result-signing.key
@@ -396,7 +404,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
-      - /work:size=536870912,mode=0700,nosuid,nodev
+      - /work:size=536870912,mode=0700,uid=1001,gid=1001,nosuid,nodev
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 64
@@ -414,6 +422,45 @@ services:
       timeout: 5s
       retries: 6
       start_period: 5s
+
+  # Local compose readiness reporter for Capability 5 adapters. Production uses
+  # the Kubernetes reporter and qualification manifest; this service verifies the
+  # immutable local runtime wrappers and renews short-lived adapter health.
+  pentest-adapter-reporter:
+    profiles: ["pentesting-v5"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: tool-supervisor
+    container_name: sccap_pentest_adapter_reporter
+    volumes:
+      - ./src:/app/src:ro
+    environment:
+      PYTHONPATH: /app/src
+      PENTEST_ADAPTER_REPORTER_MODE: local-compose
+      PENTEST_ADAPTER_REPORTER_ENDPOINT: http://app:8000
+      PENTEST_ADAPTER_REPORTER_TOKEN: ${PENTEST_ADAPTER_REPORTER_TOKEN:-sccap-local-adapter-reporter}
+      PENTEST_ADAPTER_REPORTER_INTERVAL_SECONDS: ${PENTEST_ADAPTER_REPORTER_INTERVAL_SECONDS:-10}
+      PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: ${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
+      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: '${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{"authorization_readonly.v1":"0000000000000000000000000000000000000000000000000000000000000000","playwright_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","zap_passive.v1":"0000000000000000000000000000000000000000000000000000000000000000","nuclei_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","nmap_connect.v1":"0000000000000000000000000000000000000000000000000000000000000000","graphql_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","realtime_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000"}}'
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: ""
+    command: ["python", "-m", "app.infrastructure.pentesting.tool_worker.deployment_reporter"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 512m
+    depends_on:
+      app:
+        condition: service_started
+    networks:
+      - pentest-control
+    restart: unless-stopped
 
   # Capability 6 no-target coordinator. It receives only database/RabbitMQ
   # control-plane authority and public verification keys. It has no app auth,

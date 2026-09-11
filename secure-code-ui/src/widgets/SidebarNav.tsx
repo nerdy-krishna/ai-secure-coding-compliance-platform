@@ -23,7 +23,7 @@ const tools: Item[] = [
   { to: "/advisor", label: "Security advisor", feature: "chat" },
   { to: "/usage", label: "Usage" },
 ];
-const attemptSections = ["overview", "activity", "observations", "findings", "tests", "operations", "frameworks", "coverage", "cleanup", "callbacks", "evidence", "reports", "governance", "retests", "deltas", "audit"];
+const attemptSections = ["overview", "activity", "observations", "findings", "tests", "operations", "frameworks", "coverage", "cleanup", "callbacks", "evidence", "workflows", "reports", "governance", "retests", "deltas", "audit"];
 
 export function SidebarNav() {
   const [collapsed, setCollapsed] = useState(false);

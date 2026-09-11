@@ -287,9 +287,25 @@ export interface EngagementSummary {
   assessment_mode: string;
   state: string;
   owner_ref: string;
+  project_name?: string | null;
+  normalized_origin?: string | null;
+  attempt_number?: number | null;
+  attempt_started_at?: string | null;
+  attempt_ended_at?: string | null;
+  attempt_state?: string | null;
+  created_at?: string | null;
   current_attempt_id: string | null;
   updated_at: string;
   projection_state: ProjectionHealth;
+}
+
+export interface AssessmentSummary extends EngagementSummary {
+  engagement_id: string;
+  attempt_id: string;
+  pentest_project_id: string | null;
+  is_current: boolean;
+  engagement_state: string;
+  state_version: number;
 }
 
 export interface EngagementDetail {

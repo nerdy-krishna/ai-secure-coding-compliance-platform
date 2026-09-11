@@ -359,6 +359,10 @@ pentestToolPack:
   # Exact repository@sha256 references are supplied by the release pipeline.
   # Empty values fail Helm rendering when pentestToolPack.enabled=true.
   runtimes:
+    authorization:
+      image: ""
+      command: [/opt/sccap-tool-runtimes/authorization-readonly, --kubernetes-attach-v1]
+      egressMode: relay
     playwright:
       image: ""
       command: [/opt/sccap-tool-runtimes/playwright-observe, --kubernetes-attach-v1]
@@ -375,6 +379,14 @@ pentestToolPack:
       image: ""
       command: [/opt/sccap-tool-runtimes/nmap-connect, --kubernetes-attach-v1]
       egressMode: exact-pinned
+    graphql:
+      image: ""
+      command: [/opt/sccap-tool-runtimes/graphql-observe, --kubernetes-attach-v1]
+      egressMode: relay
+    realtime:
+      image: ""
+      command: [/opt/sccap-tool-runtimes/realtime-observe, --kubernetes-attach-v1]
+      egressMode: relay
 
 autoscaling:
   keda:

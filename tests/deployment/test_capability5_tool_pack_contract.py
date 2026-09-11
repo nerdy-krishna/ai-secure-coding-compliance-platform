@@ -142,12 +142,24 @@ class Capability5HelmContractTests(unittest.TestCase):
         self.assertNotIn("DATABASE_URL", env)
         self.assertEqual(init_container["command"][0], "/usr/bin/install")
         self.assertIn("0400", init_container["command"])
-        self.assertEqual(
-            init_container["securityContext"]["capabilities"]["add"], ["CHOWN"]
+        self.assertEqual(init_container["securityContext"]["runAsUser"], 1001)
+        self.assertTrue(init_container["securityContext"]["runAsNonRoot"])
+        self.assertNotIn("add", init_container["securityContext"]["capabilities"])
+        self.assertIn("PENTEST_TOOL_WORKER_RELAY_GRANT_PUBLIC_KEYS", env)
+        template_mount = next(
+            mount for mount in worker_container["volumeMounts"]
+            if mount["name"] == "runtime-templates"
         )
-        templates = by_identity[
-            ("ConfigMap", "contract-sccap-pentest-tool-runtime-templates")
-        ]
+        self.assertEqual(template_mount["subPath"], "templates.json")
+        self.assertTrue(template_mount["readOnly"])
+        self.assertTrue(all("apiVersion" in item for item in manifests))
+        api_token = next(v for v in worker["spec"]["template"]["spec"]["volumes"]
+                         if v["name"] == "kubernetes-api-token")
+        token_projection = api_token["projected"]["sources"][0]["serviceAccountToken"]
+        self.assertNotIn("audience", token_projection)
+        self.assertEqual(token_projection["expirationSeconds"], 600)
+        template_volume = next(v for v in worker["spec"]["template"]["spec"]["volumes"] if v["name"] == "runtime-templates")
+        templates = by_identity[("ConfigMap", template_volume["configMap"]["name"])]
         self.assertTrue(templates["immutable"])
         for runtime in ("playwright", "zap", "nuclei", "nmap"):
             self.assertIn(

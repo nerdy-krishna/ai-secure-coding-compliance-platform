@@ -17,6 +17,7 @@ async function entry(page: Page) {
     else if (path === "/auth/session/me") body = { id: 42, email: "fixture@example.invalid", is_active: true, is_verified: true, is_superuser: false, permissions: ["pentest.read", "pentest.create"], role_keys: ["analyst"], active_tenant_id: tenant, tenant_id: tenant };
     else if (path === "/auth/sessions") body = [{ id: "fixture-session", current: true, last_seen_at: new Date().toISOString(), idle_expires_at: new Date(Date.now() + 3600000).toISOString(), absolute_expires_at: new Date(Date.now() + 7200000).toISOString() }];
     else if (path === "/pentesting/projects") body = { items: [{ id: project, name: "Owned test project", owner_user_id: 42 }] };
+    else if (path === `/pentesting/projects/${project}`) body = { id: project, name: "Owned test project", owner_user_id: 42, defaults: { mode: "gray_box" } };
     else if (path.endsWith("/credentials")) body = { items: [{ id: primary, name: "Account A", credential_kind: "username_password", revoked: false }, { id: secondary, name: "Account B", credential_kind: "username_password", revoked: false }] };
     else if (path === "/pentesting/model-options") body = { items: [{ id: model, name: "Offline fixture model", provider: "fixture", model_name: "never-called" }] };
     else if (path === "/pentesting/configuration") body = { default_duration_minutes: 3, maximum_duration_minutes: 10, default_response_mebibytes: 1, maximum_response_mebibytes: 8, revision: 1 };
@@ -32,10 +33,8 @@ async function entry(page: Page) {
     }
     await route.fulfill({ json: body, headers: { "X-CSRF-Token": "fixture-csrf" } });
   });
-  await page.goto("/pentesting/engagements");
-  await page.getByRole("button", { name: "New engagement" }).click();
+  await page.goto(`/pentesting/engagements/new?project=${project}`);
   await page.getByRole("radio", { name: /^Gray box/ }).click();
-  await page.getByRole("combobox", { name: "Pentesting project", exact: true }).selectOption(project);
   await page.getByLabel("Primary project credential").selectOption(primary);
   await page.getByLabel("Engagement name").fill("Two-identity read-only fixture");
   await page.getByLabel("Assessment AI model").selectOption(model);
@@ -115,6 +114,9 @@ test("changing project clears both credentials and private resource declarations
   await page.getByLabel("Primary account owner-only resources").fill("/records/report-7");
   await page.getByLabel("Secondary account owner-only resources").fill("/documents/ledger-42");
   await page.getByRole("combobox", { name: "Pentesting project", exact: true }).selectOption("");
+  await page.getByRole("radio", { name: /^Gray box/ }).click();
+  await expect(page.getByLabel("Primary project credential")).toHaveValue("");
+  await page.getByText("Read-only authorization context (optional)", { exact: true }).click();
   for (const label of ["Primary account owner-only resources", "Secondary account owner-only resources"]) {
     await expect(page.getByLabel(label)).toHaveValue("");
     await expect(page.getByLabel(label)).toBeDisabled();

@@ -1,3 +1,4 @@
+import type { AssessmentSummary } from "../lib/capability13/types";
 import apiClient from "./apiClient";
 import type { components } from "../types/api-generated";
 import type {
@@ -73,6 +74,7 @@ export interface WorkLedgerSummary {
 }
 
 export interface AttemptRuntimeSummary {
+  limitations?: string[];
   state: string;
   outcome: string | null;
   bootstrap: { status?: string };
@@ -143,6 +145,7 @@ export interface AttemptToolObservation {
   severity: string | null;
   status: string | null;
   fields: { label: string; value: string }[];
+  evidence_refs?: string[];
 }
 
 export interface AttemptToolCommand {
@@ -160,6 +163,7 @@ export interface AttemptToolObservations {
   detail_status: "available" | "partial" | "unavailable";
   commands: AttemptToolCommand[];
   items: AttemptToolObservation[];
+  evidence?: { id: string; execution_id: string; evidence_type: string; media_type: string; size_bytes: number; committed_at: string }[];
   limitation: string;
 }
 
@@ -234,6 +238,17 @@ interface FindingTruthPage<T> {
   next_cursor: string | null;
 }
 
+export interface FindingObservation {
+  observation_id: string;
+  lifecycle_state: string;
+  observation_type: string;
+  title: string;
+  evidence_refs: string[];
+  limitations: string[];
+  observed_at: string;
+  committed_at: string;
+}
+
 export interface FindingLifecycle {
   candidates: FindingCandidate[];
   verifications: FindingVerification[];
@@ -302,6 +317,13 @@ export const capability13Service = {
   createEngagement: async (input: CreateEngagementInput) =>
     (await apiClient.post<EngagementCreatedReceipt>("/pentesting/engagements", input)).data,
 
+  listAssessments: async (filters: C13Filters & { project_id?: string; engagement_id?: string } = {}, signal?: AbortSignal) =>
+    (await apiClient.get<CursorPage<AssessmentSummary>>("/pentesting/assessments", { params: { ...params(filters), project_id: filters.project_id, engagement_id: filters.engagement_id }, signal })).data,
+  restartEngagement: async (engagementId: string, expectedStateVersion: number, commandKey: string) =>
+    (await apiClient.post<{ engagement_id: string; attempt_id: string }>(`/pentesting/engagements/${part(engagementId)}/commands/restart`, {
+      schema_version: "sccap.pentest.v1", command_version: "sccap.pentest.attempt-command.v2", command_idempotency_key: commandKey,
+      expected_state_version: expectedStateVersion,
+    })).data,
   listEngagements: async (filters: C13Filters = {}, signal?: AbortSignal) =>
     (await apiClient.get<CursorPage<EngagementSummary>>("/pentesting/engagements", { params: params(filters), signal })).data,
 
@@ -335,6 +357,17 @@ export const capability13Service = {
 
   getOperationInventory: async (engagementId: string, attemptId: string, signal?: AbortSignal) =>
     (await apiClient.get<OperationInventoryView>(`${attemptPath(engagementId, attemptId)}/operation-inventory`, { signal })).data,
+
+  getFindingObservations: async (engagementId: string, attemptId: string, signal?: AbortSignal): Promise<FindingObservation[]> => {
+    const items: FindingObservation[] = [];
+    let cursor: string | null = null;
+    do {
+      const { data }: { data: FindingTruthPage<FindingObservation> } = await apiClient.get(`${attemptPath(engagementId, attemptId)}/observations`, { params: { limit: 200, ...(cursor ? { cursor } : {}) }, signal });
+      items.push(...data.items);
+      cursor = data.next_cursor;
+    } while (cursor);
+    return items;
+  },
 
   getFindingLifecycle: async (engagementId: string, attemptId: string, signal?: AbortSignal): Promise<FindingLifecycle> => {
     const path = attemptPath(engagementId, attemptId);

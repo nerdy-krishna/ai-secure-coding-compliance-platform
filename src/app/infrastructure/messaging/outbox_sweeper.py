@@ -58,6 +58,8 @@ async def _tick() -> None:
         system_scope=True,
     ):
         async with AsyncSessionLocal() as db:
+            from app.core.services.pentesting.authentication_job_service import recover_expired_jobs
+            await recover_expired_jobs(db)
             governance_count = await _reconcile_capability13_governance(db)
             repo = ScanOutboxRepository(db)
             pentest_repo = PentestEngagementRepository(db)
