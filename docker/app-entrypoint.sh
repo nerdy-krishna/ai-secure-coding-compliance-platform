@@ -29,8 +29,11 @@ case "${SCCAP_MIGRATION_ROLE:-wait}" in
     done
     echo "[entrypoint] Database is at Alembic head."
     ;;
+  skip)
+    echo "[entrypoint] Skipping Alembic readiness check for isolated service."
+    ;;
   *)
-    echo "[entrypoint] SCCAP_MIGRATION_ROLE must be owner or wait." >&2
+    echo "[entrypoint] SCCAP_MIGRATION_ROLE must be owner, wait, or skip." >&2
     exit 64
     ;;
 esac

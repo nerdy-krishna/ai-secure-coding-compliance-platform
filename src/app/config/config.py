@@ -254,6 +254,7 @@ class Settings(BaseSettings):
     PENTEST_RUNNER_V3_GATEWAY_TOKEN: Optional[SecretStr] = None
     PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS: str = ""
     PENTEST_RUNNER_V3_RESOLVER_ID: str = "foundation3-approved-resolver"
+    PENTEST_LOCAL_TARGET_HOST_ALIASES: str = ""
     PENTEST_RUNNER_V3_CAPABILITY_VERSION: str = "foundation3-v1"
     PENTEST_EXECUTION_LEASE_TTL_SECONDS: int = Field(default=60, ge=15, le=300)
     PENTEST_EXECUTION_HEARTBEAT_SECONDS: int = Field(default=10, ge=1, le=60)

@@ -31,6 +31,9 @@ services:
       - RABBITMQ_PENTEST_TOOL_QUEUE=${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
       - PENTEST_TOOL_GATEWAY_TOKEN=${PENTEST_TOOL_GATEWAY_TOKEN:-}
       - PENTEST_TOOL_WORKER_CAPABILITY_DIGEST=${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
+      - PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS=${PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS:-127.0.0.11}
+      - PENTEST_RUNNER_V3_RESOLVER_ID=${PENTEST_RUNNER_V3_RESOLVER_ID:-foundation3-approved-resolver}
+      - PENTEST_LOCAL_TARGET_HOST_ALIASES=${PENTEST_LOCAL_TARGET_HOST_ALIASES:-localhost=host.docker.internal,127.0.0.1=host.docker.internal}
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
@@ -287,7 +290,7 @@ services:
       PENTEST_CONTROLLER_LLM_CONFIG_ID: ${PENTEST_CONTROLLER_LLM_CONFIG_ID:-}
       PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS: ${PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS:-60}
       RABBITMQ_PENTEST_CONTROLLER_QUEUE: ${RABBITMQ_PENTEST_CONTROLLER_QUEUE:-pentest_controller_queue}
-      RABBITMQ_PENTEST_CONTROLLER_URL: ${RABBITMQ_PENTEST_CONTROLLER_URL:-amqp://pentest_controller:pentest-controller-local-only@rabbitmq/}
+      RABBITMQ_PENTEST_CONTROLLER_URL: ${RABBITMQ_PENTEST_CONTROLLER_URL:-amqp://${RABBITMQ_PENTEST_CONTROLLER_USER:-pentest_controller}:${RABBITMQ_PENTEST_CONTROLLER_PASS:-pentest-controller-local-only}@rabbitmq/}
       PENTEST_RESULT_SIGNING_SEED: ""
       PENTEST_SCOPE_OBSERVATION_SIGNING_SEED: ""
       PENTEST_SCOPE_DECISION_SIGNING_SEED: ""
@@ -334,7 +337,8 @@ services:
     container_name: sccap_pentest_runner_v3
     environment:
       PYTHONPATH: /app/src
-      PENTEST_RUNNER_V3_RABBIT_URL: ${PENTEST_RUNNER_V3_RABBIT_URL:-amqp://pentest_runner_v3:pentest-runner-local-only@rabbitmq/}
+      SCCAP_MIGRATION_ROLE: skip
+      PENTEST_RUNNER_V3_RABBIT_URL: ${PENTEST_RUNNER_V3_RABBIT_URL:-amqp://${RABBITMQ_PENTEST_RUNNER_USER:-pentest_runner_v3}:${RABBITMQ_PENTEST_RUNNER_PASS:-pentest-runner-local-only}@rabbitmq/}
       PENTEST_RUNNER_V3_QUEUE: ${RABBITMQ_PENTEST_V3_QUEUE:-pentest_execution_v3_queue}
       PENTEST_RUNNER_V3_GATEWAY_URL: http://app:8000
       PENTEST_RUNNER_V3_GATEWAY_SERVICE_IDENTITY: ${PENTEST_RUNNER_V3_GATEWAY_TOKEN:-}
@@ -346,13 +350,16 @@ services:
       PENTEST_RUNNER_V3_DECISION_AUDIENCE: ${PENTEST_SCOPE_DECISION_AUDIENCE:-pentest-scope-decision:foundation3}
       PENTEST_RUNNER_V3_RESULT_KEY_ID: ${PENTEST_RESULT_SIGNING_KEY_ID:-pentest-foundation2-result-local}
       PENTEST_RUNNER_V3_RESULT_SIGNING_SEED: ${PENTEST_RESULT_SIGNING_SEED:-}
-      PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS: ${PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS:-}
+      PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS: ${PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS:-127.0.0.11}
       PENTEST_RUNNER_V3_RESOLVER_ID: ${PENTEST_RUNNER_V3_RESOLVER_ID:-foundation3-approved-resolver}
+      PENTEST_LOCAL_TARGET_HOST_ALIASES: ${PENTEST_LOCAL_TARGET_HOST_ALIASES:-localhost=host.docker.internal,127.0.0.1=host.docker.internal}
       PENTEST_RUNNER_V3_WORKSPACE_ROOT: /work
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     read_only: true
     tmpfs:
       - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
-      - /work:size=8388608,mode=0700,nosuid,nodev,noexec
+      - /work:size=8388608,uid=1001,gid=1001,mode=0700,nosuid,nodev,noexec
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     pids_limit: 8
