@@ -1,151 +1,174 @@
 ---
 sidebar_position: 8
-title: Production Roadmap
+title: Production Status and Roadmap
 ---
 
-# Production roadmap
+# Production status and roadmap
 
-This roadmap starts from the application as it exists today. It separates
-release blockers from scale and enterprise work; an item listed here is not a
-claim that it is already implemented.
+This is the **single source of truth** for what SCCAP has implemented and what
+remains pending. Operational runbooks explain *how* to deploy and qualify a
+subsystem; they do not restate status. If an operational page and this page
+disagree, this page is stale — fix it here.
+
+!!! warning "Verification level"
+    "Implemented" below means the module, migration, endpoint, test, or CI job
+    **exists in the tree**. It does not mean the path has been demonstrated
+    end-to-end in a running deployment. Where a boundary is only partially built,
+    it is listed under *Pending* rather than claimed here.
 
 ## Current baseline
 
-SCCAP already has a FastAPI API, PostgreSQL persistence, a RabbitMQ worker,
-LangGraph scan orchestration, deterministic scanners (Semgrep, Bandit,
-Gitleaks, and OSV-Scanner), AI analysis/remediation, a React operator UI, SSE
-scan events, downloadable HTML/CSV/PDF/SARIF reports, scanner-native JSON,
-finding dispositions, user groups, SAML/OIDC SSO, SCIM, passkeys, and an
-administrative audit surface.
+SCCAP runs a FastAPI API, PostgreSQL persistence, a RabbitMQ worker with outbox-only
+publishing, LangGraph scan orchestration, deterministic scanners (Semgrep, Bandit,
+Gitleaks, OSV-Scanner), AI analysis and remediation, a React operator UI, SSE scan
+events, and downloadable HTML/CSV/PDF/SARIF reports.
 
-The `ai-pentester` integration also contains the Pentesting execution path,
-operator cockpit, immutable reporting/export, governance overlay, and
-fresh-retest workflow. A committed development profile enables explicitly
-allowlisted internal fixtures for frontend-driven assessments and ordinary
-report downloads. External vault providers, blind-callback receivers,
-recipient-encrypted evidence packages, and SIEM delivery are optional future
-enterprise integrations; their absence is not a blocker for the core local
-product path. Arbitrary target expansion remains out of scope.
+| Area | Implemented |
+| --- | --- |
+| Durable orchestration | Atomic submission/approval/decline/resume/restart; outbox sweeper as sole publisher; one declared transition policy over all status writers; failed/cancelled recovery sweepers |
+| Deterministic scanning | Semgrep, Bandit, Gitleaks, OSV-Scanner; native reports with runtime/config digests and exact rule hashes; OSV replayed from a dated offline snapshot (`infrastructure/scanners/osv_offline_replay.py`, `docker-compose.osv-offline.yml`) |
+| Scan attempts | Immutable attempt identifier per run/retry; per-attempt tool version, rule-set and config digests, exit status and failure reason |
+| Coverage | `scanner_coverage_entries` manifest separating clean from `planned`/`skipped`/`failed`/`timeout`/`unsupported`/`truncated`; terminal outcomes carry reason, finding count, native-evidence availability and provenance; policy evaluation plus append-only waivers |
+| Evidence | Encrypted immutable object storage, per-object digests, versioning, retention and legal hold, tamper-evident governance records, orphan reconciliation |
+| Findings | Evidence-first governance record with source ranges, attempt, evidence/coverage ids, provenance, consolidation lineage; `new`/`unchanged`/`reintroduced`/`fixed` baselines; versioned blocking policy gates and waivers; portfolio trend |
+| Live activity | Versioned scan events (`schema_version`, `activity_kind`, `attempt_id`); monotonic cursor with `Last-Event-ID` / `last_event_id` / `cursor` reconnect; cancellation phases with requested-versus-observed states |
+| Identity and tenancy | SAML/OIDC, SCIM, passkeys; server-side `AuthSession` with idle and absolute expiry, revocation, credential-generation replay detection, device (user-agent) visibility; `RoleAssignment` tenant roles; enforced separation of duties (`off`/`critical`); forced tenant RLS with non-owner runtime roles |
+| Rule foundry | Governed AI-to-static promotion: candidate generation, fixture validation, precision/recall scoring, reviewer approval, versioned registry, shadow deployment, rollback |
+| Integrations | Signed SIEM delivery, Jira ticket identity, CI policy endpoints and SARIF output |
+| Operations | Kubernetes 1.30+ Helm chart with KEDA queue autoscaling; OTLP traces/metrics with W3C correlation; Prometheus rules and SLOs; backup/restore and degradation runbooks |
+| CI gates | Backend ruff/black, frontend test+lint+build with deterministic bundle budgets, authenticated Playwright lifecycle, generated OpenAPI drift (`check:api`), Poetry lock drift, Bandit, pip-audit, Gitleaks, and a Postgres+RabbitMQ+worker integration job covering gate resume and outbox recovery |
 
-The remaining work is primarily correctness under failure, durable evidence,
-operator visibility, tenant enforcement, and repeatable enterprise operation.
+### Pentesting integration
 
-The API already uses one atomic, outbox-only transaction for submission, approval/decline, resume,
-and restart. Cancellation commits its terminal status and event atomically. One declared transition
-policy now guards all scan-status writers, and graph checkpoints carry explicit completed-stage
-state for resume. The frontend OpenAPI contract is generated and drift-gated in CI. Deterministic
-scanner artifacts now append native reports with verified runtime/config digests, exact Semgrep
-rule hashes and resolved source commits; bounded provenance is visible in results and exports.
+Foundations 0–3 and Capabilities 4–13 are implemented: bounded-context contracts,
+exact-origin tracer, durable execution and evidence commit, deterministic scope
+gateway, adaptive controller, initial Web/API tool pack, identity-aware
+verification, white-box Code Scan integration, canonical test catalog and
+coverage, reversible mutations with cleanup, asynchronous callback correlation,
+the private-network execution runner contract, the operator cockpit with
+reports/governance/retesting, the target-agnostic iterative local loop, and the
+threat-model/business-invariant workflow.
 
-## P0 — release blockers
+Of the 21 registered capability profiles, 19 now carry a successor adapter
+(`graphql_observe.v1`, `realtime_observe.v1`, `active_validation.v1`,
+`authorization_readonly.v1`, `file_upload_validation.v1`,
+`codescan_source_facts.v2`, and the passive native pack). The remaining two are
+listed under *Pending* below.
 
-- Add integration tests around PostgreSQL, RabbitMQ, LangGraph pause/resume,
-  cancellation races, report downloads, token refresh, and tenant visibility.
-  Keep pure unit tests only for important policy boundaries.
-- Keep the implemented frontend OpenAPI generation/drift gate green as endpoint contracts evolve.
-- Replace OSV's current live advisory lookup with a dated, hashed offline snapshot. Scanner
-  binaries/configs and per-scan Semgrep rules/source commits are already verified and retained;
-  OSV is deliberately shown as degraded until the advisory input is equally reproducible.
-- Run authenticated browser regressions for login/refresh/logout, submission,
-  approval, live activity, cancellation, results, and all report downloads.
+See [capability activation](operations/pentesting-capability-activation.md) for
+deployment overlays and [local audit qualification](operations/pentesting-local-audit-qualification.md)
+for qualification lanes.
 
-## P1 — trustworthy scanning and evidence
+## Pending
 
-### Scan attempts and reports
+### Release blockers
 
-- Give every run/retry an immutable scan-attempt identifier. Record tool
-  version, rule-set digest, configuration digest, selected/skipped files,
-  timestamps, exit status, and failure reason per scanner.
-- Store native reports and generated exports in encrypted object storage rather
-  than growing PostgreSQL rows. Preserve digests, retention policy, tenant,
-  attempt, legal-hold state, and a tamper-evident audit record.
-- Distinguish a clean scan from skipped coverage, tool failure, parse failure,
-  timeout, and truncated output. Surface that coverage manifest in the UI and
-  exports.
+- **No demonstrated end-to-end engagement.** The 2026-09-12 black-box run against
+  the Juice Shop fixture blocked at `PENTEST_PROFILE_UNAVAILABLE` before any
+  model call, because the controller container had `PENTEST_CAPABILITY5_ENABLED=false`
+  while the API had `true`. The Compose overlays now set the flag consistently on
+  both services, but the path has **not** been re-run. Readiness reporting,
+  `model_blocked` not propagating to engagement state, retries that do not
+  increment `retry_count`, and the ambiguous bootstrap request count all remain
+  unverified.
+- **Non-owner forced-RLS qualification.** The qualification lane proves query
+  scope, not enforced row-level security under a non-owner runtime role.
+- **Precommit crash/cancellation persistence.** Native cancellation retains only
+  an in-memory reservation; whole-assessment precommit crash and cancellation
+  recovery still require fault-injection tests.
+- **Real-broker and middleware coverage in the product lane.** The worker/product
+  qualification lane omits real RabbitMQ delivery/recovery, HTTP login/CSRF
+  middleware, and a real cockpit browser.
 
-### Live activity and cancellation
+### Pentest capability activation
 
-- Version the event schema. Each event needs a sequence/cursor, scan attempt,
-  stage, task, event type (`started`, `progress`, `completed`, `failed`,
-  `cancel_requested`, `cancel_observed`), safe structured details, and timing.
-- Build an operator activity console with stage/scanner/agent filters, progress
-  counts, durations, retries, degraded work, approval pauses, and a detail
-  drawer. Reconnect from the last cursor without duplicating entries.
-- Propagate cancellation into process groups and LLM-provider requests, define
-  a cancellation latency SLO, and show requested versus observed cancellation.
+- **`authentication` and `session_management` profiles** have no Capability 4
+  successor. They resolve through C6/C7 runtime health
+  (`services/profile_registry.py`), so they stay unselectable until that runtime
+  is deployed and reports qualified health.
+- **Step rehydration.** V3 refuses prior advanced work with
+  `committed_step_rehydration_required` rather than restoring verified receipts
+  and budget; whole-attempt recovery is not implemented.
+- **Prerequisite-state replay.** Authenticated and prerequisite-state DOM replay
+  remains unqualified; `auth_kind` is not an exact identity binding.
+- **OAST/C11 end-to-end delivery.** The reviewed payload bundle and correlation
+  bridge exist, but delivery consumers for the full technique set are not wired
+  into the adaptive loop.
+- **C10 execution in the product path.** Mutation and cleanup ledgers with
+  restoration predicates exist; routing product state-changing work through them
+  is gated on intensity and not yet exercised end to end.
+- **Operation × identity scheduling.** Complete scheduling across every canonical
+  operation and brokered identity is unfinished.
+- **Arbitrary native profile qualification.** Only the enumerated adapters are
+  qualified; there is no general qualification path for new native profiles.
+- **Capability 12 runner.** The control-plane contract, network profiles and
+  scope evaluation exist (ADR-027); the customer-hosted runner lifecycle
+  (enrollment, rotation, revocation, spool, remote kill) is not demonstrated.
+- **Live model calls in qualification.** The product lane disables live model
+  calls, so provider behaviour and cost are unqualified there.
 
-### Identity, authorization, and tenancy
+### Trustworthy scanning and evidence
 
-- Harden the existing SAML/OIDC and SCIM implementations with signed metadata,
-  key rotation, domain ownership, group/role mapping, just-in-time policy,
-  deprovisioning tests, and identity-provider conformance suites.
-- Replace the coarse user/superuser model with tenant roles and separation of
-  duties. Enforce two-person approval for high-cost scans; the existing flag is
-  informational only.
-- Centralize tenant predicates and add database-level isolation where feasible.
-  Every list, export, event stream, artifact, search, and background task must
-  prove its tenant scope.
-- Add server-side session inventory, refresh-token rotation/reuse detection,
-  revocation, idle/absolute lifetime, device visibility, and administrator
-  termination. Evaluate a backend-for-frontend/HttpOnly access-token model to
-  remove the current local-storage exposure.
+- Harden SAML/OIDC and SCIM against signed metadata, key rotation, domain
+  ownership, group/role mapping, just-in-time policy, deprovisioning, and
+  provider conformance suites.
+- Enforce two-person approval for high-cost scans. Separation of duties is
+  enforced for role combinations; the high-cost scan gate is not yet covered.
+- Extend database-level isolation beyond forced RLS to the remaining background
+  and export paths.
+- Evaluate a backend-for-frontend / HttpOnly access-token model to remove the
+  current local-storage exposure.
+- **Test-Validated Remediation** ([details](user-guide/unit-test-integration.md))
+  is not implemented: SCCAP does not yet run the project's existing test suite
+  against an AI-generated fix before applying it, so fixes that break tests can
+  still be proposed.
 
-## P2 — AI-to-static rule foundry
+### Frontend and integration maturity
 
-AI findings must not be promoted directly into production scanner rules. The
-learning loop should be reviewable and measurable:
+- Complete accessibility, keyboard, responsive and design-token audits; continue
+  splitting large routes and visualizations to hold the bundle budgets.
+- Service accounts and OAuth scopes, signed webhooks, GitHub/GitLab/Azure
+  DevOps/Bitbucket CI templates, and expanded ticketing surfaces.
 
-1. Start from a confirmed AI-only finding with stable evidence, CWE, root
-   cause, data-flow facts, language, framework, and preconditions.
-2. Produce a candidate Semgrep rule (prefer taint mode when appropriate) plus
-   vulnerable, fixed, and negative fixtures. Secret-pattern candidates may
-   target Gitleaks; dependency issues belong in an advisory feed rather than a
-   regex rule.
-3. Validate candidates in an isolated sandbox against the fixtures and a
-   representative clean/vulnerable corpus. Measure precision, recall,
-   performance, duplicate rate, and rule churn.
-4. Require security-reviewer approval and a signed, versioned registry entry.
-   Scope rules to tenant, technology, and language; deploy first in shadow mode.
-5. Promote only after quality thresholds and observed telemetry. Support rapid
-   rollback, expiry, supersession, and feedback from false positives, false
-   negatives, and remediation regressions.
+### Enterprise operations
 
-Semantic findings that cannot be represented faithfully should remain AI
-checks or move to a purpose-built data-flow analyzer. Never weaken a finding
-into a broad regex merely to claim scanner learning. Treat repository content
-as untrusted prompt input and prevent generated rules from executing arbitrary
-code or being promoted autonomously.
-
-## P2 — frontend and integration maturity
-
-- Make finding pages evidence-first: source ranges, trace, scanner/AI
-  provenance, rule version, triage history, remediation diff, verification,
-  and stable lineage identifiers.
-- Add baselines and “new/fixed/unchanged” PR views, policy gates, waivers, and
-  portfolio trend/drill-down views.
-- Complete accessibility, keyboard, responsive, and design-token audits. Split
-  large routes and visualizations to reduce the current main bundle.
-- Add service accounts/OAuth scopes, signed webhooks, GitHub/GitLab/Azure
-  DevOps/Bitbucket CI templates, SARIF upload, ticketing, and SIEM integrations.
-
-## P2/P3 — enterprise operations
-
-- Package stateless APIs and specialized worker pools for Kubernetes with
-  queue-based autoscaling, disruption budgets, safe migrations, and staged
-  rollout/rollback.
-- Add OpenTelemetry traces/metrics/log correlation, SLO dashboards, alerts,
-  queue/backlog and provider-budget controls, and documented incident runbooks.
-- Use a secrets manager/KMS with rotation; produce SBOMs, signed images,
-  provenance, vulnerability gates, and repeatable offline scanner-data updates.
-- Define backup/restore drills, RPO/RTO, regional/tenant retention, legal hold,
-  data export/deletion, and disaster recovery.
+- Complete KMS/secret-manager rotation, SBOM and signed-image provenance gates,
+  and repeatable offline scanner-data updates.
+- Define and drill RPO/RTO, regional and tenant retention, legal-hold, data
+  export/deletion, and disaster recovery.
 - Performance-test large repositories, concurrent tenants, event replay,
-  artifact downloads, and degraded dependencies before an enterprise release.
+  artifact downloads and degraded dependencies before an enterprise release.
+
+## Retired claims
+
+Earlier revisions of this page listed the following as pending. They are
+implemented; the entries are kept only so the change is traceable.
+
+- OSV live advisory lookup → replaced by the dated offline snapshot.
+- Scan-attempt identifier, coverage manifest, and encrypted object storage for
+  reports and exports.
+- Versioned event schema with cursor-based reconnect.
+- Server-side session inventory, revocation, idle/absolute lifetime, device
+  visibility.
+- "Two-person approval is informational only" → separation of duties is enforced.
+- AI-to-static rule foundry.
+- Evidence-first finding pages, baselines, policy gates, waivers, portfolio trend.
+- OpenTelemetry traces/metrics/log correlation and Kubernetes worker pooling.
+- GraphQL and realtime profiles lacking adapters.
+- Injection lacking a general active adapter mapping.
+- Threat modelling being entirely absent (closed by ADR-026).
+- State-changing tests being hard-rejected (now intensity-gated).
+
+Two long-standing claims were also checked and found stale: documentation build
+and generated-OpenAPI drift **are** CI gates (`docs.yml`,
+`ci.yml` `check:api`), and the product roadmap no longer depends on
+`.scratch/pentesting-full-vision/GAP_REGISTER.md`, which was superseded by the
+committed ADRs.
 
 ## Exit criteria for an enterprise pilot
 
-An enterprise pilot should not begin until P0 is complete, no known cross-
-tenant access path remains, cancellation and session-longevity SLOs pass under
-load, every scanner outcome has auditable evidence, backup/restore has been
+A pilot should not begin until the release blockers above are closed, no known
+cross-tenant access path remains, cancellation and session-longevity SLOs pass
+under load, every scanner outcome has auditable evidence, backup/restore has been
 demonstrated, and the supported SSO/SCIM provider matrix passes automated
 conformance tests.

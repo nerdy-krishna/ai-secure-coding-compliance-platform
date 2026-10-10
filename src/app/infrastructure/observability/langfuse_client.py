@@ -28,7 +28,6 @@ import threading
 import urllib.parse
 from typing import Any, Optional
 
-from app.config.config import settings
 from app.config.logging_config import correlation_id_var
 from app.infrastructure.observability.mask import mask
 
@@ -65,6 +64,8 @@ def _host_is_allowed(host_url: str) -> bool:
 
 
 def _is_configured() -> bool:
+    from app.config.config import settings  # noqa: PLC0415
+
     if not settings.LANGFUSE_ENABLED:
         return False
     secret = settings.LANGFUSE_SECRET_KEY
@@ -86,6 +87,8 @@ def _is_configured() -> bool:
 
 def get_langfuse() -> Optional[Any]:
     """Return the singleton Langfuse client, or None if disabled / failed."""
+    from app.config.config import settings  # noqa: PLC0415
+
     global _client, _disabled
 
     if _disabled:

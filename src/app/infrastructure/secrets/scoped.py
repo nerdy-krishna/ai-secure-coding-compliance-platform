@@ -7,10 +7,8 @@ import base64
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from app.config.config import settings
 from app.infrastructure.evidence.crypto import build_key_provider
 from app.infrastructure.secrets.envelope import SecretEnvelopeCipher
-from app.shared.lib.encryption import FernetEncrypt
 
 PREFIX = "SCCAP-KMS-ENVELOPE-V1:"
 
@@ -22,6 +20,8 @@ class ScopedSecretRead:
 
 
 def _cipher() -> SecretEnvelopeCipher:
+    from app.config.config import settings  # noqa: PLC0415
+
     if (
         settings.ENVIRONMENT != "development"
         and settings.EVIDENCE_KEY_PROVIDER != "aws_kms"
@@ -53,6 +53,8 @@ async def decrypt_scoped_secret(
                 else None
             ),
         )
+    from app.shared.lib.encryption import FernetEncrypt  # noqa: PLC0415
+
     plaintext = FernetEncrypt.decrypt(persisted_value)
     return ScopedSecretRead(
         plaintext=plaintext,

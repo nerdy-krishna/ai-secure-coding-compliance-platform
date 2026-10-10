@@ -212,6 +212,10 @@ services:
       dockerfile: Dockerfile
       target: worker
     container_name: sccap_worker
+    # Chromium renders a real SPA inside this container; the default 64 MiB
+    # /dev/shm starves the renderer and crashes it mid-boot.  The 1 GiB share
+    # is the container-side half of the --disable-dev-shm-usage workaround.
+    shm_size: 1g
     env_file:
       - .env
     volumes:
@@ -485,6 +489,7 @@ services:
     environment:
       PYTHONPATH: /app/src
       SERVICE_NAME: pentest-verification-coordinator
+      SCCAP_MIGRATION_ROLE: skip
       ENVIRONMENT: ${ENVIRONMENT:-development}
       ASYNC_DATABASE_URL: ${PENTEST_VERIFICATION_DATABASE_URL:-}
       RABBITMQ_PENTEST_VERIFICATION_URL: ${RABBITMQ_PENTEST_VERIFICATION_URL:-amqp://pentest_verifier:pentest-verifier-local-only@rabbitmq/}
@@ -498,6 +503,9 @@ services:
       HTTPS_PROXY: ""
       ALL_PROXY: ""
       NO_PROXY: ""
+      # The shared worker image bakes in a Playwright browser path; the
+      # verification coordinator is least-privilege and must not inherit it.
+      PLAYWRIGHT_BROWSERS_PATH: ""
     read_only: true
     tmpfs:
       - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
@@ -698,7 +706,7 @@ services:
     volumes:
       - langfuse_redis_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 10

@@ -3,7 +3,6 @@
 import logging
 
 from cryptography.fernet import Fernet
-from app.config.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,34 +21,41 @@ class FernetEncrypt:
     """
 
     # ENCRYPTION_KEY is a Pydantic SecretStr; unwrap before the base64 padding fix-up.
-    _raw_key = settings.ENCRYPTION_KEY
-    _key_str = (
-        _raw_key.get_secret_value()
-        if hasattr(_raw_key, "get_secret_value")
-        else str(_raw_key) if _raw_key else ""
-    )
-    if not _key_str:
-        raise ValueError(
-            "ENCRYPTION_KEY environment variable not set. Please generate a new one."
-        )
+    _fernet = None
 
-    try:
-        # Some systems or .env parsers strip '=' padding. We re-add it here.
-        # A valid base64 string's length must be a multiple of 4.
-        padded_key_str = _key_str + "=" * (-len(_key_str) % 4)
+    @classmethod
+    def _fernet_instance(cls) -> Fernet:
+        """Lazily build the immutable Fernet cipher on first use."""
+        if cls._fernet is None:
+            from app.config.config import settings  # noqa: PLC0415
 
-        # The Fernet constructor expects the base64-encoded key as bytes.
-        key_as_bytes = padded_key_str.encode("utf-8")
+            raw_key = settings.ENCRYPTION_KEY
+            key_str = (
+                raw_key.get_secret_value()
+                if hasattr(raw_key, "get_secret_value")
+                else str(raw_key) if raw_key else ""
+            )
+            if not key_str:
+                raise ValueError(
+                    "ENCRYPTION_KEY environment variable not set. Please generate a new one."
+                )
+            try:
+                # Some systems or .env parsers strip '=' padding. We re-add it here.
+                # A valid base64 string's length must be a multiple of 4.
+                padded_key_str = key_str + "=" * (-len(key_str) % 4)
 
-        # The Fernet constructor performs the base64 decoding internally.
-        # It will raise a ValueError here if the key is still invalid after padding.
-        _fernet = Fernet(key_as_bytes)
+                # The Fernet constructor expects the base64-encoded key as bytes.
+                key_as_bytes = padded_key_str.encode("utf-8")
 
-    except Exception:
-        raise ValueError(
-            "Invalid ENCRYPTION_KEY. Could not initialize encryption service. "
-            "Ensure it is a URL-safe base64 32-byte key."
-        ) from None
+                # The Fernet constructor performs the base64 decoding internally.
+                # It will raise a ValueError here if the key is still invalid after padding.
+                cls._fernet = Fernet(key_as_bytes)
+            except Exception:
+                raise ValueError(
+                    "Invalid ENCRYPTION_KEY. Could not initialize encryption service. "
+                    "Ensure it is a URL-safe base64 32-byte key."
+                ) from None
+        return cls._fernet
 
     @classmethod
     def encrypt(cls, data: str) -> str:
@@ -58,7 +64,7 @@ class FernetEncrypt:
             raise TypeError("FernetEncrypt.encrypt: data must be str")
         if len(data) > 64_000:
             raise ValueError("FernetEncrypt.encrypt: data exceeds 64KB cap")
-        return cls._fernet.encrypt(data.encode("utf-8")).decode("utf-8")
+        return cls._fernet_instance().encrypt(data.encode("utf-8")).decode("utf-8")
 
     @classmethod
     def decrypt(cls, encrypted_data: str) -> str:
@@ -68,7 +74,7 @@ class FernetEncrypt:
         if len(encrypted_data) > 100_000 or len(encrypted_data) < 20:
             raise ValueError("FernetEncrypt.decrypt: token length out of range")
         try:
-            return cls._fernet.decrypt(encrypted_data.encode("utf-8")).decode("utf-8")
+            return cls._fernet_instance().decrypt(encrypted_data.encode("utf-8")).decode("utf-8")
         except Exception as exc:
             logger.warning("encryption.decrypt_failed err=%s", type(exc).__name__)
             raise

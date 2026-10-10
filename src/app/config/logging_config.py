@@ -187,12 +187,17 @@ _LOG_FILE_PATH = os.getenv("LOG_FILE_PATH", "app.log")
 # Apply restrictive file permissions on the log file at startup (V14.2.4)
 # This runs at import time so the file exists before any handler opens it.
 if not _IS_PRODUCTION:
-    _log_dir = os.path.dirname(os.path.abspath(_LOG_FILE_PATH))
-    os.makedirs(_log_dir, exist_ok=True)
-    # Touch the file if it doesn't yet exist so chmod can be applied
-    if not os.path.exists(_LOG_FILE_PATH):
-        open(_LOG_FILE_PATH, "a").close()
-    os.chmod(_LOG_FILE_PATH, 0o600)
+    try:
+        _log_dir = os.path.dirname(os.path.abspath(_LOG_FILE_PATH))
+        os.makedirs(_log_dir, exist_ok=True)
+        # Touch the file if it doesn't yet exist so chmod can be applied
+        if not os.path.exists(_LOG_FILE_PATH):
+            open(_LOG_FILE_PATH, "a").close()
+        os.chmod(_LOG_FILE_PATH, 0o600)
+    except OSError:
+        # Read-only worker images (least-privilege pentest processes) cannot
+        # create a log file; logging simply stays on console handlers.
+        pass
 
 # Active app logger level: INFO in production, DEBUG elsewhere (V13.4.2 / V14.1.2)
 _APP_LOG_LEVEL = "INFO" if _IS_PRODUCTION else "DEBUG"
