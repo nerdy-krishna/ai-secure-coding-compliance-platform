@@ -74,6 +74,7 @@ export interface WorkLedgerSummary {
 }
 
 export interface AttemptRuntimeSummary {
+  adaptive_progress?: { current_activity: string } | null;
   limitations?: string[];
   state: string;
   outcome: string | null;

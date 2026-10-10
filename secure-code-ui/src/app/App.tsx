@@ -272,7 +272,7 @@ function AppContent() {
           </Route>
         </Route>
         <Route element={<RouteGuard requires="permission" anyPermission={["pentest.read"]} />}>
-          <Route element={<FeatureRoute feature="pentesting_capability13" />}>
+          <Route element={<FeatureRoute feature="pentesting" />}>
             <Route
               path="/pentesting/engagements"
               element={routeContent(<PentestEngagementsPage />)}

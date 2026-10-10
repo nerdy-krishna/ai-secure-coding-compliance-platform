@@ -13,10 +13,10 @@ const codeScan: Item[] = [
   { to: "/account/history", label: "Submission history" },
 ];
 const pentesting: Item[] = [
-  { to: "/pentesting/engagements", label: "Engagements", feature: "pentesting_capability13", permission: Permission.pentestRead },
-  { to: "/pentesting/projects", label: "Pentesting projects", feature: "pentesting_capability13", permission: Permission.pentestRead },
-  { to: "/pentesting/credentials", label: "Credentials", feature: "pentesting_capability13", permission: Permission.pentestRead },
-  { to: "/pentesting/configuration", label: "Configuration", feature: "pentesting_capability13", permission: Permission.pentestRead },
+  { to: "/pentesting/engagements", label: "Engagements", feature: "pentesting", permission: Permission.pentestRead },
+  { to: "/pentesting/projects", label: "Pentesting projects", feature: "pentesting", permission: Permission.pentestRead },
+  { to: "/pentesting/credentials", label: "Credentials", feature: "pentesting", permission: Permission.pentestRead },
+  { to: "/pentesting/configuration", label: "Configuration", feature: "pentesting", permission: Permission.pentestRead },
 ];
 const tools: Item[] = [
   { to: "/compliance", label: "Compliance", feature: "compliance" },

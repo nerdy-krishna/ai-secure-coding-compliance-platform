@@ -99,6 +99,26 @@ def _safe(s: Any) -> str:
     return str(s).replace("\r", "").replace("\n", "")
 
 
+def _extract_capability13_locator_body(message_body: dict[str, Any]) -> dict[str, Any]:
+    """Return only the closed C13 locator fields from an AMQP envelope."""
+
+    return {
+        key: message_body[key]
+        for key in (
+            "kind",
+            "locator_version",
+            "outbox_id",
+            "tenant_id",
+            "engagement_id",
+            "attempt_id",
+            "request_id",
+            "request_kind",
+            "locator_digest",
+        )
+        if key in message_body
+    }
+
+
 load_dotenv()
 
 # Non-resumable scan statuses for which the LangGraph checkpointer thread
@@ -1043,9 +1063,10 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
                     Capability13ReportLocatorV1,
                 )
 
-                c13_locator = Capability13ReportLocatorV1.model_validate(c13_body)
+                c13_locator_body = _extract_capability13_locator_body(c13_body)
+                c13_locator = Capability13ReportLocatorV1.model_validate_json(json.dumps(c13_locator_body))
             except Exception:
-                logger.error("c13.report.delivery.invalid_locator")
+                logger.error("c13.report.delivery.invalid_locator", exc_info=True)
                 await message.reject(requeue=False)
                 return
             if not settings.PENTEST_CAPABILITY13_REPORT_BUILDS:
@@ -1055,6 +1076,9 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
 
             async def _run_c13_report_delivery() -> None:
                 try:
+                    from app.core.services.pentesting.capability13_report_service import (
+                        Capability13ReportError,
+                    )
                     from app.workers.pentesting import (
                         handle_capability13_export_delivery,
                         handle_capability13_report_delivery,
@@ -1067,18 +1091,29 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
                         system_scope=True,
                     ):
                         if c13_locator.request_kind == "report":
-                            await handle_capability13_report_delivery(c13_body)
+                            await handle_capability13_report_delivery(c13_locator_body)
                         else:
-                            await handle_capability13_export_delivery(c13_body)
+                            await handle_capability13_export_delivery(c13_locator_body)
                     await message.ack()
                 except asyncio.CancelledError:
                     raise
+                except Capability13ReportError as exc:
+                    logger.error(
+                        "c13.report.delivery.report_error",
+                        extra={"error_code": exc.code},
+                        exc_info=True,
+                    )
+                    if not message.processed:
+                        if exc.code == "C13_BUILD_ALREADY_CLAIMED":
+                            await message.ack()
+                        else:
+                            await message.reject(requeue=False)
                 except ValueError:
-                    logger.error("c13.report.delivery.rejected")
+                    logger.error("c13.report.delivery.rejected", exc_info=True)
                     if not message.processed:
                         await message.reject(requeue=False)
                 except Exception:
-                    logger.error("c13.report.delivery.failed")
+                    logger.error("c13.report.delivery.failed", exc_info=True)
                     if not message.processed:
                         await message.reject(requeue=True)
 

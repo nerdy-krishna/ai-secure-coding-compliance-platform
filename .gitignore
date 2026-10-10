@@ -93,6 +93,14 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local pentest secret material: signing keys and runner env files stay on this
+# laptop. Never commit these; bootstrap scripts regenerate them per environment.
+.secrets/
+
+# Node dependencies and tool caches (including stray root-level ones created by
+# running build tools from the repo root instead of secure-code-ui/).
+node_modules/
+
 # Spyder project settings
 .spyderproject
 .spyproject
