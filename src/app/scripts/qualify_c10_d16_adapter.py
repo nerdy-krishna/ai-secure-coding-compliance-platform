@@ -175,9 +175,81 @@ def _fault_observations() -> tuple[C10AdapterQualificationFaultObservationV1, ..
     return tuple(observations)
 
 
-def build_receipt(*, now: datetime | None = None) -> C10AdapterQualificationV1:
-    """Run the qualification and return the immutable receipt."""
+def _deployed_selector_binding() -> dict[str, object]:
+    """Return the deployed snapshot's identity fields, or refuse.
 
+    D16 dispatches only to an adapter whose snapshot is mutation-capable.  This
+    reads the live deployed-adapter inventory and fails closed when the selector
+    is absent — or present but read-only, which is the case for every adapter the
+    shipped pack provides: they are all `*_observe`, `*_passive`, `*_readonly` or
+    `*_connect` and declare `read_only_discovery`.  Manufacturing the binding
+    would fabricate the deployment qualification the reporter just produced.
+    """
+
+    import asyncio
+
+    from sqlalchemy import select
+
+    import app.infrastructure.database.models  # noqa: F401  (registers tables)
+    from app.infrastructure.database.database import AsyncSessionLocal
+    from app.infrastructure.database.models import SystemConfiguration
+
+    async def load() -> dict[str, Any] | None:
+        async with AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    select(SystemConfiguration).where(
+                        SystemConfiguration.key
+                        == "pentest_deployed_adapter_inventory"
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None or not row.value:
+                return None
+            for entry in row.value.get("adapters", []):
+                snapshot = entry.get("snapshot") if isinstance(entry, dict) else None
+                if isinstance(snapshot, dict) and snapshot.get(
+                    "adapter_id"
+                ) == D16_ADAPTER_ID:
+                    return snapshot
+            return None
+
+    snapshot = asyncio.run(load())
+    if snapshot is None:
+        raise SystemExit(
+            f"the deployed-adapter inventory has no {D16_ADAPTER_ID} snapshot. "
+            "D16 dispatch lives on the C5 adapter path, so the adapter pack must "
+            "be deployed and probed before a receipt can be produced."
+        )
+    interaction = str(snapshot.get("supported_interaction_class") or "")
+    if interaction == "read_only_discovery":
+        raise SystemExit(
+            f"{D16_ADAPTER_ID} is deployed as {interaction!r}, so D16 has no "
+            "mutation-capable adapter to dispatch to. The shipped adapter pack is "
+            "read-only by construction (every adapter is *_observe, *_passive, "
+            "*_readonly or *_connect), so no configuration can enable destructive "
+            "execution: a mutation-capable adapter with mutation, cleanup and "
+            "restoration recipes has to be built and qualified first."
+        )
+    return {
+        "adapter_contract_version": snapshot["adapter_contract_version"],
+        "runtime_version": snapshot["runtime_version"],
+        "runtime_image_digest": snapshot["runtime_image_digest"],
+        "configuration_digest": snapshot["configuration_digest"],
+        "content_bundle_digest": snapshot.get("content_bundle_digest"),
+    }
+
+
+def build_receipt(*, now: datetime | None = None) -> C10AdapterQualificationV1:
+    """Run the qualification and return the immutable receipt.
+
+    The receipt must bind to the deployed adapter snapshot, so its identity
+    fields come from the live inventory rather than from this module.  A receipt
+    carrying its own idea of the runtime image or configuration digest can never
+    be accepted, which is part of why ADR-022's block was unsatisfiable.
+    """
+
+    binding = _deployed_selector_binding()
     qualified_at = now or datetime.now(UTC)
     vulnerable = _qualify_fixture("vulnerable")
     clean = _qualify_fixture("clean")
@@ -206,11 +278,12 @@ def build_receipt(*, now: datetime | None = None) -> C10AdapterQualificationV1:
         "schema_version": "sccap.pentest.c10-adapter-qualification.v1",
         "qualification_id": uuid.uuid5(_ADAPTER_NAMESPACE, "c10:d16:qualification"),
         "adapter_id": D16_ADAPTER_ID,
-        "adapter_contract_version": "playwright-observe.v1",
-        "runtime_version": "1.0.0",
-        "runtime_image_digest": _digest({"runtime": D16_ADAPTER_ID, "v": 1}),
-        "configuration_digest": _digest({"selector": D16_ADAPTER_ID, "v": 1}),
-        "content_bundle_digest": None,
+        # Bound to the deployed snapshot, never invented here.
+        "adapter_contract_version": binding["adapter_contract_version"],
+        "runtime_version": binding["runtime_version"],
+        "runtime_image_digest": binding["runtime_image_digest"],
+        "configuration_digest": binding["configuration_digest"],
+        "content_bundle_digest": binding["content_bundle_digest"],
         "mutation_recipe_ref": uuid.uuid5(_ADAPTER_NAMESPACE, "mutation-recipe"),
         "mutation_recipe_digest": _digest({"mutation": "session_state_change.v1"}),
         "cleanup_recipe_ref": uuid.uuid5(_ADAPTER_NAMESPACE, "cleanup-recipe"),
@@ -264,11 +337,11 @@ def build_receipt(*, now: datetime | None = None) -> C10AdapterQualificationV1:
     validate_mutation_qualification(
         manifest={"capability10_qualification": receipt.model_dump(mode="json")},
         adapter_id=D16_ADAPTER_ID,
-        adapter_contract_version="playwright-observe.v1",
-        runtime_version="1.0.0",
-        runtime_image_digest=values["runtime_image_digest"],
-        configuration_digest=values["configuration_digest"],
-        content_bundle_digest=None,
+        adapter_contract_version=str(binding["adapter_contract_version"]),
+        runtime_version=str(binding["runtime_version"]),
+        runtime_image_digest=str(binding["runtime_image_digest"]),
+        configuration_digest=str(binding["configuration_digest"]),
+        content_bundle_digest=binding["content_bundle_digest"],
         effect_class=D16_EFFECT_CLASS,
         interaction_category=D16_INTERACTION_CATEGORY,
         mutation_recipe_ref=values["mutation_recipe_ref"],
