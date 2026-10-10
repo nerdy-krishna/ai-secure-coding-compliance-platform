@@ -33,3 +33,4 @@ leaving a completed plan as the only explanation of the system.
 - [ADR-025: Target-agnostic iterative local assessment loop](025-target-agnostic-iterative-local-assessment.md)
 - [ADR-026: Pentesting threat model, business invariants, and workflow state machines](026-pentesting-threat-model-business-invariants-workflow.md)
 - [ADR-027: Pentesting Capability 12 private-network execution runner](027-pentesting-capability12-private-network-runner.md)
+- [ADR-028: Operator-authorized destructive testing](028-pentesting-operator-authorized-destructive-testing.md)
