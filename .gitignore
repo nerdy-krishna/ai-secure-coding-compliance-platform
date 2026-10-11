@@ -202,3 +202,9 @@ AGENTS.md
 
 # Private local issue tracker and planning workspace.
 .scratch/
+
+# Vendored wordlists carry their own provenance: generate.py is committed so the
+# corpus can be regenerated and audited, and manifest.json pins the digest of the
+# exact bytes shipped. These are attack input, so their contents must be reviewable
+# in the diff like any other input rather than fetched at build time.
+!src/app/pentesting/catalogs/wordlists/*.txt
