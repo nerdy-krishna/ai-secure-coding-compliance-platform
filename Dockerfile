@@ -429,14 +429,14 @@ USER root
 # for.  Everything here is packaged and digest-pinned by apt: no assessment-time
 # download, no unpinned wordlist, and no tool that has to call home to work.
 #
-# john is the primary cracker because it is pure CPU and needs no OpenCL ICD;
-# hashcat is installed with pocl so the same work can use a CPU OpenCL backend
-# where the host provides one.
+# hashcat is the cracker.  Debian's john is the non-jumbo build: it cannot make
+# raw md5/sha1/sha256/sha512 digests at all, offers no pot-file control and no run
+# limit, which is the opposite of what a bounded, evidence-producing adapter needs.
+# hashcat covers every family in one tool with an explicit pot path and an explicit
+# runtime, and pocl gives it a CPU OpenCL device so no GPU is required.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         "nmap=7.93+dfsg1-1" \
-        "john=1.9.0-2" \
-        "john-data=1.9.0-2" \
         "hashcat=6.2.6+ds1-1+b1" \
         "hashcat-data=6.2.6+ds1-1" \
         "sqlmap=1.7.2-1" \
@@ -486,9 +486,9 @@ RUN chmod -R a+rX /ms-playwright /zap \
     # Debian ships john in /usr/sbin, which the supervised tool PATH does not
     # include.  A stable path under /opt/sccap-tools keeps the adapter's argv
     # independent of the distribution's sbin layout.
-    && ln -sf /usr/sbin/john /opt/sccap-tools/john \
-    && chmod 0555 /opt/sccap-tools/john /usr/bin/sqlmap /usr/bin/ffuf \
-        /usr/bin/hydra /usr/bin/whatweb /usr/bin/gobuster /usr/bin/hashcat \
+    && ln -sf /usr/bin/hashcat /opt/sccap-tools/hashcat \
+    && chmod 0555 /opt/sccap-tools/hashcat /usr/bin/sqlmap /usr/bin/ffuf \
+        /usr/bin/hydra /usr/bin/whatweb /usr/bin/gobuster \
         /usr/bin/testssl.sh 2>/dev/null || true
 RUN chmod 0555 /opt/sccap-wordlists/* \
     && chmod -R a+rX /opt/sccap-wordlists
