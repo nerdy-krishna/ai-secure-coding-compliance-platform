@@ -22,6 +22,7 @@ from app.api.v1.routers.chat import router as chat_router
 from app.api.v1.routers.compliance import router as compliance_router
 from app.api.v1.routers.features import router as features_router
 from app.api.v1.routers.admin_features import router as admin_features_router
+from app.api.v1.routers.pentest_console import router as pentest_console_router
 from app.api.v1.routers.pentesting import router as pentesting_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.browser_session import router as browser_session_router
@@ -1151,6 +1152,10 @@ def _include_if_enabled(feature: str, *args, **kwargs) -> None:
 # Foundation 0 Pentesting contract discovery. Runtime assessment behavior is
 # introduced only by later foundations.
 _include_if_enabled("pentesting", pentesting_router, prefix="/api/v1")
+# The operator replay console rides the pentesting feature: it is meaningless without an
+# engagement to scope it, and its own flag would only create a state where the API is
+# exposed and the thing it acts on is not.
+_include_if_enabled("pentesting", pentest_console_router, prefix="/api/v1")
 
 
 # Router for managing LLM Configurations
