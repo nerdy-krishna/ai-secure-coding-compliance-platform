@@ -46,7 +46,6 @@ services:
       - ./docker-compose.yml:/app/docker-compose.yml:ro
       - ./alembic.ini:/app/alembic.ini
       - ./alembic:/app/alembic
-      - ./tests:/app/tests
       - ./data:/app/data:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
       - validation_jobs:/var/lib/sccap-validation/jobs

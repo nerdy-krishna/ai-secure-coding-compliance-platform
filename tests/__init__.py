@@ -1,1 +1,0 @@
-"""Focused SCCAP regression tests."""

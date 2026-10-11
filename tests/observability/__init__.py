@@ -1,1 +1,0 @@
-"""Operational observability contract tests."""
