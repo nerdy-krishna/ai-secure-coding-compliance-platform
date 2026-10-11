@@ -1023,6 +1023,81 @@ async def _build_initial_state(
     return initial_state
 
 
+# Bounded redelivery for one committed execution.  A transient failure may be
+# fixed by trying again; a deterministic one never is, so the first is retried a
+# few times and the second is abandoned immediately.
+_PENTEST_DELIVERY_ATTEMPT_LIMIT = 4
+_MAX_TRACKED_DELIVERY_FAILURES = 512
+_delivery_attempts: dict[str, int] = {}
+
+
+def _delivery_failure_key(body: dict[str, Any]) -> str | None:
+    """Return the stable identity redeliveries of this message share."""
+
+    for field in ("execution_id", "outbox_id", "attempt_id"):
+        value = body.get(field)
+        if value:
+            return f"{field}:{value}"
+    return None
+
+
+def _record_delivery_failure(key: str) -> int:
+    """Count consecutive failures for one message identity.
+
+    Bounded by construction: an entry is dropped once the message is handled or
+    abandoned, and the map is trimmed if it ever grows past its bound.
+    """
+
+    attempts = _delivery_attempts.get(key, 0) + 1
+    _delivery_attempts[key] = attempts
+    if len(_delivery_attempts) > _MAX_TRACKED_DELIVERY_FAILURES:
+        for stale in list(_delivery_attempts)[: len(_delivery_attempts) // 2]:
+            _delivery_attempts.pop(stale, None)
+    return attempts
+
+
+def _clear_delivery_failure(body: dict[str, Any]) -> None:
+    key = _delivery_failure_key(body)
+    if key is not None:
+        _delivery_attempts.pop(key, None)
+
+
+async def _requeue_or_abandon_pentest_delivery(
+    message: AbstractIncomingMessage, body: dict[str, Any], exc: BaseException
+) -> None:
+    """Redeliver a committed execution only when redelivery could help.
+
+    An unconditional requeue turns a deterministic failure into a hot loop: the
+    execution commit is immutable and already durable, so a contract or
+    validation failure against it reproduces exactly on every attempt, pushing
+    the broker to redeliver at line rate and burying every other log. Those are
+    abandoned instead. Transient failures are still retried, but only a bounded
+    number of times, so a persistently flaky dependency cannot loop either.
+    """
+
+    from app.workers.pentesting_v2 import delivery_failure_is_terminal
+
+    terminal = delivery_failure_is_terminal(exc)
+    key = _delivery_failure_key(body)
+    attempts = _record_delivery_failure(key) if key is not None else 1
+    if terminal or attempts > _PENTEST_DELIVERY_ATTEMPT_LIMIT:
+        logger.error(
+            "pentest.delivery.abandoned",
+            extra={
+                "error_class": type(exc).__name__,
+                "terminal": terminal,
+                "attempts": attempts,
+            },
+        )
+        # requeue=False hands the message to the queue's dead-letter target when
+        # one is configured, and drops it otherwise. Either way the loop ends.
+        await message.reject(requeue=False)
+        if key is not None:
+            _delivery_attempts.pop(key, None)
+        return
+    await message.reject(requeue=True)
+
+
 async def _handle_message(message: AbstractIncomingMessage) -> None:
     """Top-level message handler.
 
@@ -1144,13 +1219,14 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
                     principal_id=f"pentest-worker:{body.get('outbox_id')}",
                 ):
                     await handle_pentest_delivery(body)
+                _clear_delivery_failure(body)
                 await message.ack()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 logger.error("pentest.delivery.unhandled", exc_info=True)
                 if not message.processed:
-                    await message.reject(requeue=True)
+                    await _requeue_or_abandon_pentest_delivery(message, body, exc)
 
         _track_delivery(_run_pentest_delivery())
         return
