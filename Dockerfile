@@ -425,9 +425,28 @@ CMD ["--kubernetes-attach-v1"]
 FROM worker AS worker-pentest-local
 
 USER root
+# Offline credential recovery and the wider toolchain a human assessor reaches
+# for.  Everything here is packaged and digest-pinned by apt: no assessment-time
+# download, no unpinned wordlist, and no tool that has to call home to work.
+#
+# john is the primary cracker because it is pure CPU and needs no OpenCL ICD;
+# hashcat is installed with pocl so the same work can use a CPU OpenCL backend
+# where the host provides one.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         "nmap=7.93+dfsg1-1" \
+        "john=1.9.0-2" \
+        "john-data=1.9.0-2" \
+        "hashcat=6.2.6+ds1-1+b1" \
+        "hashcat-data=6.2.6+ds1-1" \
+        "sqlmap=1.7.2-1" \
+        "ffuf=1.1.0-1+b8" \
+        "hydra=9.4-1" \
+        "whatweb=0.5.5-1" \
+        "gobuster=3.5.0-1+b1" \
+        "testssl.sh=3.0.8+dfsg-1" \
+        python3-pip \
+        pocl-opencl-icd \
         default-jre-headless \
         fonts-liberation \
         libasound2 \
@@ -461,8 +480,18 @@ COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/p
 COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/greenlet /app/.venv/lib/python3.12/site-packages/greenlet
 COPY --from=pentest-adapter-zap /zap /zap
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY --chown=root:root src/app/pentesting/catalogs/wordlists /opt/sccap-wordlists
 RUN chmod -R a+rX /ms-playwright /zap \
-    && chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap /zap/zap.sh
+    && chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap /zap/zap.sh \
+    # Debian ships john in /usr/sbin, which the supervised tool PATH does not
+    # include.  A stable path under /opt/sccap-tools keeps the adapter's argv
+    # independent of the distribution's sbin layout.
+    && ln -sf /usr/sbin/john /opt/sccap-tools/john \
+    && chmod 0555 /opt/sccap-tools/john /usr/bin/sqlmap /usr/bin/ffuf \
+        /usr/bin/hydra /usr/bin/whatweb /usr/bin/gobuster /usr/bin/hashcat \
+        /usr/bin/testssl.sh 2>/dev/null || true
+RUN chmod 0555 /opt/sccap-wordlists/* \
+    && chmod -R a+rX /opt/sccap-wordlists
 USER appuser
 
 # ---------- patch validator ----------------------------------------------
