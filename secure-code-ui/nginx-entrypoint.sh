@@ -137,7 +137,7 @@ fi
     RENEW_BACKOFF=3600  # start at 1 h on failure
     while true; do
         sleep 12h
-        if flock -n /tmp/sccap-renew.lock certbot renew --quiet --post-hook "nginx -s reload"; then
+        if flock -n /tmp/sccap-renew.lock certbot renew --webroot -w /usr/share/nginx/html --quiet --post-hook "nginx -s reload"; then
             RENEW_FAILS=0
             RENEW_BACKOFF=3600
         else
@@ -157,9 +157,12 @@ fi
 ) &
 RENEWAL_PID=$!
 
-# V15.4.1: forward SIGTERM/INT to the renewal subshell so it is reaped cleanly
-# when the container init sends the shutdown signal.
-trap "kill $RENEWAL_PID 2>/dev/null" TERM INT EXIT
+# Forward TERM/INT to the renewal subshell so it is reaped when the container
+# init signals shutdown. Deliberately NOT `EXIT`: this hook is short-lived, and
+# trapping EXIT kills the renewal loop the instant the hook returns (exit 0
+# below), which is exactly what let a deployed certificate lapse - the loop
+# never survived past startup.
+trap "kill $RENEWAL_PID 2>/dev/null" TERM INT
 
 # The main Nginx process will start after this entrypoint script finishes.
 exit 0

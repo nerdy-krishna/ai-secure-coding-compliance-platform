@@ -2,6 +2,7 @@
 
 services:
   app:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -76,6 +77,7 @@ services:
     command: [ "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000" ]
 
   db:
+    restart: unless-stopped
     image: postgres:16
     container_name: sccap_db
     env_file:
@@ -110,6 +112,7 @@ services:
       - pentest-control
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:3.12-management
     container_name: sccap_rabbitmq
     env_file:
@@ -159,6 +162,7 @@ services:
   # `.env.example` placeholder value.
   # ------------------------------------------------------------------
   qdrant:
+    restart: unless-stopped
     image: qdrant/qdrant@sha256:94728574965d17c6485dd361aa3c0818b325b9016dac5ea6afec7b4b2700865f
     container_name: sccap_qdrant
     environment:
@@ -184,6 +188,7 @@ services:
   # Dedicated SCCAP evidence store. It is intentionally independent of the
   # optional Langfuse MinIO service, credentials, bucket, and lifecycle.
   evidence-minio:
+    restart: unless-stopped
     image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: sccap_evidence_minio
     command: server /data --address ":9000" --console-address ":9001"
@@ -206,6 +211,7 @@ services:
       - scpnetwork
 
   worker:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -260,6 +266,7 @@ services:
   # or ambient proxy. Local compose therefore blocks provider egress too; a
   # configured production NetworkPolicy may allow only explicit model CIDRs.
   pentest-controller:
+    restart: unless-stopped
     profiles: ["pentesting-v4"]
     build:
       context: .
@@ -330,6 +337,7 @@ services:
   # worker, receives no database/object-store/provider credentials, and starts
   # only under the explicit pentesting-v3 profile.
   pentest-runner-v3:
+    restart: unless-stopped
     profiles: ["pentesting-v3", "pentesting-v4"]
     env_file:
       - path: ./.secrets/pentest-runner-v3.env
@@ -383,6 +391,7 @@ services:
   # only digest-qualified adapter processes. This container has no target,
   # database, object-store, provider, Docker/Kubernetes API, or ambient proxy.
   pentest-tool-worker:
+    restart: unless-stopped
     profiles: ["pentesting-v5"]
     build:
       context: .
@@ -477,6 +486,7 @@ services:
   # control-plane authority and public verification keys. It has no app auth,
   # encryption, KMS, evidence-store, model, browser, adapter, or target secret.
   pentest-verification-coordinator:
+    restart: unless-stopped
     profiles: ["pentesting-c67"]
     build:
       context: .
@@ -558,6 +568,7 @@ services:
       retries: 12
 
   fluentd:
+    restart: unless-stopped
     build: ./fluentd
     container_name: sccap_fluentd
     # Log stack — only runs when `log_stack` is in COMPOSE_PROFILES.
@@ -588,6 +599,7 @@ services:
       - scpnetwork
 
   loki:
+    restart: unless-stopped
     image: grafana/loki:3.4.2
     container_name: sccap_loki
     profiles: ["log_stack"]
@@ -611,6 +623,7 @@ services:
       - scpnetwork
 
   grafana:
+    restart: unless-stopped
     image: grafana/grafana:11.5.2
     container_name: sccap_grafana
     profiles: ["log_stack"]
@@ -642,6 +655,7 @@ services:
   # See docs/adr/005-llm-observability.md for the accepted boundaries.
   # ------------------------------------------------------------------
   langfuse-postgres:
+    restart: unless-stopped
     image: postgres@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
     container_name: sccap_langfuse_postgres
     # Langfuse stack — only runs when `tracing` is in COMPOSE_PROFILES.
@@ -666,6 +680,7 @@ services:
       - scpnetwork
 
   langfuse-clickhouse:
+    restart: unless-stopped
     image: clickhouse/clickhouse-server@sha256:85b97f63dcfff47790d26bb5d5801637aaddb2b93e5e9aee27a686c2fb2b9916
     container_name: sccap_langfuse_clickhouse
     profiles: ["tracing"]
@@ -693,6 +708,7 @@ services:
       - scpnetwork
 
   langfuse-redis:
+    restart: unless-stopped
     image: redis@sha256:7aec734b2bb298a1d769fd8729f13b8514a41bf90fcdd1f38ec52267fbaa8ee6
     container_name: sccap_langfuse_redis
     profiles: ["tracing"]
@@ -718,6 +734,7 @@ services:
       - scpnetwork
 
   langfuse-minio:
+    restart: unless-stopped
     image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: sccap_langfuse_minio
     profiles: ["tracing"]
@@ -741,6 +758,7 @@ services:
       - scpnetwork
 
   langfuse-web:
+    restart: unless-stopped
     image: langfuse/langfuse@sha256:31bf938d0e678026f39d35151771fad8854b4ec83ba7bff8c6d232760e276296
     container_name: sccap_langfuse_web
     profiles: ["tracing"]
@@ -790,6 +808,7 @@ services:
       - scpnetwork
 
   langfuse-worker:
+    restart: unless-stopped
     image: langfuse/langfuse-worker@sha256:a6725ff2c11f10b3a2e212694f5ecacc9e48d2a59e71058a7008ff951620307c
     container_name: sccap_langfuse_worker
     profiles: ["tracing"]
@@ -830,6 +849,7 @@ services:
       - scpnetwork
 
   ui:
+    restart: unless-stopped
     build:
       context: ./secure-code-ui
       dockerfile: Dockerfile
