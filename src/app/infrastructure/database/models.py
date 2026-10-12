@@ -155,14 +155,14 @@ class Scan(Base):
         String(50), nullable=False, default=STATUS_QUEUED
     )
     reasoning_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     # Utility (cheap) LLM slot — drives trivial steps (the per-file
     # profiler). Nullable: scans created
     # before this column, and submits that omit it, fall back to the
     # reasoning slot at resolution time (see shared.lib.llm_slots).
     utility_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     # Optional second reasoning LLM for the analysis stage (#93 / PRD
     # #91). When set, every routed agent runs on BOTH this config and
@@ -171,7 +171,7 @@ class Scan(Base):
     # analysis. Confined to analysis; consolidation / merge / profiler
     # stay on the primary reasoning + utility slots.
     secondary_reasoning_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     frameworks: Mapped[Optional[List[str]]] = mapped_column(JSONB)
     cost_details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
@@ -1825,7 +1825,7 @@ class UsageBudgetPolicy(Base):
     )
     window_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id", ondelete="RESTRICT"), nullable=True
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
     )
     stage: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     cap_input_tokens: Mapped[Optional[int]] = mapped_column(BIGINT)
@@ -2519,7 +2519,7 @@ class ChatSession(Base):
         index=True,
     )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     frameworks: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
@@ -2644,8 +2644,8 @@ class RAGPreprocessingJob(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     framework_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    llm_config_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("llm_configurations.id"), nullable=False
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
     )
     original_file_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
