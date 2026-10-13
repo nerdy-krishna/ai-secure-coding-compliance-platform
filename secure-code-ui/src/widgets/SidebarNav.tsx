@@ -23,7 +23,13 @@ const tools: Item[] = [
   { to: "/advisor", label: "Security advisor", feature: "chat" },
   { to: "/usage", label: "Usage" },
 ];
-const attemptSections = ["overview", "activity", "observations", "findings", "tests", "operations", "frameworks", "coverage", "cleanup", "callbacks", "evidence", "workflows", "reports", "governance", "retests", "deltas", "audit"];
+// Seven workspaces, in reading order. The eleven that used to be listed here -
+// Tests, Operations, Frameworks, Coverage, Cleanup, Callbacks, Workflows,
+// Governance, Retests, Deltas - were the pipeline's internal stages given equal
+// billing with the results. Findings and Observations stay side by side on
+// purpose: one is the interpreted result, the other is the raw thing it was
+// interpreted from.
+const attemptSections = ["overview", "findings", "observations", "evidence", "activity", "reports", "audit"];
 
 export function SidebarNav() {
   const [collapsed, setCollapsed] = useState(false);
