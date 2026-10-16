@@ -109,7 +109,7 @@ python3-saml = ">=1.16,<2.0"
 # wraps the `cryptography` primitives we already use; ships the COSE
 # key parsing, attestation verification, and assertion verification
 # stacks needed for a server-side relying party. MIT.
-webauthn = ">=2.0,<3.0"
+webauthn = ">=2.0,<4.0"
 # PDF findings-report generation (#70). WeasyPrint renders the
 # print-oriented HTML/CSS report template to a paginated PDF. Needs the
 # pango system libraries — added to the api Docker stage in the same
