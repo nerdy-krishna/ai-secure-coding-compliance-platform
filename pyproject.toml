@@ -127,7 +127,7 @@ weasyprint = ">=63"
 optional = true
 
 [tool.poetry.group.worker.dependencies]
-tree-sitter = ">=0.21.0,<0.22.0"
+tree-sitter = ">=0.21.0,<0.27.0"
 tree-sitter-languages = "^1.10.2"
 # Semgrep is installed in an isolated /opt/semgrep-venv inside the
 # worker Dockerfile (see Dockerfile worker stage). It's NOT in the main
