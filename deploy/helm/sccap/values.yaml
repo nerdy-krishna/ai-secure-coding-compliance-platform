@@ -1,11 +1,15 @@
 images:
   api:
-    repository: ghcr.io/nerdy-krishna/sccap-api
-    tag: "1.0.0"
+    # Matches the signed supply-chain workflow output:
+    #   ghcr.io/${{ github.repository }}/sccap-api
+    # (github.repository = nerdy-krishna/ai-secure-coding-compliance-platform).
+    # Set the tag to the git tag the release workflow pushed (e.g. v1.0.0).
+    repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-api
+    tag: "v1.0.0"
     pullPolicy: IfNotPresent
   worker:
-    repository: ghcr.io/nerdy-krishna/sccap-worker
-    tag: "1.0.0"
+    repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-worker
+    tag: "v1.0.0"
     pullPolicy: IfNotPresent
 imagePullSecrets: []
 

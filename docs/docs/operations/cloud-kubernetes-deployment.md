@@ -49,12 +49,23 @@ namespace with that service name.
 ## 2. Images
 
 Publish the application images and the pentest tool-pack runtimes to a registry
-your cluster can pull from, then reference them in `values.yaml`:
+your cluster can pull from, then reference them in `values.yaml`.
+
+The signed supply-chain workflow (`.github/workflows/supply-chain-release.yml`)
+already builds and signs `api` and `worker` on every `v*` tag. Trigger it with:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+That pushes `ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-api`
+and `sccap-worker` at the tag, with Cosign attestations and SBOMs (public keyless
+signing needs no extra secrets). Then install with the matching tag:
 
 ```yaml
 images:
-  api:    {repository: your-registry/sccap-api,    tag: "1.0.0"}
-  worker: {repository: your-registry/sccap-worker, tag: "1.0.0"}
+  api:    {repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-api,    tag: "v1.0.0"}
+  worker: {repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-worker, tag: "v1.0.0"}
 
 pentestToolPack:
   enabled: true
@@ -95,6 +106,8 @@ API/LLM secrets — the pod boundary enforces least privilege.
 
 Recommended: drive these with External Secrets Operator or the Azure Key Vault /
 AWS Secrets Manager CSI providers rather than hand-maintained `kubectl create`.
+A starting point that creates every secret the chart names is committed at
+`scripts/provision-k8s-secrets.sh` (source a populated `.env` first).
 
 ## 4. Install on AKS
 
@@ -167,8 +180,12 @@ intentional fail-closed states, not chart defects.
 
 ## Not yet turnkey
 
-- The pentest tool-pack runtime images and the identity-runtime `awsApiPort` /
-  `taskPublicKeys` bindings are release-pipeline artifacts, not committed
-  defaults.
-- C11 asynchronous-callback correlation was withdrawn; the chart's callback
-  workloads have been removed and no longer render.
+- The pentest tool-pack runtime images (authorization, playwright, zap, nuclei,
+  nmap, graphql, realtime) have no committed Dockerfiles and no build workflow;
+  only the `api` and `worker` images are published by the signed release
+  pipeline. These are release-pipeline artifacts to be sourced and pinned by
+  digest before `pentestToolPack.enabled=true`.
+- The identity-runtime `awsApiPort` / `taskPublicKeys` bindings are not
+  committed defaults.
+- The pentest tool-pack `--kubernetes-attach-v1` path has been exercised against
+  a local kind cluster, not yet a managed cluster.
