@@ -109,6 +109,55 @@ _sccap_set_env_kv() {
         echo "${key}=${val}" >> .env
     fi
 }
+# 2.4b. Pentesting (authorized automated security assessment)
+# ----------------------------------------------------------------------
+# Enables the pentest engagement plane: the controller, runner, tool worker and
+# verification coordinator profiles plus the capability flags the working local
+# deployment uses. It does NOT install the tool runtimes (nmap/nuclei/zap/
+# playwright) - those run via the Kubernetes attach runtime (cloud) or the local
+# kind-cluster qualification, see docs/docs/operations/cloud-kubernetes-deployment.md.
+_sccap_enable_pentesting() {
+    for _flag in \
+        PENTEST_FOUNDATION2_ENABLED PENTEST_FOUNDATION3_ENABLED \
+        PENTEST_CAPABILITY4_ENABLED PENTEST_CAPABILITY5_ENABLED \
+        PENTEST_CAPABILITY6_ENABLED PENTEST_CAPABILITY7_ENABLED \
+        PENTEST_CAPABILITY8_SCHEMA_READ PENTEST_CAPABILITY8_ADAPTER_RECONCILE \
+        PENTEST_CAPABILITY8_C6_INGRESS_RECONCILE PENTEST_CAPABILITY8_EVENT_V3 \
+        PENTEST_CAPABILITY8_SOURCE_PROFILES PENTEST_CAPABILITY8_WHITE_BOX_API \
+        PENTEST_CAPABILITY9_API PENTEST_CAPABILITY9_EVENT_V4 \
+        PENTEST_CAPABILITY9_PIN_NEW_ATTEMPTS PENTEST_CAPABILITY9_RECONCILE \
+        PENTEST_CAPABILITY9_SCHEMA_READ \
+        PENTEST_CAPABILITY13_SAFE_API PENTEST_CAPABILITY13_SCHEMA_READ \
+        PENTEST_CAPABILITY13_COCKPIT PENTEST_CAPABILITY13_REPORT_BUILDS \
+        PENTEST_CAPABILITY13_PROTECTED_EXPORT PENTEST_CAPABILITY13_REDACTED_EXPORT \
+        PENTEST_CAPABILITY13_EXPORT_RETENTION PENTEST_CAPABILITY13_INTEGRATIONS \
+        PENTEST_CAPABILITY13_RETEST PENTEST_CAPABILITY13_GOVERNANCE_WRITES \
+        PENTEST_C67_INGRESS_ENABLED PENTEST_VERIFICATION_COORDINATOR_ENABLED \
+        PENTEST_PROJECT_AUTHENTICATION_ENABLED PENTEST_PROJECT_SESSION_REUSE_ENABLED \
+        PENTEST_IDENTITY_RUNTIME_ENABLED PENTEST_LOCAL_BLACKBOX_BENCHMARK_ENABLED; do
+        _sccap_set_env_kv "$_flag" "true"
+    done
+    _sccap_set_env_kv "PENTEST_LOCAL_FIXTURE_ORIGINS" "http://juice-shop:3000"
+    _sccap_set_env_kv "PENTEST_RUNNER_SUBNET" "172.16.242.0/28"
+    # Do NOT guess the protected/private network lists - they are deployment-
+    # specific. Leave them empty and warn the operator to set them.
+}
+
+echo ""
+echo "[*] Pentesting:"
+echo "  Authorized automated security assessment (engagement plane, runner,"
+echo "  controller, tool worker, verification coordinator)."
+read -p "  Enable pentesting? (y/N): " _pentest_choice
+case "$_pentest_choice" in
+    [Yy]*)
+        COMPOSE_PROFILES_VALUE="${COMPOSE_PROFILES_VALUE:+$COMPOSE_PROFILES_VALUE,}pentesting-v3,pentesting-v4,pentesting-v5,pentesting-c67"
+        _sccap_enable_pentesting
+        _PENTEST_NOTE="Pentesting workers enabled. Tool runtimes (nmap/nuclei/zap/playwright) need the Kubernetes attach runtime or the local kind-cluster qualification; configure PENTEST_PROTECTED_NETWORKS and PENTEST_PRIVATE_NETWORK_PROFILES before running an engagement."
+        echo "[+] Pentesting enabled."
+        ;;
+    *) echo "[ ] Pentesting skipped." ;;
+esac
+
 _sccap_set_env_kv "SCCAP_VARIANT" "$SCCAP_VARIANT"
 _sccap_set_env_kv "COMPOSE_PROFILES" "$COMPOSE_PROFILES_VALUE"
 echo "[+] Wrote SCCAP_VARIANT and COMPOSE_PROFILES to .env."
@@ -479,5 +528,10 @@ else
     else
         echo "   Grafana not exposed publicly. Tunnel via SSH (-L 3000:localhost:3000) to reach the dashboard."
     fi
+fi
+if [ -n "${_PENTEST_NOTE:-}" ]; then
+    echo ""
+    echo "[*] Pentesting note:"
+    echo "    $_PENTEST_NOTE"
 fi
 echo ""
