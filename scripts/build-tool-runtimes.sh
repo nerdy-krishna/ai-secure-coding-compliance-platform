@@ -33,6 +33,7 @@ declare -A TARGETS=(
   [nuclei]=sccap-tool-nuclei
   [zap]=sccap-tool-zap
   [playwright]=sccap-tool-playwright
+  [relay]=sccap-tool-relay
 )
 
 build_one() {
@@ -57,7 +58,7 @@ build_one() {
 
 echo "Publishing to $REGISTRY at $VERSION"
 declare -A DIGESTS=()
-for target in python nmap nuclei zap playwright; do
+for target in python nmap nuclei zap playwright relay; do
   DIGESTS[$target]="$(build_one "$target" "${TARGETS[$target]}" | tail -1)"
 done
 
@@ -74,4 +75,6 @@ pentestToolPack:
     nuclei:        {image: "${DIGESTS[nuclei]}"}
     zap:           {image: "${DIGESTS[zap]}"}
     playwright:    {image: "${DIGESTS[playwright]}"}
+  runtimeManager:
+    relayImage:    "${DIGESTS[relay]}"
 EOF

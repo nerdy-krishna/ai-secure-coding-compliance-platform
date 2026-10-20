@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [python, nmap, nuclei, zap, playwright]
+        target: [python, nmap, nuclei, zap, playwright, relay]
     env:
       IMAGE: ghcr.io/${{ github.repository }}/sccap-tool-${{ matrix.target }}
     steps:

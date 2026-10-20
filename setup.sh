@@ -154,6 +154,14 @@ case "$_pentest_choice" in
         _sccap_enable_pentesting
         _PENTEST_NOTE="Pentesting workers enabled. Tool runtimes (nmap/nuclei/zap/playwright) need the Kubernetes attach runtime or the local kind-cluster qualification; configure PENTEST_PROTECTED_NETWORKS and PENTEST_PRIVATE_NETWORK_PROFILES before running an engagement."
         echo "[+] Pentesting enabled."
+        read -p "  Set up a local kind cluster for the pentest tool runtimes (VM install)? (y/N): " _kind_choice
+        case "$_kind_choice" in
+            [Yy]*)
+                _PENTEST_KIND=1
+                _PENTEST_NOTE="Pentesting + local kind cluster. The kind cluster is created by scripts/pentesting/setup-kind.sh after the containers start; build/publish the tool-runtime images first (scripts/build-tool-runtimes.sh)."
+                echo "[+] Kind cluster will be set up after the containers start."
+                ;;
+        esac
         ;;
     *) echo "[ ] Pentesting skipped." ;;
 esac
@@ -500,6 +508,16 @@ docker compose exec app alembic upgrade head
 
 echo "[+] Database initialized. Proceed to the Web UI to create your Admin Superuser."
 echo ""
+
+# 5. Local kind cluster for pentest tool runtimes (optional).
+if [ "${_PENTEST_KIND:-0}" = "1" ]; then
+    echo "[*] Setting up the local kind cluster for pentest tool runtimes..."
+    if [ -x scripts/pentesting/setup-kind.sh ]; then
+        bash scripts/pentesting/setup-kind.sh || echo "[!] kind setup failed; re-run scripts/pentesting/setup-kind.sh manually."
+    else
+        echo "[!] scripts/pentesting/setup-kind.sh not found."
+    fi
+fi
 
 echo "=================================================="
 echo "   Setup Complete!"

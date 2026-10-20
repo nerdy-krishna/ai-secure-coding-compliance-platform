@@ -108,3 +108,10 @@ RUN /app/.venv/bin/pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}
     && rm -rf /var/lib/apt/lists/* /root/.cache
 USER ${APP_USER}
 CMD ["/opt/sccap-tool-runtimes/playwright-observe", "--kubernetes-attach-v1"]
+
+# ---------- relay ----------
+# The per-execution relay tunnels tool traffic back to the SCCAP API. It is the
+# same runtime-base; the cluster CA is mounted at runtime via the tool-pack's
+# trust ConfigMap, never baked into the image.
+FROM runtime-base AS relay
+CMD ["python", "-m", "app.infrastructure.pentesting.tool_gateway.main"]
