@@ -1,0 +1,38 @@
+{{- if .Values.api.ingress.enabled }}
+{{- $fullName := include "sccap.fullname" . -}}
+{{- $svcPort := .Values.api.service.port -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}-api
+  labels:
+    {{- include "sccap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+  {{- with .Values.api.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.api.ingress.className }}
+  ingressClassName: {{ .Values.api.ingress.className }}
+  {{- end }}
+  {{- if .Values.api.ingress.tls }}
+  tls:
+    {{- toYaml .Values.api.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- if .Values.api.ingress.host }}
+    - host: {{ .Values.api.ingress.host | quote }}
+      http:
+    {{- else }}
+    - http:
+    {{- end }}
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}-api
+                port:
+                  number: {{ $svcPort }}
+{{- end }}

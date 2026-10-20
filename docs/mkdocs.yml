@@ -188,6 +188,7 @@ nav:
       - Resilience and Recovery: operations/resilience-and-recovery.md
       - Evidence-first Findings: operations/evidence-first-findings.md
       - Kubernetes Worker Pools: operations/kubernetes-worker-pools.md
+      - Cloud Kubernetes Deployment (AKS/EKS): operations/cloud-kubernetes-deployment.md
       - Observability and SLOs: operations/observability-slos.md
       - Dependency Degradation: operations/dependency-degradation.md
       - Pentesting Adaptive Controller: operations/pentesting-adaptive-controller.md
