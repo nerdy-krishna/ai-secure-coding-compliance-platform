@@ -51,21 +51,18 @@ namespace with that service name.
 Publish the application images and the pentest tool-pack runtimes to a registry
 your cluster can pull from, then reference them in `values.yaml`.
 
-The signed supply-chain workflow (`.github/workflows/supply-chain-release.yml`)
-already builds and signs `api` and `worker` on every `v*` tag. Trigger it with:
-
-```bash
-git tag v1.0.0 && git push origin v1.0.0
-```
-
-That pushes `ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-api`
-and `sccap-worker` at the tag, with Cosign attestations and SBOMs (public keyless
-signing needs no extra secrets). Then install with the matching tag:
+Published images live on Docker Hub (public repos), built for linux/amd64:
 
 ```yaml
 images:
-  api:    {repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-api,    tag: "v1.0.0"}
-  worker: {repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-worker, tag: "v1.0.0"}
+  api:    {repository: docker.io/nerdykrishna/sccap-api,    tag: "v1.0.0"}
+  worker: {repository: docker.io/nerdykrishna/sccap-worker, tag: "v1.0.0"}
+```
+
+The chart's `pentestToolPack.runtimes` already carries the exact
+`repository@sha256` digests for the six tool-runtime images. Rebuild/push with
+`scripts/build-tool-runtimes.sh` (docker login first) and
+`.github/workflows/tool-runtime-release.yml`.
 
 pentestToolPack:
   enabled: true

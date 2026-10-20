@@ -77,7 +77,7 @@ RUN set -eux; \
     curl -fsSL -o /tmp/nuclei.zip \
         "https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}/nuclei_${NUCLEI_VERSION}_linux_${NUCLEI_ARCH}.zip"; \
     echo "${NUCLEI_SHA256}  /tmp/nuclei.zip" | sha256sum --check --strict; \
-    unzip -o /tmp/nuclei.zip -d /opt/sccap-tools/; \
+    /app/.venv/bin/python -m zipfile -e /tmp/nuclei.zip /opt/sccap-tools/; \
     chmod 0755 /opt/sccap-tools/nuclei; \
     rm /tmp/nuclei.zip
 USER ${APP_USER}

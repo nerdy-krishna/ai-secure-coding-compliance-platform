@@ -30,7 +30,7 @@ jobs:
       matrix:
         target: [api, worker]
     env:
-      IMAGE: ghcr.io/${{ github.repository }}/sccap-${{ matrix.target }}
+      IMAGE: docker.io/nerdykrishna/sccap-${{ matrix.target }}
       SIGNING_MODE: ${{ inputs.signing_mode || 'public_keyless' }}
       COSIGN_KMS_URI: ${{ secrets.COSIGN_KMS_URI }}
       AWS_ROLE_TO_ASSUME: ${{ secrets.SUPPLY_CHAIN_AWS_ROLE_ARN }}

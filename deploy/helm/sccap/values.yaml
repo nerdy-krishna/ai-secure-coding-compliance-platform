@@ -1,14 +1,11 @@
 images:
   api:
-    # Matches the signed supply-chain workflow output:
-    #   ghcr.io/${{ github.repository }}/sccap-api
-    # (github.repository = nerdy-krishna/ai-secure-coding-compliance-platform).
-    # Set the tag to the git tag the release workflow pushed (e.g. v1.0.0).
-    repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-api
+    # Docker Hub public repository. Set the tag to the pushed version.
+    repository: docker.io/nerdykrishna/sccap-api
     tag: "v1.0.0"
     pullPolicy: IfNotPresent
   worker:
-    repository: ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform/sccap-worker
+    repository: docker.io/nerdykrishna/sccap-worker
     tag: "v1.0.0"
     pullPolicy: IfNotPresent
 imagePullSecrets: []
@@ -248,7 +245,7 @@ pentestToolPack:
     apiServerCidrs: []
     jobTtlSeconds: 600
     # Release automation supplies a dedicated immutable relay runtime image.
-    relayImage: ""
+    relayImage: "docker.io/nerdykrishna/sccap-tool-relay@sha256:d5c3c4104253614dc9373454ce09b770ad4d386264441f4bfbc58e906c53a378"
     # Enabling the tool pack in Kubernetes also requires the cluster operator
     # to attest that the namespace's ephemeral relay Secrets are encrypted.
     secretEncryptionAtRestReady: false
@@ -289,31 +286,31 @@ pentestToolPack:
   # Empty values fail Helm rendering when pentestToolPack.enabled=true.
   runtimes:
     authorization:
-      image: ""
+      image: "docker.io/nerdykrishna/sccap-tool-python@sha256:de283a5325582fff319b5f4527f40daf686fe942c3a411053ddde31d4c0fee76"
       command: [/opt/sccap-tool-runtimes/authorization-readonly, --kubernetes-attach-v1]
       egressMode: relay
     playwright:
-      image: ""
+      image: "docker.io/nerdykrishna/sccap-tool-playwright@sha256:b8529b98445ae28ca7327fe263840a657b42679d4405913d8331f9ab2ca2f4fc"
       command: [/opt/sccap-tool-runtimes/playwright-observe, --kubernetes-attach-v1]
       egressMode: relay
     zap:
-      image: ""
+      image: "docker.io/nerdykrishna/sccap-tool-zap@sha256:6639cf147d32dba29c213902a5a32a74deff231312f2cfc825a7a8ae6d9f2597"
       command: [/opt/sccap-tool-runtimes/zap-passive, --kubernetes-attach-v1]
       egressMode: relay
     nuclei:
-      image: ""
+      image: "docker.io/nerdykrishna/sccap-tool-nuclei@sha256:417e15248ab20324876e23c3a2bbe4547f7d5afe1c303d824ed6a59421b1e529"
       command: [/opt/sccap-tool-runtimes/nuclei-observe, --kubernetes-attach-v1]
       egressMode: relay
     nmap:
-      image: ""
+      image: "docker.io/nerdykrishna/sccap-tool-nmap@sha256:2dbe438c87a8bce8ea6291d0f67ad68849c999b04aace27b2a6339d6c8a6246d"
       command: [/opt/sccap-tool-runtimes/nmap-connect, --kubernetes-attach-v1]
       egressMode: exact-pinned
     graphql:
-      image: ""
+      image: "docker.io/nerdykrishna/sccap-tool-python@sha256:de283a5325582fff319b5f4527f40daf686fe942c3a411053ddde31d4c0fee76"
       command: [/opt/sccap-tool-runtimes/graphql-observe, --kubernetes-attach-v1]
       egressMode: relay
     realtime:
-      image: ""
+      image: "docker.io/nerdykrishna/sccap-tool-python@sha256:de283a5325582fff319b5f4527f40daf686fe942c3a411053ddde31d4c0fee76"
       command: [/opt/sccap-tool-runtimes/realtime-observe, --kubernetes-attach-v1]
       egressMode: relay
 

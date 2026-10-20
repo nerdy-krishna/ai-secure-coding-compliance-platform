@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-REGISTRY="${REGISTRY:-ghcr.io/nerdy-krishna/ai-secure-coding-compliance-platform}"
+REGISTRY="${REGISTRY:-docker.io/nerdykrishna}"
 VERSION="${VERSION:-v1.0.0}"
 CONTEXT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
