@@ -26,10 +26,120 @@ _sccap_with_root() {
     fi
 }
 
+_sccap_docker_official_repo() {
+    # Add Docker's official apt repository for Ubuntu/Debian and install
+    # docker-ce + the Compose plugin. Returns non-zero if download.docker.com
+    # is unreachable or apt fails, so the caller can offer alternatives.
+    local codename arch
+    codename="${VERSION_CODENAME:-}"
+    arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+    [ -n "$codename" ] || codename="stable"
+    echo "[*] Adding Docker's official apt repository (https://download.docker.com/linux/${ID})..."
+    _sccap_with_root apt-get install -y ca-certificates curl gnupg >/dev/null || return 1
+    _sccap_with_root install -m 0755 -d /etc/apt/keyrings || return 1
+    local tmp_gpg
+    tmp_gpg="$(mktemp /tmp/docker.gpg.XXXXXX)" || return 1
+    if ! curl -fsSL "https://download.docker.com/linux/${ID}/gpg" -o "$tmp_gpg"; then
+        echo "[!] Could not download Docker's GPG key — download.docker.com is unreachable."
+        rm -f "$tmp_gpg"
+        return 1
+    fi
+    if ! _sccap_with_root gpg --dearmor -o /etc/apt/keyrings/docker.gpg "$tmp_gpg" 2>/dev/null; then
+        _sccap_with_root install -m 0644 -o root -g root "$tmp_gpg" /etc/apt/keyrings/docker.gpg || { rm -f "$tmp_gpg"; return 1; }
+    fi
+    rm -f "$tmp_gpg"
+    _sccap_with_root chmod a+r /etc/apt/keyrings/docker.gpg || true
+    echo "deb [arch=${arch} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/${ID} ${codename} stable" \
+        | _sccap_with_root tee /etc/apt/sources.list.d/docker.list >/dev/null || return 1
+    if ! _sccap_with_root apt-get update -y; then
+        echo "[!] apt-get update failed — the Docker repository is unreachable."
+        return 1
+    fi
+    _sccap_with_root apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin || return 1
+    _sccap_with_root systemctl enable --now docker 2>/dev/null || true
+    return 0
+}
+
+_sccap_install_docker_distro() {
+    # Distro-packaged Docker (may be older than the official repo).
+    echo "[*] Installing Docker from the distro package..."
+    case "${ID:-}" in
+        ubuntu|debian)
+            _sccap_with_root apt-get update -y
+            _sccap_with_root apt-get install -y docker.io docker-compose-v2 \
+                || _sccap_with_root apt-get install -y docker.io docker-compose-plugin
+            ;;
+        rhel|centos|fedora|rocky|almalinux|amzn)
+            _sccap_with_root dnf install -y docker docker-compose-plugin \
+                || _sccap_with_root yum install -y docker docker-compose-plugin
+            ;;
+        *) return 1 ;;
+    esac
+    _sccap_with_root systemctl enable --now docker 2>/dev/null || true
+    return 0
+}
+
+_sccap_platform_guide() {
+    # Print manual Docker install guidance for a cloud platform.
+    case "$1" in
+        azure)
+            echo ""
+            echo "=== Azure: installing Docker manually ==="
+            echo "  1) Convenience script (needs HTTPS 443 egress):"
+            echo "       curl -fsSL https://get.docker.com | sudo sh"
+            echo "  2) Distro package:"
+            echo "       sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2"
+            echo "  3) Or re-deploy this VM from an Ubuntu image and allow outbound 443."
+            echo "  If download.docker.com is blocked, allow HTTPS 443 in the VM's NSG,"
+            echo "  or mirror Docker images/repo through Artifactory/Azure Container Registry."
+            ;;
+        aws)
+            echo ""
+            echo "=== AWS: installing Docker manually ==="
+            echo "  1) Amazon Linux 2023:"
+            echo "       sudo dnf install -y docker && sudo systemctl enable --now docker"
+            echo "       sudo dnf install -y docker-compose-plugin"
+            echo "  2) Ubuntu: sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2"
+            echo "  3) Or launch an ECS-optimized AMI (Docker preinstalled)."
+            echo "  If download.docker.com is blocked, allow HTTPS 443 via the security group/NAT."
+            ;;
+        gcp)
+            echo ""
+            echo "=== GCP: installing Docker manually ==="
+            echo "  1) Easiest: use a Container-Optimized OS VM (Docker preinstalled)."
+            echo "  2) Debian/Ubuntu: sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2"
+            echo "  3) If download.docker.com is blocked, allow HTTPS 443 egress or use a"
+            echo "     private mirror (Artifact Registry / Nexus)."
+            ;;
+    esac
+    echo ""
+}
+
+_sccap_docker_fallback_menu() {
+    # The official repo was unreachable; offer distro package or platform guidance.
+    while true; do
+        echo "Choose an alternate Docker installation method:"
+        echo "  1) Distro package (docker.io + docker-compose-v2) — simplest, may be older"
+        echo "  2) Show manual instructions for Azure"
+        echo "  3) Show manual instructions for AWS"
+        echo "  4) Show manual instructions for GCP"
+        echo "  0) Skip (I will install Docker manually and re-run)"
+        read -p "Your choice (1/2/3/4/0): " _dk_choice
+        case "$_dk_choice" in
+            1) _sccap_install_docker_distro && return 0 ; echo "[!] Distro-package install failed." ;;
+            2) _sccap_platform_guide azure ;;
+            3) _sccap_platform_guide aws ;;
+            4) _sccap_platform_guide gcp ;;
+            0) echo "[!] Docker not installed. Install Docker manually, then re-run ./setup.sh."; return 1 ;;
+            *) echo "Invalid choice." ;;
+        esac
+    done
+}
+
 _sccap_install_docker() {
-    # Install Docker Engine + the Compose plugin from the distro's packages.
-    # The official Docker repo pins a newer version; distro packages are the
-    # reliable, least-magic default for an unattended enterprise install.
+    # Install Docker Engine + Compose. Ubuntu/Debian try the official Docker
+    # apt repo first (pinned, current); if download.docker.com is unreachable,
+    # fall back to the distro package or platform-specific manual guidance.
     echo "[*] Installing Docker Engine + Compose plugin..."
     if ! _sccap_with_root true >/dev/null 2>&1; then
         echo "[!] sudo/root is required to install Docker. Install Docker manually, then re-run."
@@ -37,28 +147,32 @@ _sccap_install_docker() {
     fi
     if [ -f /etc/os-release ]; then
         . /etc/os-release
-        case "${ID:-}" in
-            ubuntu|debian)
-                _sccap_with_root apt-get update -y
-                _sccap_with_root apt-get install -y ca-certificates curl docker.io
-                _sccap_with_root apt-get install -y docker-compose-v2 \
-                    || _sccap_with_root apt-get install -y docker-compose-plugin
-                ;;
-            rhel|centos|fedora|rocky|almalinux|amzn)
-                _sccap_with_root dnf install -y docker docker-compose-plugin \
-                    || _sccap_with_root yum install -y docker docker-compose-plugin
-                ;;
-            *)
-                echo "[!] Unrecognized distro '${ID:-unknown}'. Install Docker manually, then re-run."
-                return 1
-                ;;
-        esac
     else
         echo "[!] /etc/os-release not found. Install Docker manually, then re-run."
         return 1
     fi
-    _sccap_with_root systemctl enable --now docker 2>/dev/null || true
-    return 0
+    case "${ID:-}" in
+        ubuntu|debian)
+            _sccap_docker_official_repo && return 0
+            echo ""
+            echo "[!] The official Docker repository (download.docker.com) was not reachable."
+            echo "    This usually means outbound HTTPS 443 is blocked on this host."
+            _sccap_docker_fallback_menu
+            return $?
+            ;;
+        rhel|centos|fedora|rocky|almalinux|amzn)
+            if _sccap_install_docker_distro; then
+                return 0
+            fi
+            echo "[!] Distro Docker install failed."
+            _sccap_docker_fallback_menu
+            return $?
+            ;;
+        *)
+            echo "[!] Unrecognized distro '${ID:-unknown}'. Install Docker manually, then re-run."
+            return 1
+            ;;
+    esac
 }
 
 _sccap_ensure_docker() {
