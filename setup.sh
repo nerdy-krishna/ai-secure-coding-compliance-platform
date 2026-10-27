@@ -311,7 +311,8 @@ fi
 _sccap_stage config
 
 # On resume the configuration prompts are skipped, so read the persisted values
-# back into the shell variables the final summary and URL output depend on.
+# back into the shell variables the final summary and URL output depend on, and
+# keep the HTTP opt-in consistent with the chosen TLS mode.
 if [ "$_RESUME" = "1" ]; then
     _sccap_env_val() { grep -E "^${1}=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'; }
     DEPLOYMENT_TYPE=$(_sccap_env_val DEPLOYMENT_TYPE)
@@ -320,6 +321,19 @@ if [ "$_RESUME" = "1" ]; then
     SSL_MODE=$(_sccap_env_val SSL_MODE)
     SSL_DOMAIN=$(_sccap_env_val SSL_DOMAIN)
     SSL_DEV_INSECURE=$(_sccap_env_val SSL_DEV_INSECURE)
+    # When TLS is off, the UI's nginx refuses to serve HTTP unless the operator
+    # has explicitly opted in.  Older installs chose "No TLS" but predate the
+    # SSL_DEV_INSECURE key, so reconcile it here rather than leave the UI
+    # failing closed.
+    if [ "$SSL_ENABLED" != "true" ]; then
+        SSL_MODE=${SSL_MODE:-none}
+        SSL_DEV_INSECURE=true
+        if grep -q '^SSL_DEV_INSECURE=' .env; then
+            sed -i.bak 's/^SSL_DEV_INSECURE=.*/SSL_DEV_INSECURE=true/' .env && rm -f .env.bak
+        else
+            echo 'SSL_DEV_INSECURE=true' >> .env
+        fi
+    fi
 fi
 
 # 2. Environment Setup
