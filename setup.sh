@@ -310,6 +310,18 @@ if [ -f "$_SETUP_STAGE_FILE" ]; then
 fi
 _sccap_stage config
 
+# On resume the configuration prompts are skipped, so read the persisted values
+# back into the shell variables the final summary and URL output depend on.
+if [ "$_RESUME" = "1" ]; then
+    _sccap_env_val() { grep -E "^${1}=" .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\"'; }
+    DEPLOYMENT_TYPE=$(_sccap_env_val DEPLOYMENT_TYPE)
+    DEPLOYMENT_TYPE=${DEPLOYMENT_TYPE:-cloud}
+    SSL_ENABLED=$(_sccap_env_val SSL_ENABLED)
+    SSL_MODE=$(_sccap_env_val SSL_MODE)
+    SSL_DOMAIN=$(_sccap_env_val SSL_DOMAIN)
+    SSL_DEV_INSECURE=$(_sccap_env_val SSL_DEV_INSECURE)
+fi
+
 # 2. Environment Setup
 echo "[*] Setting up environment configuration..."
 
