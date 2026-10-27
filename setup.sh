@@ -3,29 +3,198 @@ set -e
 
 # setup.sh - Easy Installation Script for SCCAP
 
+# ----------------------------------------------------------------------
+# Helpers (defined early so prerequisite checks can use them).
+# ----------------------------------------------------------------------
+
+# Stage marker for resumable setup: records the step that is about to run so a
+# re-run can offer to skip already-completed configuration and retry the step
+# that failed.
+_SETUP_STAGE_FILE=".setup-stage"
+_sccap_stage() { echo "$1" > "$_SETUP_STAGE_FILE"; }
+
+_sccap_with_root() {
+    # Run "$@" as root via the cleanest available channel (argv only).
+    if [ "$EUID" -eq 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "[!] Neither root nor sudo available. As root, run:"
+        echo "    $*"
+        return 1
+    fi
+}
+
+_sccap_install_docker() {
+    # Install Docker Engine + the Compose plugin from the distro's packages.
+    # The official Docker repo pins a newer version; distro packages are the
+    # reliable, least-magic default for an unattended enterprise install.
+    echo "[*] Installing Docker Engine + Compose plugin..."
+    if ! _sccap_with_root true >/dev/null 2>&1; then
+        echo "[!] sudo/root is required to install Docker. Install Docker manually, then re-run."
+        return 1
+    fi
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "${ID:-}" in
+            ubuntu|debian)
+                _sccap_with_root apt-get update -y
+                _sccap_with_root apt-get install -y ca-certificates curl docker.io
+                _sccap_with_root apt-get install -y docker-compose-v2 \
+                    || _sccap_with_root apt-get install -y docker-compose-plugin
+                ;;
+            rhel|centos|fedora|rocky|almalinux|amzn)
+                _sccap_with_root dnf install -y docker docker-compose-plugin \
+                    || _sccap_with_root yum install -y docker docker-compose-plugin
+                ;;
+            *)
+                echo "[!] Unrecognized distro '${ID:-unknown}'. Install Docker manually, then re-run."
+                return 1
+                ;;
+        esac
+    else
+        echo "[!] /etc/os-release not found. Install Docker manually, then re-run."
+        return 1
+    fi
+    _sccap_with_root systemctl enable --now docker 2>/dev/null || true
+    return 0
+}
+
+_sccap_ensure_docker() {
+    # Docker present, Compose present, socket reachable, and current user in the
+    # docker group.  Installs what is missing and re-enters the script with the
+    # docker group active when the socket is denied, so no further permission
+    # failures occur mid-setup.
+    if ! command -v docker >/dev/null 2>&1; then
+        _sccap_install_docker || return 1
+    fi
+    if ! docker compose version >/dev/null 2>&1; then
+        echo "[*] Docker Compose plugin missing; installing..."
+        _sccap_install_docker || return 1
+    fi
+    if docker info >/dev/null 2>&1; then
+        return 0
+    fi
+    # Socket denied: almost always the user isn't in the docker group.
+    if ! id -nG "$(whoami)" 2>/dev/null | grep -qw docker; then
+        echo "[*] Adding '$(whoami)' to the docker group..."
+        _sccap_with_root usermod -aG docker "$(whoami)" 2>/dev/null || {
+            echo "[!] Could not add '$(whoami)' to the docker group (sudo needed)."
+            echo "    Run: sudo usermod -aG docker \$USER   then log out and back in."
+            return 1
+        }
+    fi
+    # Re-enter under the docker group. The current shell has not picked up the
+    # new group yet; `sg` gives us a one-shot shell that has.
+    if [ -z "${_SCCAP_REEXEC:-}" ] && command -v sg >/dev/null 2>&1; then
+        export _SCCAP_REEXEC=1
+        echo "[*] Re-entering setup with the docker group active..."
+        exec sg docker -c "$(printf '%q ' "$0" "$@")"
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        echo "[!] Docker socket is still not accessible after adding the group."
+        echo "    Log out and back in, then re-run ./setup.sh (it resumes where it stopped)."
+        return 1
+    fi
+    return 0
+}
+
+_sccap_generate_selfsigned() {
+    # Generate a self-signed cert and drop it where the nginx entrypoint looks
+    # (certbot/conf/live/<domain>/fullchain.pem + privkey.pem). The entrypoint
+    # skips certbot whenever that path already exists.
+    local domain="$1" dir="certbot/conf/live/$domain"
+    mkdir -p "$dir"
+    if [ -f "$dir/fullchain.pem" ] && [ -f "$dir/privkey.pem" ]; then
+        echo "[*] A certificate already exists for $domain; reusing it."
+        return 0
+    fi
+    if ! command -v openssl >/dev/null 2>&1; then
+        echo "[*] openssl missing; installing..."
+        if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            case "${ID:-}" in
+                ubuntu|debian) _sccap_with_root apt-get install -y openssl ;;
+                rhel|centos|fedora|rocky|almalinux|amzn) _sccap_with_root dnf install -y openssl ;;
+            esac
+        fi
+    fi
+    local san
+    if [[ "$domain" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+        san="IP:$domain"
+    else
+        san="DNS:$domain"
+    fi
+    echo "[*] Generating a self-signed certificate for $domain (365 days)..."
+    openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
+        -keyout "$dir/privkey.pem" -out "$dir/fullchain.pem" \
+        -subj "/CN=$domain" -addext "subjectAltName=$san" 2>/dev/null
+    chmod 600 "$dir/privkey.pem"
+    echo "[+] Self-signed certificate written under $dir/."
+    return 0
+}
+
+_sccap_install_own_cert() {
+    # Copy an operator-supplied certificate (fullchain + key) into the
+    # certbot/conf/live/<domain>/ layout the nginx entrypoint expects.
+    local domain="$1" fullchain="$2" key="$3" dir="certbot/conf/live/$domain"
+    mkdir -p "$dir"
+    cp "$fullchain" "$dir/fullchain.pem" || { echo "[!] Could not copy $fullchain"; return 1; }
+    cp "$key" "$dir/privkey.pem" || { echo "[!] Could not copy $key"; return 1; }
+    chmod 600 "$dir/privkey.pem"
+    echo "[+] Certificate installed under $dir/."
+    return 0
+}
+
+
 echo "=================================================="
 echo "   SCCAP - Setup Wizard"
 echo "=================================================="
 echo ""
 
-# 1. Prerequisites Check
+# 1. Prerequisites Check (auto-install what is missing)
 echo "[*] Checking prerequisites..."
 
-if ! command -v docker &> /dev/null; then
-    echo "Error: docker could not be found. Please install Docker first."
+# Python is needed by the env-secrets bootstrap and the daemon.json merge.
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "[*] Python 3 missing; installing..."
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        case "${ID:-}" in
+            ubuntu|debian) _sccap_with_root apt-get update -y && _sccap_with_root apt-get install -y python3 ;;
+            rhel|centos|fedora|rocky|almalinux|amzn) _sccap_with_root dnf install -y python3 || _sccap_with_root yum install -y python3 ;;
+        esac
+    fi
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Error: python3 could not be found or installed."
     exit 1
 fi
 
-if ! command -v python3 &> /dev/null; then
-    echo "Error: python3 could not be found. Please install Python 3 first."
-    exit 1
-fi
+# Docker Engine + Compose plugin + docker-group membership.
+_sccap_ensure_docker || exit 1
 
 # Note: Node.js is intentionally NOT a host prerequisite — the UI is built
 # inside the `ui` Docker image, never on the host.
 
 echo "[+] Prerequisites met."
 echo ""
+
+# Resume support: if a previous run stopped at the build/migrate step, offer to
+# skip re-configuring and retry that step.
+_RESUME=0
+if [ -f "$_SETUP_STAGE_FILE" ]; then
+    _prev_stage=$(cat "$_SETUP_STAGE_FILE" 2>/dev/null || true)
+    case "$_prev_stage" in
+        build|migrate)
+            echo "[*] A previous setup stopped at the '$_prev_stage' step."
+            read -p "    Resume from there (skip re-configuring)? (y/N): " _resume_choice
+            case "$_resume_choice" in [Yy]*) _RESUME=1 ;; esac
+            ;;
+    esac
+fi
+_sccap_stage config
 
 # 2. Environment Setup
 echo "[*] Setting up environment configuration..."
@@ -49,6 +218,7 @@ else
 fi
 flock -u 9
 
+if [ "$_RESUME" != "1" ]; then
 # 2.4. Installation Variant (modular setup)
 # ----------------------------------------------------------------------
 # Picks which features SCCAP enables. Written to .env as SCCAP_VARIANT (the
@@ -178,6 +348,10 @@ STATE=1
 DEPLOYMENT_TYPE=""
 SSL_ENABLED="false"
 SSL_DOMAIN=""
+SSL_MODE=""
+SSL_DEV_INSECURE="false"
+SSL_CERT_FULLCHAIN=""
+SSL_CERT_KEY=""
 
 while true; do
     case $STATE in
@@ -195,6 +369,7 @@ while true; do
             if [ "$choice" = "1" ]; then
                 DEPLOYMENT_TYPE="local"
                 SSL_ENABLED="false"
+                SSL_MODE="none"
                 STATE=4
             elif [ "$choice" = "2" ]; then
                 DEPLOYMENT_TYPE="cloud"
@@ -208,35 +383,31 @@ while true; do
             ;;
         2)
             echo ""
-            echo "Would you like to auto-provision a free Let's Encrypt SSL Certificate?"
-            echo "  1) Yes (I have a valid domain pointing to this server's IP)"
-            echo "  2) No (I will access via IP or configure SSL manually)"
-            echo "     WARNING: Choosing No exposes your deployment over cleartext HTTP."
+            echo "How would you like to secure the application over SSL?"
+            echo "  1) Let's Encrypt      (free; needs a public domain pointing to this server)"
+            echo "  2) Self-signed        (generated now; good for internal/testing)"
+            echo "  3) My own certificate (enterprise / internal CA)"
+            echo "  4) No TLS             (HTTP only — only behind a reverse proxy / private network)"
             echo "  0) Go Back"
-            read -p "Your choice (1/2/0): " choice
-            if [ "$choice" = "1" ]; then
-                SSL_ENABLED="true"
-                STATE=3
-            elif [ "$choice" = "2" ]; then
-                echo ""
-                echo "  [!] SECURITY WARNING: Running a cloud deployment without TLS transmits"
-                echo "      all data (including credentials) in cleartext over the public Internet."
-                read -p "  To confirm you accept this risk, type YES_I_UNDERSTAND_PLAINTEXT: " ssl_risk_confirm
-                if [ "$ssl_risk_confirm" = "YES_I_UNDERSTAND_PLAINTEXT" ]; then
-                    SSL_ENABLED="false"
-                    STATE=4
-                else
-                    echo "  Confirmation not accepted. Returning to SSL selection."
-                fi
-            elif [ "$choice" = "0" ]; then
-                STATE=1
-            else
-                echo "Invalid choice. Please enter 1, 2, or 0."
-            fi
+            read -p "Your choice (1/2/3/4/0): " choice
+            case "$choice" in
+                1) SSL_MODE="letsencrypt"; SSL_ENABLED="true"; STATE=3 ;;
+                2) SSL_MODE="selfsigned"; SSL_ENABLED="true"; STATE=3 ;;
+                3) SSL_MODE="own"; SSL_ENABLED="true"; STATE=5 ;;
+                4)
+                    read -p "  Continue without TLS (HTTP only)? (y/N): " ssl_none_confirm
+                    case "$ssl_none_confirm" in
+                        [Yy]*) SSL_MODE="none"; SSL_ENABLED="false"; SSL_DEV_INSECURE="true"; STATE=4 ;;
+                        *) echo "  Keeping TLS. Returning to SSL selection." ;;
+                    esac
+                    ;;
+                0) STATE=1 ;;
+                *) echo "Invalid choice. Please enter 1, 2, 3, 4, or 0." ;;
+            esac
             ;;
         3)
             echo ""
-            read -p "Please enter your domain name/IP (e.g., example.com or 192.168.1.100) [or type '0' to go back]: " choice
+            read -p "Please enter your domain name or IP (e.g. example.com or 192.168.1.100) [0 to go back]: " choice
             if [ "$choice" = "0" ]; then
                 STATE=2
             elif [ -z "$choice" ]; then
@@ -249,6 +420,29 @@ while true; do
                 STATE=4
             fi
             ;;
+        5)
+            echo ""
+            read -p "Domain name or IP the certificate is issued for [0 to go back]: " choice
+            if [ "$choice" = "0" ]; then
+                STATE=2
+            elif [ -z "$choice" ]; then
+                echo "Domain cannot be blank."
+            else
+                SSL_DOMAIN="$choice"
+                echo ""
+                read -p "Path to the full-chain certificate file (.pem/.crt): " cert_choice
+                read -p "Path to the private key file (.key/.pem): " key_choice
+                if [ -z "$cert_choice" ] || [ -z "$key_choice" ]; then
+                    echo "Both paths are required."
+                elif [ ! -f "$cert_choice" ] || [ ! -f "$key_choice" ]; then
+                    echo "One of those files does not exist. Check the paths and try again."
+                else
+                    SSL_CERT_FULLCHAIN="$cert_choice"
+                    SSL_CERT_KEY="$key_choice"
+                    STATE=4
+                fi
+            fi
+            ;;
         4)
             echo ""
             echo "Please confirm your configuration:"
@@ -258,27 +452,25 @@ while true; do
                 echo "SSL Mode:    Disabled (Port 80)"
             else
                 echo "Environment: Cloud Deployment"
-                if [ "$SSL_ENABLED" = "true" ]; then
-                    echo "SSL Mode:    Enabled via Let's Encrypt"
-                    echo "Domain:      $SSL_DOMAIN"
-                else
-                    echo "SSL Mode:    Disabled (Port 80 via IP)"
-                fi
+                case "$SSL_MODE" in
+                    letsencrypt) echo "SSL Mode:    Let's Encrypt ($SSL_DOMAIN)" ;;
+                    selfsigned)  echo "SSL Mode:    Self-signed ($SSL_DOMAIN)" ;;
+                    own)         echo "SSL Mode:    Own certificate ($SSL_DOMAIN)" ;;
+                    none)        echo "SSL Mode:    No TLS (HTTP, port 80)" ;;
+                esac
             fi
             echo "-----------------------------------"
             echo "  1) Proceed with Setup"
             echo "  0) Go Back to change settings"
             read -p "Your choice (1/0): " choice
-            
+
             if [ "$choice" = "1" ]; then
                 break
             elif [ "$choice" = "0" ]; then
                 if [ "$DEPLOYMENT_TYPE" = "local" ]; then
                     STATE=1
-                elif [ "$SSL_ENABLED" = "false" ]; then
-                    STATE=2
                 else
-                    STATE=3
+                    STATE=2
                 fi
             else
                 echo "Invalid choice. Please enter 1 or 0."
@@ -286,6 +478,7 @@ while true; do
             ;;
     esac
 done
+
 
 echo ""
 echo "[*] Saving Configuration..."
@@ -315,6 +508,30 @@ else
 fi
 rm -f .env.bak
 
+# SSL_MODE and SSL_DEV_INSECURE (new keys; default when absent).
+if grep -q "^SSL_MODE=" .env; then
+    sed -i.bak "s/^SSL_MODE=.*$/SSL_MODE=$SSL_MODE/" .env
+else
+    echo "SSL_MODE=$SSL_MODE" >> .env
+fi
+if grep -q "^SSL_DEV_INSECURE=" .env; then
+    sed -i.bak "s/^SSL_DEV_INSECURE=.*$/SSL_DEV_INSECURE=$SSL_DEV_INSECURE/" .env
+else
+    echo "SSL_DEV_INSECURE=$SSL_DEV_INSECURE" >> .env
+fi
+rm -f .env.bak
+
+# Prepare the certificate material for the nginx entrypoint.  Letsencrypt is
+# fetched by certbot inside the UI container; self-signed is generated here and
+# an operator-supplied certificate is copied into the same certbot/conf layout,
+# which the entrypoint detects and serves without touching certbot.
+if [ "$SSL_ENABLED" = "true" ] && [ -n "$SSL_DOMAIN" ]; then
+    case "$SSL_MODE" in
+        selfsigned) _sccap_generate_selfsigned "$SSL_DOMAIN" ;;
+        own) _sccap_install_own_cert "$SSL_DOMAIN" "$SSL_CERT_FULLCHAIN" "$SSL_CERT_KEY" ;;
+    esac
+fi
+
 # VITE_ALLOWED_HOSTS: used by the Vite dev-server config and passed as a
 # Docker build arg. For cloud deploys with a domain, set to that domain;
 # otherwise leave empty (localhost is always allowed).
@@ -338,25 +555,10 @@ echo "[+] Configuration saved."
 # Belt-and-suspenders for the per-service `logging:` blocks in
 # docker-compose.yml: also set host-wide json-file caps so any container
 # an operator runs *outside* compose (e.g. ad-hoc `docker run`) inherits
-# the bound. Three-branch root detection (P2-E2): EUID==0 vs sudo vs
-# neither. Pre-existing /etc/docker/daemon.json is JSON-merged via
+# the bound. Pre-existing /etc/docker/daemon.json is JSON-merged via
 # python3 (P2-E1) — never `>`-overwritten — so operator keys like
 # `data-root` or `registry-mirrors` are preserved. Backup written to
 # /etc/docker/daemon.json.bak.sccap-<timestamp>.
-
-_sccap_with_root() {
-    # Run "$@" as root via the cleanest available channel. Never
-    # interpolates user input into a shell string — argv only.
-    if [ "$EUID" -eq 0 ]; then
-        "$@"
-    elif command -v sudo >/dev/null 2>&1; then
-        sudo "$@"
-    else
-        echo "[!] Neither root nor sudo available. As root, run:"
-        echo "    $*"
-        return 1
-    fi
-}
 
 _sccap_render_daemon_json() {
     # Read the existing /etc/docker/daemon.json (or {}) and merge our
@@ -416,8 +618,9 @@ echo "[*] Docker daemon log rotation (ADR-010 — bounded log volume):"
 echo "    Sets host-wide json-file defaults (max-size 50m, max-file 5)"
 echo "    via /etc/docker/daemon.json. This restarts the Docker daemon"
 echo "    and will recreate ALL containers on this host (not just SCCAP)."
-read -p "    Apply now? (type YES to confirm, anything else skips): " daemon_confirm
-if [ "$daemon_confirm" = "YES" ]; then
+read -p "    Apply now? (y/N): " daemon_confirm
+case "$daemon_confirm" in
+    [Yy]*)
     if ! command -v python3 >/dev/null 2>&1; then
         echo "[!] python3 unavailable; cannot merge JSON safely. Skipping."
     else
@@ -468,10 +671,12 @@ if [ "$daemon_confirm" = "YES" ]; then
                 ;;
         esac
     fi
-else
-    echo "    Skipped. Per-compose `logging:` blocks still bound SCCAP services;"
-    echo "    only ad-hoc \`docker run\` containers on this host stay unbounded."
-fi
+        ;;
+    *)
+        echo "    Skipped. Per-compose `logging:` blocks still bound SCCAP services;"
+        echo "    only ad-hoc \`docker run\` containers on this host stay unbounded."
+        ;;
+esac
 fi
 
 
@@ -479,7 +684,10 @@ fi
 # CORS Configuration is now handled in the Setup Wizard UI.
 
 
+fi  # resume: skip configuration prompts
+
 # 3. Docker Build and Launch
+_sccap_stage build
 echo "[*] Launching Docker containers (this may take a few minutes)..."
 # We need to ensure the VITE variables are available to the build context
 # Sourcing .env is one way, but docker compose reads .env automatically
@@ -503,6 +711,7 @@ echo "[+] Database is healthy."
 echo ""
 
 # 4. Database Migrations & Initial Data
+_sccap_stage migrate
 echo "[*] Applying database migrations..."
 docker compose exec app alembic upgrade head
 
@@ -523,18 +732,21 @@ echo "=================================================="
 echo "   Setup Complete!"
 echo "=================================================="
 echo ""
+_sccap_stage done
 echo "Access the application at:"
 if [ "$DEPLOYMENT_TYPE" = "local" ]; then
     echo "   -> http://localhost (Production build via Docker)"
     echo "   -> http://localhost:5173 (If running UI dev server)"
 else
-    if [ "$SSL_ENABLED" = "true" ]; then
-        echo "   -> https://$SSL_DOMAIN"
-    else
-        echo "Refusing to advertise a cleartext URL for cloud deployments."
-        echo "Re-run the wizard with SSL enabled (Let's Encrypt) or use Local mode for development."
-        exit 1
-    fi
+    case "$SSL_MODE" in
+        letsencrypt) echo "   -> https://$SSL_DOMAIN" ;;
+        selfsigned)  echo "   -> https://$SSL_DOMAIN   (self-signed: browsers will warn until trusted)" ;;
+        own)         echo "   -> https://$SSL_DOMAIN" ;;
+        none)
+            echo "   -> http://${SSL_DOMAIN:-<server-ip>}:80"
+            echo "   [!] TLS is disabled; expose this only behind a reverse proxy/private network."
+            ;;
+    esac
 fi
 echo ""
 echo "Access Grafana at:"
