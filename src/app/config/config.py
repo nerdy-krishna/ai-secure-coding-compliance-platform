@@ -469,34 +469,34 @@ class Settings(BaseSettings):
     # Requests Per Minute (RPM) for each LLM provider.
     # Use Optional[int] = None to disable rate limiting for a provider instead of 0.
     OPENAI_REQUESTS_PER_MINUTE: int = Field(
-        default=60, ge=1, description="Max RPM for OpenAI models."
+        default=120, ge=1, description="Max RPM for OpenAI models."
     )
     OPENAI_TOKENS_PER_MINUTE: int = Field(
-        default=30000, ge=1, description="Max TPM for OpenAI models."
+        default=400000, ge=1, description="Max TPM for OpenAI models."
     )
     GOOGLE_REQUESTS_PER_MINUTE: int = Field(
-        default=60, ge=1, description="Max RPM for Google models."
+        default=120, ge=1, description="Max RPM for Google models."
     )
     GOOGLE_TOKENS_PER_MINUTE: int = Field(
-        default=60000, ge=1, description="Max TPM for Google models."
+        default=500000, ge=1, description="Max TPM for Google models."
     )
     ANTHROPIC_REQUESTS_PER_MINUTE: int = Field(
-        default=30, ge=1, description="Max RPM for Anthropic models."
+        default=60, ge=1, description="Max RPM for Anthropic models."
     )
     ANTHROPIC_TOKENS_PER_MINUTE: int = Field(
-        default=20000, ge=1, description="Max TPM for Anthropic models."
+        default=200000, ge=1, description="Max TPM for Anthropic models."
     )
     DEEPSEEK_REQUESTS_PER_MINUTE: int = Field(
-        default=60, ge=1, description="Max RPM for DeepSeek models."
+        default=120, ge=1, description="Max RPM for DeepSeek models."
     )
     DEEPSEEK_TOKENS_PER_MINUTE: int = Field(
-        default=30000, ge=1, description="Max TPM for DeepSeek models."
+        default=400000, ge=1, description="Max TPM for DeepSeek models."
     )
     XAI_REQUESTS_PER_MINUTE: int = Field(
-        default=60, ge=1, description="Max RPM for xAI (Grok) models."
+        default=120, ge=1, description="Max RPM for xAI (Grok) models."
     )
     XAI_TOKENS_PER_MINUTE: int = Field(
-        default=30000, ge=1, description="Max TPM for xAI (Grok) models."
+        default=400000, ge=1, description="Max TPM for xAI (Grok) models."
     )
     CUSTOM_OPENAI_REQUESTS_PER_MINUTE: int = Field(
         default=10_000,

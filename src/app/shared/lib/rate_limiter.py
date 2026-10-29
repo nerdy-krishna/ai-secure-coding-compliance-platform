@@ -95,11 +95,28 @@ class AsyncRateLimiter:
                 # Sleep after releasing the lock so one throttled caller does not
                 # block unrelated callers that may fit the remaining budget.
                 time_to_wait = max(wait_time_for_rpm, wait_time_for_tpm, 0)
-                if time_to_wait > 0:
+                if time_to_wait <= 0:
+                    # The request does not fit the remaining budget even if every
+                    # in-window request expired at once (e.g. one prompt larger
+                    # than the whole TPM budget). Sleeping zero here used to spin
+                    # this loop hot forever; wait a full window instead and let
+                    # the upstream call succeed or fail on its own merits.
+                    time_to_wait = self.period
+                    logger.warning(
+                        "rate_limiter.request_exceeds_window "
+                        "tokens=%d tpm_limit=%d current_tokens=%d — waiting a full window",
+                        tokens,
+                        self.tpm_limit,
+                        current_tokens,
+                    )
+                else:
                     logger.info(
-                        "rate_limiter.throttled wait=%.3fs current_requests=%d current_tokens=%d",
+                        "rate_limiter.throttled wait=%.3fs current_requests=%d "
+                        "current_tokens=%d rpm_limit=%d tpm_limit=%d",
                         time_to_wait,
                         current_requests,
                         current_tokens,
+                        self.rpm_limit,
+                        self.tpm_limit,
                     )
             await asyncio.sleep(time_to_wait)
