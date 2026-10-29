@@ -15,17 +15,34 @@ logger = logging.getLogger(__name__)
 _CWE_RE = re.compile(r"CWE-(\d+)", re.IGNORECASE)
 
 
+def _stringify_keys(value: Any) -> Any:
+    """Recursively cast mapping keys to strings.
+
+    YAML 1.1 resolves bare ``on``/``off``/``yes``/``no``/``true``/``false`` keys
+    and numeric scalars to non-string mapping keys. ``json.dumps(...,
+    sort_keys=True)`` compares keys directly, so one such key anywhere in a rule
+    raises ``TypeError: '<' not supported between instances of 'bool' and
+    'str'`` and aborted the whole source sync (elttam ``jsp-likely-xss``,
+    Minded Security ``MSTG-ARCH-9``).
+
+    Only rules that previously failed to hash are affected: for rules whose keys
+    are already strings this returns an equal structure, so existing digests - and
+    therefore replay verification of rules ingested before this fix - are stable.
+    """
+    if isinstance(value, dict):
+        return {str(key): _stringify_keys(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_stringify_keys(item) for item in value]
+    return value
+
+
 def semgrep_rule_content_hash(raw_rule: dict[str, Any]) -> str:
     """Return the canonical digest used to bind an ingested Semgrep rule.
 
     Replay recomputes this value from ``raw_yaml`` instead of trusting the
     mutable database digest column alone.
     """
-    canonical = json.dumps(
-        {str(k): raw_rule[k] for k in sorted(raw_rule.keys(), key=str)},
-        sort_keys=True,
-        default=str,
-    )
+    canonical = json.dumps(_stringify_keys(raw_rule), sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
@@ -122,7 +139,21 @@ def parse_rule_file(
     for raw_rule in rules_list:
         if not isinstance(raw_rule, dict):
             continue
-        normalized = _normalize_rule(raw_rule, source, relative_path)
+        # A single pathological rule must not fail the whole source: log it, count
+        # it as invalid, and keep ingesting the rest of the repository.
+        try:
+            normalized = _normalize_rule(raw_rule, source, relative_path)
+        except Exception as exc:  # noqa: BLE001 - isolate per-rule parse failures
+            logger.warning(
+                "semgrep.parser.rule_failed",
+                extra={
+                    "source": source.slug,
+                    "path": relative_path,
+                    "rule_id": str(raw_rule.get("id"))[:200],
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+            )
+            continue
         if normalized:
             results.append(normalized)
     return results

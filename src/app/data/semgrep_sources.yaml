@@ -149,9 +149,12 @@ sources:
     description: >
       Java security and quality rules from Atlassian. LGPL-2.1 — included in
       the default allowed licenses list.
-    repo_url: https://github.com/atlassian-labs/semgrep-rules
+    # Atlassian renamed/relocated the rule repository: the old
+    # atlassian-labs/semgrep-rules URL now returns 404, which surfaced as
+    # `GitCommandError: Cmd('git') failed due to exit code(128)` and 0 rules.
+    repo_url: https://github.com/atlassian-labs/atlassian-sast-ruleset
     branch: main
-    subpath: null
+    subpath: sast-rules
     license_spdx: LGPL-2.1
     author: Atlassian Labs
 
