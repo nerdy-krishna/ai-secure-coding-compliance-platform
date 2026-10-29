@@ -332,6 +332,13 @@ _sccap_align_certbot_ownership() {
     # the UI entrypoint, not silently swallowed.
     local img uid gid
     img=$(docker compose config --images 2>/dev/null | grep -E -- '-ui$' | head -1)
+    if [ -z "$img" ] || ! docker image inspect "$img" >/dev/null 2>&1; then
+        # The compose project name may differ from the checkout directory (e.g. a
+        # copy of the tree, or a renamed folder), in which case compose reports
+        # images that were never built. Fall back to any local UI image so the
+        # certificate handover does not silently do nothing.
+        img=$(docker images --format '{{.Repository}}' 2>/dev/null | grep -E -- '-ui$' | head -1)
+    fi
     [ -n "$img" ] || return 0
     docker image inspect "$img" >/dev/null 2>&1 || return 0
     uid=$(docker run --rm --entrypoint sh "$img" -c 'id -u' 2>/dev/null) || return 0
@@ -449,6 +456,9 @@ _sccap_prepare_tls_material() {
     case "$mode" in
         selfsigned)
             _sccap_generate_selfsigned "$domain" || return 1
+            # Generated as the invoking user (often root): the UI container's
+            # UID must own the key or nginx cannot load it.
+            _sccap_align_certbot_ownership || true
             ;;
         letsencrypt)
             if _sccap_is_ip "$domain"; then
@@ -963,9 +973,19 @@ _sccap_run_repair_tls() {
     if ! _sccap_prepare_tls_material; then
         return 1
     fi
+    # A key generated under sudo is 0600 root:root, but nginx inside the UI
+    # container runs as its own UID and cannot read it ("cannot load certificate
+    # key ... Permission denied"). Hand the tree over exactly as the install
+    # flow does after the build.
+    _sccap_align_certbot_ownership || true
     local domain
     domain=$(grep -m1 '^SSL_DOMAIN=' .env | cut -d= -f2-)
     if [ -f "certbot/conf/live/${domain}/fullchain.pem" ]; then
+        if [ -f "certbot/conf/live/${domain}/privkey.pem" ] \
+                && [ "$(stat -c '%a' "certbot/conf/live/${domain}/privkey.pem" 2>/dev/null)" = "600" ] \
+                && [ ! -r "certbot/conf/live/${domain}/privkey.pem" ]; then
+            echo "[!] The private key is not readable by $(id -un); the UI runs as another UID."
+        fi
         echo "[+] Certificate present for ${domain}."
     else
         echo "[!] No certificate was created; check SSL_ENABLED/SSL_MODE/SSL_DOMAIN in .env."
