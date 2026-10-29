@@ -813,6 +813,22 @@ const ScanRunningPage: React.FC = () => {
     costDetails?.expected_estimated_cost ?? costDetails?.total_estimated_cost;
   const upperBoundCost = costDetails?.upper_bound_estimated_cost;
   const estimateConfidence = costDetails?.estimate_confidence;
+  // A zero amount is only meaningful when a price was actually resolved. When
+  // the backend reports pricing_status="unknown" (no admin override and no
+  // catalogue entry for the model) the "$0.0000" was a lie, so say so instead.
+  const pricingUnknown =
+    costDetails?.pricing_status === "unknown" ||
+    Boolean(costDetails?.pricing_status == null && expectedCost === 0);
+  const costSummary =
+    typeof expectedCost === "number"
+      ? pricingUnknown
+        ? " · pricing unavailable for this model"
+        : ` · expected $${expectedCost.toFixed(4)}${
+            typeof upperBoundCost === "number"
+              ? ` · upper $${upperBoundCost.toFixed(4)}`
+              : ""
+          }`
+      : "";
 
   // Scan progress (#85): the rail, the progress bar, and the live
   // badge all derive from ONE pure function over the `scan_events`
@@ -1642,7 +1658,7 @@ const ScanRunningPage: React.FC = () => {
                 }}
               >
                 {activeApprovalGate?.display_name ?? "Approve file profiling cost"}
-                {typeof expectedCost === "number" && (
+                {(typeof expectedCost === "number" || pricingUnknown) && (
                   <span
                     style={{
                       marginLeft: 10,
@@ -1651,10 +1667,7 @@ const ScanRunningPage: React.FC = () => {
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
-                    · expected ${expectedCost.toFixed(4)}
-                    {typeof upperBoundCost === "number"
-                      ? ` · upper $${upperBoundCost.toFixed(4)}`
-                      : ""}
+{costSummary}
                   </span>
                 )}
               </div>
@@ -1738,10 +1751,7 @@ const ScanRunningPage: React.FC = () => {
                       fontVariantNumeric: "tabular-nums",
                     }}
                   >
-                    · expected ${expectedCost.toFixed(4)}
-                    {typeof upperBoundCost === "number"
-                      ? ` · upper $${upperBoundCost.toFixed(4)}`
-                      : ""}
+{costSummary}
                   </span>
                 )}
               </div>

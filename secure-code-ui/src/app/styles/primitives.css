@@ -58,6 +58,24 @@
 .chip-warn     { color: var(--high);     background: var(--high-weak);     border-color: transparent; }
 .chip-ai       { color: var(--primary);  background: var(--primary-weak);  border-color: transparent; }
 
+/* ============ text selection ============ */
+/* The browser's default selection inherits the accent colour, which rendered
+   dark body text on an indigo block (unreadable). Pin an explicit, contrasted
+   pair per theme. */
+::selection {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+::-moz-selection {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+/* Inputs sit on --bg-elev in both themes; keep the same pair there. */
+::selection:window-inactive {
+  background: var(--primary-weak);
+  color: var(--fg);
+}
+
 /* ============ buttons ============ */
 .sccap-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -201,9 +219,13 @@
 }
 .scan-running-main { grid-row: 2; }
 .scan-running-status-card { flex: 1 1 280px; min-width: 0; }
+/* Content-sized pills, not full-width blocks: `flex: 1 1 150px` used to stretch
+   every control into a wide rectangle that read as a card rather than a button. */
 .scan-running-controls > .sccap-btn {
-  flex: 1 1 150px;
-  min-width: min(100%, 150px);
+  flex: 0 0 auto;
+  min-width: 0;
+  align-self: center;
+  border-radius: var(--r-sm);
 }
 .scan-stage-grid {
   display: grid;
