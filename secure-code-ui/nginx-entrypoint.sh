@@ -93,8 +93,12 @@ mkdir -p /var/log/letsencrypt /var/lib/letsencrypt 2>/dev/null || true
 # V15.4.2: serialise cert acquisition with a lock to prevent TOCTOU races when
 # multiple replicas share the same ./certbot/conf volume.
 # Only one replica enters the bootstrap path at a time.
+#
+# `-x` (exclusive) rather than `-e`: the nginx:alpine image ships BusyBox flock,
+# which only accepts [-sxun] and fails outright on util-linux's `-e`. A missing
+# lock must not skip certificate acquisition, so the failure is tolerated.
 (
-flock -e 200
+flock -x 200 2>/dev/null || true
 if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
     echo "No SSL certificate found. Bootstrapping HTTP-only configuration to answer ACME challenges..."
     render_http_conf

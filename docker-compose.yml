@@ -24,7 +24,7 @@ services:
       # whenever we bump the litellm pin.
       - LITELLM_LOCAL_MODEL_COST_MAP=True
       - EVIDENCE_STORE_ENABLED=true
-      - EVIDENCE_S3_ENDPOINT=http://evidence-minio:8000
+      - EVIDENCE_S3_ENDPOINT=${EVIDENCE_S3_ENDPOINT:-http://cloudserver-front:8000}
       - EVIDENCE_S3_ACCESS_KEY_ID=${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
       - EVIDENCE_S3_SECRET_ACCESS_KEY=${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
       - PENTEST_CAPABILITY5_ENABLED=${PENTEST_CAPABILITY5_ENABLED:-false}
@@ -213,8 +213,16 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
+    # Scality CloudServer only accepts request hosts listed in its
+    # `restEndpoints` map (shipped: localhost, 127.0.0.1, cloudserver-front,
+    # s3.docker.test, ...). Addressing it as `evidence-minio` makes every S3
+    # call fail with `InvalidURI: Could not parse the specified URI. Check your
+    # restEndpoints configuration.` This alias is a host the image already
+    # trusts, so clients reach the store by name without a patched config.json.
     networks:
-      - scpnetwork
+      scpnetwork:
+        aliases:
+          - cloudserver-front
 
   worker:
     restart: unless-stopped
@@ -241,7 +249,7 @@ services:
       - SERVICE_NAME=worker
       - LITELLM_LOCAL_MODEL_COST_MAP=True
       - EVIDENCE_STORE_ENABLED=true
-      - EVIDENCE_S3_ENDPOINT=http://evidence-minio:8000
+      - EVIDENCE_S3_ENDPOINT=${EVIDENCE_S3_ENDPOINT:-http://cloudserver-front:8000}
       - EVIDENCE_S3_ACCESS_KEY_ID=${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
       - EVIDENCE_S3_SECRET_ACCESS_KEY=${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
     depends_on:
@@ -410,7 +418,7 @@ services:
       - ${PENTEST_TOOL_RESULT_SIGNING_KEY_FILE:-./.secrets/pentest-tool-result-signing.key}:/run/secrets/pentest-tool-result-signing.key:ro
     environment:
       PYTHONPATH: /app/src
-      PENTEST_TOOL_WORKER_RABBIT_URL: ${RABBITMQ_PENTEST_TOOL_URL:-amqp://pentest_tool_worker:pentest-tool-local-only@rabbitmq/}
+      PENTEST_TOOL_WORKER_RABBIT_URL: ${RABBITMQ_PENTEST_TOOL_URL:-amqp://${RABBITMQ_PENTEST_TOOL_USER:-pentest_tool_worker}:${RABBITMQ_PENTEST_TOOL_PASS:-pentest-tool-local-only}@rabbitmq/}
       PENTEST_TOOL_WORKER_QUEUE: ${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
       PENTEST_TOOL_WORKER_GATEWAY_URL: http://app:8000
       PENTEST_TOOL_WORKER_GATEWAY_TOKEN: ${PENTEST_TOOL_GATEWAY_TOKEN:-}
@@ -444,10 +452,13 @@ services:
     command: ["python", "-m", "app.infrastructure.pentesting.tool_worker.main"]
     healthcheck:
       test: ["CMD", "python", "-m", "app.infrastructure.pentesting.tool_worker.main", "--health-check"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 5s
+      # The probe imports the worker's full module tree inside a 1-CPU container;
+      # it measures ~8 s here, so the previous 5 s timeout marked a healthy
+      # worker unhealthy on every cycle.
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
 
   # Local compose readiness reporter for Capability 5 adapters. Production uses
   # the Kubernetes reporter and qualification manifest; this service verifies the
@@ -507,7 +518,7 @@ services:
       SCCAP_MIGRATION_ROLE: skip
       ENVIRONMENT: ${ENVIRONMENT:-development}
       ASYNC_DATABASE_URL: ${PENTEST_VERIFICATION_DATABASE_URL:-}
-      RABBITMQ_PENTEST_VERIFICATION_URL: ${RABBITMQ_PENTEST_VERIFICATION_URL:-amqp://pentest_verifier:pentest-verifier-local-only@rabbitmq/}
+      RABBITMQ_PENTEST_VERIFICATION_URL: ${RABBITMQ_PENTEST_VERIFICATION_URL:-amqp://${RABBITMQ_PENTEST_VERIFICATION_USER:-pentest_verifier}:${RABBITMQ_PENTEST_VERIFICATION_PASS:-pentest-verifier-local-only}@rabbitmq/}
       RABBITMQ_PENTEST_VERIFICATION_QUEUE: pentest_verification_queue_v1
       PENTEST_VERIFICATION_COORDINATOR_ENABLED: ${PENTEST_VERIFICATION_COORDINATOR_ENABLED:-false}
       PENTEST_C67_INGRESS_ENABLED: ${PENTEST_C67_INGRESS_ENABLED:-false}

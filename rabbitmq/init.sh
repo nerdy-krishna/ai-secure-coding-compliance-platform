@@ -7,6 +7,22 @@
 # with ACCESS_REFUSED. This script closes that hole.
 set -e
 
+# Ensure the user exists with exactly the password the environment supplies.
+# Creating-only-on-absence would keep a stale password after a rotation, and the
+# consumer's URL (built from the same env var) would then be refused.
+ensure_pentest_user() {
+  # $1 user, $2 password, $3 configure, $4 write, $5 read (queue-scoped).
+  local user="$1" pass="$2"
+  [[ -n "$user" && -n "$pass" ]] || return 0
+  if rabbitmqctl list_users -q --no-table-headers \
+      | awk '{print $1}' | grep -qx "$user"; then
+    rabbitmqctl change_password "$user" "$pass" >/dev/null
+  else
+    rabbitmqctl add_user "$user" "$pass" >/dev/null
+  fi
+  rabbitmqctl set_permissions -p / "$user" "$3" "$4" "$5"
+}
+
 ensure_user() {
   until rabbitmqctl status >/dev/null 2>&1; do sleep 2; done
   local user="${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER unset}"
@@ -19,52 +35,25 @@ ensure_user() {
   fi
   rabbitmqctl set_permissions -p / "$user" '.*' '.*' '.*'
 
-  local controller_user="${RABBITMQ_PENTEST_CONTROLLER_USER:-}"
-  local controller_pass="${RABBITMQ_PENTEST_CONTROLLER_PASS:-}"
-  if [[ -n "$controller_user" && -n "$controller_pass" ]]; then
-    if ! rabbitmqctl list_users -q --no-table-headers \
-        | awk '{print $1}' | grep -qx "$controller_user"; then
-      echo "rabbitmq-init: creating bounded controller user '$controller_user'"
-      rabbitmqctl add_user "$controller_user" "$controller_pass"
-    fi
-    rabbitmqctl set_permissions -p / "$controller_user" \
-      '^pentest_controller_queue$' '^$' '^pentest_controller_queue$'
-  fi
+  ensure_pentest_user \
+    "${RABBITMQ_PENTEST_CONTROLLER_USER:-}" \
+    "${RABBITMQ_PENTEST_CONTROLLER_PASS:-}" \
+    '^pentest_controller_queue$' '^$' '^pentest_controller_queue$'
 
-  local tool_user="${RABBITMQ_PENTEST_TOOL_USER:-}"
-  local tool_pass="${RABBITMQ_PENTEST_TOOL_PASS:-}"
-  if [[ -n "$tool_user" && -n "$tool_pass" ]]; then
-    if ! rabbitmqctl list_users -q --no-table-headers \
-        | awk '{print $1}' | grep -qx "$tool_user"; then
-      echo "rabbitmq-init: creating bounded tool-worker user '$tool_user'"
-      rabbitmqctl add_user "$tool_user" "$tool_pass"
-    fi
-    rabbitmqctl set_permissions -p / "$tool_user" \
-      '^pentest_tool_queue_v1$' '^$' '^pentest_tool_queue_v1$'
-  fi
+  ensure_pentest_user \
+    "${RABBITMQ_PENTEST_TOOL_USER:-}" \
+    "${RABBITMQ_PENTEST_TOOL_PASS:-}" \
+    '^pentest_tool_queue_v1$' '^$' '^pentest_tool_queue_v1$'
 
-  local runner_user="${RABBITMQ_PENTEST_RUNNER_USER:-}"
-  local runner_pass="${RABBITMQ_PENTEST_RUNNER_PASS:-}"
-  if [[ -n "$runner_user" && -n "$runner_pass" ]]; then
-    if ! rabbitmqctl list_users -q --no-table-headers \
-        | awk '{print $1}' | grep -qx "$runner_user"; then
-      rabbitmqctl add_user "$runner_user" "$runner_pass"
-    fi
-    rabbitmqctl set_permissions -p / "$runner_user" \
-      '^pentest_execution_v3_queue$' '^$' '^pentest_execution_v3_queue$'
-  fi
+  ensure_pentest_user \
+    "${RABBITMQ_PENTEST_RUNNER_USER:-}" \
+    "${RABBITMQ_PENTEST_RUNNER_PASS:-}" \
+    '^pentest_execution_v3_queue$' '^$' '^pentest_execution_v3_queue$'
 
-  local verifier_user="${RABBITMQ_PENTEST_VERIFICATION_USER:-}"
-  local verifier_pass="${RABBITMQ_PENTEST_VERIFICATION_PASS:-}"
-  if [[ -n "$verifier_user" && -n "$verifier_pass" ]]; then
-    if ! rabbitmqctl list_users -q --no-table-headers \
-        | awk '{print $1}' | grep -qx "$verifier_user"; then
-      echo "rabbitmq-init: creating bounded verification user '$verifier_user'"
-      rabbitmqctl add_user "$verifier_user" "$verifier_pass"
-    fi
-    rabbitmqctl set_permissions -p / "$verifier_user" \
-      '^pentest_verification_queue_v1$' '^$' '^pentest_verification_queue_v1$'
-  fi
+  ensure_pentest_user \
+    "${RABBITMQ_PENTEST_VERIFICATION_USER:-}" \
+    "${RABBITMQ_PENTEST_VERIFICATION_PASS:-}" \
+    '^pentest_verification_queue_v1$' '^$' '^pentest_verification_queue_v1$'
 }
 
 ensure_user &
