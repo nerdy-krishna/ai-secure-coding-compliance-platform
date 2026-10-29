@@ -286,6 +286,9 @@ _sccap_provision_pentest_secrets() {
     fi
     # The tool worker rejects a key file it does not own (uid 1001 in compose).
     _sccap_with_root chown 1001:1001 .secrets/pentest-tool-result-signing.key 2>/dev/null || true
+    # The provisioner runs as root; make sure .env is the operator's again
+    # before the next `docker compose` command reads it.
+    _sccap_fix_ownership
 }
 
 _sccap_ensure_evidence_bucket() {
@@ -626,6 +629,77 @@ _sccap_backup_database() {
     return 0
 }
 
+_sccap_project_name() {
+    # Compose project name, used to find leftovers `down` cannot see.
+    local name=""
+    name=$(docker compose config --format json 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("name",""))' 2>/dev/null \
+        || true)
+    if [ -z "$name" ]; then
+        name=$(basename "$PWD" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]//g')
+    fi
+    printf '%s\n' "$name"
+}
+
+_sccap_force_remove_leftovers() {
+    # `docker compose down` only removes what *this* compose file declares. A
+    # stack started with an overlay or a different profile generation leaves
+    # containers behind that keep networks busy, and compose then reports
+    # "Resource is still in use" while exiting 0 - so the installer claimed a
+    # clean teardown while containers were still running.
+    local project="$1" include_data="$2" removed=0 cid net vol
+    local containers networks volumes
+
+    containers=$(docker ps -aq --filter "label=com.docker.compose.project=$project" 2>/dev/null || true)
+    for cid in $containers; do
+        if docker rm -f "$cid" >/dev/null 2>&1; then removed=$((removed + 1)); fi
+    done
+
+    # Networks are matched by label *and* by name prefix: a network created by
+    # an older compose generation may carry the name but not the label.
+    # Every candidate must belong to this project: either by compose label or by
+    # the `<project>_` name prefix compose gives its networks. The prefix check
+    # keeps a broad `docker network ls` from ever offering a system network
+    # (bridge/host/none) for removal.
+    networks=$( { docker network ls --filter "label=com.docker.compose.project=$project" --format '{{.Name}}' 2>/dev/null || true
+                  docker network ls --format '{{.Name}}' 2>/dev/null | grep -E "^${project}_" || true
+                } | grep -E "^${project}_" | sort -u )
+    for net in $networks; do
+        for cid in $(docker network inspect "$net" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null || true); do
+            docker network disconnect -f "$net" "$cid" >/dev/null 2>&1 || true
+        done
+        if docker network rm "$net" >/dev/null 2>&1; then removed=$((removed + 1)); fi
+    done
+
+    if [ "$include_data" = "1" ]; then
+        volumes=$( { docker volume ls --filter "label=com.docker.compose.project=$project" -q 2>/dev/null || true
+                     docker volume ls -q 2>/dev/null | grep -E "^${project}_" || true
+                   } | grep -E "^${project}_" | sort -u )
+        for vol in $volumes; do
+            if docker volume rm -f "$vol" >/dev/null 2>&1; then removed=$((removed + 1)); fi
+        done
+    fi
+
+    [ "$removed" -gt 0 ] && echo "    Force-removed $removed leftover container/network/volume resource(s)."
+    return 0
+}
+
+_sccap_report_leftovers() {
+    local project="$1" remaining
+    remaining=$( { docker ps -aq --filter "label=com.docker.compose.project=$project" 2>/dev/null || true
+                   docker network ls --format '{{.Name}}' 2>/dev/null | grep -E "^${project}_" || true
+                 } | grep -vc '^$' || true)
+    if [ "${remaining:-0}" -gt 0 ]; then
+        echo "[!] $remaining resource(s) still belong to project '$project':"
+        docker ps -a --filter "label=com.docker.compose.project=$project" \
+            --format '      container {{.Names}} ({{.Status}})' 2>/dev/null | head -10
+        docker network ls --format '{{.Name}}' 2>/dev/null \
+            | grep -E "^${project}_" | sed 's/^/      network /' | head -10
+        return 1
+    fi
+    return 0
+}
+
 _sccap_teardown() {
     # $1 = uninstall | purge | factory-reset
     local level="$1" img
@@ -647,6 +721,21 @@ _sccap_teardown() {
                 docker image rm -f "$img" >/dev/null 2>&1 || true
             done
         fi
+    fi
+
+    # Anything compose could not see (overlay/profile leftovers, stopped
+    # containers holding a network) is removed here, so "teardown complete"
+    # means nothing of this project is left running.
+    local project leftover_data
+    project=$(_sccap_project_name)
+    if [ "$level" = "uninstall" ]; then
+        leftover_data=0
+    else
+        leftover_data=1
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        echo "[*] Removing leftover containers and networks..."
+        _sccap_force_remove_leftovers "$project" "$leftover_data"
     fi
 
     if [ "$level" = "factory-reset" ]; then
@@ -675,7 +764,30 @@ _sccap_teardown() {
             echo "    ./setup.sh now performs a clean install (fresh certificate)."
             ;;
     esac
+    if command -v docker >/dev/null 2>&1; then
+        _sccap_report_leftovers "$project" || return 1
+    fi
     return 0
+}
+
+_sccap_assert_env_readable() {
+    # A previous `sudo ./setup.sh` leaves .env root-owned (0600). The next run as
+    # the deploying user then fails deep inside `docker compose up` with an
+    # opaque "open .env: permission denied". Detect it up front and repair it.
+    [ -f .env ] || return 0
+    [ -r .env ] && return 0
+    if [ "$(id -u)" -eq 0 ]; then
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1 && sudo -n chown "$(id -u):$(id -g)" .env 2>/dev/null; then
+        echo "[+] Repaired .env ownership (it was root-owned from an earlier sudo run)."
+        return 0
+    fi
+    echo "[!] .env exists but is not readable by $(id -un)."
+    echo "    It was written by an earlier 'sudo ./setup.sh'. Fix with:"
+    echo "      sudo chown $(id -un):$(id -gn) .env"
+    echo "    or re-run this script with sudo."
+    return 1
 }
 
 _sccap_tune_tcp_congestion() {
@@ -784,7 +896,12 @@ _sccap_run_teardown_mode() {
             _sccap_confirm "This removes the stack, ALL data volumes, .env, signing keys and certificates. This cannot be undone." "factory-reset" || { echo "Aborted."; exit 1; }
             ;;
     esac
-    _sccap_teardown "$level"
+    if ! _sccap_teardown "$level"; then
+        echo "[!] Teardown finished with resources still present (see above)."
+        echo "    Retry with: docker ps -a --filter label=com.docker.compose.project=$(_sccap_project_name)"
+        rm -f "$_SETUP_STAGE_FILE" 2>/dev/null || true
+        exit 1
+    fi
     rm -f "$_SETUP_STAGE_FILE" 2>/dev/null || true
     exit 0
 }
@@ -823,6 +940,8 @@ _sccap_ensure_docker || exit 1
 
 echo "[+] Prerequisites met."
 echo ""
+
+_sccap_assert_env_readable || exit 1
 
 # Non-interactive teardown (--uninstall/--purge/--factory-reset) needs docker
 # but nothing else from the install flow.

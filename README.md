@@ -313,6 +313,13 @@ action name, and `--purge`/`--factory-reset` are not recoverable without the
 backup). Re-running `./setup.sh` after `--uninstall` or `--purge` brings the
 stack back using the preserved configuration.
 
+Teardown also force-removes what `docker compose down` cannot see — containers
+left by an overlay or an older profile generation, and the networks they keep
+busy (`Resource is still in use`) — and exits non-zero if anything of the
+project survives, so "teardown complete" always means it. Configuration written
+by a `sudo` run is handed back to the operating user, so a later non-root
+`./setup.sh` no longer fails with `open .../.env: permission denied`.
+
 Ownership is handled for you: `.env` and `.setup-stage` end up owned by the
 operating user (with `0600`/`0700` modes) even when the script runs under
 `sudo`, while container-writable paths (Let's Encrypt state, the pentest
