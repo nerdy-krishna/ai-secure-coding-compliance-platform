@@ -28,6 +28,7 @@ const LoginPageContent: React.FC = () => {
     error: authError,
     isLoading: authLoading,
     clearError,
+    isSetupCompleted,
   } = useAuth();
   const { isFeatureEnabled } = useFeatures();
   const [passkeyLoading, setPasskeyLoading] = useState(false);
@@ -168,6 +169,32 @@ const LoginPageContent: React.FC = () => {
             "linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%)",
         }}
       />
+
+      {isSetupCompleted === false && (
+        <div
+          role="status"
+          data-testid="setup-pending-notice"
+          style={{
+            display: "grid",
+            gap: 4,
+            padding: 12,
+            border: "1px solid var(--warning)",
+            background: "rgba(245,158,66,0.12)",
+            borderRadius: "var(--r-sm)",
+            fontSize: 12.5,
+            color: "var(--fg-muted)",
+            lineHeight: 1.55,
+          }}
+        >
+          <b style={{ color: "var(--warning)" }}>
+            This installation has no administrator account yet
+          </b>
+          Setup now runs entirely from the terminal. On the server, run{" "}
+          <code>./setup.sh</code> and answer the administrator and LLM questions
+          it asks; it creates the account and configures the platform. Reload
+          this page afterwards.
+        </div>
+      )}
 
       <div style={{ textAlign: "center" }}>
         <div

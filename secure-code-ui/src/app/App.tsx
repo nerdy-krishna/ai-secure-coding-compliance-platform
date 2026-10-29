@@ -57,7 +57,6 @@ const SecurityAdvisorPage = React.lazy(() => import("../pages/chat/SecurityAdvis
 const CompliancePage = React.lazy(() => import("../pages/compliance/CompliancePage"));
 const SubmitPage = React.lazy(() => import("../pages/submission/SubmitPage"));
 const ScanRunningPage = React.lazy(() => import("../pages/submission/ScanRunningPage"));
-const SetupPage = React.lazy(() => import("../pages/setup/SetupPage"));
 const PentestEngagementsPage = React.lazy(() => import("../pages/pentesting/PentestEngagementsPage"));
 const PentestNewEngagementPage = React.lazy(() => import("../pages/pentesting/PentestNewEngagementPage"));
 const PentestProjectDetailPage = React.lazy(() => import("../pages/pentesting/PentestProjectDetailPage"));
@@ -118,8 +117,9 @@ interface RouteGuardProps {
 /**
  * Single route guard consolidating the four copies this file had
  * (protected / auth-only / root / superuser). All variants share:
- *  - the same "is auth/setup state resolved yet?" loading gate, and
- *  - the same "setup not completed → /setup" forced redirect.
+ *  - the same "is auth state resolved yet?" loading gate.
+ * First-run setup happens in the terminal (see setup.sh), so there is no
+ * in-app setup route to redirect to any more.
  * The `requires` prop selects the post-setup-gate behavior.
  */
 const RouteGuard: React.FC<RouteGuardProps> = ({ requires, anyPermission = [] }) => {
@@ -128,10 +128,6 @@ const RouteGuard: React.FC<RouteGuardProps> = ({ requires, anyPermission = [] })
 
   if (!initialAuthChecked || isLoading || isSetupCompleted === null) {
     return <LoadingScreen />;
-  }
-
-  if (isSetupCompleted === false) {
-    return <Navigate to="/setup" replace />;
   }
 
   if (requires === "root-redirect") {
@@ -197,10 +193,9 @@ function AppContent() {
               this page asks AuthProvider to bootstrap it. */}
           <Route path="/auth/sso/complete" element={routeContent(<SsoCallbackPage />)} />
           <Route path="/reset-password" element={routeContent(<ResetPasswordPage />)} />
+          {/* Setup is terminal-only now; keep old bookmarks from 404ing. */}
+          <Route path="/setup" element={<Navigate to="/login" replace />} />
         </Route>
-
-        {/* Setup Route */}
-        <Route path="/setup" element={routeContent(<SetupPage />)} />
 
         <Route element={<RouteGuard requires="auth" />}>
           <Route path="/account/dashboard" element={routeContent(<DashboardPage />)} />
