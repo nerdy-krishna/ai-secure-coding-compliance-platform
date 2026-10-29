@@ -290,6 +290,32 @@ See the [Installation Guide](docs/docs/getting-started/installation.md)
 for the step-by-step path, including VPS-specific notes and
 troubleshooting.
 
+### Upgrading, uninstalling and clean reinstalls
+
+`setup.sh` takes no arguments for a normal install. It also manages teardown,
+and offers the same choices as a menu when it detects an existing installation:
+
+```bash
+./setup.sh                    # install, upgrade, or re-run the wizard
+./setup.sh --uninstall        # stop and remove the stack; data, .env, keys
+                              # and certificates are kept
+./setup.sh --purge            # also drop data volumes and the images built
+                              # from this checkout; a pg_dumpall backup is
+                              # written to .purge-backups/ first
+./setup.sh --factory-reset    # purge plus delete .env, .secrets/ and certbot/
+                              # — a true clean install (fresh certificate)
+```
+
+Add `-y` to skip the confirmation prompts (each level asks you to type the
+action name, and `--purge`/`--factory-reset` are not recoverable without the
+backup). Re-running `./setup.sh` after `--uninstall` or `--purge` brings the
+stack back using the preserved configuration.
+
+Ownership is handled for you: `.env` and `.setup-stage` end up owned by the
+operating user (with `0600`/`0700` modes) even when the script runs under
+`sudo`, while container-writable paths (Let's Encrypt state, the pentest
+result-signing key) are handed to the UIDs the containers run as.
+
 ## Getting Started
 
 1. **Open the app** at the URL the setup script printed (default
