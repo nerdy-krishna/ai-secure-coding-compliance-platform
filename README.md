@@ -100,10 +100,12 @@ separate, opt-in step.
 - **User Groups + scoped visibility** — an admin creates groups and
   adds users by email; a regular user sees their own scans plus any
   scan owned by a peer they share a group with. Admins see everything.
-- **First-run setup wizard** — the first registered user becomes
-  superuser and is routed through `/setup`, which confirms the
-  installation variant and configures LLMs, SMTP, and system settings
-  before the app unlocks for everyone else.
+- **Terminal-only first run** — `setup.sh` asks for the administrator
+  email/password, the LLM provider/model/key, the Grafana administrator
+  (when the log stack is on) and — for the custom variant — the feature
+  set. It bootstraps the superuser, LLM configuration, CORS allowlist and
+  feature flags before the UI is ever opened, so there is no second
+  in-browser setup step.
 - **Modular feature flags** — every optional surface (chat, compliance,
   SSO, SCIM, multi-tenancy, the log stack, …) is a runtime flag. The
   install variant seeds them; *Admin → Features* toggles them live, with
@@ -277,7 +279,7 @@ generated values.
 - **Enterprise** — every feature, including SSO, SCIM, multi-tenancy,
   and the log stack.
 - **Custom** — pick the optional container stacks in `setup.sh`, then the
-  individual features in the setup wizard.
+  individual features in `setup.sh`.
 
 The variant seeds a set of runtime feature flags and selects which
 optional container stacks boot (`COMPOSE_PROFILES`). Change features
@@ -296,7 +298,7 @@ troubleshooting.
 and offers the same choices as a menu when it detects an existing installation:
 
 ```bash
-./setup.sh                    # install, upgrade, or re-run the wizard
+./setup.sh                    # install, upgrade, or re-run setup
 ./setup.sh --uninstall        # stop and remove the stack; data, .env, keys
                               # and certificates are kept
 ./setup.sh --purge            # also drop data volumes and the images built
@@ -318,12 +320,12 @@ result-signing key) are handed to the UIDs the containers run as.
 
 ## Getting Started
 
-1. **Open the app** at the URL the setup script printed (default
-   `http://localhost`). The first account you register becomes
-   superuser and is routed to `/setup`.
-2. **Finish setup** — add at least one LLM configuration, optional
-   SMTP, and any system settings you need. The `/setup` wizard blocks
-   the rest of the app until this is done.
+1. **Log in** at the URL the setup script printed (default
+   `http://localhost`) with the administrator email and password you gave
+   the terminal installer. The superuser, default LLM configuration and
+   feature flags were already created during setup.
+2. **Optional afterwards** — add SMTP, extra LLM configurations or adjust
+   system settings under *Admin*.
 3. **Create user groups (optional)** — under *Admin → Groups*, grant
    teams of users visibility into each other's scans.
 4. **Enable Semgrep rules (post-deploy)** — Semgrep runs exclusively
