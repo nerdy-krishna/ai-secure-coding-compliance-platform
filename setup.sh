@@ -328,6 +328,216 @@ _sccap_align_certbot_ownership() {
 
 
 # ----------------------------------------------------------------------
+# First-run answers.
+#
+# These used to be asked twice: once here and again by the browser wizard at
+# /setup. The wizard is gone, so the terminal asks everything the platform
+# needs and app/cli/terminal_setup.py submits it to the API bootstrap endpoint.
+# ----------------------------------------------------------------------
+ADMIN_EMAIL=""
+ADMIN_PASSWORD=""
+LLM_MODE="multi_provider"
+LLM_PROVIDER=""
+LLM_MODEL=""
+LLM_API_KEY=""
+CUSTOM_FEATURES=""
+GRAFANA_USER=""
+GRAFANA_PASSWORD=""
+
+_sccap_password_problem() {
+    # Mirror of app/infrastructure/auth/schemas.py plus the context-term check
+    # the bootstrap endpoint applies, so a bad password is rejected here rather
+    # than after the whole stack has been built.
+    _SCCAP_PW="$1" _SCCAP_EMAIL="$2" _SCCAP_DEPLOY="$3" python3 - <<'PYPW'
+import os, re, sys
+pw = os.environ.get("_SCCAP_PW", "")
+email = os.environ.get("_SCCAP_EMAIL", "")
+deploy = os.environ.get("_SCCAP_DEPLOY", "")
+if len(pw) < 12:
+    print("must be at least 12 characters"); raise SystemExit(0)
+if len(pw) > 128:
+    print("must be at most 128 characters"); raise SystemExit(0)
+classes = sum(bool(re.search(p, pw)) for p in (r"[A-Z]", r"[a-z]", r"[0-9]", r"[^A-Za-z0-9]"))
+if classes < 2:
+    print("must mix at least two of uppercase, lowercase, digits, symbols"); raise SystemExit(0)
+for token in ("sccap", "admin", "superuser", email.split("@")[0].lower(), deploy.lower()):
+    if token and token in pw.lower():
+        print("must not contain the term '%s'" % token); raise SystemExit(0)
+print("")
+PYPW
+}
+
+_sccap_ask_secret() {
+    # $1 prompt, $2 minimum length, $3 optional validator (empty = none)
+    local first second problem
+    while true; do
+        printf '%s' "$1"
+        stty -echo 2>/dev/null || true
+        read -r first
+        stty echo 2>/dev/null || true
+        echo
+        if [ "${#first}" -lt "$2" ]; then
+            echo "  [!] Use at least $2 characters."
+            continue
+        fi
+        if [ -n "$3" ]; then
+            printf '  Repeat to confirm: '
+            stty -echo 2>/dev/null || true
+            read -r second
+            stty echo 2>/dev/null || true
+            echo
+            if [ "$first" != "$second" ]; then
+                echo "  [!] Passwords do not match."
+                continue
+            fi
+            problem=$($3 "$first")
+            if [ -n "$problem" ]; then
+                echo "  [!] Password $problem."
+                continue
+            fi
+        fi
+        _SCCAP_ANSWER="$first"
+        return 0
+    done
+}
+
+_sccap_admin_pw_problem() { _sccap_password_problem "$1" "$ADMIN_EMAIL" "$DEPLOYMENT_TYPE"; }
+
+_sccap_platform_bootstrapped() {
+    # True when a superuser already exists (the API's setup status). Used on the
+    # resume path: a run that died before first-run bootstrap must re-ask for the
+    # administrator/LLM answers instead of submitting empty ones.
+    docker compose exec -T app python -m app.cli.terminal_setup --check >/dev/null 2>&1
+}
+
+_sccap_ask_first_run() {
+    # Only asked on a fresh configuration run (skipped when resuming/upgrading).
+    echo ""
+    echo "[*] Administrator account (this is the UI login)"
+    while true; do
+        read -p "  Admin email: " ADMIN_EMAIL
+        if python3 -c 'import re,sys; sys.exit(0 if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", sys.argv[1]) else 1)' "$ADMIN_EMAIL"; then
+            break
+        fi
+        echo "  [!] Enter a valid email address."
+    done
+    _sccap_ask_secret "  Admin password (12+ chars, 2+ character types): " 12 _sccap_admin_pw_problem
+    ADMIN_PASSWORD="$_SCCAP_ANSWER"
+
+    echo ""
+    echo "[*] LLM provider (used for every scan and the advisor)"
+    echo "    1) OpenAI        2) Anthropic     3) Google     4) DeepSeek     5) xAI"
+    while true; do
+        read -p "  Provider (1-5) [1]: " _llm_choice
+        case "${_llm_choice:-1}" in
+            1|"") LLM_PROVIDER=openai ;;
+            2) LLM_PROVIDER=anthropic ;;
+            3) LLM_PROVIDER=google ;;
+            4) LLM_PROVIDER=deepseek ;;
+            5) LLM_PROVIDER=xai ;;
+            *) echo "  Invalid choice."; continue ;;
+        esac
+        break
+    done
+
+    echo ""
+    echo "  Optimization mode:"
+    echo "    1) multi-provider      portable prompts, any provider (default)"
+    echo "    2) anthropic-optimized prompt caching + tuned variants (Anthropic only)"
+    while true; do
+        read -p "  Mode (1/2) [1]: " _mode_choice
+        case "${_mode_choice:-1}" in
+            1|"") LLM_MODE=multi_provider; break ;;
+            2)
+                if [ "$LLM_PROVIDER" != "anthropic" ]; then
+                    echo "  [!] anthropic-optimized requires the Anthropic provider."
+                    continue
+                fi
+                LLM_MODE=anthropic_optimized; break ;;
+            *) echo "  Invalid choice." ;;
+        esac
+    done
+
+    case "$LLM_PROVIDER" in
+        openai) _llm_default_model=gpt-4o ;;
+        anthropic) _llm_default_model=claude-sonnet-4-5 ;;
+        google) _llm_default_model=gemini-2.5-pro ;;
+        deepseek) _llm_default_model=deepseek-chat ;;
+        xai) _llm_default_model=grok-4 ;;
+    esac
+    read -p "  Model [$_llm_default_model]: " LLM_MODEL
+    LLM_MODEL=${LLM_MODEL:-$_llm_default_model}
+
+    _sccap_ask_secret "  $LLM_PROVIDER API key: " 8
+    LLM_API_KEY="$_SCCAP_ANSWER"
+
+    if [ "$SCCAP_VARIANT" = "custom" ]; then
+        echo ""
+        echo "[*] Custom variant: choose the features to enable (y/N each)"
+        CUSTOM_FEATURES=""
+        for _feat in scan chat compliance mcp multi_user user_groups multi_tenant sso scim email log_stack tracing admin_authoring; do
+            read -p "  Enable $_feat? (y/N): " _feat_choice
+            case "$_feat_choice" in
+                [Yy]*) CUSTOM_FEATURES="${CUSTOM_FEATURES:+$CUSTOM_FEATURES,}$_feat" ;;
+            esac
+        done
+    fi
+
+    if [ "$_LOG_STACK_ON" = "1" ]; then
+        echo ""
+        echo "[*] Grafana administrator (served at /grafana/ after setup)"
+        read -p "  Grafana username [admin]: " GRAFANA_USER
+        GRAFANA_USER=${GRAFANA_USER:-admin}
+        _sccap_ask_secret "  Grafana password (8+ chars): " 8
+        GRAFANA_PASSWORD="$_SCCAP_ANSWER"
+    fi
+}
+
+_sccap_write_grafana_credentials() {
+    [ -n "$GRAFANA_USER" ] && [ -n "$GRAFANA_PASSWORD" ] || return 0
+    for _kv in "GRAFANA_ADMIN_USER=$GRAFANA_USER" "GRAFANA_ADMIN_PASSWORD=$GRAFANA_PASSWORD"; do
+        _key=${_kv%%=*}
+        _val=${_kv#*=}
+        _escaped=$(printf '%s\n' "$_val" | sed -e 's/[\/&]/\\&/g')
+        if grep -q "^${_key}=" .env; then
+            sed -i.bak "s|^${_key}=.*$|${_key}=${_escaped}|" .env
+        else
+            echo "${_key}=${_val}" >> .env
+        fi
+    done
+    rm -f .env.bak
+    echo "[+] Grafana credentials saved to .env."
+}
+
+_sccap_run_terminal_setup() {
+    # Submit the first-run answers to the API bootstrap endpoint through the
+    # container-side client. Idempotent: a completed install is left untouched.
+    local args=(
+        --api-base http://127.0.0.1:8000
+        --wait-seconds 120
+        --admin-email "$ADMIN_EMAIL"
+        --deployment-type "$DEPLOYMENT_TYPE"
+        --llm-mode "$LLM_MODE"
+        --llm-provider "$LLM_PROVIDER"
+        --llm-model "$LLM_MODEL"
+    )
+    if [ "$DEPLOYMENT_TYPE" = "cloud" ] && [ -n "$SSL_DOMAIN" ]; then
+        if [ "$SSL_ENABLED" = "true" ]; then
+            args+=(--frontend-url "https://$SSL_DOMAIN")
+        else
+            args+=(--frontend-url "http://$SSL_DOMAIN")
+        fi
+    fi
+    [ -n "$CUSTOM_FEATURES" ] && args+=(--features "$CUSTOM_FEATURES")
+
+    # Secrets travel as container env vars, never as argv.
+    docker compose exec -T \
+        -e SCCAP_SETUP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+        -e SCCAP_SETUP_LLM_API_KEY="$LLM_API_KEY" \
+        app python -m app.cli.terminal_setup "${args[@]}"
+}
+
+# ----------------------------------------------------------------------
 # Operator flags, teardown (uninstall/purge/factory reset) and ownership.
 # ----------------------------------------------------------------------
 _SCCAP_MODE="install"        # install | uninstall
@@ -653,6 +863,20 @@ fi
 if [ "$_SCCAP_REINSTALL" = "1" ] && [ -f .env ]; then
     _RESUME=1
 fi
+
+# A resume skips the questionnaire, but if the earlier run died before first-run
+# bootstrap the platform still has no superuser - ask for the answers then.
+if [ "$_RESUME" = "1" ] && [ -f .env ] && ! _sccap_platform_bootstrapped; then
+    echo "[*] This installation has not been bootstrapped yet; asking for the"
+    echo "    administrator and LLM details now."
+    # The questionnaire normally sets these; restore them from .env so the
+    # custom-feature and Grafana questions still fire on this path.
+    SCCAP_VARIANT=${SCCAP_VARIANT:-$(grep -m1 '^SCCAP_VARIANT=' .env 2>/dev/null | cut -d= -f2-)}
+    case ",$(grep -m1 '^COMPOSE_PROFILES=' .env 2>/dev/null | cut -d= -f2-)," in
+        *,log_stack,*) _LOG_STACK_ON=1 ;;
+    esac
+    _sccap_ask_first_run
+fi
 _sccap_stage config
 
 # On resume the configuration prompts are skipped, so read the persisted values
@@ -974,6 +1198,12 @@ done
 
 
 echo ""
+# Everything the browser wizard used to ask for is collected here, in the
+# terminal, before any container is built.
+if [ "$_RESUME" != "1" ]; then
+    _sccap_ask_first_run
+fi
+
 echo "[*] Saving Configuration..."
 # Escape sed replacement-side metacharacters for any value written via sed (V01.2.9).
 _esc() { printf '%s\n' "$1" | sed -e 's/[\/&]/\\&/g'; }
@@ -1209,7 +1439,7 @@ for _kv in "GRAFANA_ROOT_URL=$_GRAFANA_ROOT_URL" "GRAFANA_SERVE_FROM_SUB_PATH=$_
         echo "${_key}=${_val}" >> .env
     fi
 done
-rm -f .env.bak
+_sccap_write_grafana_credentials
 
 # 3. Docker Build and Launch
 _sccap_stage build
@@ -1261,6 +1491,16 @@ if [ "$_migrated" != "1" ]; then
 fi
 
 _sccap_ensure_evidence_bucket
+
+# 4b. First-run bootstrap (superuser, LLM config, feature flags)
+_sccap_stage setup
+echo "[*] Creating the administrator account and LLM configuration..."
+if _sccap_run_terminal_setup; then
+    echo "[+] Platform setup complete."
+else
+    echo "[!] First-run bootstrap failed; re-run ./setup.sh once the API is healthy."
+    echo "    Details: docker compose logs --tail=50 app"
+fi
 
 echo "[+] Database initialized. Proceed to the Web UI to create your Admin Superuser."
 echo ""
