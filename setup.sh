@@ -244,6 +244,11 @@ _sccap_generate_selfsigned() {
     openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
         -keyout "$dir/privkey.pem" -out "$dir/fullchain.pem" \
         -subj "/CN=$domain" -addext "subjectAltName=$san" 2>/dev/null
+    # nginx-https.conf uses `ssl_trusted_certificate .../chain.pem`. certbot
+    # writes that file, a self-signed certificate does not - and without it
+    # `nginx -t` fails, the UI container exits, and the browser reports
+    # "connection closed" with nothing listening on 443.
+    cp "$dir/fullchain.pem" "$dir/chain.pem"
     chmod 600 "$dir/privkey.pem"
     echo "[+] Self-signed certificate written under $dir/."
     return 0
@@ -256,6 +261,9 @@ _sccap_install_own_cert() {
     mkdir -p "$dir"
     cp "$fullchain" "$dir/fullchain.pem" || { echo "[!] Could not copy $fullchain"; return 1; }
     cp "$key" "$dir/privkey.pem" || { echo "[!] Could not copy $key"; return 1; }
+    # Same reason as the self-signed path: `ssl_trusted_certificate` needs a
+    # chain file, and an operator-supplied bundle is the only source we have.
+    cp "$fullchain" "$dir/chain.pem" || true
     chmod 600 "$dir/privkey.pem"
     echo "[+] Certificate installed under $dir/."
     return 0
@@ -300,11 +308,19 @@ _sccap_ensure_evidence_bucket() {
     local enabled
     enabled=$(grep -m1 '^EVIDENCE_STORE_ENABLED=' .env 2>/dev/null | cut -d= -f2-)
     [ "$enabled" = "true" ] || return 0
-    if docker compose exec -T app python -c "import asyncio; from app.infrastructure.evidence.object_store import EvidenceObjectStore; asyncio.run(EvidenceObjectStore().ensure_bucket())" >/dev/null 2>&1; then
-        echo "[+] Evidence bucket ready."
-    else
-        echo "[!] Could not create the evidence bucket; evidence writes will retry at runtime."
-    fi
+    # The API is still running its startup seeding right after the migration
+    # step, so the first attempt can legitimately fail. Retry for ~90s before
+    # giving up (the app also retries lazily on first write).
+    local attempt
+    for attempt in $(seq 1 15); do
+        if docker compose exec -T app python -c "import asyncio; from app.infrastructure.evidence.object_store import EvidenceObjectStore; asyncio.run(EvidenceObjectStore().ensure_bucket())" >/dev/null 2>&1; then
+            echo "[+] Evidence bucket ready."
+            return 0
+        fi
+        sleep 6
+    done
+    echo "[!] Could not create the evidence bucket yet; evidence writes will retry at runtime."
+    return 0
 }
 
 _sccap_align_certbot_ownership() {
@@ -468,8 +484,24 @@ _sccap_ask_first_run() {
         deepseek) _llm_default_model=deepseek-chat ;;
         xai) _llm_default_model=grok-4 ;;
     esac
-    read -p "  Model [$_llm_default_model]: " LLM_MODEL
-    LLM_MODEL=${LLM_MODEL:-$_llm_default_model}
+    while true; do
+        read -p "  Model [$_llm_default_model]: " LLM_MODEL
+        LLM_MODEL=${LLM_MODEL:-$_llm_default_model}
+        case "$LLM_MODEL" in
+            sk-*|sk_*|AIza*|xai-*|gsk_*|hf_*)
+                echo "  [!] That looks like an API key, not a model name (e.g. gpt-4o,"
+                echo "      claude-sonnet-4-5, gemini-2.5-pro, deepseek-flash). API keys are"
+                echo "      asked for in the next question."
+                continue
+                ;;
+        esac
+        if [ "${#LLM_MODEL}" -gt 128 ] || ! printf '%s' "$LLM_MODEL" | grep -qE '^[A-Za-z0-9._:/-]+$'; then
+            echo "  [!] Model names may contain letters, digits and . _ : / - only."
+            continue
+        fi
+        break
+    done
+    echo "  -> provider: $LLM_PROVIDER · model: $LLM_MODEL"
 
     _sccap_ask_secret "  $LLM_PROVIDER API key: " 8
     LLM_API_KEY="$_SCCAP_ANSWER"

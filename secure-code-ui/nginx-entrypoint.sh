@@ -40,6 +40,15 @@ validate_email() {
 # Helper: render nginx-https.conf by substituting __SSL_DOMAIN__ with the real domain.
 # V01.3.7: validate rendered config with nginx -t before proceeding.
 render_https_conf() {
+    # The template pins `ssl_trusted_certificate .../chain.pem`. certbot writes
+    # that file but a self-signed or operator-supplied certificate may not, and
+    # nginx then refuses to start (the browser only sees "connection closed").
+    # Fall back to the full chain so a restart heals such an install.
+    local live="/etc/letsencrypt/live/${DOMAIN}"
+    if [ ! -f "${live}/chain.pem" ] && [ -f "${live}/fullchain.pem" ]; then
+        cp "${live}/fullchain.pem" "${live}/chain.pem" 2>/dev/null \
+            || echo "WARN: no chain.pem and it is not writable; relying on fullchain"
+    fi
     sed "s|__SSL_DOMAIN__|${DOMAIN}|g" /etc/nginx/nginx-https.conf > /etc/nginx/conf.d/default.conf
     if ! nginx -t 2>/dev/null; then
         echo "ERROR: rendered nginx config failed validation (nginx -t). Aborting."

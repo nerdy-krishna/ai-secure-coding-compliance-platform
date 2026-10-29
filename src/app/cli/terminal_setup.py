@@ -199,6 +199,19 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         return _fail("missing required setup input: " + ", ".join(missing))
 
+    # A pasted API key in the model field is easy to do and produces a
+    # permanently unpriced configuration ("no catalogue price for model
+    # 'sk-...'"), so refuse it instead of bootstrapping a broken LLM row.
+    if args.llm_model.strip() == api_key.strip():
+        return _fail(
+            "the model name is identical to the API key; pass the provider's model "
+            "identifier (e.g. gpt-4o, claude-sonnet-4-5, gemini-2.5-pro, deepseek-flash)"
+        )
+    if args.llm_model.lower().startswith(("sk-", "sk_", "aiza", "xai-", "gsk_", "hf_")):
+        return _fail(
+            f"--llm-model looks like an API key, not a model identifier: {args.llm_model[:8]}..."
+        )
+
     payload = build_payload(
         admin_email=args.admin_email,
         admin_password=password,
