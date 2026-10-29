@@ -7,36 +7,12 @@ import { AxiosError } from "axios";
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { authService } from "../../../shared/api/authService";
+import { MAX_PASSWORD_LEN, MIN_PASSWORD_LEN, validatePassword } from "../../../shared/lib/passwordPolicy";
 import { Icon } from "../../../shared/ui/Icon";
 import { useToast } from "../../../shared/ui/Toast";
 
-// Mirror of the backend rules in `app/infrastructure/auth/schemas.py`. Keep in
-// sync if the server-side rules change. Class definitions match the regex
-// alternation used by `_password_class_count`.
-const MIN_PASSWORD_LEN = 12;
-const MAX_PASSWORD_LEN = 128;
-
-function passwordClassCount(p: string): number {
-  let n = 0;
-  if (/[a-z]/.test(p)) n += 1;
-  if (/[A-Z]/.test(p)) n += 1;
-  if (/[0-9]/.test(p)) n += 1;
-  if (/[^a-zA-Z0-9]/.test(p)) n += 1;
-  return n;
-}
-
-function clientValidatePassword(p: string): string | null {
-  if (p.length < MIN_PASSWORD_LEN) {
-    return `Password must be at least ${MIN_PASSWORD_LEN} characters.`;
-  }
-  if (p.length > MAX_PASSWORD_LEN) {
-    return `Password must be at most ${MAX_PASSWORD_LEN} characters.`;
-  }
-  if (passwordClassCount(p) < 2) {
-    return "Password must mix at least two character classes (e.g. letters + digits, letters + symbols).";
-  }
-  return null;
-}
+// Password policy lives in `shared/lib/passwordPolicy.ts` so the setup wizard
+// and this form cannot drift apart (or away from the backend rules).
 
 // fastapi-users surfaces specific reset-password failure modes via the
 // `detail` field of the 400 response. Map each to a user-facing message
@@ -125,7 +101,7 @@ const ResetPasswordPage: React.FC = () => {
       toast.error("The two passwords do not match.");
       return;
     }
-    const clientError = clientValidatePassword(password);
+    const clientError = validatePassword(password);
     if (clientError) {
       toast.error(clientError);
       return;
@@ -215,12 +191,12 @@ const ResetPasswordPage: React.FC = () => {
           required
           autoFocus
           autoComplete="new-password"
-          maxLength={128}
+          maxLength={MAX_PASSWORD_LEN}
           style={{ paddingLeft: 32 }}
         />
       </div>
       {password.length > 0 && (() => {
-        const issue = clientValidatePassword(password);
+        const issue = validatePassword(password);
         return (
           <div
             style={{
@@ -247,7 +223,7 @@ const ResetPasswordPage: React.FC = () => {
           onChange={(e) => setConfirm(e.target.value)}
           required
           autoComplete="new-password"
-          maxLength={128}
+          maxLength={MAX_PASSWORD_LEN}
           style={{ paddingLeft: 32 }}
         />
       </div>

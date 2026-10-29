@@ -16,6 +16,12 @@ import {
   type FeatureCatalogEntry,
 } from "../../shared/api/featureService";
 import { useAuth } from "../../shared/hooks/useAuth";
+import {
+  MAX_PASSWORD_LEN,
+  MIN_PASSWORD_LEN,
+  passwordRequirements,
+  validatePassword,
+} from "../../shared/lib/passwordPolicy";
 import { Icon } from "../../shared/ui/Icon";
 
 type DeploymentType = "local" | "cloud";
@@ -219,12 +225,11 @@ const SetupPage: React.FC = () => {
         setStepError("Admin email must be 254 characters or fewer.");
         return false;
       }
-      if (!form.admin_password || form.admin_password.length < 8) {
-        setStepError("Admin password must be at least 8 characters.");
-        return false;
-      }
-      if (form.admin_password.length > 256) {
-        setStepError("Admin password must be 256 characters or fewer.");
+      // Policy mirrors the backend (app/infrastructure/auth/schemas.py):
+      // 12–128 characters and at least two character classes.
+      const passwordIssue = validatePassword(form.admin_password);
+      if (passwordIssue) {
+        setStepError(passwordIssue);
         return false;
       }
     }
@@ -273,18 +278,7 @@ const SetupPage: React.FC = () => {
       await checkSetupStatus();
       navigate("/login");
     } catch (err) {
-      const e = err as {
-        response?: { data?: { detail?: unknown } };
-        message?: string;
-      };
-      const detail = e.response?.data?.detail;
-      const msg =
-        typeof detail === "string"
-          ? detail
-          : detail
-            ? JSON.stringify(detail)
-            : e.message || "Setup failed. Please try again.";
-      setError(msg);
+      setError(explainSetupError(err));
     } finally {
       setSubmitting(false);
     }
@@ -437,16 +431,21 @@ const SetupPage: React.FC = () => {
                   }
                 />
               </Field>
-              <Field label="Admin password" hint="Minimum 8 characters.">
+              <Field
+                label="Admin password"
+                hint={`${MIN_PASSWORD_LEN}–${MAX_PASSWORD_LEN} characters, at least two character types.`}
+              >
                 <input
                   className="sccap-input"
                   type="password"
                   autoComplete="new-password"
+                  maxLength={MAX_PASSWORD_LEN}
                   value={form.admin_password}
                   onChange={(e) =>
                     setForm({ ...form, admin_password: e.target.value })
                   }
                 />
+                <PasswordRequirements value={form.admin_password} />
               </Field>
             </>
           )}
@@ -690,6 +689,67 @@ const StepsHeader: React.FC<{ current: number }> = ({ current }) => (
     })}
   </div>
 );
+
+// Live policy checklist for the admin password. The server rejects weak
+// passwords with a 422; surfacing the rules up front keeps that from looking
+// like a silent failure on submit.
+const PasswordRequirements: React.FC<{ value: string }> = ({ value }) => (
+  <ul
+    data-testid="password-requirements"
+    style={{ listStyle: "none", margin: "2px 0 0", padding: 0, display: "grid", gap: 3 }}
+  >
+    {passwordRequirements(value).map((req) => (
+      <li
+        key={req.label}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 11.5,
+          color: req.met ? "var(--success)" : "var(--fg-muted)",
+        }}
+      >
+        <Icon.Check
+          size={11}
+          style={{ opacity: req.met ? 1 : 0.35 }}
+        />
+        <span>{req.label}</span>
+      </li>
+    ))}
+  </ul>
+);
+
+// FastAPI returns validation failures as `detail: [{loc, msg, type}, ...]`.
+// Rendering that array raw hides the reason behind a JSON blob, so collapse it
+// into one readable sentence.
+function explainSetupError(err: unknown): string {
+  const e = err as {
+    response?: { data?: { detail?: unknown } };
+    message?: string;
+  };
+  const detail = e.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => {
+      const entry = item as { loc?: unknown; msg?: unknown } | null;
+      const loc = Array.isArray(entry?.loc)
+        ? entry.loc.filter((part) => part !== "body").join(".")
+        : "";
+      const msg =
+        typeof entry?.msg === "string" ? entry.msg : "Invalid value.";
+      const cleaned = msg.replace(/^Value error,\s*/i, "");
+      return loc ? `${loc}: ${cleaned}` : cleaned;
+    });
+    const unique = [...new Set(messages)].filter(Boolean);
+    if (unique.length > 0) return unique.join(" ");
+  }
+  if (detail && typeof detail === "object") {
+    const obj = detail as { code?: string; reason?: string; message?: string };
+    if (obj.message) return obj.message;
+    if (obj.reason) return `${obj.code ?? "Error"}: ${obj.reason}`;
+  }
+  return e.message || "Setup failed. Please try again.";
+}
 
 const Field: React.FC<{
   label: string;
