@@ -650,6 +650,13 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?GRAFANA_ADMIN_USER must be set}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
       - GF_AUTH_ANONYMOUS_ENABLED=false
+      # Served under https://<domain>/grafana/ by the UI container's nginx so
+      # operators do not need a second hostname or direct port 3000 access.
+      # setup.sh writes both values; the defaults keep a bare `docker compose
+      # up` working on its own.
+      - GF_SERVER_DOMAIN=${SSL_DOMAIN:-localhost}
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000/}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=${GRAFANA_SERVE_FROM_SUB_PATH:-false}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning

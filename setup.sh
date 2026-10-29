@@ -468,6 +468,24 @@ _sccap_teardown() {
     return 0
 }
 
+_sccap_tune_tcp_congestion() {
+    # Measured on a Hetzner VM serving a browser ~1s RTT away: cubic collapsed
+    # to ~9 KB/s on /grafana's multi-megabyte assets, which read as "the page
+    # never loads". BBR holds the window open on lossy paths. Best effort and
+    # host-wide, so it is skipped wherever the kernel cannot provide it.
+    [ "$(uname -s)" = "Linux" ] || return 0
+    if ! sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
+        _sccap_with_root modprobe tcp_bbr >/dev/null 2>&1 || return 0
+    fi
+    if sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null | grep -qw bbr; then
+        _sccap_with_root sysctl -w net.ipv4.tcp_congestion_control=bbr >/dev/null 2>&1 || true
+        printf '%s\n' 'net.ipv4.tcp_congestion_control=bbr' \
+            | _sccap_with_root tee /etc/sysctl.d/99-sccap-network.conf >/dev/null 2>&1 || true
+        echo "[+] TCP congestion control: BBR (persisted in /etc/sysctl.d/99-sccap-network.conf)."
+    fi
+    return 0
+}
+
 _sccap_fix_ownership() {
     # setup.sh runs as root (directly or via sudo) while the operator and the
     # containers do not. Files created here therefore end up root-owned and the
@@ -616,6 +634,7 @@ fi
 
 # Hand config state back to the operating user before we rewrite it.
 _sccap_fix_ownership
+_sccap_tune_tcp_congestion
 
 # Resume support: if a previous run stopped at the build/migrate step, offer to
 # skip re-configuring and retry that step. A reinstall always skips the
@@ -1160,6 +1179,38 @@ fi
 
 fi  # resume: skip configuration prompts
 
+# ----------------------------------------------------------------------
+# Grafana URL. The log stack is published under /grafana/ on the application
+# host (see secure-code-ui/nginx-{http,https}.conf), so operators never need a
+# second hostname or direct access to port 3000. Computed outside the interview
+# so resuming an older install still picks it up.
+# ----------------------------------------------------------------------
+case ",$(grep -m1 '^COMPOSE_PROFILES=' .env 2>/dev/null | cut -d= -f2-)," in
+    *,log_stack,*) _LOG_STACK_ON=1 ;;
+    *) _LOG_STACK_ON="${_LOG_STACK_ON:-0}" ;;
+esac
+if [ "$_LOG_STACK_ON" = "1" ]; then
+    if [ "$SSL_ENABLED" = "true" ] && [ -n "$SSL_DOMAIN" ]; then
+        _GRAFANA_ROOT_URL="https://$SSL_DOMAIN/grafana/"
+    else
+        _GRAFANA_ROOT_URL="http://${SSL_DOMAIN:-localhost}/grafana/"
+    fi
+    _GRAFANA_SUB_PATH="true"
+else
+    _GRAFANA_ROOT_URL="http://localhost:3000/"
+    _GRAFANA_SUB_PATH="false"
+fi
+for _kv in "GRAFANA_ROOT_URL=$_GRAFANA_ROOT_URL" "GRAFANA_SERVE_FROM_SUB_PATH=$_GRAFANA_SUB_PATH"; do
+    _key="${_kv%%=*}"
+    _val="${_kv#*=}"
+    if grep -q "^${_key}=" .env; then
+        sed -i.bak "s|^${_key}=.*$|${_key}=${_val}|" .env
+    else
+        echo "${_key}=${_val}" >> .env
+    fi
+done
+rm -f .env.bak
+
 # 3. Docker Build and Launch
 _sccap_stage build
 echo "[*] Launching Docker containers (this may take a few minutes)..."
@@ -1250,14 +1301,11 @@ else
 fi
 echo ""
 echo "Access Grafana at:"
-if [ "$DEPLOYMENT_TYPE" = "local" ]; then
-    echo "   -> http://localhost:3000"
+if [ "$_LOG_STACK_ON" = "1" ]; then
+    echo "   -> ${_GRAFANA_ROOT_URL:-http://localhost:3000/}   (proxied by the UI container)"
+    echo "   -> http://localhost:3000 (loopback only; use SSH -L 3000:127.0.0.1:3000 as a fallback)"
 else
-    if [ "$SSL_ENABLED" = "true" ]; then
-        echo "   -> https://$SSL_DOMAIN:3000"
-    else
-        echo "   Grafana not exposed publicly. Tunnel via SSH (-L 3000:localhost:3000) to reach the dashboard."
-    fi
+    echo "   Log stack not enabled (COMPOSE_PROFILES has no log_stack); nothing to serve."
 fi
 if [ -n "${_PENTEST_NOTE:-}" ]; then
     echo ""
