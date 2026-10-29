@@ -261,6 +261,307 @@ _sccap_install_own_cert() {
     return 0
 }
 
+_sccap_provision_pentest_secrets() {
+    # The pentesting-* profiles run workers that refuse to start without signing
+    # keys and gateway tokens. The application derives those from SECRET_KEY at
+    # runtime, so the provisioner (run inside the already-built app image, which
+    # ships `cryptography`) writes the matching values into .env plus the tool
+    # worker's result-signing key file. Without this a fresh install leaves
+    # pentest-runner-v3 / pentest-tool-worker / the verification coordinator in
+    # a restart loop.
+    local profiles img
+    profiles="${COMPOSE_PROFILES_VALUE:-$(grep -m1 '^COMPOSE_PROFILES=' .env 2>/dev/null | cut -d= -f2-)}"
+    case ",${profiles}," in
+        *pentesting*) ;;
+        *) return 0 ;;
+    esac
+    img=$(docker compose config --images 2>/dev/null | grep -E -- '-app$' | head -1)
+    [ -n "$img" ] || return 0
+    docker image inspect "$img" >/dev/null 2>&1 || return 0
+    if docker run --rm --user 0 -v "$PWD:/repo" -w /repo --entrypoint python "$img" \
+            /repo/scripts/provision-pentest-compose-secrets.py --env-file /repo/.env; then
+        echo "[+] Pentest worker credentials provisioned."
+    else
+        echo "[!] Pentest credential provisioning failed; the pentest workers may restart."
+    fi
+    # The tool worker rejects a key file it does not own (uid 1001 in compose).
+    _sccap_with_root chown 1001:1001 .secrets/pentest-tool-result-signing.key 2>/dev/null || true
+}
+
+_sccap_ensure_evidence_bucket() {
+    # Evidence writes call ensure_bucket() lazily, but the retention and orphan
+    # sweepers list the bucket at startup. On a fresh install the bucket does not
+    # exist yet, so those sweepers log NoSuchBucket errors every tick until the
+    # first evidence write happens to create it. Create it once, through the
+    # application's own store logic (which also enables versioning).
+    local enabled
+    enabled=$(grep -m1 '^EVIDENCE_STORE_ENABLED=' .env 2>/dev/null | cut -d= -f2-)
+    [ "$enabled" = "true" ] || return 0
+    if docker compose exec -T app python -c "import asyncio; from app.infrastructure.evidence.object_store import EvidenceObjectStore; asyncio.run(EvidenceObjectStore().ensure_bucket())" >/dev/null 2>&1; then
+        echo "[+] Evidence bucket ready."
+    else
+        echo "[!] Could not create the evidence bucket; evidence writes will retry at runtime."
+    fi
+}
+
+_sccap_align_certbot_ownership() {
+    # The UI container runs as a non-root user (nginx-app) and certbot writes
+    # into the ./certbot/conf bind mount. Bind mounts keep host ownership, so a
+    # root-owned tree makes Let's Encrypt issuance and renewal die with
+    # EACCES on /etc/letsencrypt/.certbot.lock. Once the UI image exists, hand
+    # the tree to that image's user. Best-effort: a failure here is reported by
+    # the UI entrypoint, not silently swallowed.
+    local img uid gid
+    img=$(docker compose config --images 2>/dev/null | grep -E -- '-ui$' | head -1)
+    [ -n "$img" ] || return 0
+    docker image inspect "$img" >/dev/null 2>&1 || return 0
+    uid=$(docker run --rm --entrypoint sh "$img" -c 'id -u' 2>/dev/null) || return 0
+    gid=$(docker run --rm --entrypoint sh "$img" -c 'id -g' 2>/dev/null) || return 0
+    case "$uid" in ''|*[!0-9]*) return 0 ;; esac
+    case "$gid" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$uid" = "0" ] && return 0
+    mkdir -p certbot/conf certbot/www
+    _sccap_with_root chown -R "$uid:$gid" certbot/conf certbot/www || true
+    echo "[+] certbot state owned by the UI container user ($uid:$gid)."
+    return 0
+}
+
+
+# ----------------------------------------------------------------------
+# Operator flags, teardown (uninstall/purge/factory reset) and ownership.
+# ----------------------------------------------------------------------
+_SCCAP_MODE="install"        # install | uninstall
+_SCCAP_PURGE=0
+_SCCAP_FACTORY_RESET=0
+_SCCAP_ASSUME_YES=0
+_SCCAP_REINSTALL=0
+_PURGE_BACKUP_DIR="${SCCAP_BACKUP_DIR:-.purge-backups}"
+
+_sccap_usage() {
+    cat <<'USAGE'
+SCCAP setup
+
+  ./setup.sh                     Install, upgrade or re-run the setup wizard.
+  ./setup.sh --uninstall         Stop and remove the stack. Volumes, data,
+                                 .env, keys and certificates are kept.
+  ./setup.sh --purge             Also drop data volumes and remove the images
+                                 built here. Keeps .env/.secrets/certbot.
+                                 A pg_dumpall backup is written first.
+  ./setup.sh --factory-reset     Purge plus delete .env, .secrets and certbot
+                                 state. This is a clean install.
+  -y, --yes                      Skip the interactive confirmations.
+  -h, --help                     Show this help.
+
+An interactive run on an existing installation offers the same choices.
+USAGE
+}
+
+_sccap_parse_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --uninstall)     _SCCAP_MODE="uninstall" ;;
+            --purge)         _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1 ;;
+            --factory-reset) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1; _SCCAP_FACTORY_RESET=1 ;;
+            -y|--yes)        _SCCAP_ASSUME_YES=1 ;;
+            -h|--help)       _sccap_usage; exit 0 ;;
+            *)
+                echo "[!] Unknown option: $1" >&2
+                _sccap_usage >&2
+                exit 2
+                ;;
+        esac
+        shift
+    done
+}
+
+_sccap_confirm() {
+    # $1 = question, $2 = exact phrase the operator must type.
+    local answer
+    if [ "$_SCCAP_ASSUME_YES" = "1" ]; then
+        echo "[+] $1 (auto-confirmed by --yes)"
+        return 0
+    fi
+    read -r -p "$1 Type '$2' to confirm: " answer
+    [ "$answer" = "$2" ]
+}
+
+_sccap_project_images() {
+    # Only the images this checkout builds; never postgres/rabbitmq/etc.
+    local prefix
+    prefix="$(basename "$PWD")"
+    docker compose config --images 2>/dev/null | sort -u | while read -r img; do
+        [ -n "$img" ] || continue
+        case "$img" in
+            "$prefix"*) printf '%s\n' "$img" ;;
+        esac
+    done
+}
+
+_sccap_backup_database() {
+    # Best effort: an operator purging volumes should still be able to roll back.
+    local db_id dump
+    db_id=$(docker compose ps -q db 2>/dev/null || true)
+    [ -n "$db_id" ] || { echo "    No running database container; skipping backup."; return 0; }
+    mkdir -p "$_PURGE_BACKUP_DIR" 2>/dev/null || true
+    # The dump contains every row and role in the deployment: keep it private.
+    chmod 700 "$_PURGE_BACKUP_DIR" 2>/dev/null || true
+    dump="$_PURGE_BACKUP_DIR/pre-purge-$(date -u +%Y%m%dT%H%M%SZ).sql"
+    if docker compose exec -T db sh -c 'pg_dumpall -U "$POSTGRES_USER"' >"$dump" 2>/dev/null; then
+        chmod 600 "$dump" 2>/dev/null || true
+        echo "    Database backup: $dump"
+    else
+        rm -f "$dump"
+        echo "    [!] Could not dump the database; continuing anyway."
+    fi
+    return 0
+}
+
+_sccap_teardown() {
+    # $1 = uninstall | purge | factory-reset
+    local level="$1" img
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "[!] docker is not installed; nothing to remove with compose."
+    elif [ ! -f .env ]; then
+        echo "[!] No .env in $PWD; compose state cannot be addressed from here."
+    else
+        echo "[*] Stopping the stack..."
+        docker compose down --remove-orphans || true
+        if [ "$level" != "uninstall" ]; then
+            echo "[*] Backing up the database before removing volumes..."
+            _sccap_backup_database
+            echo "[*] Removing data volumes..."
+            docker compose down --volumes --remove-orphans || true
+            echo "[*] Removing images built from this checkout..."
+            for img in $(_sccap_project_images); do
+                docker image rm -f "$img" >/dev/null 2>&1 || true
+            done
+        fi
+    fi
+
+    if [ "$level" = "factory-reset" ]; then
+        echo "[*] Removing configuration and key material..."
+        rm -f .env .env.lock "$_SETUP_STAGE_FILE"
+        rm -rf .secrets
+        rm -rf certbot
+    fi
+
+    echo ""
+    echo "[+] Teardown complete ($level)."
+    case "$level" in
+        uninstall)
+            echo "    Kept: data volumes, .env, .secrets/, certbot/"
+            echo "    Re-run ./setup.sh to bring the stack back up."
+            ;;
+        purge)
+            echo "    Kept: .env, .secrets/, certbot/ (so a reinstall reuses them)"
+            echo "    Removed: data volumes and project images"
+            if [ -d "$_PURGE_BACKUP_DIR" ]; then
+                echo "    Database backups: $_PURGE_BACKUP_DIR/"
+            fi
+            ;;
+        factory-reset)
+            echo "    Removed: stack, data volumes, images, .env, .secrets/, certbot/"
+            echo "    ./setup.sh now performs a clean install (fresh certificate)."
+            ;;
+    esac
+    return 0
+}
+
+_sccap_fix_ownership() {
+    # setup.sh runs as root (directly or via sudo) while the operator and the
+    # containers do not. Files created here therefore end up root-owned and the
+    # operator cannot read .env or edit the checkout afterwards. Hand back only
+    # what the human needs; container-writable paths keep their container UID
+    # (certbot -> UI image user, pentest signing key -> tool worker user).
+    local operator="${SUDO_USER:-}" repo_group
+    [ "$(id -u)" -eq 0 ] || return 0
+
+    if [ -z "$operator" ] || [ "$operator" = "root" ]; then
+        # Running straight as root: nothing to hand back, but keep the state
+        # private and make sure the container-writable paths exist.
+        chmod 600 .env 2>/dev/null || true
+        mkdir -p .secrets 2>/dev/null || true
+        chmod 700 .secrets 2>/dev/null || true
+        return 0
+    fi
+
+    repo_group=$(id -gn "$operator" 2>/dev/null || echo "$operator")
+    # .purge-backups is written by root during a --purge teardown; hand it back
+    # as well so the operator can read the dump they were told about.
+    for path in .env .env.lock "$_SETUP_STAGE_FILE" "$_PURGE_BACKUP_DIR"; do
+        [ -e "$path" ] || continue
+        chown "$operator:$repo_group" "$path" 2>/dev/null || true
+    done
+    chmod 600 .env 2>/dev/null || true
+
+    # .secrets stays private to the operator; the key file inside belongs to the
+    # tool worker (uid 1001) so the supervisor accepts it.
+    if [ -d .secrets ]; then
+        chown "$operator:$repo_group" .secrets 2>/dev/null || true
+        chmod 700 .secrets 2>/dev/null || true
+    fi
+
+    # The checkout itself was likely cloned as root; a non-root operator cannot
+    # even `git pull`. Report it instead of silently taking over the tree.
+    if [ -d .git ] && [ "$(stat -c '%u' .git 2>/dev/null || echo 0)" -eq 0 ]; then
+        echo "[!] This checkout is owned by root; '$operator' cannot update it."
+        echo "    Fix with: sudo chown -R $operator:$repo_group $(pwd)"
+    fi
+    return 0
+}
+
+_sccap_existing_install_menu() {
+    # Offer continue/reinstall/uninstall/purge/factory-reset when there is
+    # already an installation in this directory.
+    local containers choice
+    [ -f .env ] || return 0
+    containers=$(docker compose ps -q 2>/dev/null | wc -l | tr -d ' ')
+    [ "${containers:-0}" -gt 0 ] || return 0
+
+    echo ""
+    echo "[*] Existing installation detected ($containers container(s) in $PWD)."
+    echo "    1) Continue      keep data and configuration, upgrade/re-run setup (default)"
+    echo "    2) Reinstall     stop the stack, keep data, rebuild and start again"
+    echo "    3) Uninstall     stop and remove the stack, keep data and configuration"
+    echo "    4) Purge         remove the stack AND data volumes (keeps .env/keys/certs)"
+    echo "    5) Factory reset purge AND delete .env, keys and certificates"
+    read -r -p "    Your choice (1/2/3/4/5) [1]: " choice
+    case "${choice:-1}" in
+        1) : ;;
+        2) _SCCAP_REINSTALL=1 ;;
+        3) _SCCAP_MODE="uninstall" ;;
+        4) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1 ;;
+        5) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1; _SCCAP_FACTORY_RESET=1 ;;
+        *) echo "    Unrecognised choice; continuing with the existing installation." ;;
+    esac
+    echo ""
+}
+
+_sccap_run_teardown_mode() {
+    local level="uninstall"
+    if [ "$_SCCAP_FACTORY_RESET" = "1" ]; then
+        level="factory-reset"
+    elif [ "$_SCCAP_PURGE" = "1" ]; then
+        level="purge"
+    fi
+    case "$level" in
+        uninstall)
+            _sccap_confirm "This stops and removes the SCCAP containers. Data volumes, .env and certificates are kept." "uninstall" || { echo "Aborted."; exit 1; }
+            ;;
+        purge)
+            _sccap_confirm "This stops the stack, removes DATA VOLUMES and deletes the images built here. A database backup is taken first." "purge" || { echo "Aborted."; exit 1; }
+            ;;
+        factory-reset)
+            _sccap_confirm "This removes the stack, ALL data volumes, .env, signing keys and certificates. This cannot be undone." "factory-reset" || { echo "Aborted."; exit 1; }
+            ;;
+    esac
+    _sccap_teardown "$level"
+    rm -f "$_SETUP_STAGE_FILE" 2>/dev/null || true
+    exit 0
+}
+
+_sccap_parse_args "$@"
 
 echo "=================================================="
 echo "   SCCAP - Setup Wizard"
@@ -295,8 +596,30 @@ _sccap_ensure_docker || exit 1
 echo "[+] Prerequisites met."
 echo ""
 
+# Non-interactive teardown (--uninstall/--purge/--factory-reset) needs docker
+# but nothing else from the install flow.
+if [ "$_SCCAP_MODE" = "uninstall" ]; then
+    _sccap_run_teardown_mode
+fi
+
+# Interactive alternative: detect an existing installation and let the operator
+# continue, reinstall, uninstall, purge or factory-reset.
+_sccap_existing_install_menu
+if [ "$_SCCAP_MODE" = "uninstall" ]; then
+    _sccap_run_teardown_mode
+fi
+if [ "$_SCCAP_REINSTALL" = "1" ]; then
+    echo "[*] Reinstall requested: stopping the stack (data volumes kept)..."
+    docker compose down --remove-orphans || true
+    echo ""
+fi
+
+# Hand config state back to the operating user before we rewrite it.
+_sccap_fix_ownership
+
 # Resume support: if a previous run stopped at the build/migrate step, offer to
-# skip re-configuring and retry that step.
+# skip re-configuring and retry that step. A reinstall always skips the
+# questionnaire: the answer file on disk is already the desired configuration.
 _RESUME=0
 if [ -f "$_SETUP_STAGE_FILE" ]; then
     _prev_stage=$(cat "$_SETUP_STAGE_FILE" 2>/dev/null || true)
@@ -307,6 +630,9 @@ if [ -f "$_SETUP_STAGE_FILE" ]; then
             case "$_resume_choice" in [Yy]*) _RESUME=1 ;; esac
             ;;
     esac
+fi
+if [ "$_SCCAP_REINSTALL" = "1" ] && [ -f .env ]; then
+    _RESUME=1
 fi
 _sccap_stage config
 
@@ -339,7 +665,15 @@ fi
 # 2. Environment Setup
 echo "[*] Setting up environment configuration..."
 
-exec 9>>.env.lock; flock -n 9 || { echo "[!] Another setup.sh is running; exiting."; exit 1; }
+# Serialise concurrent setup runs. `flock` is util-linux and absent on macOS
+# and some minimal images; degrade to a warning instead of refusing to install.
+if command -v flock >/dev/null 2>&1; then
+    exec 9>>.env.lock
+    flock -n 9 || { echo "[!] Another setup.sh is running; exiting."; exit 1; }
+else
+    echo "[!] flock not available; skipping the concurrent-setup lock."
+    exec 9>>.env.lock
+fi
 if [ ! -f .env ]; then
     echo " -> Copying .env.example to .env..."
     cp .env.example .env
@@ -831,7 +1165,10 @@ _sccap_stage build
 echo "[*] Launching Docker containers (this may take a few minutes)..."
 # We need to ensure the VITE variables are available to the build context
 # Sourcing .env is one way, but docker compose reads .env automatically
-docker compose up -d --build
+docker compose build
+_sccap_align_certbot_ownership
+_sccap_provision_pentest_secrets
+docker compose up -d
 
 echo "[*] Waiting for database to be healthy..."
 # Simple wait loop for db container
@@ -853,7 +1190,26 @@ echo ""
 # 4. Database Migrations & Initial Data
 _sccap_stage migrate
 echo "[*] Applying database migrations..."
-docker compose exec app alembic upgrade head
+# The API image runs `alembic upgrade head` from its entrypoint: exactly one
+# API-owned process migrates. Racing a second Alembic process here is what a
+# fresh install hits -- both try to create alembic_version and one dies with
+# `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`,
+# aborting setup midway. Wait for the API owned migration to reach head and
+# only take over if it never gets there.
+_migrated=0
+for _ in $(seq 1 100); do
+    if docker compose exec -T app alembic current --check-heads >/dev/null 2>&1; then
+        _migrated=1
+        break
+    fi
+    sleep 3
+done
+if [ "$_migrated" != "1" ]; then
+    echo "[!] API-owned migrations did not reach head; running them explicitly..."
+    docker compose exec -T app alembic upgrade head
+fi
+
+_sccap_ensure_evidence_bucket
 
 echo "[+] Database initialized. Proceed to the Web UI to create your Admin Superuser."
 echo ""
@@ -873,6 +1229,10 @@ echo "   Setup Complete!"
 echo "=================================================="
 echo ""
 _sccap_stage done
+# Final ownership pass: everything setup.sh just wrote belongs to the operator
+# (config) or the container UIDs (certbot state, tool-worker key).
+_sccap_fix_ownership
+_sccap_align_certbot_ownership
 echo "Access the application at:"
 if [ "$DEPLOYMENT_TYPE" = "local" ]; then
     echo "   -> http://localhost (Production build via Docker)"
