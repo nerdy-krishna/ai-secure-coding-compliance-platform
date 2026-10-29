@@ -23,6 +23,7 @@ from app.shared.lib.llm_usage import (
     normalize_request_usage,
     price_normalized_usage,
 )
+from app.shared.lib.model_pricing import resolve_model_prices
 
 
 def _run_usage(run_result: Any) -> Any:
@@ -133,6 +134,49 @@ def _catalog_snapshot(response: ModelResponse) -> PriceSnapshot | None:
     )
 
 
+def _resolved_snapshot(config: Any) -> PriceSnapshot | None:
+    """Price the run from the shared resolver when no override/catalogue hit.
+
+    ``response.cost()`` resolves by the provider-side model name; names the
+    bundled catalogues do not know (e.g. ``deepseek-flash``) raise LookupError
+    and the run would otherwise be recorded as free.
+    """
+    prices = resolve_model_prices(config)
+    if prices is None:
+        return None
+    return PriceSnapshot(
+        source=f"{prices.source}:{prices.matched_model or 'admin'}",
+        effective_at=_effective_at(config),
+        currency="USD",
+        rates={
+            "uncached_input": Rate(
+                Decimal(str(prices.input_per_token)) * Decimal(1_000_000),
+                "million_tokens",
+            ),
+            "image_input": Rate(
+                Decimal(str(prices.input_per_token)) * Decimal(1_000_000),
+                "million_tokens",
+            ),
+            "non_reasoning_output": Rate(
+                Decimal(str(prices.output_per_token)) * Decimal(1_000_000),
+                "million_tokens",
+            ),
+            "reasoning_output": Rate(
+                Decimal(str(prices.output_per_token)) * Decimal(1_000_000),
+                "million_tokens",
+            ),
+            "image_output": Rate(
+                Decimal(str(prices.output_per_token)) * Decimal(1_000_000),
+                "million_tokens",
+            ),
+        },
+        catalog_metadata={
+            "resolved_model": prices.matched_model,
+            "aliased_from": prices.aliased_from,
+        },
+    )
+
+
 def _price_snapshot(
     response: ModelResponse,
     config: Any,
@@ -141,7 +185,9 @@ def _price_snapshot(
     if effective_override is not None:
         return effective_override
     admin = _admin_snapshot(config)
-    return admin if admin is not None else _catalog_snapshot(response)
+    if admin is not None:
+        return admin
+    return _catalog_snapshot(response) or _resolved_snapshot(config)
 
 
 def build_request_writes(

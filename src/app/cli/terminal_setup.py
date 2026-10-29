@@ -218,6 +218,17 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "[+] Platform setup completed: superuser, LLM configuration and feature flags are in place."
     )
+    # Surface how the model was priced: an unpriced model silently produces
+    # $0.0000 estimates for every scan, which reads as a broken cost view.
+    try:
+        note = (json.loads(body) or {}).get("pricing") or ""
+    except (json.JSONDecodeError, AttributeError):
+        note = ""
+    if note:
+        if "no catalogue price" in note:
+            print(f"[!] {note}", file=sys.stderr)
+        else:
+            print(f"[+] LLM pricing: {note}")
     return 0
 
 

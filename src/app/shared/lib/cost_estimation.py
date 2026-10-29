@@ -24,6 +24,7 @@ import litellm
 from app.infrastructure.database import models as db_models
 from app.shared.lib.llm_estimation import EstimateCalibration, calibrate_estimate
 from app.shared.lib.llm_usage import PriceSnapshot
+from app.shared.lib.model_pricing import resolve_model_prices
 
 logger = logging.getLogger(__name__)
 
@@ -183,28 +184,23 @@ def _compute_cost(
                 _estimate(prompt_tokens, input_rate) + request_cost,
                 _estimate(completion_tokens, output_rate),
             )
-    override = _admin_override(config)
-    if override is not None:
-        in_rate, out_rate = override
-        return prompt_tokens * in_rate, completion_tokens * out_rate
-
-    model = _first_working_model_key(config)
-    try:
-        prompt_cost, completion_cost = litellm.cost_per_token(
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-        )
-        return float(prompt_cost), float(completion_cost)
-    except Exception as e:
+    # One resolver for override, catalogue entry and price alias. Returning a
+    # silent zero here is what made every estimate (and every completed scan)
+    # read $0.0000 for models the bundled price map does not know; callers now
+    # also receive ``pricing_status`` so the UI can say "unavailable".
+    prices = resolve_model_prices(config)
+    if prices is None:
         logger.warning(
-            "LiteLLM cost_per_token failed for model=%s (provider=%s): %s. "
-            "Returning zero cost (safe default).",
-            model,
+            "Model pricing unavailable for model=%s (provider=%s); "
+            "estimates report pricing_status=unknown.",
+            config.model_name,
             config.provider,
-            e,
         )
         return 0.0, 0.0
+    return (
+        prompt_tokens * prices.input_per_token,
+        completion_tokens * prices.output_per_token,
+    )
 
 
 def estimate_cost_for_prompt(
@@ -315,7 +311,19 @@ def estimate_cost_for_prompt(
         "estimate_price_source": (
             price_snapshot.source
             if price_snapshot is not None
-            else "legacy_config_or_litellm"
+            else (
+                prices.source if (prices := resolve_model_prices(config)) else "unknown"
+            )
+        ),
+        # "unknown" means no override and no catalogue price: the amounts above
+        # are zero because pricing is missing, not because the scan is free.
+        "pricing_status": "unknown"
+        if (price_snapshot is None and resolve_model_prices(config) is None)
+        else "resolved",
+        "pricing_model": (
+            (prices.matched_model or config.model_name)
+            if (prices := resolve_model_prices(config)) is not None
+            else config.model_name
         ),
         "estimate_sample_count": calibration.sample_count,
         "estimate_assumptions": assumptions,
