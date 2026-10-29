@@ -429,6 +429,45 @@ _sccap_platform_bootstrapped() {
     docker compose exec -T app python -m app.cli.terminal_setup --check >/dev/null 2>&1
 }
 
+_sccap_is_ip() {
+    printf '%s' "$1" | grep -qE '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'
+}
+
+_sccap_prepare_tls_material() {
+    # Certificate material must exist whenever SSL_ENABLED=true, on a fresh run
+    # *and* on a resumed one. It used to be created only in the configuration
+    # branch, so resuming after a failure (or after --factory-reset deleted
+    # ./certbot) left SSL_ENABLED=true with no certificate; the UI container
+    # then tried certbot, which cannot issue for a private IP, and the browser
+    # saw "connection closed".
+    local enabled mode domain
+    enabled=${SSL_ENABLED:-$(grep -m1 '^SSL_ENABLED=' .env 2>/dev/null | cut -d= -f2-)}
+    mode=${SSL_MODE:-$(grep -m1 '^SSL_MODE=' .env 2>/dev/null | cut -d= -f2-)}
+    domain=${SSL_DOMAIN:-$(grep -m1 '^SSL_DOMAIN=' .env 2>/dev/null | cut -d= -f2-)}
+    [ "$enabled" = "true" ] || return 0
+    [ -n "$domain" ] || return 0
+    case "$mode" in
+        selfsigned)
+            _sccap_generate_selfsigned "$domain" || return 1
+            ;;
+        letsencrypt)
+            if _sccap_is_ip "$domain"; then
+                echo "[!] Let's Encrypt cannot issue a certificate for the IP $domain."
+                echo "    Re-run ./setup.sh and pick 'Self-signed', or supply a public DNS name."
+                return 1
+            fi
+            ;;
+        own)
+            if [ ! -f "certbot/conf/live/$domain/fullchain.pem" ]; then
+                echo "[!] SSL mode is 'own certificate' but no certificate is installed for $domain."
+                echo "    Re-run ./setup.sh and supply the fullchain and key files again."
+                return 1
+            fi
+            ;;
+    esac
+    return 0
+}
+
 _sccap_ask_first_run() {
     # Only asked on a fresh configuration run (skipped when resuming/upgrading).
     echo ""
@@ -594,6 +633,9 @@ SCCAP setup
                                  A pg_dumpall backup is written first.
   ./setup.sh --factory-reset     Purge plus delete .env, .secrets and certbot
                                  state. This is a clean install.
+  ./setup.sh --repair-tls        Re-create the TLS material from .env and exit.
+                                 Use when the UI container reports
+                                 tls_cert_missing / "connection closed".
   -y, --yes                      Skip the interactive confirmations.
   -h, --help                     Show this help.
 
@@ -607,6 +649,7 @@ _sccap_parse_args() {
             --uninstall)     _SCCAP_MODE="uninstall" ;;
             --purge)         _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1 ;;
             --factory-reset) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1; _SCCAP_FACTORY_RESET=1 ;;
+            --repair-tls)    _SCCAP_MODE="repair-tls" ;;
             -y|--yes)        _SCCAP_ASSUME_YES=1 ;;
             -h|--help)       _sccap_usage; exit 0 ;;
             *)
@@ -910,6 +953,28 @@ _sccap_existing_install_menu() {
     echo ""
 }
 
+_sccap_run_repair_tls() {
+    # Repair path for an install whose TLS material is missing or was never
+    # created (a resumed run used to skip the certificate step entirely).
+    if [ ! -f .env ]; then
+        echo "[!] No .env here; run ./setup.sh from the install directory."
+        return 1
+    fi
+    if ! _sccap_prepare_tls_material; then
+        return 1
+    fi
+    local domain
+    domain=$(grep -m1 '^SSL_DOMAIN=' .env | cut -d= -f2-)
+    if [ -f "certbot/conf/live/${domain}/fullchain.pem" ]; then
+        echo "[+] Certificate present for ${domain}."
+    else
+        echo "[!] No certificate was created; check SSL_ENABLED/SSL_MODE/SSL_DOMAIN in .env."
+        return 1
+    fi
+    echo "    Apply it with: docker compose up -d --no-build --force-recreate ui"
+    return 0
+}
+
 _sccap_run_teardown_mode() {
     local level="uninstall"
     if [ "$_SCCAP_FACTORY_RESET" = "1" ]; then
@@ -977,6 +1042,11 @@ _sccap_assert_env_readable || exit 1
 
 # Non-interactive teardown (--uninstall/--purge/--factory-reset) needs docker
 # but nothing else from the install flow.
+if [ "$_SCCAP_MODE" = "repair-tls" ]; then
+    _sccap_run_repair_tls || exit 1
+    exit 0
+fi
+
 if [ "$_SCCAP_MODE" = "uninstall" ]; then
     _sccap_run_teardown_mode
 fi
@@ -1283,6 +1353,11 @@ while true; do
             elif ! [[ "$choice" =~ ^[A-Za-z0-9]([A-Za-z0-9.\-]*[A-Za-z0-9])?$ ]] && \
                  ! [[ "$choice" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
                 echo "Invalid domain or IP. Use only letters, digits, dots, and hyphens."
+            elif [ "$SSL_MODE" = "letsencrypt" ] && _sccap_is_ip "$choice"; then
+                echo "  [!] Let's Encrypt cannot issue certificates for IP addresses"
+                echo "      (a private IP like $choice will always fail)."
+                echo "      Choose Self-signed for an IP, or enter a public DNS name."
+                STATE=2
             else
                 SSL_DOMAIN="$choice"
                 STATE=4
@@ -1591,6 +1666,9 @@ for _kv in "GRAFANA_ROOT_URL=$_GRAFANA_ROOT_URL" "GRAFANA_SERVE_FROM_SUB_PATH=$_
     fi
 done
 _sccap_write_grafana_credentials
+
+# Certificate material for this run (fresh or resumed) before anything starts.
+_sccap_prepare_tls_material || exit 1
 
 # 3. Docker Build and Launch
 _sccap_stage build

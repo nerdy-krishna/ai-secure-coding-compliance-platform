@@ -109,6 +109,23 @@ mkdir -p /var/log/letsencrypt /var/lib/letsencrypt 2>/dev/null || true
 (
 flock -x 200 2>/dev/null || true
 if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+    # Only Let's Encrypt should ever reach certbot. A self-signed install (or an
+    # IP address, which ACME cannot issue for) that has no certificate in the
+    # volume is a host-side setup problem: say exactly that instead of running a
+    # request that is guaranteed to fail and leaving the operator with
+    # "connection closed" in the browser.
+    case "$DOMAIN" in
+        *[!0-9.]*|'') is_ip=0 ;;
+        *) is_ip=1 ;;
+    esac
+    if [ "${SSL_MODE:-}" = "selfsigned" ] || [ "$is_ip" = "1" ]; then
+        echo "ERROR security_event=tls_cert_missing: no certificate for $DOMAIN in /etc/letsencrypt."
+        echo "ssl_mode=${SSL_MODE:-unknown} ssl_domain=$DOMAIN"
+        echo "Fix on the host: re-run ./setup.sh (self-signed mode regenerates it),"
+        echo "or use a public DNS name with Let's Encrypt, or set SSL_DEV_INSECURE=true"
+        echo "to serve HTTP only."
+        exit 1
+    fi
     echo "No SSL certificate found. Bootstrapping HTTP-only configuration to answer ACME challenges..."
     render_http_conf
 
@@ -141,6 +158,16 @@ else
     render_https_conf
 fi
 ) 200>/tmp/sccap-cert.lock
+# The bootstrap ran in a subshell so it could hold the lock file on fd 200, and
+# a `exit 1` inside it only ended the subshell: nginx then started with the
+# HTTP-only fallback config while the browser was pointed at https:// — which
+# surfaces as "connection closed" with nothing listening on 443. Propagate the
+# failure so a container without a usable certificate stops loudly.
+cert_status=$?
+if [ "$cert_status" -ne 0 ]; then
+    echo "ERROR security_event=tls_bootstrap_failed: exiting without a TLS listener."
+    exit "$cert_status"
+fi
 
 # V02.3.2 / V13.1.3: bounded failure counter with backoff in the renewal loop.
 # V15.4.3: flock -n so concurrent replicas skip rather than racing on certbot renew.

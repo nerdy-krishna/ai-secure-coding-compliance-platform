@@ -889,6 +889,9 @@ services:
     environment:
       - SSL_ENABLED=${SSL_ENABLED:-false}
       - SSL_DOMAIN=${SSL_DOMAIN:-}
+      # Lets the entrypoint tell "self-signed, certificate should already be in
+      # the volume" from "Let's Encrypt, go obtain one" instead of guessing.
+      - SSL_MODE=${SSL_MODE:-}
       - SSL_DEV_INSECURE=${SSL_DEV_INSECURE:-false}
     ports:
       - "80:80"
