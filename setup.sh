@@ -638,6 +638,49 @@ EOF
     return 0
 }
 
+_sccap_install_pentest_runtimes() {
+    # Make the execution plane able to run an assessment.
+    #
+    # setup.sh used to provision only the pentest *control* plane, so every
+    # engagement reached the tool worker and died with "nmap: not found". The
+    # worker now builds from worker-pentest-local (adapters + nmap/nuclei/ZAP/
+    # Chromium), and this step records that image's real digest as the adapter
+    # qualification, replacing the all-zero placeholders.
+    case ",${COMPOSE_PROFILES_VALUE:-$(grep -m1 '^COMPOSE_PROFILES=' .env 2>/dev/null | cut -d= -f2-)}," in
+        *pentesting*) ;;
+        *) return 0 ;;
+    esac
+
+    local image_id digest short digests
+    image_id=$(docker compose images -q pentest-tool-worker 2>/dev/null | head -1)
+    [ -n "$image_id" ] || image_id=$(docker ps -aq --filter name=sccap_pentest_tool_worker | head -1)
+    [ -n "$image_id" ] || { echo "[!] Pentest execution image not built; skipping qualification."; return 0; }
+    digest=$(docker image inspect --format '{{.Id}}' "$image_id" 2>/dev/null | sed 's/^sha256://')
+    printf '%s' "$digest" | grep -qE '^[0-9a-f]{64}$' \
+        || { echo "[!] Could not read the pentest image digest; skipping."; return 0; }
+    short=$(printf '%s' "$digest" | cut -c1-12)
+
+    # One image hosts every adapter, so each adapter maps to the same digest.
+    digests=$(printf '{"authorization_readonly.v1":"%s","playwright_observe.v1":"%s","zap_passive.v1":"%s","nuclei_observe.v1":"%s","nmap_connect.v1":"%s","graphql_observe.v1":"%s","realtime_observe.v1":"%s"}' \
+        "$digest" "$digest" "$digest" "$digest" "$digest" "$digest" "$digest")
+    _sccap_set_env_kv "PENTEST_TOOL_WORKER_CAPABILITY_DIGEST" "$digest"
+    _sccap_set_env_kv "PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS" "$digests"
+    echo "[+] Pentest execution image qualified: ${short} (7 adapters)."
+
+    local missing=""
+    for tool in nmap nuclei java; do
+        docker compose run --rm --no-deps --entrypoint sh pentest-tool-worker \
+            -c "command -v $tool >/dev/null" >/dev/null 2>&1 || missing="$missing $tool"
+    done
+    if [ -n "$missing" ]; then
+        echo "[!] Execution image is missing:$missing — pentests will fail at tool launch."
+    else
+        echo "[+] Pentest tools present (nmap, nuclei, java/zap)."
+    fi
+    docker compose up -d --no-build pentest-tool-worker pentest-adapter-reporter >/dev/null 2>&1 || true
+    return 0
+}
+
 _sccap_run_update() {
     command -v git >/dev/null 2>&1 || { echo "[!] git is required for --update."; return 1; }
     [ -f .env ] || { echo "[!] No .env here; run this from the install directory."; return 1; }
