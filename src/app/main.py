@@ -117,23 +117,8 @@ async def lifespan(app: FastAPI):
             enforce=str(getattr(settings, "ENVIRONMENT", "")).lower() == "production",
         )
 
-    # The evidence-predicate and verification-recipe catalogs are *defined* in
-    # code but *read* from the database. Re-assert them at startup so an install
-    # whose catalog predates the current registry cannot select a recipe in code
-    # and then fail every schedule it creates.
-    try:
-        from app.scripts.seed_verification_catalog import seed_verification_catalog
-
-        registered, conflicting = await seed_verification_catalog()
-        logger.info(
-            "verification_catalog.seeded",
-            extra={"registered": registered, "conflicting": conflicting},
-        )
-    except Exception as exc:  # noqa: BLE001 - startup must not depend on the catalog
-        logger.warning(
-            "verification_catalog.seed_failed",
-            extra={"error_class": type(exc).__name__},
-        )
+    # The old pentesting verification catalogs were dropped with the
+    # better-pentester migration; there is nothing to seed.
 
     # Lifespan-health observability (V14.1.2): announce hydration entry at
     # WARNING so the line survives even when admins set system.log_level to
