@@ -352,6 +352,11 @@ services:
         condition: service_healthy
     networks:
       - pentest-control
+      # The controller calls the assessment's LLM provider. pentest-control is
+      # internal (no egress) and this service was attached to it alone, so every
+      # provider request failed with a connection/name-resolution error and the
+      # assessment blocked at model_review.requested.
+      - pentest-egress
     command: ["python", "-m", "app.workers.pentest_controller"]
 
   # Foundation 3 target-traffic runtime. It is deliberately not the unified
