@@ -109,6 +109,17 @@ def upgrade() -> None:
         if statement.startswith("SELECT pg_catalog.set_config('search_path'"):
             continue
         bind.execute(text(statement))
+    # Seed the reference data the historical migrations inserted but a
+    # schema-only dump cannot capture. The default tenant is required before
+    # any user can be created (user.tenant_id references it with a
+    # server-side default); everything else (frameworks, agents, prompt
+    # templates, feature flags) is re-seeded idempotently at app startup.
+    bind.execute(
+        text(
+            "INSERT INTO tenants (id, slug, display_name) VALUES "
+            "('00000000-0000-0000-0000-000000000001', 'default', 'Default Tenant')"
+        )
+    )
 
 
 def downgrade() -> None:
