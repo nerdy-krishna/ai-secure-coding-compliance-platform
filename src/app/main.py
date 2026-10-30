@@ -12,6 +12,7 @@ from psycopg.errors import DuplicateColumn
 from starlette.responses import JSONResponse
 
 from app.api.v1.routers.projects import router as projects_router
+from app.api.v1.routers.system_info import router as system_info_router
 from app.api.v1.routers.admin import llm_router
 from app.api.v1.routers.admin_frameworks import framework_router
 from app.api.v1.routers.admin_agents import agent_router
@@ -1135,6 +1136,8 @@ app.include_router(projects_router, prefix="/api/v1", tags=["Submissions"])
 app.include_router(features_router, prefix="/api/v1", tags=["Features"])
 # Admin feature-flag management (superuser-only) — always mounted.
 app.include_router(admin_features_router, prefix="/api/v1")
+# Build/version reporting + GitHub release check (read-only, no self-update).
+app.include_router(system_info_router, prefix="/api/v1", tags=["System"])
 
 
 def _include_if_enabled(feature: str, *args, **kwargs) -> None:

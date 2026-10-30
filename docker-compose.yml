@@ -43,6 +43,9 @@ services:
       # copied into the production API image.
       - ./.env.example:/app/.env.example:ro
       - ./setup.sh:/app/setup.sh:ro
+      # UI-triggered update handshake: the API may only create/read files here;
+      # the host's sccap-update.path unit decides whether an update actually runs.
+      - ./.control:/control
       - ./setup.bat:/app/setup.bat:ro
       - ./docker-compose.yml:/app/docker-compose.yml:ro
       - ./alembic.ini:/app/alembic.ini

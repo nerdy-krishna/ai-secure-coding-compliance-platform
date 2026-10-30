@@ -29,6 +29,17 @@
 # ---------- base ---------------------------------------------------------
 FROM python:3.12-slim-bookworm AS base
 
+# Build provenance, surfaced by GET /api/v1/system/version so an operator (and
+# the admin "update available" banner) can identify exactly what is running.
+# setup.sh passes these; a plain `docker build` leaves them empty and the API
+# falls back to the version declared in pyproject.toml.
+ARG SCCAP_BUILD_COMMIT=""
+ARG SCCAP_BUILD_TIME=""
+ARG SCCAP_BUILD_VERSION=""
+ENV SCCAP_BUILD_COMMIT=${SCCAP_BUILD_COMMIT} \
+    SCCAP_BUILD_TIME=${SCCAP_BUILD_TIME} \
+    SCCAP_BUILD_VERSION=${SCCAP_BUILD_VERSION}
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \

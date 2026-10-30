@@ -208,3 +208,7 @@ AGENTS.md
 # exact bytes shipped. These are attack input, so their contents must be reviewable
 # in the diff like any other input rather than fetched at build time.
 !src/app/pentesting/catalogs/wordlists/*.txt
+
+# UI-triggered update handshake (request/status files written at runtime)
+.control/
+.deploy-backups/

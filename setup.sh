@@ -66,7 +66,10 @@ _sccap_install_docker_distro() {
     case "${ID:-}" in
         ubuntu|debian)
             _sccap_with_root apt-get update -y
-            _sccap_with_root apt-get install -y docker.io docker-compose-v2 \
+            # docker-buildx: the Dockerfile uses BuildKit-only --mount=cache,
+            # and scripts/build-tool-runtimes.sh calls `docker buildx` directly.
+            # Ubuntu ships it as a separate package.
+            _sccap_with_root apt-get install -y docker.io docker-compose-v2 docker-buildx \
                 || _sccap_with_root apt-get install -y docker.io docker-compose-plugin
             ;;
         rhel|centos|fedora|rocky|almalinux|amzn)
@@ -528,6 +531,233 @@ _sccap_prepare_tls_material() {
     return 0
 }
 
+_SCCAP_DEPLOY_STATE=".scratch/deploy-state.json"
+
+_sccap_git_sha() { git rev-parse HEAD 2>/dev/null || echo ""; }
+
+_sccap_deploy_state_write() {
+    # Remember what to go back to: revision, the image tags we overwrote, and the
+    # database dump taken just before the upgrade.
+    local commit="$1" backup="$2" images_json="$3"
+    mkdir -p "$(dirname "$_SCCAP_DEPLOY_STATE")" 2>/dev/null || true
+    cat > "$_SCCAP_DEPLOY_STATE" <<EOF
+{"previous_commit": "${commit}", "backup": "${backup}", "images": ${images_json:-[]}, "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+EOF
+    chmod 600 "$_SCCAP_DEPLOY_STATE" 2>/dev/null || true
+}
+
+_sccap_project_images_lenient() {
+    # Like _sccap_project_images, but also accepts images whose repository does
+    # not carry the checkout directory's name (a renamed or copied checkout).
+    # Used only where over-matching is harmless - tagging for rollback - never
+    # for destructive removal.
+    _sccap_project_images
+    docker compose config --images 2>/dev/null | sort -u \
+        | grep -E -- '-(app|ui|worker|patch-validator|fluentd|disk-monitor|pentest-[a-z0-9-]+)$' \
+        || true
+}
+
+_sccap_tag_rollback_images() {
+    # Tag every image this checkout builds with the *outgoing* commit so a failed
+    # upgrade can be reverted without a rebuild.
+    local sha="$1" img out="[]"
+    for img in $( { _sccap_project_images_lenient; } | sort -u ); do
+        docker tag "$img" "${img}:rollback-${sha}" >/dev/null 2>&1 || continue
+        out=$(printf '%s' "$out" | sed "s|]$|, \"${img}:rollback-${sha}\"]|; s|\[\]||")
+    done
+    printf '%s' "$out"
+}
+
+_sccap_wait_for_api() {
+    local attempts="${1:-60}" i
+    for i in $(seq 1 "$attempts"); do
+        if docker compose exec -T app python -m app.cli.terminal_setup \
+                --api-base http://127.0.0.1:8000 --check >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 3
+    done
+    return 1
+}
+
+_SCCAP_CONTROL_DIR=".control"
+
+_sccap_install_update_units() {
+    # Optional host executor that lets a superuser start an update from the UI.
+    # The API can only drop a request file into .control/; this systemd path unit
+    # runs scripts/host-update.sh as root, which calls `setup.sh --update`.
+    local repo_dir unit_dir
+    if [ "$(uname -s)" != "Linux" ] || ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$(id -u)" -ne 0 ]; then
+        echo "[!] Skipping UI-triggered update service (needs root to install units)."
+        echo "    Re-run with sudo to enable 'Update now' in the admin UI."
+        return 0
+    fi
+    repo_dir=$(pwd -P)
+    unit_dir=/etc/systemd/system
+    # The app container runs as uid 1001 and must be able to create the request.
+    mkdir -p "$repo_dir/$_SCCAP_CONTROL_DIR"
+    chown 1001:1001 "$repo_dir/$_SCCAP_CONTROL_DIR" 2>/dev/null || true
+    chmod 775 "$repo_dir/$_SCCAP_CONTROL_DIR" 2>/dev/null || true
+
+    cat > "$unit_dir/sccap-update.service" <<EOF
+[Unit]
+Description=SCCAP host-side update runner (invoked from the admin UI)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=SCCAP_REPO_DIR=$repo_dir
+ExecStart=/usr/bin/env bash $repo_dir/scripts/host-update.sh
+TimeoutStartSec=3600
+Nice=10
+EOF
+
+    cat > "$unit_dir/sccap-update.path" <<EOF
+[Unit]
+Description=Watch for an SCCAP update request from the application
+
+[Path]
+PathExists=$repo_dir/$_SCCAP_CONTROL_DIR/update-request
+Unit=sccap-update.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload 2>/dev/null || true
+    if systemctl enable --now sccap-update.path >/dev/null 2>&1; then
+        echo "[+] UI-triggered updates enabled (sccap-update.path)."
+    else
+        echo "[!] Could not enable sccap-update.path; UI updates will report unavailable."
+        echo "    Terminal equivalent: ./setup.sh --update"
+    fi
+    return 0
+}
+
+_sccap_run_update() {
+    command -v git >/dev/null 2>&1 || { echo "[!] git is required for --update."; return 1; }
+    [ -f .env ] || { echo "[!] No .env here; run this from the install directory."; return 1; }
+    [ -d .git ] || { echo "[!] This is not a git checkout; --update needs one."; return 1; }
+    git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1 || {
+        echo "[!] Current branch has no upstream; set one or update manually."; return 1
+    }
+
+    local branch previous target backup
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    previous=$(_sccap_git_sha)
+    echo "[*] Updating branch '$branch' (currently ${previous:0:8})"
+    git fetch --quiet origin || { echo "[!] git fetch failed."; return 1; }
+    target=$(git rev-parse "origin/$branch")
+    if [ "$target" = "$previous" ]; then
+        echo "[+] Already up to date at ${previous:0:8}."
+        return 0
+    fi
+    echo "    ${previous:0:8} -> ${target:0:8}"
+    git log --oneline "${previous}..${target}" | head -10 | sed 's/^/      /'
+
+    if ! _sccap_confirm "Apply this update? The stack restarts and the database is migrated." "update"; then
+        echo "Aborted."
+        return 1
+    fi
+
+    # 1. database backup before anything changes
+    _PURGE_BACKUP_DIR="${SCCAP_BACKUP_DIR:-.deploy-backups}"
+    echo "[*] Backing up the database..."
+    _sccap_backup_database
+    backup=$(ls -1t "$_PURGE_BACKUP_DIR"/pre-purge-*.sql 2>/dev/null | head -1)
+    [ -n "$backup" ] && echo "    $backup"
+
+    # 2. keep the outgoing images so --rollback needs no rebuild
+    echo "[*] Tagging the current images for rollback..."
+    local images
+    images=$(_sccap_tag_rollback_images "$previous")
+    _sccap_deploy_state_write "$previous" "$backup" "$images"
+
+    # 3. move the checkout, prepare env, rebuild, restart
+    git reset --hard "$target" --quiet || { echo "[!] git reset failed."; return 1; }
+    _sccap_prepare_tls_material || return 1
+    _sccap_fix_evidence_endpoint
+    _sccap_fix_ownership
+    echo "[*] Building images at ${target:0:8}..."
+    docker compose build \
+        --build-arg "SCCAP_BUILD_COMMIT=$target" \
+        --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        || { echo "[!] Build failed; run ./setup.sh --rollback"; return 1; }
+    _sccap_align_certbot_ownership
+    _sccap_provision_pentest_secrets
+    docker compose up -d || { echo "[!] Start failed; run ./setup.sh --rollback"; return 1; }
+
+    # 4. wait for the database, then migrate
+    local count=0
+    until [ "$(docker inspect -f '{{.State.Health.Status}}' sccap_db 2>/dev/null)" = "healthy" ]; do
+        count=$((count + 1))
+        if [ "$count" -gt 60 ]; then
+            echo "[!] Database did not become healthy; run ./setup.sh --rollback"
+            return 1
+        fi
+        sleep 2
+    done
+    echo "[*] Applying migrations..."
+    if ! docker compose exec -T app alembic upgrade head; then
+        echo "[!] Migration failed. The database backup is: ${backup:-none}"
+        echo "    Run ./setup.sh --rollback (code+images), then restore the backup if needed."
+        return 1
+    fi
+
+    # 5. health gate: the API must answer before we call this a success
+    echo "[*] Waiting for the API to become healthy..."
+    if ! _sccap_wait_for_api 60; then
+        echo "[!] API did not come up healthy; run ./setup.sh --rollback"
+        return 1
+    fi
+
+    _sccap_fix_ownership
+    _sccap_install_update_units
+    echo ""
+    echo "[+] Update applied: ${previous:0:8} -> ${target:0:8}"
+    echo "    Database backup: ${backup:-none}"
+    echo "    Code + images rollback: ./setup.sh --rollback"
+    return 0
+}
+
+_sccap_run_rollback() {
+    [ -f "$_SCCAP_DEPLOY_STATE" ] || {
+        echo "[!] No deploy state ($_SCCAP_DEPLOY_STATE); nothing to roll back to."
+        return 1
+    }
+    local previous backup images
+    previous=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("previous_commit",""))' "$_SCCAP_DEPLOY_STATE")
+    backup=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("backup","") or "")' "$_SCCAP_DEPLOY_STATE")
+    images=$(python3 -c 'import json,sys;print(" ".join(json.load(open(sys.argv[1])).get("images",[])))' "$_SCCAP_DEPLOY_STATE")
+    [ -n "$previous" ] || { echo "[!] Deploy state has no previous commit."; return 1; }
+
+    echo "[*] Rolling back code and images to ${previous:0:8}"
+    if ! _sccap_confirm "Roll back the application? Migrations are NOT reversed." "rollback"; then
+        echo "Aborted."
+        return 1
+    fi
+    git reset --hard "$previous" --quiet || { echo "[!] git reset failed."; return 1; }
+    local tagged
+    for tagged in $images; do
+        local original="${tagged%%:rollback-*}"
+        docker tag "$tagged" "$original" >/dev/null 2>&1 \
+            && echo "    restored $original"
+    done
+    docker compose up -d --no-build || { echo "[!] Failed to restart on the old images."; return 1; }
+    _sccap_wait_for_api 40 || echo "[!] API did not come back healthy."
+    echo ""
+    echo "[+] Rolled back to ${previous:0:8}."
+    echo "    Migrations were not reversed: if the newer release added schema, the"
+    echo "    older code runs against it (usually harmless, additive). To restore"
+    echo "    data as well:  docker compose exec -T db psql -U postgres -d secure_coding_platform \\"
+    echo "                      < ${backup:-<backup file>}"
+    return 0
+}
+
 _sccap_ask_first_run() {
     # Only asked on a fresh configuration run (skipped when resuming/upgrading).
     echo ""
@@ -693,6 +923,9 @@ SCCAP setup
                                  A pg_dumpall backup is written first.
   ./setup.sh --factory-reset     Purge plus delete .env, .secrets and certbot
                                  state. This is a clean install.
+  ./setup.sh --update            Pull the current branch, back up the database,
+                                 rebuild, migrate and health-check in place.
+  ./setup.sh --rollback          Return code + images to the previous --update.
   ./setup.sh --repair-tls        Re-create the TLS material from .env and exit.
                                  Use when the UI container reports
                                  tls_cert_missing / "connection closed".
@@ -710,6 +943,8 @@ _sccap_parse_args() {
             --purge)         _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1 ;;
             --factory-reset) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1; _SCCAP_FACTORY_RESET=1 ;;
             --repair-tls)    _SCCAP_MODE="repair-tls" ;;
+            --update)        _SCCAP_MODE="update" ;;
+            --rollback)      _SCCAP_MODE="rollback" ;;
             -y|--yes)        _SCCAP_ASSUME_YES=1 ;;
             -h|--help)       _sccap_usage; exit 0 ;;
             *)
@@ -1114,6 +1349,18 @@ _sccap_assert_env_readable || exit 1
 # but nothing else from the install flow.
 if [ "$_SCCAP_MODE" = "repair-tls" ]; then
     _sccap_run_repair_tls || exit 1
+    exit 0
+fi
+
+if [ "$_SCCAP_MODE" = "update" ]; then
+    _sccap_assert_env_readable || exit 1
+    _sccap_run_update || exit 1
+    exit 0
+fi
+
+if [ "$_SCCAP_MODE" = "rollback" ]; then
+    _sccap_assert_env_readable || exit 1
+    _sccap_run_rollback || exit 1
     exit 0
 fi
 
@@ -1824,6 +2071,7 @@ _sccap_stage done
 # (config) or the container UIDs (certbot state, tool-worker key).
 _sccap_fix_ownership
 _sccap_align_certbot_ownership
+_sccap_install_update_units
 echo "Access the application at:"
 if [ "$DEPLOYMENT_TYPE" = "local" ]; then
     echo "   -> http://localhost (Production build via Docker)"
