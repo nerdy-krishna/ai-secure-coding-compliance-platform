@@ -295,6 +295,10 @@ services:
       - ./alembic.ini:/app/alembic.ini:ro
       - ./alembic:/app/alembic:ro
     environment:
+      # The controller records the adapter snapshot it dispatches from the
+      # digests the installer wrote for the built execution image.
+      PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: ${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
+      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: ${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{}}
       PYTHONPATH: /app/src
       SERVICE_NAME: pentest-controller
       OTEL_SERVICE_NAME: sccap-pentest-controller
