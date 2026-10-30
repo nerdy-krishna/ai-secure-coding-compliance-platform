@@ -29,7 +29,6 @@ const tools: Item[] = [
 // billing with the results. Findings and Observations stay side by side on
 // purpose: one is the interpreted result, the other is the raw thing it was
 // interpreted from.
-const attemptSections = ["overview", "findings", "observations", "evidence", "activity", "reports", "audit"];
 
 export function SidebarNav() {
   const [collapsed, setCollapsed] = useState(false);
@@ -37,16 +36,6 @@ export function SidebarNav() {
   const { user } = useAuth();
   const { isFeatureEnabled, featuresLoading } = useFeatures();
   const visible = (items: Item[]) => items.filter((item) => (!item.feature || (!featuresLoading && isFeatureEnabled(item.feature))) && (!item.permission || hasPermission(user?.permissions, item.permission)));
-  const pathParts = pathname.split("/");
-  const attemptBase = pathParts.length >= 6
-    && pathParts[1] === "pentesting"
-    && pathParts[2] === "engagements"
-    && pathParts[4] === "attempts"
-    && pathParts[3]
-    && pathParts[5]
-    ? `/pentesting/engagements/${pathParts[3]}/attempts/${pathParts[5]}`
-    : null;
-  const canAudit = hasPermission(user?.permissions, "audit.read");
   const admin = ADMIN_LINKS.filter((item) => (!item.feature || isFeatureEnabled(item.feature)) && (!item.permissions || hasAnyPermission(user?.permissions, item.permissions)));
   const hasAdmin = hasAnyPermission(user?.permissions, ADMIN_AREA_PERMISSIONS) || admin.some((item) => pathname.startsWith(item.to));
   const group = (label: string, items: Item[], open = false) => <details className="side-nav-group" open={open}><summary>{collapsed ? label.slice(0, 1) : label}</summary><div>{visible(items).map((item) => <NavLink key={item.to} to={item.to} title={collapsed ? item.label : undefined}>{collapsed ? item.label.slice(0, 1) : item.label}</NavLink>)}</div></details>;
@@ -55,7 +44,6 @@ export function SidebarNav() {
     <NavLink className="side-nav-home" to="/account/dashboard" title={collapsed ? "Dashboard" : undefined}>{collapsed ? "D" : "Dashboard"}</NavLink>
     {group("Code scanning", codeScan, pathname.startsWith("/analysis") || pathname.startsWith("/submission"))}
     {group("Pentesting", pentesting, pathname.startsWith("/pentesting"))}
-    {attemptBase ? group("Current attempt", attemptSections.filter((section) => section !== "audit" || canAudit).map((section) => ({ to: `${attemptBase}/${section}`, label: section[0]!.toUpperCase() + section.slice(1) })), true) : null}
     {group("Tools", tools, pathname.startsWith("/compliance") || pathname.startsWith("/advisor") || pathname.startsWith("/usage"))}
     {hasAdmin ? <details className="side-nav-group" open={pathname.startsWith("/admin") || pathname.startsWith("/account/settings/llm")}><summary>{collapsed ? "A" : "Administration"}</summary><div>{admin.map((item) => <NavLink key={item.to} to={item.to} title={collapsed ? item.label : undefined}>{collapsed ? item.label.slice(0, 1) : item.label}</NavLink>)}</div></details> : null}
   </aside>;
