@@ -753,6 +753,13 @@ _sccap_run_update() {
     _sccap_align_certbot_ownership
     _sccap_provision_pentest_secrets
     docker compose up -d || { echo "[!] Start failed; run ./setup.sh --rollback"; return 1; }
+    # The broker applies the pentest users' passwords from .env only when its
+    # container starts (rabbitmq/init.sh change_password). If an update rotates
+    # those secrets, an untouched broker keeps the old ones and every pentest
+    # consumer is refused with ACCESS_REFUSED - the controller then sits
+    # "connected=false" and assessments never advance past decision.committed.
+    echo "[*] Re-applying broker credentials..."
+    docker compose up -d --no-build --force-recreate rabbitmq >/dev/null 2>&1 || true
     _sccap_install_pentest_runtimes
 
     # 4. wait for the database, then migrate
