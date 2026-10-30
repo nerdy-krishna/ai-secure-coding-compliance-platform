@@ -13,6 +13,20 @@ set -e
 _SETUP_STAGE_FILE=".setup-stage"
 _sccap_stage() { echo "$1" > "$_SETUP_STAGE_FILE"; }
 
+_sccap_set_env_kv() {
+    local key="$1" val="$2" esc
+    esc=$(printf '%s\n' "$val" | sed -e 's/[\/&]/\\&/g')
+    if grep -q "^${key}=" .env; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/^${key}=.*$/${key}=${esc}/" .env
+        else
+            sed -i "s/^${key}=.*$/${key}=${esc}/" .env
+        fi
+    else
+        echo "${key}=${val}" >> .env
+    fi
+}
+
 _sccap_with_root() {
     # Run "$@" as root via the cleanest available channel (argv only).
     if [ "$EUID" -eq 0 ]; then
@@ -670,9 +684,13 @@ _sccap_install_pentest_runtimes() {
     echo "[+] Pentest execution image qualified: ${short} (7 adapters)."
 
     local missing=""
-    for tool in nmap nuclei java; do
+    for probe in \
+        "command -v nmap" \
+        "command -v java" \
+        "test -x /opt/sccap-tools/nuclei" \
+        "test -x /opt/sccap-tool-runtimes/nmap-connect"; do
         docker compose run --rm --no-deps --entrypoint sh pentest-tool-worker \
-            -c "command -v $tool >/dev/null" >/dev/null 2>&1 || missing="$missing $tool"
+            -c "$probe" >/dev/null 2>&1 || missing="$missing $probe"
     done
     if [ -n "$missing" ]; then
         echo "[!] Execution image is missing:$missing — pentests will fail at tool launch."
@@ -1577,19 +1595,6 @@ case ",${COMPOSE_PROFILES_VALUE}," in
 esac
 
 # Persist SCCAP_VARIANT and COMPOSE_PROFILES to .env (create-or-replace).
-_sccap_set_env_kv() {
-    local key="$1" val="$2" esc
-    esc=$(printf '%s\n' "$val" | sed -e 's/[\/&]/\\&/g')
-    if grep -q "^${key}=" .env; then
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            sed -i '' "s/^${key}=.*$/${key}=${esc}/" .env
-        else
-            sed -i "s/^${key}=.*$/${key}=${esc}/" .env
-        fi
-    else
-        echo "${key}=${val}" >> .env
-    fi
-}
 # 2.4b. Pentesting (authorized automated security assessment)
 # ----------------------------------------------------------------------
 # Enables the pentest engagement plane: the controller, runner, tool worker and
