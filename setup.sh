@@ -651,11 +651,13 @@ _sccap_install_pentest_runtimes() {
         *) return 0 ;;
     esac
 
-    local image_id digest short digests
-    image_id=$(docker compose images -q pentest-tool-worker 2>/dev/null | head -1)
-    [ -n "$image_id" ] || image_id=$(docker ps -aq --filter name=sccap_pentest_tool_worker | head -1)
-    [ -n "$image_id" ] || { echo "[!] Pentest execution image not built; skipping qualification."; return 0; }
-    digest=$(docker image inspect --format '{{.Id}}' "$image_id" 2>/dev/null | sed 's/^sha256://')
+    local image_ref digest short digests
+    # Prefer the image the running worker actually uses; fall back to the one
+    # compose resolves for the service.
+    image_ref=$(docker inspect sccap_pentest_tool_worker --format '{{.Config.Image}}' 2>/dev/null)
+    [ -n "$image_ref" ] || image_ref=$(docker compose config --images 2>/dev/null | grep -E -- '-pentest-tool-worker$' | head -1)
+    [ -n "$image_ref" ] || { echo "[!] Pentest execution image not built; skipping qualification."; return 0; }
+    digest=$(docker image inspect --format '{{.Id}}' "$image_ref" 2>/dev/null | sed 's/^sha256://')
     printf '%s' "$digest" | grep -qE '^[0-9a-f]{64}$' \
         || { echo "[!] Could not read the pentest image digest; skipping."; return 0; }
     short=$(printf '%s' "$digest" | cut -c1-12)
