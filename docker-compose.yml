@@ -413,7 +413,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: tool-supervisor
+      # One execution image for every deployment: the adapter entrypoints plus
+      # the tools they drive (nmap, nuclei, ZAP, Chromium). Previously this
+      # built `tool-supervisor`, which has the entrypoints but none of the
+      # tools, so every claimed execution died with "nmap: not found".
+      target: worker-pentest-local
     container_name: sccap_pentest_tool_worker
     user: "1001:1001"
     volumes:

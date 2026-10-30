@@ -690,6 +690,7 @@ _sccap_run_update() {
     _sccap_align_certbot_ownership
     _sccap_provision_pentest_secrets
     docker compose up -d || { echo "[!] Start failed; run ./setup.sh --rollback"; return 1; }
+    _sccap_install_pentest_runtimes
 
     # 4. wait for the database, then migrate
     local count=0
@@ -1997,6 +1998,7 @@ docker compose build
 _sccap_align_certbot_ownership
 _sccap_provision_pentest_secrets
 docker compose up -d
+_sccap_install_pentest_runtimes
 
 echo "[*] Waiting for database to be healthy..."
 # Simple wait loop for db container

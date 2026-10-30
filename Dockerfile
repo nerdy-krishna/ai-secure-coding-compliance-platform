@@ -508,6 +508,21 @@ USER appuser
 # ---------- patch validator ----------------------------------------------
 # Deliberately contains no SCCAP application, configuration, or credentials.
 # Compose gives it no network namespace and only a bounded shared job spool.
+# Adapter entrypoints. The tool worker's local execution path verifies one
+# immutable executable per adapter here (verify_runtime_prerequisites); the
+# tools themselves are already in this image (nmap, nuclei, ZAP, Chromium), so a
+# single production-ready worker image can execute assessments without a
+# separate Kubernetes runtime fleet.
+RUN install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
+    && chmod 0555 /opt/sccap-tool-runtimes/*
+
 FROM python:3.12-slim-bookworm AS patch-validator
 
 RUN apt-get update \
