@@ -393,27 +393,64 @@ print("")
 PYPW
 }
 
+_sccap_read_masked() {
+    # Read one secret line, echoing one '*' per character so the operator can see
+    # that typing registered without exposing the value.
+    #
+    # Falls back to a plain silent read when stdin is not a TTY (an answers file
+    # or a pipe), where per-character reading would echo stars into the log.
+    local char answer=""
+    if [ ! -t 0 ]; then
+        IFS= read -r answer
+        _SCCAP_ANSWER="$answer"
+        return 0
+    fi
+    printf '%s' "$1"
+    stty -echo 2>/dev/null || true
+    while IFS= read -r -s -n 1 char; do
+        case "$char" in
+            "")
+                break
+                ;;
+            $'\x7f'|$'\b')
+                if [ -n "$answer" ]; then
+                    answer="${answer%?}"
+                    printf '\b \b'
+                fi
+                ;;
+            *)
+                answer+="$char"
+                printf '*'
+                ;;
+        esac
+    done
+    stty echo 2>/dev/null || true
+    echo
+    _SCCAP_ANSWER="$answer"
+}
+
+_sccap_grafana_pw_problem() {
+    # Grafana accepts any 8+ character secret; returning nothing here means the
+    # value satisfies the policy and only the confirmation step is enforced.
+    printf ''
+}
+
 _sccap_ask_secret() {
-    # $1 prompt, $2 minimum length, $3 optional validator (empty = none)
+    # $1 prompt, $2 minimum length, $3 optional validator (empty = none, which
+    # also skips the confirmation prompt; pass a no-op validator to require it)
     local first second problem
     while true; do
-        printf '%s' "$1"
-        stty -echo 2>/dev/null || true
-        read -r first
-        stty echo 2>/dev/null || true
-        echo
+        _sccap_read_masked "$1"
+        first="$_SCCAP_ANSWER"
         if [ "${#first}" -lt "$2" ]; then
             echo "  [!] Use at least $2 characters."
             continue
         fi
         if [ -n "$3" ]; then
-            printf '  Repeat to confirm: '
-            stty -echo 2>/dev/null || true
-            read -r second
-            stty echo 2>/dev/null || true
-            echo
+            _sccap_read_masked "  Repeat to confirm: "
+            second="$_SCCAP_ANSWER"
             if [ "$first" != "$second" ]; then
-                echo "  [!] Passwords do not match."
+                echo "  [!] Values do not match."
                 continue
             fi
             problem=$($3 "$first")
@@ -585,7 +622,7 @@ _sccap_ask_first_run() {
         echo "[*] Grafana administrator (served at /grafana/ after setup)"
         read -p "  Grafana username [admin]: " GRAFANA_USER
         GRAFANA_USER=${GRAFANA_USER:-admin}
-        _sccap_ask_secret "  Grafana password (8+ chars): " 8
+        _sccap_ask_secret "  Grafana password (8+ chars): " 8 _sccap_grafana_pw_problem
         GRAFANA_PASSWORD="$_SCCAP_ANSWER"
     fi
 }
