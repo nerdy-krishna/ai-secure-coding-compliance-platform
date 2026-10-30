@@ -86,10 +86,10 @@ FEATURE_CATALOG: Dict[str, Feature] = {
     "pentesting": Feature(
         name="pentesting",
         description=(
-            "Authorized adaptive black-box, gray-box, and white-box pentesting."
+            "Autonomous black-box, gray-box, and white-box penetration testing."
         ),
         depends_on=frozenset({"scan"}),
-        api_namespace="/api/v1/pentesting",
+        api_namespace="/api/v1/pentest",
         wire_contract="sccap.pentest.v1",
     ),
     "multi_user": Feature(
