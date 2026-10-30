@@ -924,6 +924,9 @@ SCCAP setup
                                  A pg_dumpall backup is written first.
   ./setup.sh --factory-reset     Purge plus delete .env, .secrets and certbot
                                  state. This is a clean install.
+  ./setup.sh --qualify-pentest   Rebuild the pentest execution image, record its
+                                 digest as the adapter qualification and restart
+                                 the tool worker. Run after changing the image.
   ./setup.sh --update            Pull the current branch, back up the database,
                                  rebuild, migrate and health-check in place.
   ./setup.sh --rollback          Return code + images to the previous --update.
@@ -944,6 +947,7 @@ _sccap_parse_args() {
             --purge)         _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1 ;;
             --factory-reset) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1; _SCCAP_FACTORY_RESET=1 ;;
             --repair-tls)    _SCCAP_MODE="repair-tls" ;;
+            --qualify-pentest) _SCCAP_MODE="qualify-pentest" ;;
             --update)        _SCCAP_MODE="update" ;;
             --rollback)      _SCCAP_MODE="rollback" ;;
             -y|--yes)        _SCCAP_ASSUME_YES=1 ;;
@@ -1348,6 +1352,12 @@ _sccap_assert_env_readable || exit 1
 
 # Non-interactive teardown (--uninstall/--purge/--factory-reset) needs docker
 # but nothing else from the install flow.
+if [ "$_SCCAP_MODE" = "qualify-pentest" ]; then
+    docker compose build pentest-tool-worker || exit 1
+    _sccap_install_pentest_runtimes || exit 1
+    exit 0
+fi
+
 if [ "$_SCCAP_MODE" = "repair-tls" ]; then
     _sccap_run_repair_tls || exit 1
     exit 0
