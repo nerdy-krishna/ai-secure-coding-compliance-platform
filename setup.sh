@@ -440,6 +440,19 @@ _sccap_is_ip() {
     printf '%s' "$1" | grep -qE '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'
 }
 
+_sccap_fix_evidence_endpoint() {
+    # Older .env files pinned the compose service name, which CloudServer rejects
+    # (its restEndpoints map does not contain it) - so the evidence bucket could
+    # never be created and every evidence write failed at runtime.
+    [ -f .env ] || return 0
+    if grep -q '^EVIDENCE_S3_ENDPOINT=http://evidence-minio:8000' .env; then
+        sed -i.bak 's|^EVIDENCE_S3_ENDPOINT=http://evidence-minio:8000|EVIDENCE_S3_ENDPOINT=http://cloudserver-front:8000|' .env
+        rm -f .env.bak
+        echo "[+] Evidence endpoint updated to the CloudServer alias (cloudserver-front)."
+    fi
+    return 0
+}
+
 _sccap_prepare_tls_material() {
     # Certificate material must exist whenever SSL_ENABLED=true, on a fresh run
     # *and* on a resumed one. It used to be created only in the configuration
@@ -1689,6 +1702,7 @@ _sccap_write_grafana_credentials
 
 # Certificate material for this run (fresh or resumed) before anything starts.
 _sccap_prepare_tls_material || exit 1
+_sccap_fix_evidence_endpoint
 
 # 3. Docker Build and Launch
 _sccap_stage build
