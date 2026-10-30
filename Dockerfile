@@ -513,6 +513,7 @@ USER appuser
 # tools themselves are already in this image (nmap, nuclei, ZAP, Chromium), so a
 # single production-ready worker image can execute assessments without a
 # separate Kubernetes runtime fleet.
+USER root
 RUN install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
@@ -522,6 +523,7 @@ RUN install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
     && chmod 0555 /opt/sccap-tool-runtimes/*
+USER appuser
 
 FROM python:3.12-slim-bookworm AS patch-validator
 
