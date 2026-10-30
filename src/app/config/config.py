@@ -516,6 +516,15 @@ class Settings(BaseSettings):
     SCAN_WORKFLOW_TIMEOUT_SECONDS: int = Field(
         default=2 * 60 * 60, description="Max seconds a single scan workflow may run."
     )
+    # A single provider call has no timeout of its own, so a stalled response
+    # used to hang the scan until the two-hour workflow timeout. Bounded here so
+    # the retry/backoff path handles it and the failure is visible in the log.
+    LLM_REQUEST_TIMEOUT_SECONDS: int = Field(
+        default=300,
+        ge=10,
+        le=3600,
+        description="Max seconds to wait for one LLM provider response.",
+    )
     WORKER_POOL: Literal["unified", "scanner", "llm", "report"] = "unified"
     WORKER_PREFETCH_COUNT: int = Field(default=5, ge=1, le=20)
     WORKER_DRAIN_TIMEOUT_SECONDS: int = Field(default=570, ge=1, le=570)

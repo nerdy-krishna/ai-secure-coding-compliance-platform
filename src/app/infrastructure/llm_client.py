@@ -101,8 +101,9 @@ _PROMPTED_OUTPUT_MODELS: set[str] = set()
 def _prefers_prompted_output(provider: str, model_name: str) -> bool:
     """Avoid a known rejected tool request for DeepSeek-compatible endpoints."""
 
-    return provider.strip().lower() == "deepseek" or model_name.strip().lower().startswith(
-        "deepseek-"
+    return (
+        provider.strip().lower() == "deepseek"
+        or model_name.strip().lower().startswith("deepseek-")
     )
 
 
@@ -514,6 +515,31 @@ class LLMClient:
                 },
             )
 
+        from app.config.config import settings as _settings  # noqa: PLC0415
+
+        request_timeout = _settings.LLM_REQUEST_TIMEOUT_SECONDS
+
+        async def _run_agent_with_timeout(run_agent: Agent) -> None:
+            """One provider call, bounded so a stalled response cannot wedge the scan.
+
+            Without this the call waited until the two-hour workflow timeout, and
+            the scan sat at "Running security agents" with no new events.
+            """
+            try:
+                _capture(
+                    await asyncio.wait_for(
+                        run_agent.run(prompt), timeout=request_timeout
+                    )
+                )
+            except asyncio.TimeoutError as exc:
+                # "timed out" is what the retry policy keys on, so a stalled
+                # call is retried with backoff instead of failing the task on
+                # the first attempt.
+                raise RuntimeError(
+                    f"LLM provider call timed out after {request_timeout}s "
+                    f"(model={model_key}, stage={self.provider_name})"
+                ) from exc
+
         async def _invoke_llm(run_agent: Agent) -> None:
             """Single LLM invocation with model-quirk fallback.
 
@@ -524,7 +550,7 @@ class LLMClient:
             nonlocal provider_call_started, use_prompted
             try:
                 provider_call_started = True
-                _capture(await run_agent.run(prompt))
+                await _run_agent_with_timeout(run_agent)
             except Exception as e:
                 tool_issue = not use_prompted and _is_tool_choice_unsupported(e)
                 temp_issue = self.temperature is not None and (
@@ -548,11 +574,11 @@ class LLMClient:
                 if tool_issue:
                     _PROMPTED_OUTPUT_MODELS.add(model_key)
                     use_prompted = True
-                _capture(
-                    await _make_agent(
+                await _run_agent_with_timeout(
+                    _make_agent(
                         prompted=use_prompted,
                         temperature=None if temp_issue else self.temperature,
-                    ).run(prompt)
+                    )
                 )
 
         try:
@@ -642,13 +668,15 @@ class LLMClient:
         usage_event_created = False
         if captured_run_result is not None:
             try:
-                usage_event_id, ledger_cost, usage_event_created = (
-                    await record_run_usage(
-                        run_result=captured_run_result,
-                        context=usage_context,
-                        config=self.db_llm_config,
-                        effective_override=effective_price_override,
-                    )
+                (
+                    usage_event_id,
+                    ledger_cost,
+                    usage_event_created,
+                ) = await record_run_usage(
+                    run_result=captured_run_result,
+                    context=usage_context,
+                    config=self.db_llm_config,
+                    effective_override=effective_price_override,
                 )
                 cost = float(ledger_cost) if ledger_cost is not None else None
                 if usage_event_created and cost is not None:
