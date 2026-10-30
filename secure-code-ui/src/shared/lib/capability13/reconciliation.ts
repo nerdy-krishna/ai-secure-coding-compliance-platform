@@ -77,7 +77,12 @@ export function validateSnapshot(snapshot: C13CockpitSnapshot, expected: Expecte
   if (!SHA256.test(snapshot.source_cutoff.event_digest) || !SHA256.test(snapshot.snapshot_digest)) return "invalid_digest";
   if (!Number.isFinite(Date.parse(snapshot.source_cutoff.captured_at))) return "invalid_cutoff_time";
   const owners = new Set(snapshot.source_pins.map((pin) => pin.owner));
-  if (!["C6", "C9", "C10", "C11"].every((owner) => owners.has(owner as SourcePin["owner"]))) return "missing_required_source_pin";
+  // C11 pins reporting, which does not exist until a report does. Demanding it
+  // unconditionally meant no assessment could render its cockpit while it was
+  // running - the page fell back to "Assessment not found". It is required only
+  // once the attempt is terminal.
+  const requiredPins = snapshot.attempt_is_terminal ? ["C6", "C9", "C10", "C11"] : ["C6", "C9", "C10"];
+  if (!requiredPins.every((owner) => owners.has(owner as SourcePin["owner"]))) return "missing_required_source_pin";
   if (owners.size !== snapshot.source_pins.length) return "duplicate_source_pin";
   if (snapshot.source_pins.some((pin) =>
     !UUID.test(pin.projection_id) || !SHA256.test(pin.digest) ||
