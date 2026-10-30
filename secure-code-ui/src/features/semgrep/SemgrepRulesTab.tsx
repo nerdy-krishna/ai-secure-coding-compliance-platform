@@ -706,8 +706,9 @@ const SemgrepRulesTab: React.FC = () => {
       <RuleFoundryPanel permissions={user?.permissions} />
       <SettingsPanel />
 
-      {/* ── Bulk action bar ─────────────────────────────────────── */}
-      {someSelected && (
+      {/* ── Bulk action bar — always visible when sources exist; actions apply
+            to the current selection and are disabled when nothing is selected. ── */}
+      {!isLoading && sources.length > 0 && (
         <div
           className="sccap-card"
           style={{
@@ -733,7 +734,7 @@ const SemgrepRulesTab: React.FC = () => {
                 data: { enabled: true },
               })
             }
-            disabled={bulkUpdate.isPending}
+            disabled={!someSelected || bulkUpdate.isPending}
           >
             Enable
           </button>
@@ -745,7 +746,7 @@ const SemgrepRulesTab: React.FC = () => {
                 data: { enabled: false },
               })
             }
-            disabled={bulkUpdate.isPending}
+            disabled={!someSelected || bulkUpdate.isPending}
           >
             Disable
           </button>
@@ -757,7 +758,7 @@ const SemgrepRulesTab: React.FC = () => {
                 data: { auto_sync: true },
               })
             }
-            disabled={bulkUpdate.isPending}
+            disabled={!someSelected || bulkUpdate.isPending}
           >
             Auto-sync On
           </button>
@@ -769,20 +770,21 @@ const SemgrepRulesTab: React.FC = () => {
                 data: { auto_sync: false },
               })
             }
-            disabled={bulkUpdate.isPending}
+            disabled={!someSelected || bulkUpdate.isPending}
           >
             Auto-sync Off
           </button>
           <button
             className="sccap-btn sccap-btn-primary sccap-btn-sm"
             onClick={() => bulkSync.mutate([...selectedIds])}
-            disabled={bulkSync.isPending || bulkUpdate.isPending}
+            disabled={!someSelected || bulkSync.isPending || bulkUpdate.isPending}
           >
             <Icon.Refresh size={12} /> Sync selected
           </button>
           <button
             className="sccap-btn sccap-btn-ghost sccap-btn-sm"
             onClick={clearSelection}
+            disabled={!someSelected}
           >
             Clear
           </button>
