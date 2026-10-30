@@ -212,3 +212,5 @@ AGENTS.md
 # UI-triggered update handshake (request/status files written at runtime)
 .control/
 .deploy-backups/
+# Pentest tool wordlists are data, not documentation — track them despite *.txt.
+!src/app/pentest/data/wordlists/*.txt
