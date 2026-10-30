@@ -396,14 +396,6 @@ def _register_checks() -> None:
 def register_schema_contracts() -> None:
     """Idempotently register every non-column PostgreSQL schema contract."""
 
-    # Pentesting may already be present in ``sys.modules`` when Alembic loads
-    # the shared ledger models. Re-run the idempotent cross-context FK hook
-    # after every model module is populated so metadata is import-order safe.
-    from app.pentesting.persistence.models import (
-        register_shared_pentest_attempt_foreign_keys,
-    )
-
-    register_shared_pentest_attempt_foreign_keys()
     _register_offline_bundle_ledger()
     _register_indexes()
     _register_checks()

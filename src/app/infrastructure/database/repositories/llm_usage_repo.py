@@ -597,22 +597,13 @@ class LLMUsageRepository:
         else:
             if context.pentest_attempt_id is None:
                 raise ValueError("pentest usage context requires pentest_attempt_id")
-            from app.pentesting.persistence.models import (
-                PentestAttempt,
-                PentestEngagement,
-            )
+            from app.pentest.models import PentestRun
 
             row = (
                 await self.db.execute(
-                    select(
-                        PentestEngagement.owner_user_id,
-                        PentestAttempt.tenant_id,
+                    select(PentestRun.user_id, PentestRun.tenant_id).where(
+                        PentestRun.id == context.pentest_attempt_id
                     )
-                    .join(
-                        PentestEngagement,
-                        PentestEngagement.id == PentestAttempt.engagement_id,
-                    )
-                    .where(PentestAttempt.id == context.pentest_attempt_id)
                 )
             ).one_or_none()
         if row is None:

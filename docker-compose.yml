@@ -282,290 +282,46 @@ services:
   # result-signing key, evidence-store credential, browser/session credential,
   # or ambient proxy. Local compose therefore blocks provider egress too; a
   # configured production NetworkPolicy may allow only explicit model CIDRs.
-  pentest-controller:
-    restart: unless-stopped
-    profiles: ["pentesting-v4"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: worker
-    container_name: sccap_pentest_controller
-    volumes:
-      - ./src:/app/src:ro
-      - ./alembic.ini:/app/alembic.ini:ro
-      - ./alembic:/app/alembic:ro
-    environment:
-      # The controller records the adapter snapshot it dispatches from the
-      # digests the installer wrote for the built execution image.
-      PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: ${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
-      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: ${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{}}
-      PYTHONPATH: /app/src
-      SERVICE_NAME: pentest-controller
-      OTEL_SERVICE_NAME: sccap-pentest-controller
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: db
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_HOST_ALEMBIC: db
-      RABBITMQ_DEFAULT_USER: controller-unused
-      RABBITMQ_DEFAULT_PASS: controller-unused-not-authority
-      RABBITMQ_HOST: rabbitmq
-      SECRET_KEY: ${PENTEST_CONTROLLER_INTERNAL_SECRET:-capability4-controller-runtime-only-change-me}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      ALLOWED_ORIGINS: http://pentest-controller.invalid
-      QDRANT_API_KEY: controller-qdrant-unreachable-not-authority
-      PENTEST_FOUNDATION3_ENABLED: "true"
-      PENTEST_CAPABILITY4_ENABLED: "true"
-      PENTEST_CAPABILITY5_ENABLED: ${PENTEST_CAPABILITY5_ENABLED:-false}
-      PENTEST_CAPABILITY6_ENABLED: ${PENTEST_CAPABILITY6_ENABLED:-false}
-      PENTEST_CONTROLLER_LLM_CONFIG_ID: ${PENTEST_CONTROLLER_LLM_CONFIG_ID:-}
-      PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS: ${PENTEST_CONTROLLER_MODEL_TIMEOUT_SECONDS:-60}
-      RABBITMQ_PENTEST_CONTROLLER_QUEUE: ${RABBITMQ_PENTEST_CONTROLLER_QUEUE:-pentest_controller_queue}
-      RABBITMQ_PENTEST_CONTROLLER_URL: ${RABBITMQ_PENTEST_CONTROLLER_URL:-amqp://${RABBITMQ_PENTEST_CONTROLLER_USER:-pentest_controller}:${RABBITMQ_PENTEST_CONTROLLER_PASS:-pentest-controller-local-only}@rabbitmq/}
-      PENTEST_RESULT_SIGNING_SEED: ""
-      PENTEST_SCOPE_OBSERVATION_SIGNING_SEED: ""
-      PENTEST_SCOPE_DECISION_SIGNING_SEED: ""
-      PENTEST_RUNNER_V3_GATEWAY_TOKEN: ""
-      EVIDENCE_STORE_ENABLED: "false"
-      EVIDENCE_S3_ACCESS_KEY_ID: ""
-      EVIDENCE_S3_SECRET_ACCESS_KEY: ""
-      AWS_ACCESS_KEY_ID: ""
-      AWS_SECRET_ACCESS_KEY: ""
-      AWS_SESSION_TOKEN: ""
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      ALL_PROXY: ""
-      NO_PROXY: ""
-    read_only: true
-    tmpfs:
-      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 32
-    mem_limit: 512m
-    cpus: 1.0
-    depends_on:
-      db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    networks:
-      - pentest-control
-      # The controller calls the assessment's LLM provider. pentest-control is
-      # internal (no egress) and this service was attached to it alone, so every
-      # provider request failed with a connection/name-resolution error and the
-      # assessment blocked at model_review.requested.
-      - pentest-egress
-    command: ["python", "-m", "app.workers.pentest_controller"]
-
-  # Foundation 3 target-traffic runtime. It is deliberately not the unified
-  # worker, receives no database/object-store/provider credentials, and starts
-  # only under the explicit pentesting-v3 profile.
-  pentest-runner-v3:
-    restart: unless-stopped
-    profiles: ["pentesting-v3", "pentesting-v4"]
-    env_file:
-      - path: ./.secrets/pentest-runner-v3.env
-        required: false
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: worker
-    container_name: sccap_pentest_runner_v3
-    environment:
-      PYTHONPATH: /app/src
-      SCCAP_MIGRATION_ROLE: skip
-      PENTEST_RUNNER_V3_RABBIT_URL: ${PENTEST_RUNNER_V3_RABBIT_URL:-amqp://${RABBITMQ_PENTEST_RUNNER_USER:-pentest_runner_v3}:${RABBITMQ_PENTEST_RUNNER_PASS:-pentest-runner-local-only}@rabbitmq/}
-      PENTEST_RUNNER_V3_QUEUE: ${RABBITMQ_PENTEST_V3_QUEUE:-pentest_execution_v3_queue}
-      PENTEST_RUNNER_V3_GATEWAY_URL: http://app:8000
-      PENTEST_RUNNER_V3_GATEWAY_SERVICE_IDENTITY: ${PENTEST_RUNNER_V3_GATEWAY_TOKEN:-}
-      PENTEST_RUNNER_V3_TASK_PUBLIC_KEYS: ${PENTEST_RUNNER_V3_TASK_PUBLIC_KEYS:-}
-      PENTEST_RUNNER_V3_OBSERVATION_KEY_ID: ${PENTEST_SCOPE_OBSERVATION_SIGNING_KEY_ID:-pentest-foundation3-observation-local}
-      PENTEST_RUNNER_V3_OBSERVATION_SIGNING_SEED: ${PENTEST_SCOPE_OBSERVATION_SIGNING_SEED:-}
-      PENTEST_RUNNER_V3_OBSERVATION_AUDIENCE: ${PENTEST_SCOPE_OBSERVATION_AUDIENCE:-pentest-resolution:foundation3}
-      PENTEST_RUNNER_V3_DECISION_PUBLIC_KEYS: ${PENTEST_RUNNER_V3_DECISION_PUBLIC_KEYS:-}
-      PENTEST_RUNNER_V3_DECISION_AUDIENCE: ${PENTEST_SCOPE_DECISION_AUDIENCE:-pentest-scope-decision:foundation3}
-      PENTEST_RUNNER_V3_RESULT_KEY_ID: ${PENTEST_RESULT_SIGNING_KEY_ID:-pentest-foundation2-result-local}
-      PENTEST_RUNNER_V3_RESULT_SIGNING_SEED: ${PENTEST_RESULT_SIGNING_SEED:-}
-      PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS: ${PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS:-127.0.0.11}
-      PENTEST_RUNNER_V3_RESOLVER_ID: ${PENTEST_RUNNER_V3_RESOLVER_ID:-foundation3-approved-resolver}
-      PENTEST_LOCAL_TARGET_HOST_ALIASES: ${PENTEST_LOCAL_TARGET_HOST_ALIASES:-localhost=host.docker.internal,127.0.0.1=host.docker.internal}
-      PENTEST_RUNNER_V3_WORKSPACE_ROOT: /work
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    read_only: true
-    tmpfs:
-      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
-      - /work:size=8388608,uid=1001,gid=1001,mode=0700,nosuid,nodev,noexec
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 8
-    mem_limit: 512m
-    cpus: 0.50
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      app:
-        condition: service_started
-    networks:
-      - pentest-control
-      - pentest-egress
-    command: ["python", "-m", "app.infrastructure.pentesting.runner_v3.main"]
-
-  # Capability 5 supervisor. It reconciles signed notifications and launches
-  # only digest-qualified adapter processes. This container has no target,
-  # database, object-store, provider, Docker/Kubernetes API, or ambient proxy.
-  pentest-tool-worker:
+  # better-pentester engine. One image with every scanner (nmap, nuclei, ZAP,
+  # sqlmap, ffuf, hydra, whatweb, testssl, hashcat, Chromium) and the LLM loop.
+  # It polls the shared database for queued runs and streams events/findings
+  # straight into Postgres — no broker, no signing, no qualification, no limits.
+  pentest-engine:
     restart: unless-stopped
     profiles: ["pentesting-v5"]
     build:
       context: .
       dockerfile: Dockerfile
-      # One execution image for every deployment: the adapter entrypoints plus
-      # the tools they drive (nmap, nuclei, ZAP, Chromium). Previously this
-      # built `tool-supervisor`, which has the entrypoints but none of the
-      # tools, so every claimed execution died with "nmap: not found".
       target: worker-pentest-local
-    container_name: sccap_pentest_tool_worker
-    user: "1001:1001"
+    container_name: sccap_pentest_engine
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app/src
+      - SERVICE_NAME=pentest-engine
+      - SCCAP_MIGRATION_ROLE=wait
+      - LITELLM_LOCAL_MODEL_COST_MAP=True
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+      - HOME=/tmp
+      - PENTEST_NUCLEI_USER=/tmp/nuclei-templates
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - ALL_PROXY=
+      - NO_PROXY=
     volumes:
       - ./src:/app/src:ro
-      - ${PENTEST_TOOL_RESULT_SIGNING_KEY_FILE:-./.secrets/pentest-tool-result-signing.key}:/run/secrets/pentest-tool-result-signing.key:ro
-    environment:
-      # This service holds no database credentials, so the worker image's
-      # migration-waiter entrypoint has nothing to check against and would
-      # loop forever. It is an isolated runtime, not a schema consumer.
-      SCCAP_MIGRATION_ROLE: skip
-      PYTHONPATH: /app/src
-      PENTEST_TOOL_WORKER_RABBIT_URL: ${RABBITMQ_PENTEST_TOOL_URL:-amqp://${RABBITMQ_PENTEST_TOOL_USER:-pentest_tool_worker}:${RABBITMQ_PENTEST_TOOL_PASS:-pentest-tool-local-only}@rabbitmq/}
-      PENTEST_TOOL_WORKER_QUEUE: ${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
-      PENTEST_TOOL_WORKER_GATEWAY_URL: http://app:8000
-      PENTEST_TOOL_WORKER_GATEWAY_TOKEN: ${PENTEST_TOOL_GATEWAY_TOKEN:-}
-      PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS: ${PENTEST_TOOL_WORKER_TASK_PUBLIC_KEYS:-local:AA}
-      PENTEST_TOOL_WORKER_RELAY_GRANT_PUBLIC_KEYS: ${PENTEST_TOOL_WORKER_RELAY_GRANT_PUBLIC_KEYS:-local:AA}
-      PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: ${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
-      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: '${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{"authorization_readonly.v1":"0000000000000000000000000000000000000000000000000000000000000000","playwright_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","zap_passive.v1":"0000000000000000000000000000000000000000000000000000000000000000","nuclei_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","nmap_connect.v1":"0000000000000000000000000000000000000000000000000000000000000000","graphql_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","realtime_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000"}}'
-      PENTEST_TOOL_WORKER_ID: ${PENTEST_TOOL_WORKER_ID:-pentest-tool-worker-v1}
-      PENTEST_TOOL_WORKER_WORKSPACE_ROOT: /work
-      PENTEST_TOOL_RESULT_SIGNING_KEY_FILE: /run/secrets/pentest-tool-result-signing.key
-      PENTEST_TOOL_RESULT_SIGNING_KEY_ID: ${PENTEST_TOOL_RESULT_SIGNING_KEY_ID:-pentest-capability5-result-local}
-      PENTEST_TOOL_RESULT_KEY_AUDIENCE: ${PENTEST_TOOL_RESULT_KEY_AUDIENCE:-pentest-result:foundation2}
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      ALL_PROXY: ""
-      NO_PROXY: ""
-    read_only: true
+      - ./alembic:/app/alembic:ro
+      - ./alembic.ini:/app/alembic.ini:ro
     tmpfs:
-      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
-      - /work:size=536870912,mode=0700,uid=1001,gid=1001,nosuid,nodev
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 64
-    mem_limit: 1g
-    cpus: 1.0
-    depends_on:
-      rabbitmq: {condition: service_healthy}
-      app: {condition: service_started}
-    networks:
-      - pentest-control
-    command: ["python", "-m", "app.infrastructure.pentesting.tool_worker.main"]
-    healthcheck:
-      test: ["CMD", "python", "-m", "app.infrastructure.pentesting.tool_worker.main", "--health-check"]
-      # The probe imports the worker's full module tree inside a 1-CPU container;
-      # it measures ~8 s here, so the previous 5 s timeout marked a healthy
-      # worker unhealthy on every cycle.
-      interval: 30s
-      timeout: 20s
-      retries: 3
-      start_period: 30s
-
-  # Local compose readiness reporter for Capability 5 adapters. Production uses
-  # the Kubernetes reporter and qualification manifest; this service verifies the
-  # immutable local runtime wrappers and renews short-lived adapter health.
-  pentest-adapter-reporter:
-    profiles: ["pentesting-v5"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: tool-supervisor
-    container_name: sccap_pentest_adapter_reporter
-    volumes:
-      - ./src:/app/src:ro
-    environment:
-      PYTHONPATH: /app/src
-      PENTEST_ADAPTER_REPORTER_MODE: local-compose
-      PENTEST_ADAPTER_REPORTER_ENDPOINT: http://app:8000
-      PENTEST_ADAPTER_REPORTER_TOKEN: ${PENTEST_ADAPTER_REPORTER_TOKEN:-sccap-local-adapter-reporter}
-      PENTEST_ADAPTER_REPORTER_INTERVAL_SECONDS: ${PENTEST_ADAPTER_REPORTER_INTERVAL_SECONDS:-10}
-      PENTEST_TOOL_WORKER_CAPABILITY_DIGEST: ${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
-      PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS: '${PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS:-{"authorization_readonly.v1":"0000000000000000000000000000000000000000000000000000000000000000","playwright_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","zap_passive.v1":"0000000000000000000000000000000000000000000000000000000000000000","nuclei_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","nmap_connect.v1":"0000000000000000000000000000000000000000000000000000000000000000","graphql_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000","realtime_observe.v1":"0000000000000000000000000000000000000000000000000000000000000000"}}'
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      ALL_PROXY: ""
-      NO_PROXY: ""
-    command: ["python", "-m", "app.infrastructure.pentesting.tool_worker.deployment_reporter"]
-    read_only: true
-    tmpfs:
-      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 32
-    mem_limit: 512m
-    depends_on:
-      app:
-        condition: service_started
-    networks:
-      - pentest-control
-    restart: unless-stopped
-
-  # Capability 6 no-target coordinator. It receives only database/RabbitMQ
-  # control-plane authority and public verification keys. It has no app auth,
-  # encryption, KMS, evidence-store, model, browser, adapter, or target secret.
-  pentest-verification-coordinator:
-    restart: unless-stopped
-    profiles: ["pentesting-c67"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: worker
-    container_name: sccap_pentest_verification_coordinator
-    volumes:
-      - ./src:/app/src:ro
-    environment:
-      PYTHONPATH: /app/src
-      SERVICE_NAME: pentest-verification-coordinator
-      SCCAP_MIGRATION_ROLE: skip
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      ASYNC_DATABASE_URL: ${PENTEST_VERIFICATION_DATABASE_URL:-}
-      RABBITMQ_PENTEST_VERIFICATION_URL: ${RABBITMQ_PENTEST_VERIFICATION_URL:-amqp://${RABBITMQ_PENTEST_VERIFICATION_USER:-pentest_verifier}:${RABBITMQ_PENTEST_VERIFICATION_PASS:-pentest-verifier-local-only}@rabbitmq/}
-      RABBITMQ_PENTEST_VERIFICATION_QUEUE: pentest_verification_queue_v1
-      PENTEST_VERIFICATION_COORDINATOR_ENABLED: ${PENTEST_VERIFICATION_COORDINATOR_ENABLED:-false}
-      PENTEST_C67_INGRESS_ENABLED: ${PENTEST_C67_INGRESS_ENABLED:-false}
-      PENTEST_VERIFICATION_LOCATOR_VERIFY_PUBLIC_KEYS: ${PENTEST_VERIFICATION_LOCATOR_VERIFY_PUBLIC_KEYS:-}
-      PENTEST_VERIFICATION_LOCATOR_AUDIENCE: ${PENTEST_VERIFICATION_LOCATOR_AUDIENCE:-pentest-verifier:v1}
-      PENTEST_VERIFICATION_LEASE_TTL_SECONDS: ${PENTEST_VERIFICATION_LEASE_TTL_SECONDS:-60}
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      ALL_PROXY: ""
-      NO_PROXY: ""
-      # The shared worker image bakes in a Playwright browser path; the
-      # verification coordinator is least-privilege and must not inherit it.
-      PLAYWRIGHT_BROWSERS_PATH: ""
-    read_only: true
-    tmpfs:
-      - /tmp:size=67108864,mode=1777,nosuid,nodev,noexec
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    pids_limit: 32
-    mem_limit: 512m
-    cpus: 1.0
+      - /tmp:size=2147483648,mode=1777
+      - /work:size=2147483648,mode=0777
     depends_on:
       db: {condition: service_healthy}
-      rabbitmq: {condition: service_healthy}
+      app: {condition: service_started}
     networks:
-      - pentest-control
-    command: ["python", "-m", "app.workers.pentest_verification"]
+      - scpnetwork
+      - pentest-egress
+    command: ["python", "-m", "app.pentest.engine"]
 
   patch-validator:
     build:
@@ -997,6 +753,3 @@ networks:
     internal: true
   pentest-egress:
     driver: bridge
-  pentest-tool-runtime:
-    driver: bridge
-    internal: true

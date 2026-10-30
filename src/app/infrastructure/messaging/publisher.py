@@ -9,7 +9,6 @@ from typing import Optional
 
 import aio_pika
 from aio_pika.abc import AbstractRobustChannel, AbstractRobustConnection
-from pydantic import ValidationError
 
 from app.config.config import settings
 from app.infrastructure.observability import (
@@ -18,8 +17,6 @@ from app.infrastructure.observability import (
     span,
     trace_carrier,
 )
-from app.pentesting.contracts.finding_truth_v2 import VerificationLocatorV1
-from app.pentesting.contracts.tooling_v1 import ToolTaskLocatorV1
 
 logger = logging.getLogger(__name__)
 
@@ -90,25 +87,12 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
 
 
 def _is_safe_notification_locator(message_body: dict) -> bool:
-    """Validate each opaque locator against the contract selected by its kind."""
+    """No pentest notifications are published anymore; refuse any that linger."""
 
-    if "locator" not in message_body:
-        return True
-    locator = message_body["locator"]
-    contract = {
-        "pentest_tool_v1": ToolTaskLocatorV1,
-        "pentest_verification_v1": VerificationLocatorV1,
-    }.get(message_body.get("kind"))
-    if contract is None or not isinstance(locator, dict):
+    kind = str(message_body.get("kind", ""))
+    if kind.startswith("pentest_"):
         return False
-    try:
-        validated = contract.model_validate_json(json.dumps(locator))
-    except (TypeError, ValueError, ValidationError):
-        return False
-
-    # Capability 5 reserves extensions for a future version. Keep the current
-    # queue boundary narrower than the reusable contract base model.
-    return not isinstance(validated, ToolTaskLocatorV1) or validated.extensions == {}
+    return True
 
 
 async def _get_channel() -> AbstractRobustChannel:

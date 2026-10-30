@@ -23,8 +23,7 @@ from app.api.v1.routers.chat import router as chat_router
 from app.api.v1.routers.compliance import router as compliance_router
 from app.api.v1.routers.features import router as features_router
 from app.api.v1.routers.admin_features import router as admin_features_router
-from app.api.v1.routers.pentest_console import router as pentest_console_router
-from app.api.v1.routers.pentesting import router as pentesting_router
+from app.api.v1.routers.pentest import router as pentest_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.browser_session import router as browser_session_router
 from app.api.v1.routers.sessions import router as sessions_router
@@ -534,34 +533,6 @@ async def lifespan(app: FastAPI):
         run_outbox_sweeper(sweeper_stop), name="outbox-sweeper"
     )
 
-    pentest_foundation2_stop = asyncio.Event()
-    pentest_foundation2_tasks: list[asyncio.Task] = []
-    if settings.PENTEST_FOUNDATION2_ENABLED:
-        from app.infrastructure.messaging.pentest_evidence_orphan_sweeper import (
-            run_pentest_evidence_orphan_sweeper,
-        )
-        from app.infrastructure.messaging.pentest_recovery_sweeper import (
-            run_pentest_recovery_sweeper,
-        )
-        from app.infrastructure.messaging.pentest_finding_sweeper import (
-            run_pentest_finding_sweeper,
-        )
-
-        pentest_foundation2_tasks = [
-            asyncio.create_task(
-                run_pentest_finding_sweeper(pentest_foundation2_stop),
-                name="pentest-finding-sweeper",
-            ),
-            asyncio.create_task(
-                run_pentest_recovery_sweeper(pentest_foundation2_stop),
-                name="pentest-recovery-sweeper",
-            ),
-            asyncio.create_task(
-                run_pentest_evidence_orphan_sweeper(pentest_foundation2_stop),
-                name="pentest-evidence-orphan-sweeper",
-            ),
-        ]
-
     # --- Start the prescan-approval auto-decline sweeper (ADR-009) ---
     # Transitions scans stuck in PENDING_PRESCAN_APPROVAL > 24h to
     # BLOCKED_USER_DECLINE. Runs on the API container since the worker
@@ -746,7 +717,6 @@ async def lifespan(app: FastAPI):
     # This code runs on shutdown
     logger.info("Application shutdown.")
     sweeper_stop.set()
-    pentest_foundation2_stop.set()
     prescan_sweeper_stop.set()
     findings_source_sweeper_stop.set()
     retention_sweeper_stop.set()
@@ -762,14 +732,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"scan_progress: bus shutdown error: {e}")
     set_scan_progress_bus(None)
-    for task in pentest_foundation2_tasks:
-        try:
-            await asyncio.wait_for(task, timeout=5)
-        except asyncio.TimeoutError:
-            logger.warning("Pentest Foundation 2 sweeper did not stop; cancelling.")
-            task.cancel()
-        except Exception as e:
-            logger.warning("Pentest Foundation 2 sweeper shutdown error: %s", e)
     try:
         await asyncio.wait_for(sweeper_task, timeout=5)
     except asyncio.TimeoutError:
@@ -1152,13 +1114,9 @@ def _include_if_enabled(feature: str, *args, **kwargs) -> None:
         logger.info("startup.features.router_skipped", extra={"feature": feature})
 
 
-# Foundation 0 Pentesting contract discovery. Runtime assessment behavior is
-# introduced only by later foundations.
-_include_if_enabled("pentesting", pentesting_router, prefix="/api/v1")
-# The operator replay console rides the pentesting feature: it is meaningless without an
-# engagement to scope it, and its own flag would only create a state where the API is
-# exposed and the thing it acts on is not.
-_include_if_enabled("pentesting", pentest_console_router, prefix="/api/v1")
+# Pentesting engine. Runtime assessment behavior is feature-gated; the engine
+# container executes runs and streams events through the shared database.
+_include_if_enabled("pentesting", pentest_router, prefix="/api/v1")
 
 
 # Router for managing LLM Configurations

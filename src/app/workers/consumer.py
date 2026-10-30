@@ -99,26 +99,6 @@ def _safe(s: Any) -> str:
     return str(s).replace("\r", "").replace("\n", "")
 
 
-def _extract_capability13_locator_body(message_body: dict[str, Any]) -> dict[str, Any]:
-    """Return only the closed C13 locator fields from an AMQP envelope."""
-
-    return {
-        key: message_body[key]
-        for key in (
-            "kind",
-            "locator_version",
-            "outbox_id",
-            "tenant_id",
-            "engagement_id",
-            "attempt_id",
-            "request_id",
-            "request_kind",
-            "locator_digest",
-        )
-        if key in message_body
-    }
-
-
 load_dotenv()
 
 # Non-resumable scan statuses for which the LangGraph checkpointer thread
@@ -281,8 +261,6 @@ def queues_for_pool(pool: str) -> tuple[str, ...]:
     mapping = {
         "scanner": (
             settings.RABBITMQ_SUBMISSION_QUEUE,
-            settings.RABBITMQ_PENTEST_QUEUE,
-            settings.RABBITMQ_PENTEST_V2_QUEUE,
         ),
         "llm": (settings.RABBITMQ_APPROVAL_QUEUE,),
         "report": (settings.RABBITMQ_REPORT_QUEUE,),
@@ -290,8 +268,6 @@ def queues_for_pool(pool: str) -> tuple[str, ...]:
             settings.RABBITMQ_SUBMISSION_QUEUE,
             settings.RABBITMQ_APPROVAL_QUEUE,
             settings.RABBITMQ_REPORT_QUEUE,
-            settings.RABBITMQ_PENTEST_QUEUE,
-            settings.RABBITMQ_PENTEST_V2_QUEUE,
         ),
     }
     try:
@@ -1023,81 +999,6 @@ async def _build_initial_state(
     return initial_state
 
 
-# Bounded redelivery for one committed execution.  A transient failure may be
-# fixed by trying again; a deterministic one never is, so the first is retried a
-# few times and the second is abandoned immediately.
-_PENTEST_DELIVERY_ATTEMPT_LIMIT = 4
-_MAX_TRACKED_DELIVERY_FAILURES = 512
-_delivery_attempts: dict[str, int] = {}
-
-
-def _delivery_failure_key(body: dict[str, Any]) -> str | None:
-    """Return the stable identity redeliveries of this message share."""
-
-    for field in ("execution_id", "outbox_id", "attempt_id"):
-        value = body.get(field)
-        if value:
-            return f"{field}:{value}"
-    return None
-
-
-def _record_delivery_failure(key: str) -> int:
-    """Count consecutive failures for one message identity.
-
-    Bounded by construction: an entry is dropped once the message is handled or
-    abandoned, and the map is trimmed if it ever grows past its bound.
-    """
-
-    attempts = _delivery_attempts.get(key, 0) + 1
-    _delivery_attempts[key] = attempts
-    if len(_delivery_attempts) > _MAX_TRACKED_DELIVERY_FAILURES:
-        for stale in list(_delivery_attempts)[: len(_delivery_attempts) // 2]:
-            _delivery_attempts.pop(stale, None)
-    return attempts
-
-
-def _clear_delivery_failure(body: dict[str, Any]) -> None:
-    key = _delivery_failure_key(body)
-    if key is not None:
-        _delivery_attempts.pop(key, None)
-
-
-async def _requeue_or_abandon_pentest_delivery(
-    message: AbstractIncomingMessage, body: dict[str, Any], exc: BaseException
-) -> None:
-    """Redeliver a committed execution only when redelivery could help.
-
-    An unconditional requeue turns a deterministic failure into a hot loop: the
-    execution commit is immutable and already durable, so a contract or
-    validation failure against it reproduces exactly on every attempt, pushing
-    the broker to redeliver at line rate and burying every other log. Those are
-    abandoned instead. Transient failures are still retried, but only a bounded
-    number of times, so a persistently flaky dependency cannot loop either.
-    """
-
-    from app.workers.pentesting_v2 import delivery_failure_is_terminal
-
-    terminal = delivery_failure_is_terminal(exc)
-    key = _delivery_failure_key(body)
-    attempts = _record_delivery_failure(key) if key is not None else 1
-    if terminal or attempts > _PENTEST_DELIVERY_ATTEMPT_LIMIT:
-        logger.error(
-            "pentest.delivery.abandoned",
-            extra={
-                "error_class": type(exc).__name__,
-                "terminal": terminal,
-                "attempts": attempts,
-            },
-        )
-        # requeue=False hands the message to the queue's dead-letter target when
-        # one is configured, and drops it otherwise. Either way the loop ends.
-        await message.reject(requeue=False)
-        if key is not None:
-            _delivery_attempts.pop(key, None)
-        return
-    await message.reject(requeue=True)
-
-
 async def _handle_message(message: AbstractIncomingMessage) -> None:
     """Top-level message handler.
 
@@ -1116,120 +1017,6 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         _safe(message.routing_key),
         message.delivery_tag,
     )
-
-    # C13 reuses the existing report queue with a closed opaque locator. It is
-    # intentionally dispatched before the legacy scan envelope parser because
-    # it has no scan_id and must never enter the LangGraph/report-handoff path.
-    if (message.routing_key or "") == settings.RABBITMQ_REPORT_QUEUE:
-        try:
-            c13_body = json.loads(message.body.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            c13_body = None
-        if isinstance(c13_body, dict) and c13_body.get("kind") == "capability13_report_export":
-            # The split report worker is the sole C13 protected-evidence
-            # plaintext boundary. Unified workers can share this legacy queue
-            # during rollout, but may only return the locator to the broker.
-            if settings.WORKER_POOL != "report":
-                logger.warning("c13.report.delivery.wrong_worker_pool")
-                await message.reject(requeue=True)
-                return
-            try:
-                from app.infrastructure.database.repositories.pentesting.capability13_report_locator import (
-                    Capability13ReportLocatorV1,
-                )
-
-                c13_locator_body = _extract_capability13_locator_body(c13_body)
-                c13_locator = Capability13ReportLocatorV1.model_validate_json(json.dumps(c13_locator_body))
-            except Exception:
-                logger.error("c13.report.delivery.invalid_locator", exc_info=True)
-                await message.reject(requeue=False)
-                return
-            if not settings.PENTEST_CAPABILITY13_REPORT_BUILDS:
-                logger.warning("c13.report.delivery.feature_disabled")
-                await message.reject(requeue=True)
-                return
-
-            async def _run_c13_report_delivery() -> None:
-                try:
-                    from app.core.services.pentesting.capability13_report_service import (
-                        Capability13ReportError,
-                    )
-                    from app.workers.pentesting import (
-                        handle_capability13_export_delivery,
-                        handle_capability13_report_delivery,
-                    )
-
-                    with principal_scope(
-                        tenant_id=c13_locator.tenant_id,
-                        principal_kind="system",
-                        principal_id=f"c13-report-worker:{c13_locator.outbox_id}",
-                        system_scope=True,
-                    ):
-                        if c13_locator.request_kind == "report":
-                            await handle_capability13_report_delivery(c13_locator_body)
-                        else:
-                            await handle_capability13_export_delivery(c13_locator_body)
-                    await message.ack()
-                except asyncio.CancelledError:
-                    raise
-                except Capability13ReportError as exc:
-                    logger.error(
-                        "c13.report.delivery.report_error",
-                        extra={"error_code": exc.code},
-                        exc_info=True,
-                    )
-                    if not message.processed:
-                        if exc.code == "C13_BUILD_ALREADY_CLAIMED":
-                            await message.ack()
-                        else:
-                            await message.reject(requeue=False)
-                except ValueError:
-                    logger.error("c13.report.delivery.rejected", exc_info=True)
-                    if not message.processed:
-                        await message.reject(requeue=False)
-                except Exception:
-                    logger.error("c13.report.delivery.failed", exc_info=True)
-                    if not message.processed:
-                        await message.reject(requeue=True)
-
-            _track_delivery(_run_c13_report_delivery())
-            return
-
-    if (message.routing_key or "") in {
-        settings.RABBITMQ_PENTEST_QUEUE,
-        settings.RABBITMQ_PENTEST_V2_QUEUE,
-    }:
-        try:
-            body = json.loads(message.body.decode("utf-8"))
-            if not isinstance(body, dict):
-                raise ValueError("message body must be an object")
-            tenant_id = uuid.UUID(str(body.get("tenant_id")))
-        except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
-            logger.error("pentest.delivery.invalid_envelope")
-            await message.reject(requeue=False)
-            return
-
-        async def _run_pentest_delivery() -> None:
-            try:
-                from app.workers.pentesting import handle_pentest_delivery
-
-                with principal_scope(
-                    tenant_id=tenant_id,
-                    principal_kind="service_principal",
-                    principal_id=f"pentest-worker:{body.get('outbox_id')}",
-                ):
-                    await handle_pentest_delivery(body)
-                _clear_delivery_failure(body)
-                await message.ack()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.error("pentest.delivery.unhandled", exc_info=True)
-                if not message.processed:
-                    await _requeue_or_abandon_pentest_delivery(message, body, exc)
-
-        _track_delivery(_run_pentest_delivery())
-        return
 
     initial_state = await _build_initial_state(message)
     if initial_state is None:

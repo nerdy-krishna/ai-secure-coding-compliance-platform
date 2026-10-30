@@ -292,27 +292,20 @@ class LLMConfigRepository:
                 "preprocessing job(s) are still running on it."
             )
 
-        # A pentest attempt pins its model in `pinned_versions`, and the controller
-        # asks that model on every cycle, so a running attempt is live work.
-        from app.pentesting.persistence import models as pentest_models
+        # A running pentest run asks its model every cycle, so live runs count too.
+        from app.pentest import models as pentest_models
 
         running_attempts = await self.db.scalar(
             select(func.count())
-            .select_from(pentest_models.PentestAttempt)
+            .select_from(pentest_models.PentestRun)
             .where(
-                # Anything not finished could still ask this model on a later
-                # cycle, so a paused or blocked attempt counts as live too.
-                pentest_models.PentestAttempt.state.notin_(
-                    ("completed", "failed", "cancelled", "stopped", "inconclusive")
-                ),
-                pentest_models.PentestAttempt.pinned_versions["model_config"].astext
-                == str(config_id),
+                pentest_models.PentestRun.status.in_(("queued", "running"))
             )
         )
         if running_attempts:
             return (
                 f"Cannot delete this configuration yet — {running_attempts} pentest "
-                "engagement(s) are still running on it. Stop them, then delete it."
+                "run(s) are still running on it. Stop them, then delete it."
             )
         return None
 

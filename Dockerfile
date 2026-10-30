@@ -391,8 +391,8 @@ FROM base AS pentest-adapter-nuclei
 
 COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
 COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
-COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/bundles /opt/sccap-nuclei-bundles
-COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/trust /opt/sccap-nuclei-trust
+COPY --chown=root:root src/app/pentest/data/nuclei/bundles /opt/sccap-nuclei-bundles
+COPY --chown=root:root src/app/pentest/data/nuclei/trust /opt/sccap-nuclei-trust
 COPY --chown=appuser:appuser ./src /app/src
 USER root
 RUN install -d -o appuser -g appuser -m 0700 /work \
@@ -483,15 +483,15 @@ RUN apt-get update \
         libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
-COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/bundles /opt/sccap-nuclei-bundles
-COPY --chown=root:root src/app/pentesting/catalogs/initial_nuclei/trust /opt/sccap-nuclei-trust
+COPY --chown=root:root src/app/pentest/data/nuclei/bundles /opt/sccap-nuclei-bundles
+COPY --chown=root:root src/app/pentest/data/nuclei/trust /opt/sccap-nuclei-trust
 COPY --from=pentest-adapter-playwright /ms-playwright /ms-playwright
 COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/playwright /app/.venv/lib/python3.12/site-packages/playwright
 COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/pyee /app/.venv/lib/python3.12/site-packages/pyee
 COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/greenlet /app/.venv/lib/python3.12/site-packages/greenlet
 COPY --from=pentest-adapter-zap /zap /zap
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-COPY --chown=root:root src/app/pentesting/catalogs/wordlists /opt/sccap-wordlists
+COPY --chown=root:root src/app/pentest/data/wordlists /opt/sccap-wordlists
 RUN chmod -R a+rX /ms-playwright /zap \
     && chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap /zap/zap.sh \
     # The nuclei adapter stats this file to pin the engine identity; without it

@@ -223,22 +223,13 @@ class UsageBudgetRepository:
         elif context.operation_kind == "pentest":
             if context.pentest_attempt_id is None:
                 raise ValueError("pentest usage context requires pentest_attempt_id")
-            from app.pentesting.persistence.models import (
-                PentestAttempt,
-                PentestEngagement,
-            )
+            from app.pentest.models import PentestRun
 
             found = (
                 await self.db.execute(
-                    select(
-                        PentestAttempt.tenant_id,
-                        PentestEngagement.owner_user_id,
+                    select(PentestRun.tenant_id, PentestRun.user_id).where(
+                        PentestRun.id == context.pentest_attempt_id
                     )
-                    .join(
-                        PentestEngagement,
-                        PentestEngagement.id == PentestAttempt.engagement_id,
-                    )
-                    .where(PentestAttempt.id == context.pentest_attempt_id)
                 )
             ).one_or_none()
             row = (*found, None) if found is not None else None

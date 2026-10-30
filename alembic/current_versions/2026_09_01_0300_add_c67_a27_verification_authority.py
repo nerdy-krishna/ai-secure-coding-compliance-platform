@@ -18,11 +18,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    from app.pentesting.contracts.canonical import contract_digest
-    from app.pentesting.contracts.finding_truth_v2 import (
-        IdentityVerificationRecipeConstraintV1,
-    )
-    from app.pentesting.services.verification_registry import a27_verification_recipe
+    # No-op since the better-pentester migration drops every pentest table; the
+    # seeded C67-A27 catalog rows are discarded, so avoid the app.pentesting
+    # imports this migration historically needed.
+    return
 
     # Catalog creation is the same frozen release instant used by the C6
     # registry; migration wall-clock time is never part of runtime identity.
