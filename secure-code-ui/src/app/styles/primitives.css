@@ -611,6 +611,28 @@ mark.diff-hl {
 /* code blocks when used via the .mono/.code helpers — kept from
    the prototype but under a scope-safe name to avoid conflicting
    with any rules Ant pages might have. */
+/* Live activity log: monospace grid of timestamp | kind | message, sized so it
+   is readable while a scan runs and user-resizable for deep inspection. */
+.scan-activity-log {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.scan-activity-row {
+  display: grid;
+  grid-template-columns: 74px 84px minmax(0, 1fr);
+  gap: 8px;
+  padding: 1px 0;
+  border-bottom: 1px solid transparent;
+}
+.scan-activity-row:hover { background: var(--bg-soft); }
+@media (max-width: 720px) {
+  .scan-activity-row { grid-template-columns: 62px minmax(0, 1fr); }
+  .scan-activity-row > :nth-child(2) { display: none; }
+}
+
 pre.sccap-code {
   font-family: var(--font-mono);
   background: var(--bg-inset);

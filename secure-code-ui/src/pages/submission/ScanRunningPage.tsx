@@ -259,6 +259,15 @@ const ACTIVITY_DETAIL_KEYS = [
   "prompt_tokens",
   "completion_tokens",
   "error_class",
+  // Failure text. Without these the log showed "FAILED" and nothing else, which
+  // is why a stuck or failing scan looked silent.
+  "error",
+  "error_message",
+  "failure_reason",
+  "reason",
+  "detail",
+  "exception",
+  "hint",
 ] as const;
 
 const formatActivityValue = (key: string, value: unknown): string | null => {
@@ -278,6 +287,10 @@ const formatActivityValue = (key: string, value: unknown): string | null => {
     typeof value === "number"
   ) {
     return `$${value.toFixed(4)}`;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.replace(/\s+/g, " ").trim();
+    return trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed;
   }
   if (Array.isArray(value)) return value.slice(0, 5).map(String).join(", ");
   if (typeof value === "object") {
@@ -302,6 +315,43 @@ const formatActivityDetails = (
     else fragments.push(`${key.replace(/_/g, " ")}: ${value}`);
   }
   return fragments.length > 0 ? ` — ${fragments.join(" · ")}` : "";
+};
+
+type ActivityTone = "error" | "warn" | "ok" | "info";
+
+// Colour a log line by what it actually says, so a failure is visible in the
+// stream instead of looking like every other line.
+const activityTone = (event: ScanEventMsg): ActivityTone => {
+  const status = (event.status || "").toUpperCase();
+  if (status === "FAILED" || status === "ERROR" || status === "BLOCKED") {
+    return "error";
+  }
+  if (
+    status === "DEGRADED" ||
+    status === "WARNING" ||
+    status === "RETRYING" ||
+    status === "WAITING" ||
+    status === "THROTTLED"
+  ) {
+    return "warn";
+  }
+  if (status === "COMPLETED" || status === "SUCCESS") return "ok";
+  return "info";
+};
+
+const TONE_COLOR: Record<ActivityTone, string> = {
+  error: "var(--critical)",
+  warn: "var(--high)",
+  ok: "var(--success)",
+  info: "var(--fg)",
+};
+
+const formatAge = (seconds: number): string => {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 };
 
 // Merge new scan-events into the existing list, deduped by the stable
@@ -378,6 +428,11 @@ const ScanRunningPage: React.FC = () => {
   const [events, setEvents] = useState<ScanEventMsg[]>([]);
   const [activityKindFilter, setActivityKindFilter] = useState("all");
   const [activityStageFilter, setActivityStageFilter] = useState("all");
+  const [activityErrorsOnly, setActivityErrorsOnly] = useState(false);
+  const activityLogRef = useRef<HTMLDivElement | null>(null);
+  const activityStickToBottom = useRef(true);
+  const [activityShowJump, setActivityShowJump] = useState(false);
+  const [activityClock, setActivityClock] = useState(() => Date.now());
   // §3.10b — per-file analysis progress, keyed by file_path so a file
   // showing up multiple times collapses to one row. Renders below the
   // pipeline stages while RUNNING_AGENTS is active.
@@ -863,6 +918,37 @@ const ScanRunningPage: React.FC = () => {
     () => Array.from(new Set(events.map((event) => event.stage_name))).sort(),
     [events],
   );
+  const activityErrorCount = useMemo(
+    () => events.filter((event) => activityTone(event) === "error").length,
+    [events],
+  );
+  const activityVisible = useMemo(
+    () =>
+      activityErrorsOnly
+        ? filteredEvents.filter((event) => activityTone(event) === "error")
+        : filteredEvents,
+    [filteredEvents, activityErrorsOnly],
+  );
+  // Keep the newest line visible unless the operator scrolled up to read.
+  useEffect(() => {
+    if (!activityStickToBottom.current) return;
+    const node = activityLogRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [filteredEvents.length, activityErrorsOnly]);
+
+  // A lightweight clock drives the "last event … ago" indicator.
+  useEffect(() => {
+    const timer = setInterval(() => setActivityClock(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const activityLatest = filteredEvents[filteredEvents.length - 1];
+  const activityLatestAgeSeconds = useMemo(() => {
+    if (!activityLatest?.timestamp) return null;
+    const parsed = new Date(activityLatest.timestamp).getTime();
+    if (Number.isNaN(parsed)) return null;
+    return Math.max(0, Math.round((activityClock - parsed) / 1000));
+  }, [activityLatest, activityClock]);
   // Scan-event timestamps bound the elapsed timer — earliest event is
   // the start; once terminal, the latest event freezes it.
   const scanStartedAt = useMemo(() => {
@@ -2076,30 +2162,149 @@ const ScanRunningPage: React.FC = () => {
               {streamError}
             </div>
           )}
-          <pre
-            className="sccap-code scan-activity-log"
+          {/* "Right now" summary: the newest event, how long ago it was, and a
+              stall warning. A scan waiting on a slow LLM call or wedged in a
+              node used to look identical to a healthy one. */}
+          <div
             style={{
-              maxHeight: 240,
-              overflowY: "auto",
-              overflowX: "hidden",
-              whiteSpace: "pre-wrap",
-              overflowWrap: "anywhere",
-              wordBreak: "break-word",
-              fontSize: 11.5,
-              margin: 0,
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 10,
+              marginBottom: 8,
+              fontSize: 12,
             }}
           >
-            {events.length === 0
-              ? "Waiting for events…\n"
-              : filteredEvents.length === 0
-                ? "No activity matches these filters.\n"
-                : filteredEvents
-                  .map(
-                    (e) =>
-                      `[${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : "—"}] ${e.activity_kind.replace(/_/g, " ")} · ${eventDisplayName(e.stage_name)} · ${e.status}${formatActivityDetails(e.details)}`,
-                  )
-                  .join("\n")}
-          </pre>
+            {activityLatest ? (
+              <>
+                <span style={{ color: "var(--fg-muted)" }}>Now</span>
+                <span style={{ fontWeight: 600, color: TONE_COLOR[activityTone(activityLatest)] }}>
+                  {eventDisplayName(activityLatest.stage_name)} · {activityLatest.status}
+                </span>
+                {activityLatestAgeSeconds !== null && (
+                  <span
+                    style={{
+                      color:
+                        activityLatestAgeSeconds > 600
+                          ? "var(--critical)"
+                          : activityLatestAgeSeconds > 120
+                            ? "var(--high)"
+                            : "var(--fg-muted)",
+                    }}
+                    title="Time since the newest event"
+                  >
+                    last event {formatAge(activityLatestAgeSeconds)} ago
+                    {activityLatestAgeSeconds > 120 && !isTerminal && " — no progress reported"}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span style={{ color: "var(--fg-muted)" }}>Waiting for events…</span>
+            )}
+            {activityErrorCount > 0 && (
+              <span className="chip chip-critical" style={{ fontSize: 10.5 }}>
+                {activityErrorCount} error{activityErrorCount === 1 ? "" : "s"}
+              </span>
+            )}
+            <label
+              style={{
+                marginLeft: "auto",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                color: "var(--fg-muted)",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={activityErrorsOnly}
+                onChange={(event) => setActivityErrorsOnly(event.target.checked)}
+              />
+              errors only
+            </label>
+            {activityShowJump && (
+              <button
+                className="sccap-btn sccap-btn-sm"
+                onClick={() => {
+                  activityStickToBottom.current = true;
+                  setActivityShowJump(false);
+                  const node = activityLogRef.current;
+                  if (node) node.scrollTop = node.scrollHeight;
+                }}
+              >
+                Jump to latest
+              </button>
+            )}
+          </div>
+          <div
+            ref={activityLogRef}
+            className="sccap-code scan-activity-log"
+            role="log"
+            aria-live="polite"
+            onScroll={() => {
+              const node = activityLogRef.current;
+              if (!node) return;
+              const atBottom =
+                node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+              activityStickToBottom.current = atBottom;
+              setActivityShowJump(!atBottom);
+            }}
+            style={{
+              minHeight: 340,
+              maxHeight: "56vh",
+              overflowY: "auto",
+              overflowX: "hidden",
+              resize: "vertical",
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              lineHeight: 1.55,
+              margin: 0,
+              padding: "10px 12px",
+            }}
+          >
+            {activityVisible.length === 0 ? (
+              <div style={{ color: "var(--fg-muted)" }}>
+                {events.length === 0
+                  ? "Waiting for events…"
+                  : activityErrorsOnly
+                    ? "No errors reported so far."
+                    : "No activity matches these filters."}
+              </div>
+            ) : (
+              activityVisible.map((event) => {
+                const tone = activityTone(event);
+                return (
+                  <div
+                    key={
+                      event.event_id > 0
+                        ? `id:${event.event_id}`
+                        : `fp:${event.stage_name}|${event.timestamp ?? ""}|${event.status}`
+                    }
+                    className="scan-activity-row"
+                    style={{ color: TONE_COLOR[tone] }}
+                  >
+                    <span style={{ color: "var(--fg-subtle)" }}>
+                      {event.timestamp
+                        ? new Date(event.timestamp).toLocaleTimeString()
+                        : "—"}
+                    </span>
+                    <span style={{ color: "var(--fg-muted)" }}>
+                      {event.activity_kind.replace(/_/g, " ")}
+                    </span>
+                    <span style={{ wordBreak: "break-word" }}>
+                      <b style={{ fontWeight: tone === "info" ? 500 : 600 }}>
+                        {eventDisplayName(event.stage_name)}
+                      </b>{" "}
+                      {event.status}
+                      {formatActivityDetails(event.details)}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
