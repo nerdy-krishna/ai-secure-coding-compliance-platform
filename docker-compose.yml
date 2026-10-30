@@ -424,6 +424,10 @@ services:
       - ./src:/app/src:ro
       - ${PENTEST_TOOL_RESULT_SIGNING_KEY_FILE:-./.secrets/pentest-tool-result-signing.key}:/run/secrets/pentest-tool-result-signing.key:ro
     environment:
+      # This service holds no database credentials, so the worker image's
+      # migration-waiter entrypoint has nothing to check against and would
+      # loop forever. It is an isolated runtime, not a schema consumer.
+      SCCAP_MIGRATION_ROLE: skip
       PYTHONPATH: /app/src
       PENTEST_TOOL_WORKER_RABBIT_URL: ${RABBITMQ_PENTEST_TOOL_URL:-amqp://${RABBITMQ_PENTEST_TOOL_USER:-pentest_tool_worker}:${RABBITMQ_PENTEST_TOOL_PASS:-pentest-tool-local-only}@rabbitmq/}
       PENTEST_TOOL_WORKER_QUEUE: ${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
