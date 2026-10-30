@@ -287,34 +287,10 @@ _sccap_install_own_cert() {
 }
 
 _sccap_provision_pentest_secrets() {
-    # The pentesting-* profiles run workers that refuse to start without signing
-    # keys and gateway tokens. The application derives those from SECRET_KEY at
-    # runtime, so the provisioner (run inside the already-built app image, which
-    # ships `cryptography`) writes the matching values into .env plus the tool
-    # worker's result-signing key file. Without this a fresh install leaves
-    # pentest-runner-v3 / pentest-tool-worker / the verification coordinator in
-    # a restart loop.
-    local profiles img
-    profiles="${COMPOSE_PROFILES_VALUE:-$(grep -m1 '^COMPOSE_PROFILES=' .env 2>/dev/null | cut -d= -f2-)}"
-    case ",${profiles}," in
-        *pentesting*) ;;
-        *) return 0 ;;
-    esac
-    img=$(docker compose config --images 2>/dev/null | grep -E -- '-app$' | head -1)
-    [ -n "$img" ] || return 0
-    docker image inspect "$img" >/dev/null 2>&1 || return 0
-    if docker run --rm --user 0 -v "$PWD:/repo" -w /repo --entrypoint python "$img" \
-            /repo/scripts/provision-pentest-compose-secrets.py --env-file /repo/.env; then
-        echo "[+] Pentest worker credentials provisioned."
-    else
-        echo "[!] Pentest credential provisioning failed; the pentest workers may restart."
-    fi
-    # The tool worker rejects a key file it does not own (uid 1001 in compose).
-    _sccap_with_root chown 1001:1001 .secrets/pentest-tool-result-signing.key 2>/dev/null || true
-    # The provisioner runs as root; make sure .env is the operator's again
-    # before the next `docker compose` command reads it.
-    _sccap_fix_ownership
+    # The better-pentester engine derives no signing/gateway secrets; nothing to provision.
+    return 0
 }
+
 
 _sccap_ensure_evidence_bucket() {
     # Evidence writes call ensure_bucket() lazily, but the retention and orphan
@@ -653,53 +629,10 @@ EOF
 }
 
 _sccap_install_pentest_runtimes() {
-    # Make the execution plane able to run an assessment.
-    #
-    # setup.sh used to provision only the pentest *control* plane, so every
-    # engagement reached the tool worker and died with "nmap: not found". The
-    # worker now builds from worker-pentest-local (adapters + nmap/nuclei/ZAP/
-    # Chromium), and this step records that image's real digest as the adapter
-    # qualification, replacing the all-zero placeholders.
-    case ",${COMPOSE_PROFILES_VALUE:-$(grep -m1 '^COMPOSE_PROFILES=' .env 2>/dev/null | cut -d= -f2-)}," in
-        *pentesting*) ;;
-        *) return 0 ;;
-    esac
-
-    local image_ref digest short digests
-    # Prefer the image the running worker actually uses; fall back to the one
-    # compose resolves for the service.
-    image_ref=$(docker inspect sccap_pentest_tool_worker --format '{{.Config.Image}}' 2>/dev/null)
-    [ -n "$image_ref" ] || image_ref=$(docker compose config --images 2>/dev/null | grep -E -- '-pentest-tool-worker$' | head -1)
-    [ -n "$image_ref" ] || { echo "[!] Pentest execution image not built; skipping qualification."; return 0; }
-    digest=$(docker image inspect --format '{{.Id}}' "$image_ref" 2>/dev/null | sed 's/^sha256://')
-    printf '%s' "$digest" | grep -qE '^[0-9a-f]{64}$' \
-        || { echo "[!] Could not read the pentest image digest; skipping."; return 0; }
-    short=$(printf '%s' "$digest" | cut -c1-12)
-
-    # One image hosts every adapter, so each adapter maps to the same digest.
-    digests=$(printf '{"authorization_readonly.v1":"%s","playwright_observe.v1":"%s","zap_passive.v1":"%s","nuclei_observe.v1":"%s","nmap_connect.v1":"%s","graphql_observe.v1":"%s","realtime_observe.v1":"%s"}' \
-        "$digest" "$digest" "$digest" "$digest" "$digest" "$digest" "$digest")
-    _sccap_set_env_kv "PENTEST_TOOL_WORKER_CAPABILITY_DIGEST" "$digest"
-    _sccap_set_env_kv "PENTEST_TOOL_WORKER_RUNTIME_IMAGE_DIGESTS" "$digests"
-    echo "[+] Pentest execution image qualified: ${short} (7 adapters)."
-
-    local missing=""
-    for probe in \
-        "command -v nmap" \
-        "command -v java" \
-        "test -x /opt/sccap-tools/nuclei" \
-        "test -x /opt/sccap-tool-runtimes/nmap-connect"; do
-        docker compose run --rm --no-deps --entrypoint sh pentest-tool-worker \
-            -c "$probe" >/dev/null 2>&1 || missing="$missing $probe"
-    done
-    if [ -n "$missing" ]; then
-        echo "[!] Execution image is missing:$missing — pentests will fail at tool launch."
-    else
-        echo "[+] Pentest tools present (nmap, nuclei, java/zap)."
-    fi
-    docker compose up -d --no-build pentest-tool-worker pentest-adapter-reporter >/dev/null 2>&1 || true
+    # The better-pentester engine image already carries every scanner; nothing to install.
     return 0
 }
+
 
 _sccap_run_update() {
     command -v git >/dev/null 2>&1 || { echo "[!] git is required for --update."; return 1; }
@@ -751,7 +684,6 @@ _sccap_run_update() {
         --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         || { echo "[!] Build failed; run ./setup.sh --rollback"; return 1; }
     _sccap_align_certbot_ownership
-    _sccap_provision_pentest_secrets
     docker compose up -d || { echo "[!] Start failed; run ./setup.sh --rollback"; return 1; }
     # The broker applies the pentest users' passwords from .env only when its
     # container starts (rabbitmq/init.sh change_password). If an update rotates
@@ -760,7 +692,6 @@ _sccap_run_update() {
     # "connected=false" and assessments never advance past decision.committed.
     echo "[*] Re-applying broker credentials..."
     docker compose up -d --no-build --force-recreate rabbitmq >/dev/null 2>&1 || true
-    _sccap_install_pentest_runtimes
 
     # 4. wait for the database, then migrate
     local count=0
@@ -994,7 +925,6 @@ SCCAP setup
                                  A pg_dumpall backup is written first.
   ./setup.sh --factory-reset     Purge plus delete .env, .secrets and certbot
                                  state. This is a clean install.
-  ./setup.sh --qualify-pentest   Rebuild the pentest execution image, record its
                                  digest as the adapter qualification and restart
                                  the tool worker. Run after changing the image.
   ./setup.sh --update            Pull the current branch, back up the database,
@@ -1017,7 +947,6 @@ _sccap_parse_args() {
             --purge)         _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1 ;;
             --factory-reset) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1; _SCCAP_FACTORY_RESET=1 ;;
             --repair-tls)    _SCCAP_MODE="repair-tls" ;;
-            --qualify-pentest) _SCCAP_MODE="qualify-pentest" ;;
             --update)        _SCCAP_MODE="update" ;;
             --rollback)      _SCCAP_MODE="rollback" ;;
             -y|--yes)        _SCCAP_ASSUME_YES=1 ;;
@@ -1422,12 +1351,6 @@ _sccap_assert_env_readable || exit 1
 
 # Non-interactive teardown (--uninstall/--purge/--factory-reset) needs docker
 # but nothing else from the install flow.
-if [ "$_SCCAP_MODE" = "qualify-pentest" ]; then
-    docker compose build pentest-tool-worker || exit 1
-    _sccap_install_pentest_runtimes || exit 1
-    exit 0
-fi
-
 if [ "$_SCCAP_MODE" = "repair-tls" ]; then
     _sccap_run_repair_tls || exit 1
     exit 0
@@ -1610,51 +1533,21 @@ esac
 # playwright) - those run via the Kubernetes attach runtime (cloud) or the local
 # kind-cluster qualification, see docs/docs/operations/cloud-kubernetes-deployment.md.
 _sccap_enable_pentesting() {
-    for _flag in \
-        PENTEST_FOUNDATION2_ENABLED PENTEST_FOUNDATION3_ENABLED \
-        PENTEST_CAPABILITY4_ENABLED PENTEST_CAPABILITY5_ENABLED \
-        PENTEST_CAPABILITY6_ENABLED PENTEST_CAPABILITY7_ENABLED \
-        PENTEST_CAPABILITY8_SCHEMA_READ PENTEST_CAPABILITY8_ADAPTER_RECONCILE \
-        PENTEST_CAPABILITY8_C6_INGRESS_RECONCILE PENTEST_CAPABILITY8_EVENT_V3 \
-        PENTEST_CAPABILITY8_SOURCE_PROFILES PENTEST_CAPABILITY8_WHITE_BOX_API \
-        PENTEST_CAPABILITY9_API PENTEST_CAPABILITY9_EVENT_V4 \
-        PENTEST_CAPABILITY9_PIN_NEW_ATTEMPTS PENTEST_CAPABILITY9_RECONCILE \
-        PENTEST_CAPABILITY9_SCHEMA_READ \
-        PENTEST_CAPABILITY13_SAFE_API PENTEST_CAPABILITY13_SCHEMA_READ \
-        PENTEST_CAPABILITY13_COCKPIT PENTEST_CAPABILITY13_REPORT_BUILDS \
-        PENTEST_CAPABILITY13_PROTECTED_EXPORT PENTEST_CAPABILITY13_REDACTED_EXPORT \
-        PENTEST_CAPABILITY13_EXPORT_RETENTION PENTEST_CAPABILITY13_INTEGRATIONS \
-        PENTEST_CAPABILITY13_RETEST PENTEST_CAPABILITY13_GOVERNANCE_WRITES \
-        PENTEST_C67_INGRESS_ENABLED PENTEST_VERIFICATION_COORDINATOR_ENABLED \
-        PENTEST_PROJECT_AUTHENTICATION_ENABLED PENTEST_PROJECT_SESSION_REUSE_ENABLED \
-        PENTEST_IDENTITY_RUNTIME_ENABLED PENTEST_LOCAL_BLACKBOX_BENCHMARK_ENABLED; do
-        _sccap_set_env_kv "$_flag" "true"
-    done
-    _sccap_set_env_kv "PENTEST_LOCAL_FIXTURE_ORIGINS" "http://juice-shop:3000"
-    _sccap_set_env_kv "PENTEST_RUNNER_SUBNET" "172.16.242.0/28"
-    # Do NOT guess the protected/private network lists - they are deployment-
-    # specific. Leave them empty and warn the operator to set them.
+    # The better-pentester engine needs no capability flags.
+    return 0
 }
+
 
 echo ""
 echo "[*] Pentesting:"
-echo "  Authorized automated security assessment (engagement plane, runner,"
-echo "  controller, tool worker, verification coordinator)."
+echo "  Autonomous black/gray/white-box penetration testing (nmap, nuclei, ZAP,"
+echo "  sqlmap, ffuf, hydra, whatweb, testssl, hashcat, Chromium)."
 read -p "  Enable pentesting? (y/N): " _pentest_choice
 case "$_pentest_choice" in
     [Yy]*)
-        COMPOSE_PROFILES_VALUE="${COMPOSE_PROFILES_VALUE:+$COMPOSE_PROFILES_VALUE,}pentesting-v3,pentesting-v4,pentesting-v5,pentesting-c67"
-        _sccap_enable_pentesting
-        _PENTEST_NOTE="Pentesting workers enabled. Tool runtimes (nmap/nuclei/zap/playwright) need the Kubernetes attach runtime or the local kind-cluster qualification; configure PENTEST_PROTECTED_NETWORKS and PENTEST_PRIVATE_NETWORK_PROFILES before running an engagement."
+        COMPOSE_PROFILES_VALUE="${COMPOSE_PROFILES_VALUE:+$COMPOSE_PROFILES_VALUE,}pentesting-v5"
+        _PENTEST_NOTE="Pentesting enabled. The pentest-engine container runs every scanner locally; no Kubernetes or kind cluster is required."
         echo "[+] Pentesting enabled."
-        read -p "  Set up a local kind cluster for the pentest tool runtimes (VM install)? (y/N): " _kind_choice
-        case "$_kind_choice" in
-            [Yy]*)
-                _PENTEST_KIND=1
-                _PENTEST_NOTE="Pentesting + local kind cluster. The kind cluster is created by scripts/pentesting/setup-kind.sh after the containers start; build/publish the tool-runtime images first (scripts/build-tool-runtimes.sh)."
-                echo "[+] Kind cluster will be set up after the containers start."
-                ;;
-        esac
         ;;
     *) echo "[ ] Pentesting skipped." ;;
 esac
@@ -2063,9 +1956,7 @@ echo "[*] Launching Docker containers (this may take a few minutes)..."
 # Sourcing .env is one way, but docker compose reads .env automatically
 docker compose build
 _sccap_align_certbot_ownership
-_sccap_provision_pentest_secrets
 docker compose up -d
-_sccap_install_pentest_runtimes
 
 echo "[*] Waiting for database to be healthy..."
 # Simple wait loop for db container
@@ -2120,16 +2011,6 @@ fi
 
 echo "[+] Database initialized. Proceed to the Web UI to create your Admin Superuser."
 echo ""
-
-# 5. Local kind cluster for pentest tool runtimes (optional).
-if [ "${_PENTEST_KIND:-0}" = "1" ]; then
-    echo "[*] Setting up the local kind cluster for pentest tool runtimes..."
-    if [ -x scripts/pentesting/setup-kind.sh ]; then
-        bash scripts/pentesting/setup-kind.sh || echo "[!] kind setup failed; re-run scripts/pentesting/setup-kind.sh manually."
-    else
-        echo "[!] scripts/pentesting/setup-kind.sh not found."
-    fi
-fi
 
 echo "=================================================="
 echo "   Setup Complete!"
