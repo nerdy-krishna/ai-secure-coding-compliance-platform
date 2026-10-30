@@ -201,7 +201,7 @@ swark-output/
 AGENTS.md
 
 # Private local issue tracker and planning workspace.
-.scratch/
+.oldarchivedfiles/
 
 # Vendored wordlists carry their own provenance: generate.py is committed so the
 # corpus can be regenerated and audited, and manifest.json pins the digest of the
