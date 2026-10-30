@@ -316,13 +316,13 @@ COPY --chown=appuser:appuser ./src /app/src
 USER root
 RUN install -d -o appuser -g appuser -m 0700 /work \
     && install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
     && chmod 0555 /opt/sccap-tool-runtimes/*
 USER appuser
 
@@ -349,7 +349,7 @@ RUN /app/.venv/bin/python -m ensurepip \
     && install -d -o pwuser -g pwuser -m 0700 /work \
     && install -d -o root -g root -m 0755 /opt/sccap-tools /opt/sccap-tool-runtimes \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_adapters.runtime_helpers.playwright.main "$@"' > /opt/sccap-tools/playwright-chromium-driver \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
     && chmod 0555 /opt/sccap-tools/playwright-chromium-driver /opt/sccap-tool-runtimes/playwright-observe
 COPY --chown=root:root ./src /app/src
 WORKDIR /work
@@ -377,7 +377,7 @@ RUN install -d -o zap -g zap -m 0700 /work \
         ! -name 'pscanrules-release-75.zap' \
         -delete \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_adapters.runtime_helpers.zap "$@"' > /opt/sccap-tools/zap-passive-driver \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
     && chmod 0555 /opt/sccap-tools/zap-passive-driver /opt/sccap-tool-runtimes/zap-passive
 COPY --chown=root:root ./src /app/src
 WORKDIR /work
@@ -398,7 +398,7 @@ USER root
 RUN install -d -o appuser -g appuser -m 0700 /work \
     && install -d -o root -g root -m 0555 /opt/sccap-nuclei-bundles /opt/sccap-nuclei-trust /opt/sccap-tool-runtimes \
     && printf '%s\n' '3.4.10' > /opt/sccap-tools/nuclei.version \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
     && chmod 0444 /opt/sccap-tools/nuclei.version \
     && chmod 0555 /opt/sccap-tools/nuclei /opt/sccap-tool-runtimes/nuclei-observe
 WORKDIR /work
@@ -423,7 +423,7 @@ RUN install -d -o appuser -g appuser -m 0700 /work \
     && install -d -o root -g root -m 0755 /opt/sccap-tools /opt/sccap-tool-runtimes \
     && install -o root -g root -m 0555 /usr/bin/nmap /opt/sccap-tools/nmap \
     && ln -s /usr/share/nmap /opt/sccap-tools/nmap-data \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
     && chmod 0555 /opt/sccap-tool-runtimes/nmap-connect
 WORKDIR /work
 USER appuser
@@ -515,13 +515,13 @@ USER appuser
 # separate Kubernetes runtime fleet.
 USER root
 RUN install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
-    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
     && chmod 0555 /opt/sccap-tool-runtimes/*
 USER appuser
 
