@@ -1101,7 +1101,7 @@ def _include_if_enabled(feature: str, *args, **kwargs) -> None:
 
 # Pentesting engine. Runtime assessment behavior is feature-gated; the engine
 # container executes runs and streams events through the shared database.
-_include_if_enabled("pentesting", pentest_router, prefix="/api/v1")
+_include_if_enabled("pentesting", pentest_router)
 
 
 # Router for managing LLM Configurations
