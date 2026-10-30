@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "baseline0001"
 down_revision: Union[str, None] = None
@@ -107,7 +108,7 @@ def upgrade() -> None:
         # Alembic stamps afterwards, so it is skipped.
         if statement.startswith("SELECT pg_catalog.set_config('search_path'"):
             continue
-        bind.execute(statement)
+        bind.execute(text(statement))
 
 
 def downgrade() -> None:
