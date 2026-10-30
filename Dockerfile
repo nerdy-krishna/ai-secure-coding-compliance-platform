@@ -494,6 +494,11 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY --chown=root:root src/app/pentesting/catalogs/wordlists /opt/sccap-wordlists
 RUN chmod -R a+rX /ms-playwright /zap \
     && chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap /zap/zap.sh \
+    # The nuclei adapter stats this file to pin the engine identity; without it
+    # every nuclei execution failed with FileNotFoundError instead of running.
+    && install -d -o root -g root -m 0755 /opt/sccap-tools \
+    && printf '%s\n' '3.4.10' > /opt/sccap-tools/nuclei.version \
+    && chmod 0444 /opt/sccap-tools/nuclei.version \
     # Debian ships john in /usr/sbin, which the supervised tool PATH does not
     # include.  A stable path under /opt/sccap-tools keeps the adapter's argv
     # independent of the distribution's sbin layout.
