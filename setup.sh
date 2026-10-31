@@ -316,6 +316,40 @@ _sccap_ensure_evidence_bucket() {
     return 0
 }
 
+_sccap_explain_build_failure() {
+    # Turn the two failures people actually hit into an instruction, instead of
+    # leaving them to scroll a 5,000-line build log.
+    local log="$1"
+    [ -f "$log" ] || return 0
+    if grep -q "changed significantly since poetry.lock was last generated" "$log"; then
+        echo ""
+        echo "[!] poetry.lock is out of sync with pyproject.toml (the Docker build stops at"
+        echo "    'poetry install' because of it). Regenerate the lock, keeping every"
+        echo "    existing pin, then re-run this installer:"
+        echo ""
+        echo "      docker run --rm -v \"$PWD\":/app -w /app python:3.12-slim \\"
+        echo "        sh -c 'pip install \"poetry==1.8.3\" && poetry lock --no-update'"
+        echo ""
+        echo "    Then commit poetry.lock. Do not use a plain 'poetry lock': it re-resolves"
+        echo "    every dependency and silently upgrades the runtime."
+        return 0
+    fi
+    if grep -qiE "Killed|out of memory|Cannot allocate memory|exit code: 137" "$log"; then
+        echo ""
+        echo "[!] The build ran out of memory. Add swap (the installation guide has the"
+        echo "    steps for a small VPS) or build on a machine with at least 4 GB free."
+        return 0
+    fi
+    if grep -qiE "Temporary failure in name resolution|Could not resolve host|network is unreachable" "$log"; then
+        echo ""
+        echo "[!] A download inside the build could not reach the network. Check DNS and"
+        echo "    outbound HTTPS, then re-run."
+        return 0
+    fi
+    return 0
+}
+
+
 _sccap_align_fluentd_ownership() {
     # Fluentd runs as `fluent` (uid 100, gid 101) and writes its file buffer into
     # the ./fluentd/log bind mount. A root-owned directory (the checkout, or a
@@ -703,10 +737,15 @@ _sccap_run_update() {
     _sccap_fix_evidence_endpoint
     _sccap_fix_ownership
     echo "[*] Building images at ${target:0:8}..."
-    docker compose build \
+    local build_log=".build-${target:0:8}.log"
+    if ! docker compose build \
         --build-arg "SCCAP_BUILD_COMMIT=$target" \
-        --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        || { echo "[!] Build failed; run ./setup.sh --rollback"; return 1; }
+        --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>&1 | tee "$build_log"; then
+        _sccap_explain_build_failure "$build_log"
+        echo "[!] Build failed; full log: $build_log"
+        echo "    Roll back with ./setup.sh --rollback"
+        return 1
+    fi
     _sccap_align_certbot_ownership
     _sccap_align_fluentd_ownership
     docker compose up -d || { echo "[!] Start failed; run ./setup.sh --rollback"; return 1; }
