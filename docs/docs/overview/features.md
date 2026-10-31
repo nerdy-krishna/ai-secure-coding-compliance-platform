@@ -183,7 +183,7 @@ See [the pentesting engine](../operations/pentesting-engine.md) and
 | Area | Contents |
 |---|---|
 | Framework Config | Standards, agents, prompt templates, CWE mappings |
-| Semgrep Config | Rule sources (git repositories), enable/sync, scheduled syncs |
+| Semgrep Config | Rule sources (git repositories), enable/sync, scheduled syncs. The built-in library is loaded, enabled and synced automatically the first time the page is opened — no button to find before your first scan |
 | LLM Configs | Provider credentials, rate limits, effective-dated price overrides |
 | Usage & Spend | Consumption and cost per operation kind, budgets |
 | Access & Roles | Tenants, users, groups, authorization |
@@ -205,6 +205,25 @@ envelope-encrypted at rest and never stored plaintext.
 - **CI policy endpoints** — coverage and finding-governance gates with SARIF output.
 - **Observability** — `X-Correlation-ID` on every request, structured JSON logs, and an
   optional Fluentd → Loki → Grafana stack with provisioned dashboards.
+
+## Running work in parallel
+
+Code scans and pentests are separate executors and run side by side.
+
+**Code scans.** One worker container runs up to `WORKER_ANALYSIS_SLOTS` scans at a
+time (default 3) and `WORKER_SUBMISSION_SLOTS` pre-LLM pipelines concurrently
+(default 1, so a burst of submissions does not start several deterministic prescans
+at once). Inside a scan, agent fan-out is bounded by `CONCURRENT_LLM_LIMIT` (default
+50 per reasoning lane) and `CONCURRENT_SCANNER_LIMIT` (default 10), and each LLM
+configuration's RPM/TPM budget throttles further. Raise the slot counts on a host
+with memory to spare; each slot holds its own scan state.
+
+**Pentests.** The `pentest-engine` container polls the database for queued runs and
+executes **one at a time**; a run is claimed atomically, so a second engine would not
+double-drive it, but running more than one engine buys nothing until that loop is
+parallelised. Pentests read and write their own tables and never touch the scan
+queues, so a pentest and several code scans can run together — they share the host
+(CPU/RAM), Postgres, and the LLM provider's rate limits.
 
 ## Operational features
 

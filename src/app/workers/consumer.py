@@ -1184,10 +1184,11 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
 
 # Track in-flight analysis workflows so we don't overwhelm the LLM
 # provider. The CONCURRENT_LLM_LIMIT semaphore already gates individual
-# agent calls; this semaphore puts an upper bound on concurrent scan
-# analysis to prevent memory/DB-connection exhaustion.
-_analysis_semaphore = asyncio.Semaphore(3)
-_unified_submission_semaphore = asyncio.Semaphore(1)
+# agent calls; these semaphores bound concurrent scans to protect memory and
+# DB connections, and they are configurable (WORKER_ANALYSIS_SLOTS /
+# WORKER_SUBMISSION_SLOTS) so an operator can trade memory for throughput.
+_analysis_semaphore = asyncio.Semaphore(settings.WORKER_ANALYSIS_SLOTS)
+_unified_submission_semaphore = asyncio.Semaphore(settings.WORKER_SUBMISSION_SLOTS)
 
 
 @asynccontextmanager

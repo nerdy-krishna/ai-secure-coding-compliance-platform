@@ -147,6 +147,20 @@ re-sync Semgrep rule sources after an upgrade that changes rule handling
 | `sh: tsc: not found` during the UI build | npm installed without devDependencies (an inherited `NODE_ENV=production` / `npm_config_omit=dev`), or a `node_modules` leaked into the build context | Remove `secure-code-ui/node_modules` and `dist`, `docker builder prune -f`, pull, rebuild. The build now clears those variables and verifies `tsc` itself |
 | `npm error Exit handler never called` | npm crashed — out-of-memory on a small VM, or a corrupt npm cache | `COMPOSE_PARALLEL_LIMIT=1 ./setup.sh` (one image at a time), or `docker compose build ui`; add swap if it repeats. The installer defaults to 2 concurrent builds |
 
+## Throughput knobs
+
+| Setting | Default | Effect |
+|---|---|---|
+| `WORKER_ANALYSIS_SLOTS` | 3 | Scans one worker container runs at once (LLM phase) |
+| `WORKER_SUBMISSION_SLOTS` | 1 | Pre-LLM pipelines at once |
+| `WORKER_PREFETCH_COUNT` | 5 | Messages held in flight per worker |
+| `CONCURRENT_LLM_LIMIT` | 50 | Concurrent model calls per reasoning lane, inside one scan |
+| `CONCURRENT_SCANNER_LIMIT` | 10 | Concurrent scanner processes per scan |
+
+`docker compose restart worker` applies them. Each analysis slot keeps a full scan
+state in memory, so raise it against measured headroom, not hope. Pentests are
+unaffected: the engine runs its own container and one run at a time.
+
 ## Removing only what you added
 
 If you enabled an optional stack (log stack, pentesting, tracing) and want it gone without

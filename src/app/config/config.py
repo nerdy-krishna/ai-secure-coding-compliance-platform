@@ -313,6 +313,24 @@ class Settings(BaseSettings):
         description="Max seconds to wait for one LLM provider response.",
     )
     WORKER_POOL: Literal["unified", "scanner", "llm", "report"] = "unified"
+    # How many scan workflows one worker container may run at the same time.
+    # ANALYSIS covers the LLM phase (profiling, analysis, consolidation); the
+    # SUBMISSION slot covers the pre-LLM pipeline and is 1 by default so a burst
+    # of submissions does not start several deterministic prescans at once.
+    # Concurrency is still bounded inside a scan by CONCURRENT_LLM_LIMIT and by
+    # each LLM configuration's RPM/TPM budget.
+    WORKER_ANALYSIS_SLOTS: int = Field(
+        default=3,
+        ge=1,
+        le=32,
+        description="Concurrent scan analyses per worker container.",
+    )
+    WORKER_SUBMISSION_SLOTS: int = Field(
+        default=1,
+        ge=1,
+        le=16,
+        description="Concurrent pre-LLM scan pipelines per worker container.",
+    )
     WORKER_PREFETCH_COUNT: int = Field(default=5, ge=1, le=20)
     WORKER_DRAIN_TIMEOUT_SECONDS: int = Field(default=570, ge=1, le=570)
     WORKER_DRAIN_FILE: str = str(_WORKER_RUNTIME_ROOT / "drain-requested")
