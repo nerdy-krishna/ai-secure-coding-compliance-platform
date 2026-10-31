@@ -29,6 +29,7 @@ import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
 import { FindingsDebugPanel } from "../../features/scans/FindingsDebugPanel";
+import { ScanCoveragePanel } from "../../features/scans/ScanCoveragePanel";
 import { ActionableRemediationPanel } from "../../features/scans/ActionableRemediationPanel";
 import { FindingGovernancePanel } from "../../features/scans/FindingGovernancePanel";
 import type {
@@ -2815,6 +2816,9 @@ const DispositionHistory: React.FC<{
           )}
         </div>
       )}
+
+      {/* What the scanners actually read, and why anything was left out. */}
+      {scanId ? <ScanCoveragePanel scanId={scanId} /> : null}
 
       {/* Findings debug panel — agent-quality troubleshooting */}
       {scanId ? (
