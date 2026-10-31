@@ -889,6 +889,15 @@ def _route_template(request: Request) -> str:
     route = request.scope.get("route")
     template = getattr(route, "path", None)
     if isinstance(template, str) and template:
+        # APIRoute.path omits the include_router prefix ("/scans/{id}"), so
+        # rebuild the full template from the actual path: everything before the
+        # template's first segment is the mount prefix.
+        path = request.url.path
+        first = template.split("/", 1)[1] if template.startswith("/") else template
+        head = f"/{first.split('/', 1)[0]}"
+        idx = path.find(head)
+        if idx > 0:
+            return path[:idx] + template
         return template
     return request.url.path
 

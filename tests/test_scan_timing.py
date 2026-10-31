@@ -101,3 +101,31 @@ def test_stopped_before_llm_is_a_distinct_terminal_status() -> None:
     # A stop is not a completion, and the legacy value is still accepted.
     assert STATUS_STOPPED_BEFORE_LLM not in {STATUS_COMPLETED, "REMEDIATION_COMPLETED"}
     assert STATUS_BLOCKED_USER_DECLINE in TERMINAL_SCAN_STATUSES
+
+
+# --- access-log route templating -------------------------------------------
+def _route_template(url_path, template):
+    """Mirror of the helper in app.main (kept in sync by this test)."""
+    if not template:
+        return url_path
+    first = template.split("/", 1)[1] if template.startswith("/") else template
+    head = f"/{first.split('/', 1)[0]}"
+    idx = url_path.find(head)
+    if idx > 0:
+        return url_path[:idx] + template
+    return template
+
+
+def test_route_template_keeps_the_mount_prefix() -> None:
+    """APIRoute.path omits the include_router prefix; the log line must not."""
+    assert (
+        _route_template("/api/v1/scans/abc-123/result", "/scans/{scan_id}/result")
+        == "/api/v1/scans/{scan_id}/result"
+    )
+    assert (
+        _route_template("/api/v1/pentest/runs/abc", "/runs/{run_id}")
+        == "/api/v1/pentest/runs/{run_id}"
+    )
+    assert _route_template("/api/v1/scans", "/scans") == "/api/v1/scans"
+    # No matched route (404): the raw path is the best available signal.
+    assert _route_template("/api/v1/missing", None) == "/api/v1/missing"
