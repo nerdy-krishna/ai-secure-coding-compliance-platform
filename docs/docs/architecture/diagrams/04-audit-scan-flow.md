@@ -152,7 +152,7 @@ stateDiagram-v2
     PRESCAN_RUNNING --> ESTIMATING_COST : no critical secret
 
     PENDING_PRESCAN_APPROVAL --> ESTIMATING_COST : POST /approve - prescan_approval - approved=true
-    PENDING_PRESCAN_APPROVAL --> BLOCKED_USER_DECLINE : approved=false
+    PENDING_PRESCAN_APPROVAL --> STOPPED_BEFORE_LLM : approved=false
     PENDING_PRESCAN_APPROVAL --> BLOCKED_PRE_LLM : auto-block (non-overridable critical)
     PENDING_PRESCAN_APPROVAL --> EXPIRED : prescan_approval_sweeper (30 min TTL)
 
@@ -180,7 +180,7 @@ stateDiagram-v2
     COMPLETED --> [*]
     REMEDIATION_COMPLETED --> [*]
     CANCELLED --> [*]
-    BLOCKED_USER_DECLINE --> [*]
+    STOPPED_BEFORE_LLM --> [*]
     BLOCKED_PRE_LLM --> [*]
     EXPIRED --> [*]
     FAILED --> [*]
@@ -255,7 +255,7 @@ retrying outbox intent instead of silently deleting the oldest durable work.
 | `COMPLETED`             | AUDIT scan finished successfully                                                                            |
 | `REMEDIATION_COMPLETED` | REMEDIATE scan finished (see diagram 05)                                                                    |
 | `CANCELLED`             | User canceled at cost gate                                                                                  |
-| `BLOCKED_USER_DECLINE`  | User declined at prescan gate                                                                               |
+| `STOPPED_BEFORE_LLM`    | User stopped at the prescan gate; deterministic findings kept as results                                     |
 | `BLOCKED_PRE_LLM`       | Non-overridable critical secret; LLM tokens never spent                                                     |
 | `EXPIRED`               | Prescan-approval sweeper timed the scan out after 30 min                                                    |
 | `FAILED`                | Worker exception; full trace persisted via Fluentd → Loki + `scans.error_message`                            |

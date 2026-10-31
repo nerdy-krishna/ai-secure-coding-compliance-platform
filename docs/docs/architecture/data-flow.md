@@ -49,7 +49,7 @@ caller, decrypts the exact version, and verifies integrity before returning it. 
 readable while backfill expands existing rows; object-integrity failures never fall back.
 
 If findings exist, `pending_prescan_approval` sets `PENDING_PRESCAN_APPROVAL` and interrupts. A
-decline ends at `BLOCKED_USER_DECLINE`; continuing past a Critical Gitleaks result requires an
+decline ends at `STOPPED_BEFORE_LLM` (deterministic findings kept); continuing past a Critical Gitleaks result requires an
 explicit override. With no findings, this gate is skipped.
 
 ## 4. Profiling approval and profiling

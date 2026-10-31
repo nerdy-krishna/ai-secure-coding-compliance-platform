@@ -11,7 +11,7 @@
 # Output: docs/site/
 site_name: SCCAP Documentation
 site_description: >-
-  Secure Coding & Compliance Automation Platform — open-source AI-powered
+  Secure Coding Compliance and Pentesting — open-source AI-powered
   code auditing, remediation, and compliance tooling.
 site_url: https://docs.sccap.dev
 site_author: SCCAP contributors
@@ -142,6 +142,7 @@ nav:
       - Installation: getting-started/installation.md
       - Configuration: getting-started/configuration.md
       - Running the Platform: getting-started/running-the-platform.md
+      - Maintenance and Uninstallation: getting-started/maintenance.md
   - User Guide:
       - user-guide/index.md
       - Dashboard Overview: user-guide/dashboard-overview.md
@@ -191,15 +192,7 @@ nav:
       - Cloud Kubernetes Deployment (AKS/EKS): operations/cloud-kubernetes-deployment.md
       - Observability and SLOs: operations/observability-slos.md
       - Dependency Degradation: operations/dependency-degradation.md
-      - Pentesting Adaptive Controller: operations/pentesting-adaptive-controller.md
-      - Pentesting Initial Web/API Tool Pack: operations/pentesting-initial-web-api-tool-pack.md
-      - Pentesting Identity-aware Verification: operations/pentesting-identity-verification.md
-      - Local Read-only Gray-box Comparisons: operations/pentesting-readonly-authorization.md
-      - Pentesting White-box Code Scan Integration: operations/pentesting-white-box-code-scan-integration.md
-      - Pentesting Canonical Coverage: operations/pentesting-canonical-coverage.md
-      - Pentesting Reversible Mutations and Cleanup: operations/pentesting-reversible-mutations-cleanup.md
-      - Pentesting Asynchronous Callback Correlation: operations/pentesting-asynchronous-callback-correlation.md
-      - Pentesting Cockpit, Reporting, and Governance: operations/pentesting-cockpit-reporting-governance.md
+      - Pentesting Engine: operations/pentesting-engine.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

@@ -366,7 +366,7 @@ mcp = FastMCP(
     name="SCCAP",
     auth=_SCCAPJWTVerifier(),
     instructions=(
-        "Tools to drive SCCAP (Secure Coding & Compliance Automation Platform): "
+        "Tools to drive SCCAP (Secure Coding Compliance and Pentesting): "
         "submit scans, check status, fetch results, approve cost-estimated scans, "
         "apply AI-suggested fixes, and ask the security advisor one-shot questions. "
         "All tools require a SCCAP JWT bearer token."

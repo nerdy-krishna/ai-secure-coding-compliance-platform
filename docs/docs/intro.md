@@ -1,84 +1,102 @@
 ---
 sidebar_position: 1
 slug: /
-title: Introduction
+title: About SCCAP
 ---
 
-# Welcome to the SCCAP!
+# About SCCAP
 
-The SCCAP is an open-source, AI-powered platform meticulously designed to empower developers and security teams in the crucial task of building and maintaining secure software. We are driven by the mission to proactively embed security into the software development lifecycle.
+**SCCAP — Secure Coding Compliance and Pentesting** — is an open-source platform that
+audits source code against OWASP frameworks, proves each finding it reports, and then
+attacks the deployed application. It runs as one installation with one login, on Docker
+Compose, from a single host.
 
-## The Challenge We Address
+It exists because the two halves of application security are usually sold separately and
+disagree with each other. A SAST report says "this pattern is unsafe"; a pentest report says
+"this endpoint is exploitable". SCCAP keeps both in one place, on one data model, with the
+same evidence discipline: everything it claims, it can point at.
 
-In today's fast-paced development environment, ensuring code security from the outset can be challenging. Traditional reactive approaches often identify vulnerabilities late in the cycle, leading to costly rework and increased risk. The SCCAP aims to shift security left, making it an integral and accessible part of development from day one.
+## Two engines, one platform
 
-## What We Offer: Core Capabilities
+**Code scanning** answers *what is wrong in the code and how do we fix it*. Deterministic
+scanners run first — Bandit, Semgrep, Gitleaks and OSV — because they are cheap, fast and
+reproducible. Then LLM agents analyse the files that deserve it, per file, against the
+frameworks you selected. Every finding is consolidated to one root cause, scored with
+CVSS 3.1, and attached to the exact source it refers to.
 
-SCCAP integrates a multi-agent LLM pipeline with curated security
-knowledge bases. The platform is organized around three surfaces:
+**Pentesting** answers *what can actually be reached and exploited*. An autonomous engine
+discovers the attack surface beneath the origin you authorise, then drives real tools —
+nmap, nuclei, ZAP, sqlmap, ffuf, a Playwright browser, whatweb, gobuster, hydra, hashcat —
+one turn at a time through a model that sees every result and adapts. Findings are chained
+into exploit paths, and a chain is only confirmed when a step demonstrated impact.
 
-### For developers and security users
+Both share the tenant model, the user and group visibility rules, encrypted credential
+storage, the audit trail and the reporting layer.
 
-* **Live dashboard** — a real risk ring, five-bucket severity bar, 14-day scan trend sparkline, fixes-ready counter, and monthly LLM spend. Admins see a platform-wide snapshot variant.
-* **Gated, user-approved scan** — every scan classifies each file (first-party / vendor / minified / static), runs a cheap deterministic pass, profiles eligible files, and pauses the LangGraph workflow with native `interrupt()`s at up to three approval gates (prescan review, profiling cost, analysis cost) before any expensive work runs. A **deep vendor scan** option gives full LLM coverage to vendor/minified assets when needed.
-* **Versatile submission** — file uploads, Git repository URLs, or archive uploads (`.zip` / `.tar.gz`). GitHub repos are previewed via the GitHub API without cloning. An interactive file tree lets you include or exclude paths before estimation.
-* **Multi-framework scanning** — pick any combination of the 8 bundled OWASP frameworks (ASVS, Proactive Controls, Cheatsheets, CWE Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) plus custom frameworks ingested from CSV or Git URLs.
-* **Consolidated findings + downloadable report** — per-file reasoning-model consolidation merges raw findings, followed by a global cross-file consolidation pass that unifies same-root findings across files; export any scan as an HTML, CSV, PDF, or SARIF 2.1.0 report.
-* **Remediation scan mode** — submit a scan as `REMEDIATE` to generate fixes during analysis, merge overlapping edits, verify supported patches, and download the patched tree. Incremental post-result application is not implemented.
-* **Per-project stats on the Projects page** — each card shows the latest terminal scan's risk score, severity bar, and fixes-ready count, no client-side heuristics.
-* **Global search** — one TopNav combobox across projects, scans, and findings, always scoped to what the current user is allowed to see.
-* **Durable tasks & resume/restart** — every analysis and consolidation invocation is a durable task keyed by input hash. Failed or interrupted scans can be manually resumed (reuses completed work) or restarted (reruns from the original snapshot), preserving full audit history.
-* **LLM resilience controls** — fixed per-config concurrency, RPM/TPM budgets, retry with jitter, and circuit breakers protect provider calls. Prompt caps currently reject oversized calls; splitting/compaction remains planned work.
-* **Security Advisor with live context rail** — framework-scoped chat backed by RAG retrieval, with a right-hand rail that surfaces the knowledge sources, referenced findings, and files most likely discussed.
+## How the platform earns its claims
 
-### For security admins
+- **Nothing is hidden.** A zero-finding scan states what was scanned, what was skipped and
+  why. The coverage ledger is per scanner and per input; the file table lists every scanned
+  and excluded file with a reason code.
+- **Nothing is overstated.** Severity follows the CVSS band computed from the weakness, not
+  from a model's mood. A finding with no deterministic replay is marked `needs_review` and
+  stays there. A scan stopped before the LLM phase is reported as
+  `STOPPED_BEFORE_LLM` — not as complete, not as failed.
+- **Nothing is lost.** Findings survive consolidation as contributors, survive a stop as
+  results, survive a crash through the run heartbeat, and survive a rescan through a diff
+  that says what is new, resolved and still open.
+- **Secrets stay secret.** Discovered credentials are encrypted at rest, masked in the UI
+  until revealed by an explicit audited action, and masked in reports unless the unmasked
+  variant is requested deliberately.
 
-* **User Groups + scoped visibility** — admins create groups and add members by email; regular users see their own scans plus any scan owned by a peer they share a group with; admins see everything.
-* **First-run setup wizard** — the first registered account becomes superuser and is routed through `/setup` before the rest of the app unlocks.
-* **Unified Admin console** — LLM configurations, user groups, users, frameworks (with CSV / git-URL RAG ingestion), agents, prompt templates, SMTP, system config, and runtime logs. A shared sub-nav keeps every surface one click apart.
-* **Encrypted secrets** — every LLM API key and SMTP password is Fernet-encrypted at rest with the installation's `ENCRYPTION_KEY`.
+## The scanning pipeline
 
-### Pentesting (opt-in, feature-gated)
+1. **Submit** — files, pasted code, an archive, or a repository URL. One ingest manifest
+   normalises paths, enforces caps and refuses a submission that would scan nothing.
+2. **Classify** — every file is identified by evidence as first-party source, vendored,
+   generated, runtime, lockfile, empty or binary.
+3. **Pre-LLM scan** — deterministic scanners run over the eligible files. The scan pauses
+   so you can read their findings before any code is sent to a model.
+4. **Profile** — eligible files are profiled on a cheap utility model: what the file does,
+   which security-relevant operations it performs, which domains apply.
+5. **Estimate** — a dry run scoped to each file's routed agents produces a cost and duration
+   estimate. The scan pauses again for your decision.
+6. **Analyse** — specialised agents run under per-configuration concurrency, RPM/TPM and
+   circuit-breaker limits. Every invocation is a durable task.
+7. **Consolidate** — per-file, then cross-file. Duplicates become contributors, not noise.
+8. **Validate** — optionally re-judged against cross-file callers and inputs.
+9. **Report** — HTML, PDF, CSV, SARIF 2.1.0, or the raw scanner JSON for audit.
 
-A separately gated **pentesting engine** (disabled by default; enabled during setup or
-via the `pentesting-v5` profile) adds authorized black-box, gray-box and white-box
-assessments alongside Code Scan, without mutating the Code Scan aggregate:
+Each pause is a real decision point: approve, stop, or walk away and come back. Stopping
+keeps everything the scanners already found.
 
-* **Discovery first** — evasive reconnaissance, then attack-surface expansion: subdomain enumeration with takeover checks, OpenAPI/GraphQL schema discovery, and JavaScript bundle mining for endpoints, parameters and secrets.
-* **Model-driven tools** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a real Playwright browser turn by turn, seeing every result and adapting; identical probes are de-duplicated.
-* **Persistent lead queue** — every observation becomes a queued lead, claimed as it is tested; the queue decides when a run is finished, so pause/resume/restart never loses work.
-* **Observations are findings** — surface intelligence is stored alongside weaknesses, and a follow-up pass chains findings into exploit paths.
-* **One scope guard** — the operator's origin plus the in-scope estate discovered beneath its registrable domain; private and loopback destinations are refused. No intensity, budget, qualification or duration gates.
-* **Live cockpit** — event stream with every prompt and tool action, live browser frame, findings as they land, pause/resume/stop, and Markdown/JSON/HTML/PDF reports.
+## Who it is for
 
-### Integrations and automation
+- **Developers** who want to know what is wrong with the change in front of them, with the
+  code and a fix, not a PDF a week later.
+- **Security engineers** who need findings that survive scrutiny — provenance, CVSS, replay
+  evidence, and a clear statement of what was not covered.
+- **Pentesters** who want reconnaissance, tooling and reporting automated without handing
+  over scope control.
+- **Compliance owners** who need per-framework coverage and an auditable trail of who
+  approved what.
+- **Operators** who want one Compose stack on one host, with upgrade, rollback and teardown
+  that behave predictably.
 
-* **MCP server** — the scan + advisor workflow is exposed as MCP tools at `/mcp`, reusing JWT auth so Claude Code, Cursor, or other agentic clients can drive the platform remotely.
-* **LiteLLM-backed cost ledger** — token counting and cost estimation go through LiteLLM's community-maintained model price map, with a per-`LLMConfiguration` admin override for bespoke endpoints. Offline-pinnable via `LITELLM_LOCAL_MODEL_COST_MAP=True`.
-* **Pydantic AI structured output** — every agent returns a validated Pydantic model; malformed outputs trigger a typed retry loop instead of regex fallbacks.
-* **Observability** — every request gets an `X-Correlation-ID` attached to all logs; the stack ships Fluentd → Loki → Grafana dashboards out of the box.
+## Principles
 
-## Our Vision & Guiding Principles
+- **Deterministic before generative.** Cheap, reproducible tools first; models only where
+  they add judgement.
+- **Evidence over assertion.** Coverage, provenance, replay, lineage — the platform is built
+  to be argued with.
+- **Operator control.** Gates before spend, an explicit scope for pentesting, and a
+  lifecycle you can reverse.
+- **Open source, Apache 2.0.** Read it, run it, change it.
 
-* **Comprehensive & Open Source**: We are committed to building a "full scope from day 1" platform, released under an open-source license to foster community collaboration and transparency.
-* **Multi-Methodology Integration**: The platform incorporates a hybrid approach using Large Language Models (differentiated for thinking vs. code-writing), specialized security tools (SAST, SCA), dynamic Tree-sitter queries, and comprehensive Retrieval Augmented Generation (RAG) over multiple security frameworks.
-* **User-Centric Design**: We aim for a user-friendly experience through intuitive chat interfaces and a detailed code analysis portal.
-* **Community Driven**: We believe in the power of community to build and enhance tools that benefit everyone. We encourage contributions and feedback.
+## Start here
 
-## Who Is This For?
-
-* **Developers**: Write more secure code efficiently with AI-assisted guidance and generation.
-* **Security Teams**: Streamline code reviews, enforce security standards, and gain deeper insights into application security posture.
-* **DevSecOps Engineers**: Integrate automated security analysis seamlessly into CI/CD pipelines.
-* **Organizations**: Reduce the risk of security breaches and ensure compliance with various standards.
-* **Students & Educators**: Learn and teach secure coding practices with a practical, hands-on tool.
-
-## Dive In!
-
-This documentation will guide you through every aspect of the SCCAP.
-
-* **New to the platform?** Start with our [**Installation Guide**](./getting-started/installation.md) to get your local instance up and running.
-* **Want to see it in action?** Check out the [**User Guide**](./user-guide/index.md) for tutorials on our key features.
-* **Interested in contributing?** Head over to our [**Development Guide**](./development/contributing.md).
-
-We're excited to have you join us on this journey to make software more secure!
+- New to the platform? [Installation guide](./getting-started/installation.md).
+- Running it day to day? [Maintenance and uninstallation](./getting-started/maintenance.md).
+- Want the feature tour? [Platform features](./overview/features.md).
+- Pentesting in detail? [Pentesting engine](./operations/pentesting-engine.md).
+- Contributing? [Development guide](./development/contributing.md).

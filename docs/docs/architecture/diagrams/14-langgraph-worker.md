@@ -32,7 +32,7 @@ flowchart TB
       N13["verify_patches<br/>both modes: scan-bound Semgrep<br/>+ Bandit/Gitleaks/OSV replay"]:::app
       N14["save_results"]:::app
       N15["save_final_report<br/>risk_score + summary JSON<br/>status=COMPLETED / REMEDIATION_COMPLETED"]:::app
-      T1["user_decline<br/>status=BLOCKED_USER_DECLINE"]:::app
+      T1["user_decline<br/>status=STOPPED_BEFORE_LLM"]:::app
       T2["blocked_pre_llm<br/>status=BLOCKED_PRE_LLM"]:::app
       ERR["handle_error<br/>status=FAILED · scan.error_message"]:::app
     end
@@ -216,7 +216,7 @@ classDiagram
 | 13  | `verify_patches`              | `patched_files` vs original + scan-scoped scanner provenance | Both modes — exact prescan Semgrep ruleset binding, native scanner regression evidence; REMEDIATE alone promotes passing content |
 | 14  | `save_results`                | findings + governed candidates                     | idempotent `findings` and `finding_fix_candidates` persistence                                      |
 | 15  | `save_final_report`           | findings + fixes                                   | `scans.summary`, `scans.risk_score`, `scans.status = COMPLETED \| REMEDIATION_COMPLETED`, `adelete_thread()` |
-| —   | `user_decline`                | resume payload (declined)                          | `scans.status = BLOCKED_USER_DECLINE`                                                                |
+| —   | `user_decline`                | resume payload (declined)                          | `scans.status = STOPPED_BEFORE_LLM`                                                                |
 | —   | `blocked_pre_llm`             | resume payload (non-overridable critical secret)   | `scans.status = BLOCKED_PRE_LLM`, audit event                                                        |
 | —   | `handle_error`                | `WorkerState.error_message`                        | `scans.status = FAILED`, `scans.error_message`, `scan_events(FAILED)`                                |
 

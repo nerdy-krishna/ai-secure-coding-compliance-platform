@@ -99,7 +99,7 @@ caller-generated `X-Idempotency-Key` header (maximum 128 characters):
 | `cost_approval` | `PENDING_COST_APPROVAL` | `{ "gate_id", "gate_version", "evidence_hash", "kind", "approved" }` |
 
 `approved=false` at the prescan or profiling gate ends the scan at
-`BLOCKED_USER_DECLINE`. An accepted decision atomically records the transitional status, audit
+`STOPPED_BEFORE_LLM` (legacy scans carry `BLOCKED_USER_DECLINE`). An accepted decision atomically records the transitional status, audit
 events, and durable `analysis_approved_queue` outbox intent. The API does not publish inline;
 the worker eventually resumes the paused LangGraph thread with
 `Command(resume=...)`. Scans left at the prescan or profiling gate

@@ -5,170 +5,214 @@ sidebar_position: 1
 
 # Platform Features
 
-The SCCAP UI is organized into focused pages; the Admin console is only
-visible to superusers. Every surface that lists scans, projects, or
-findings is scoped through the H.2 visibility filter — regular users
-see their own data plus any peer they share a **User Group** with;
-admins see everything.
+SCCAP — Secure Coding Compliance and Pentesting — has two engines on one installation:
+**code scanning** and **pentesting**. They share a tenant, a user and group model, encrypted
+credential storage, an audit trail and a reporting layer, and they never write into each
+other's records.
+
+Every list surface is scoped by the same visibility filter: a regular user sees their own
+work plus that of peers in a shared group; admins see everything.
 
 ## Dashboard
 
-- **Risk ring** — weighted-findings score (100 − clamp(weighted, 95),
-  floor 5). Same heuristic server-side for the Dashboard, Compliance
-  page, and Projects cards so numbers are consistent across surfaces.
-- **Severity breakdown** — stacked bar and legend across critical /
-  high / medium / low / informational.
-- **14-day scan trend** — inline sparkline pulled from
-  `/api/v1/dashboard/stats`.
-- **Fixes-ready counter** — findings with an AI-suggested fix that
-  hasn't been applied yet.
-- **Monthly spend** — sum of `llm_interactions.cost` for the current
-  month, constrained to the visibility scope.
-- **Admin snapshot** — superusers get a platform-wide variant with
-  deep links to the Groups and Users admin pages.
+Two sections, code scanning first, then pentesting. Shared tiles — projects, scans or
+assessments, findings, tokens in and out, estimated cost — are followed by the
+product-specific ones.
 
-## Submit
+- Risk score and severity breakdown across critical / high / medium / low / informational.
+- Recent scans and assessments with status, duration and finding counts.
+- Usage and spend over the last 30 days, per operation kind.
 
-- File upload, Git repository URL, or archive (`.zip` / `.tar.gz`).
-  GitHub repos are previewed via the GitHub API (tree listing without
-  cloning) and source files are fetched individually from raw URLs.
-- Selective-files tree that lets you prune before cost estimation.
-- Advanced **deep vendor scan** toggle — when on, vendor, minified, and
-  static assets receive full LLM profiling and agent routing instead of
-  being skipped by default; reflected in cost and time estimates.
-- Two LLM slots per scan — a **utility** (cheap) model for the
-  per-file profiler, and a **reasoning**
-  (capable) model for analysis and consolidation. Put the same model
-  in both, or split them.
-- Optional **second reasoning LLM** — every analysis agent runs on
-  both models and the findings union, so what one model misses the
-  other may catch; each finding records which model(s) detected it.
-- Per-stage temperature tunable at submit time, or disable temperature
-  entirely so each model uses its provider default.
-- Framework multi-select (8 bundled OWASP frameworks plus any
-  admin-added custom framework).
+## Submitting a scan
 
-Before analysis, every submitted file is **deterministically classified**
-(first-party source, vendor, minified bundle, generated/static asset).
-Vendor, minified, and static assets skip LLM profiling and full agent
-routing by default while keeping SAST checks active.
+- **Four sources** — individual files, pasted code, an archive (`.zip`, `.tar.gz`, `.rar`),
+  or a repository URL (GitHub, GitLab, Bitbucket). GitHub repositories are previewed through
+  the API without cloning, and a file tree lets you include or exclude paths before any
+  estimate is produced.
+- **One ingest manifest** — every source passes the same rules: paths normalised, duplicates
+  collapsed, per-file and total caps enforced, and binaries, empty files and unsupported
+  types recorded with a reason. A submission whose every file would be skipped is refused
+  with the breakdown instead of producing an empty scan.
+- **Two LLM slots** — a *utility* (cheap) model for profiling and verification and a
+  *reasoning* (capable) model for analysis and consolidation. An optional **second reasoning
+  model** runs every agent twice and unions the findings, recording which model detected
+  each one.
+- **Per-stage temperatures** (profiler / analysis / consolidation / merge), or turn
+  temperature off entirely so each model uses its provider default.
+- **Framework multi-select** — the 8 bundled OWASP frameworks plus custom frameworks.
+- **Tool selection** — choose which deterministic scanners and, for pentesting, which tools
+  may run. Everything applicable runs by default.
+- **Scan vendor and generated files too** — by default dependencies, generated bundles and
+  minified output get a secrets scan only; this toggle gives them the full treatment.
 
-Eligible files are profiled on the utility model (see
-[Data Flow](../architecture/data-flow.md)). The deep analysis runs as
-a single parallel pass under **adaptive per-LLM concurrency control**
-that adjusts based on wait time and error signals, bounded by
-per-config RPM/TPM rate limits and prompt-size guardrails. Each
-analysis invocation and per-file consolidation is a **durable scan
-task** persisted in a scan-scoped task ledger — if the worker is
-interrupted, completed chunks are reused on resume.
+## File classification
 
-After per-file consolidation a **global consolidation** pass merges
-cross-file same-root findings (e.g. a missing CSP header across
-multiple templates) into one multi-file finding with affected
-locations on every file.
+Every file is classified by **evidence, not by path**: first-party source, vendored library,
+generated artefact, runtime file, lockfile, empty, or binary.
 
-## Results
+- A hand-written module inside `build/` is still first-party; a `@generated` file outside it
+  is still generated.
+- Language and scanner capability come from one shared table (~50 languages plus filename
+  rules such as `Dockerfile`, `Makefile`, `Jenkinsfile`, `requirements.txt`, `go.mod`,
+  `.env*`, `*.d.ts`), so Semgrep rule selection matches what the repository actually
+  contains.
+- The results page shows a **File coverage** table listing every scanned and excluded file
+  with the reason — empty, binary, vendored, generated, too large, beyond the budget, or no
+  scanner for the language.
 
-- Per-file finding panels: severity, CVSS score, suggested fix, and —
-  for a consolidated finding — every affected location and the agents
-  that corroborated it.
-- **Download report** buttons export the scan's findings as a
-  self-contained HTML page, a CSV (one row per finding), a paginated PDF,
-  or SARIF 2.1.0 for code scanning integrations.
-- Timeline and LLM-logs drill-downs for the full scan trail.
-- **Resume / Restart** buttons for failed scans — resume reuses
-  completed durable work; restart discards partial artifacts and
-  reruns from the original snapshot. Both preserve audit history and
-  write boundary events to the timeline.
+## The scanning pipeline
 
-## Projects
+1. **Classification** — as above, with a ranked selection so a truncated scan keeps
+   first-party source rather than whatever arrived first.
+2. **Pre-LLM scan** — Bandit, Semgrep, Gitleaks and OSV over the eligible files, each
+   recorded in a per-scanner, per-input coverage ledger with provenance (binary version and
+   SHA-256).
+3. **Pre-LLM review gate** (`PENDING_PRESCAN_APPROVAL`) — the deterministic findings with
+   the exact source line, before any code is sent to a model.
+4. **Profiling** — eligible files are profiled on the utility model: what the file does, its
+   security-relevant operations, and which domains apply, grounded in a tree-sitter symbol
+   index.
+5. **Profiling cost gate** (`PENDING_PROFILING_APPROVAL`).
+6. **Cost estimate gate** (`PENDING_COST_APPROVAL`) — priced on the routed agent set, per
+   model, with a duration estimate.
+7. **Analysis** — specialised agents per file under a fixed per-configuration concurrency
+   pool, RPM/TPM budgets, retry with jitter and circuit breakers. Each invocation is a
+   durable task keyed by input hash.
+8. **Consolidation** — per-file, then a deterministic cross-file pass; duplicates become
+   contributors rather than extra rows.
+9. **Cross-file validation** (opt-in) — each finding re-judged against its callers and
+   inputs, attaching `confirmed` / `mitigated` / `unconfirmed` without changing severity.
+10. **Proof** — every finding is replayed where a deterministic reproduction exists
+    (curl against the endpoint, sensitive-path disclosure, SQL injection payload, nuclei
+    template replay, API schema, GraphQL introspection, takeover, secret hash, source map,
+    TLS). No replay means `needs_review` — never an upgrade.
 
-- Grid of projects owned by any user in the caller's visibility set.
-- Per-card rollup served by `/api/v1/projects`: risk score, five-bucket
-  severity bar, fixes-ready count, derived from the latest terminal
-  scan.
-- Card click opens the Results page for that scan.
+## Stopping, pausing and resuming
+
+- **Stop at any gate.** Stopping at the pre-LLM gate records `STOPPED_BEFORE_LLM`: the
+  deterministic findings are kept and rendered as the scan's results, with a banner stating
+  that no LLM review, validation or fix generation ran.
+- **Durations measure work.** The reported duration excludes time parked at an approval
+  gate, so a three-minute scan that waited twenty minutes for you reads as three minutes.
+- **Resume or restart** — failed scans, and cancelled scans with durable artifacts, can be
+  resumed (reusing completed work) or restarted from the original snapshot. Both preserve
+  the audit trail.
+
+## Results page
+
+- **Risk score** with a severity strip, and the counts that produced it.
+- **Scan information** — status, type, ID, source, frameworks, cross-file validation,
+  temperature, consolidation tally and the models used, in one two-column block.
+- **File coverage** — every scanned and excluded file, with reasons.
+- **Findings tree and list** — by file, filterable by severity, source and triage
+  disposition, with bulk disposition changes.
+- **Finding detail** — severity and CVSS, confidence, corroborating agents, the exact source
+  with the vulnerable line highlighted, description, remediation, triage history, the patch
+  evidence when a validated patch exists, and **Merged from N findings** — the raw findings
+  and agents that produced this row.
+- **Downloads** — HTML, PDF, CSV, SARIF 2.1.0, and the raw Scanner JSON.
+- **Timeline** — the full event stream for the scan, with the pipeline rail.
+
+## Pipeline & Logs
+
+The diagnostics page for a scan:
+
+- **Findings consolidation swimlane** — one lane per detection source, severity, file or
+  CWE (your choice), raw claims on the left, the consolidated findings they became on the
+  right, an edge only where consolidation merged them, dropped claims marked, with zoom and
+  fullscreen.
+- **Findings breakdown** — the raw, consolidated and SAST buckets side by side, expandable
+  per row.
+- **LLM calls** — every interaction with prompt, response, tokens, cost and latency.
+- **Governed fix candidates** — disposition, validation and applicability per candidate.
+
+## Projects and scans
+
+- Project grid with the latest terminal scan's risk score, severity bar and fixes-ready
+  count, all served by the API.
+- Projects and scans are grouped; a project holds many scans.
+- Global search across projects, scans and findings, always scoped to what the caller may
+  see.
 
 ## Compliance
 
-- Per-framework card for the 8 bundled OWASP frameworks plus every
-  custom framework in the `frameworks` table.
-- Posture score + RAG document count + matched / open finding
-  counts.
-- Admins can deep-link to `/admin/rag` from the card to ingest the
-  knowledge base for uninstalled defaults.
+- Per-framework card for the 8 bundled OWASP frameworks (ASVS, Proactive Controls,
+  Cheatsheets, CWE Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) and any custom
+  framework, with RAG document count and open findings per framework.
+- Admins ingest or replace framework knowledge from CSV or a git URL.
 
 ## Advisor
 
-- Framework-scoped chat sessions, one LLM config per session.
-- Live context rail populated from
-  `/api/v1/chat/sessions/{id}/context`: knowledge sources (the
-  session's frameworks), referenced findings (from the linked project's
-  latest terminal scan, severity-ordered), and referenced files.
-- Quick-reply chips for common prompts (finding explanation, framework
-  mapping, scan summary).
+- Framework-scoped chat grounded in the RAG store, with a live context rail showing the
+  knowledge sources, referenced findings and files it used.
+- Available from *Security Advisor* under Code Scanning and from the floating advisor button
+  on every authenticated page.
 
-## Admin console
+## Pentesting
 
-All admin routes are superuser-gated server-side and hidden behind the
-TopNav "Admin" item + an in-page `AdminSubNav` strip:
+Enabled during setup, or with the `pentesting-v5` Compose profile. Three pages: launch an
+engagement, browse projects and assessments, review history.
 
-- **Platform** — system config (log level, LLM optimization mode, CORS
-  settings, arbitrary key/values).
-- **Users** — list, create, invite, flip is_active / is_superuser /
-  is_verified.
-- **Groups** (H.2) — create groups, add/remove members by email,
-  drives the scan-scope filter.
-- **Agents** — CRUD agent definitions used by `framework` mappings.
-- **Frameworks** — CRUD frameworks + inline CSV or Git URL RAG
-  ingestion.
-- **Prompts** — CRUD prompt templates consumed by agents.
-- **SMTP** — outbound mail config for password resets.
-- **LLM configs** — encrypted provider credentials, rate limits, and
-  effective-dated complete price override history.
+- **Attack-surface discovery** — six passive subdomain indexes with per-source timeouts and
+  retries, DNS brute-force, dangling-CNAME takeover detection, OpenAPI/Swagger and GraphQL
+  discovery, and JavaScript bundle mining for endpoints, parameters, source maps and secrets.
+- **Scope guard** — the operator's origin plus the in-scope estate beneath its registrable
+  domain. Private and loopback destinations are refused, and raw-TCP tools resolve and
+  refuse non-public addresses. No intensity, budget, qualification or duration gates.
+- **Model-in-the-loop tools** — nmap, nuclei (full template library), ZAP active scan,
+  sqlmap, ffuf, whatweb, gobuster, a real Playwright browser, hydra and hashcat, driven one
+  turn at a time against de-duplicated probes.
+- **Persistent lead ledger** — observations become leads with priority bands, claimed as
+  they are tested; the ledger decides when a run is finished.
+- **Chaining** — findings are chained into exploit paths; a chain is confirmed only when a
+  step demonstrated impact.
+- **Secret vault** — discovered credentials are stored encrypted, masked everywhere else,
+  revealed on explicit audited action, and masked in reports unless unmasked is requested.
+- **Live cockpit** — event stream with prompts and tool actions, live browser frame, findings
+  as they land, pause/resume/stop.
+- **Recovery and schedules** — a heartbeat marks stale runs interrupted and can re-queue
+  them without losing findings; a run can be cloned on an interval and each clone reports
+  what is new, resolved and still present.
+- **Reports** — Markdown, JSON, HTML and PDF, with masked and unmasked variants.
 
-## MCP server
+See [the pentesting engine](../operations/pentesting-engine.md) and
+[ADR-029](https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform/blob/main/docs/adr/029-pentesting-autonomous-engine.md).
 
-FastMCP-mounted at `/mcp`, reusing the same JWT auth as the REST API.
-Current tool surface:
+## Administration
 
-| Tool | Backs |
+| Area | Contents |
 |---|---|
-| `sccap_submit_scan` | `scan_service.create_scan_from_*` |
-| `sccap_get_scan_status` | `GET /scans/{id}` |
-| `sccap_get_scan_result` | `GET /scans/{id}/result` |
-| `sccap_approve_scan` | resumes the LangGraph thread with `Command(resume=...)` |
-| `sccap_ask_advisor` | authenticated single-shot advisor call; skips session persistence but records user/tenant-attributed usage |
+| Framework Config | Standards, agents, prompt templates, CWE mappings |
+| Semgrep Config | Rule sources (git repositories), enable/sync, scheduled syncs |
+| LLM Configs | Provider credentials, rate limits, effective-dated price overrides |
+| Usage & Spend | Consumption and cost per operation kind, budgets |
+| Access & Roles | Tenants, users, groups, authorization |
+| Identity & Email | SSO, SCIM, SMTP |
+| Integrations | SIEM, ticketing, provider reconciliation |
+| Auth Audit | Sign-in events with username resolved server-side |
+| Platform | Runtime feature flags and platform settings |
+| Appearance | Theme and branding |
 
-External agentic clients (Claude Code, Cursor, etc.) authenticate with
-an ordinary user JWT; all visibility-scope rules apply.
+Secrets — LLM keys, SMTP passwords, tenant credentials, discovered pentest secrets — are
+envelope-encrypted at rest and never stored plaintext.
 
-## Pentesting (opt-in)
+## Integrations and automation
 
-A separately gated engine (disabled by default; enabled during setup or via the
-`pentesting-v5` profile) that sits alongside — and never mutates — the Code Scan
-flow:
+- **MCP server** at `/mcp` — submit scans, read status and results, approve gates and ask
+  the advisor from Claude Code, Cursor or any MCP client, over the same JWT auth.
+- **REST API** at `/api/v1` with OpenAPI documentation, plus a generated frontend client
+  contract checked by `npm run check:api`.
+- **CI policy endpoints** — coverage and finding-governance gates with SARIF output.
+- **Observability** — `X-Correlation-ID` on every request, structured JSON logs, and an
+  optional Fluentd → Loki → Grafana stack with provisioned dashboards.
 
-- **Launch** — one target origin, a box type (black/gray/white), optional
-  credentials, and the tools to leave out. The page shows whether the engine
-  carries every scanner before a run starts.
-- **Discovery** — evasive reconnaissance followed by subdomain enumeration
-  (six passive indexes, DNS brute-force, dangling-CNAME takeover checks),
-  OpenAPI/Swagger and GraphQL schema discovery, and JavaScript bundle mining for
-  endpoints, parameters, source maps and secrets.
-- **Model loop** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a live
-  Playwright browser, up to four tools per turn, seeing every result. Probes are
-  de-duplicated and a failing tool is recorded untestable rather than retried
-  forever.
-- **Lead queue** — every observation becomes a queued lead with a priority band
-  (attacker-controlled input first). Leads are claimed as they are tested, and a
-  run may only conclude when none remain testable.
-- **Findings and observations** — weaknesses and surface intelligence are both
-  kept; observations are what exploit chains are built from.
-- **Exploit chaining** — available once a run has at least two findings; records
-  ordered chain steps on the findings involved.
-- **Controls and reports** — pause/resume/stop (honoured mid-call), live browser
-  frame, and Markdown/JSON/HTML/PDF downloads.
+## Operational features
 
-See [pentesting engine operations](../operations/pentesting-engine.md) and
-[ADR-029](../adr/029-pentesting-autonomous-engine.md).
+- **Lifecycle** — `setup.sh` installs, updates, rolls back, uninstalls, purges and
+  factory-resets, with a backup before anything is destroyed. See
+  [Maintenance and Uninstallation](../getting-started/maintenance.md).
+- **Feature flags** — every optional surface is a runtime flag, seeded by the installation
+  variant and changeable under *Admin → Platform*.
+- **Tenancy** — single-tenant or multi-tenant, with tenant-scoped data and credentials.
+- **Audit** — scan events, LLM interactions, auth events and pentest run events are retained
+  and exportable.

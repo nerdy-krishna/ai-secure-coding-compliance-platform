@@ -5,13 +5,19 @@ title: Installation Guide
 
 # Installation Guide
 
-The SCCAP is designed for local setup and deployment using Docker and Docker Compose. This guide will walk you through the process.
+SCCAP — Secure Coding Compliance and Pentesting — installs with Docker and Docker Compose
+on a single host: a laptop, a VM, or a bare-metal server. This guide covers prerequisites,
+the interactive installer, the manual path, and verification.
+
+For upgrading, rolling back, uninstalling or purging, see
+[Maintenance and Uninstallation](./maintenance.md).
 
 ## Prerequisites
 
 Before you begin, ensure you have the following installed and configured on your system:
 
-* **Docker Engine**: Make sure Docker is installed and the Docker daemon is running.
+* **Docker Engine** (with the Compose plugin): installed and running. The installer can add
+  Docker's official apt repository on Ubuntu/Debian when it is missing.
     * *Download*: [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose for Mac and Windows).
 * **Docker Compose**:
     * Usually included with Docker Desktop.
@@ -19,7 +25,9 @@ Before you begin, ensure you have the following installed and configured on your
 * **Git**: Required for cloning the project repository.
     * *Download*: [Git](https://git-scm.com/downloads).
 * **Code Editor**: A code editor like VS Code, Sublime Text, or others for viewing and editing configuration files.
-* **(Optional for specific host commands) Python & Poetry**: If you plan to run backend commands (like Alembic migrations) directly on your host machine instead of inside Docker (not recommended for initial setup), you'll need Python (version 3.12+) and Poetry installed.
+* **(Optional) Python 3.12**: only if you want to run `scripts/bootstrap_env_secrets.py`
+  outside the stack. Backend commands are meant to run inside Docker — `.env` uses Compose
+  service hostnames (`db`, `rabbitmq`, `qdrant`) that do not resolve on the host.
 
 
 ## Quick Start (Recommended)
@@ -236,25 +244,22 @@ After completing the steps above, you can verify that the platform is running co
 4.  **Check RabbitMQ Management UI**:
     * You can monitor RabbitMQ queues and exchanges via its management interface at `http://localhost:<RABBITMQ_MANAGEMENT_PORT>` (e.g., `http://localhost:15672`, using the RabbitMQ credentials from your `.env` file).
 
-## Stopping the Platform Services
+## Stopping, updating and removing
 
-To stop all running services defined in `docker-compose.yml`:
 ```bash
-docker compose down
+./setup.sh --uninstall      # stop and remove the stack; data, .env, keys and certs kept
+./setup.sh --update         # back up, rebuild, migrate, health-check; keeps images for rollback
+./setup.sh --rollback       # return code and images to the pre-update state
+./setup.sh --purge          # also drop data volumes and built images (pg_dumpall backup first)
+./setup.sh --factory-reset  # purge plus delete .env, .secrets/ and certbot/ — a clean install
 ```
-This command stops and removes the containers. Your data stored in Docker volumes (like PostgreSQL data) will persist unless you explicitly remove the volumes.
 
-## Updating the Platform
+Full behaviour, what each level deletes, ownership handling and troubleshooting live in
+[Maintenance and Uninstallation](./maintenance.md).
 
-To update to the latest version of the platform:
-1.  Navigate to the project root: `cd ai-secure-coding-compliance-platform`
-2.  Pull the latest changes from the Git repository: `git pull origin main` (or the relevant branch)
-3.  Repair newly required `.env` secrets without rotating existing values:
-    `python3 scripts/bootstrap_env_secrets.py --env-file .env` (Windows: use `python`).
-    The command never prints generated values and applies mode `0600` on POSIX systems.
-4.  Validate interpolation before changing running services: `docker compose config --quiet`
-5.  Rebuild the images if there have been changes to `Dockerfile` or application dependencies: `docker compose up --build -d`
-6.  Apply any new database migrations: `docker compose exec app poetry run alembic upgrade head`
+A plain `docker compose down` still stops the containers, and the PostgreSQL data survives
+in its volume. The installer's teardown is preferred because it also removes containers
+left by an older profile generation and verifies that nothing of the project survives.
 
 ## Troubleshooting Common Issues
 
