@@ -100,7 +100,12 @@ export const ScanCoveragePanel: React.FC<{ scanId: string; embedded?: boolean }>
     staleTime: 60_000,
   });
 
-  const rows = useMemo(() => fold(query.data?.entries ?? []), [query.data]);
+  // `<repository>` is the pseudo-input OSV records once per tree, not a file;
+  // keeping it in a file list reads as a file that was scanned.
+  const rows = useMemo(
+    () => fold(query.data?.entries ?? []).filter((row) => !row.path.startsWith("<")),
+    [query.data],
+  );
   const scanned = rows.filter((row) => row.scanned);
   const excluded = rows.filter((row) => !row.scanned);
 
