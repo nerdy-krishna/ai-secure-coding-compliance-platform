@@ -24,7 +24,11 @@ import {
 import type { PrescanReviewResponse } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 import { StageIcon } from "../../shared/ui/StageIcon";
-import { deriveScanProgress, isWaitingStatus } from "../../shared/lib/scanProgress";
+import {
+  TERMINAL_SCAN_STATUSES,
+  deriveScanProgress,
+  isWaitingStatus,
+} from "../../shared/lib/scanProgress";
 import type { ApprovalGate, CostDetails } from "../../shared/lib/scanContract";
 import { useActiveElapsed } from "../../shared/lib/useElapsed";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
@@ -385,15 +389,9 @@ const mergeScanEvents = (
   return merged.slice(-500);
 };
 
-const TERMINAL_STATUSES = new Set([
-  "COMPLETED",
-  "REMEDIATION_COMPLETED",
-  "FAILED",
-  "CANCELLED",
-  "EXPIRED",
-  "BLOCKED_PRE_LLM",
-  "BLOCKED_USER_DECLINE",
-]);
+// One source of truth: scanProgress owns the terminal vocabulary, so a new
+// terminal status can never be "running" on one screen and terminal on another.
+const TERMINAL_STATUSES = new Set(TERMINAL_SCAN_STATUSES as readonly string[]);
 
 const hasCompletedCancellation = (events: ScanEventMsg[]) =>
   events.some(
@@ -818,10 +816,21 @@ const ScanRunningPage: React.FC = () => {
   // terminal status during this page view; only redirect after a
   // genuine transition.
   const sawNonTerminalRef = useRef(false);
+  const redirectedOnMountRef = useRef(false);
   useEffect(() => {
     if (!scanId) return;
     if (status && !TERMINAL_STATUSES.has(status)) {
       sawNonTerminalRef.current = true;
+    }
+    if (
+      status &&
+      TERMINAL_STATUSES.has(status) &&
+      !sawNonTerminalRef.current &&
+      !redirectedOnMountRef.current
+    ) {
+      redirectedOnMountRef.current = true;
+      navigate(`/analysis/results/${scanId}`, { replace: true });
+      return;
     }
     // Every terminal state except FAILED lands on the results page: a scan
     // stopped at the prescan gate keeps its deterministic findings, so the user
@@ -1377,8 +1386,9 @@ const ScanRunningPage: React.FC = () => {
                   ? "Scan complete"
                   : status === "BLOCKED_PRE_LLM"
                     ? "Scan stopped — critical secret detected"
-                    : status === "BLOCKED_USER_DECLINE"
-                      ? "Scan stopped at your request"
+                    : status === "STOPPED_BEFORE_LLM" ||
+                        status === "BLOCKED_USER_DECLINE"
+                      ? "Scan stopped — scanner findings kept"
                       : status === "CANCELLED"
                         ? cancellationComplete
                           ? "Scan stopped at your request"

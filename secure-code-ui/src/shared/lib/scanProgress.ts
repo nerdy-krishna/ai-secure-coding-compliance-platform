@@ -78,7 +78,9 @@ const CROSS_FILE_STAGE: RailStage = {
   icon: "Link",
 };
 
-const TERMINAL_STATUSES = new Set([
+/** Statuses that mean the scan will not move again. Exported so pages stop
+ *  keeping private copies — a stale copy treats a new terminal status as running. */
+export const TERMINAL_SCAN_STATUSES = [
   "COMPLETED",
   "REMEDIATION_COMPLETED",
   "FAILED",
@@ -87,7 +89,10 @@ const TERMINAL_STATUSES = new Set([
   "BLOCKED_PRE_LLM",
   "STOPPED_BEFORE_LLM",
   "BLOCKED_USER_DECLINE",
-]);
+  "BUDGET_EXHAUSTED",
+] as const;
+
+const TERMINAL_STATUSES = new Set<string>(TERMINAL_SCAN_STATUSES);
 
 const ERROR_STATUSES = new Set(["FAILED", "EXPIRED"]);
 const SUCCESS_STATUSES = new Set(["COMPLETED", "REMEDIATION_COMPLETED"]);
