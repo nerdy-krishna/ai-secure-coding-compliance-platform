@@ -160,14 +160,14 @@ const ProjectsPage: React.FC = () => {
         crumbs={[
           { label: "Dashboard", to: "/account/dashboard" },
           { label: "Code scanning", to: "/submission/submit" },
-          { label: "Projects and scans" },
+          { label: "Projects & Scans" },
         ]}
-        title="Projects and scans"
+        title="Projects & Scans"
         subtitle="Repositories under scan, and what the latest assessment of each found."
         actions={
           <>
             <Link className="sccap-btn" to="/account/history">
-              Submission history
+              Submission History
             </Link>
             <button
               className="sccap-btn"

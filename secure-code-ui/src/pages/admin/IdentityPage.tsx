@@ -45,8 +45,8 @@ const IdentityPage: React.FC = () => {
 
   return (
     <TabbedAdminPage
-      crumbs={[{ label: "Identity and email" }]}
-      title="Identity and email"
+      crumbs={[{ label: "Identity & Email" }]}
+      title="Identity & Email"
       subtitle="Sign-in, automated provisioning and the mail the account flows depend on."
       tabs={tabs}
       isAdmin={isAdmin}

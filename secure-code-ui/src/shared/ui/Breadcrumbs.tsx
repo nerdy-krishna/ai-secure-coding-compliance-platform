@@ -50,30 +50,30 @@ const ACCOUNT: Crumb = { label: "Account", to: "/account/dashboard" };
  */
 const TRAILS: Record<string, Crumb[]> = {
   "/account/dashboard": [],
-  "/submission/submit": [CODE_SCAN, { label: "New scan" }],
-  "/analysis/results": [CODE_SCAN, { label: "Projects and scans" }],
-  "/account/history": [CODE_SCAN, { label: "Submission history" }],
-  "/pentesting": [PENTEST, { label: "Projects and scans" }],
-  "/pentesting/new": [PENTEST, { label: "New pentest" }],
-  "/pentesting/history": [PENTEST, { label: "Submission history" }],
-  "/advisor": [PENTEST, { label: "Security advisor" }],
-  "/compliance": [ADMIN, { label: "Framework configuration" }, { label: "Security standards" }],
+  "/submission/submit": [CODE_SCAN, { label: "New Scan" }],
+  "/analysis/results": [CODE_SCAN, { label: "Projects & Scans" }],
+  "/account/history": [CODE_SCAN, { label: "Submission History" }],
+  "/pentesting": [PENTEST, { label: "Projects & Scans" }],
+  "/pentesting/new": [PENTEST, { label: "New Pentest" }],
+  "/pentesting/history": [PENTEST, { label: "Submission History" }],
+  "/advisor": [CODE_SCAN, { label: "Security Advisor" }],
+  "/compliance": [ADMIN, { label: "Framework configuration" }, { label: "Security Standards" }],
   "/admin/analysis": [ADMIN, { label: "Framework configuration" }],
   "/admin/semgrep": [ADMIN, { label: "Semgrep configuration" }],
-  "/usage": [ADMIN, { label: "Usage" }],
+  "/usage": [ADMIN, { label: "Usage & Spend" }],
   "/account/settings/appearance": [ACCOUNT, { label: "Appearance" }],
   "/account/settings/security": [ACCOUNT, { label: "Security" }],
-  "/account/settings/llm": [ADMIN, { label: "LLM configs" }],
+  "/account/settings/llm": [ADMIN, { label: "LLM Configs" }],
   "/admin/platform": [ADMIN, { label: "Platform" }],
 
   "/admin/appearance": [ADMIN, { label: "Appearance" }],
 
   "/admin/rag": [ADMIN, { label: "Knowledge base" }],
-  "/admin/identity": [ADMIN, { label: "Identity and email" }],
-  "/admin/sso/audit": [ADMIN, { label: "Auth audit" }],
+  "/admin/identity": [ADMIN, { label: "Identity & Email" }],
+  "/admin/sso/audit": [ADMIN, { label: "Auth Audit" }],
 
   "/admin/integrations": [ADMIN, { label: "Integrations" }],
-  "/admin/access": [ADMIN, { label: "Access and roles" }],
+  "/admin/access": [ADMIN, { label: "Access & Roles" }],
 
 
 

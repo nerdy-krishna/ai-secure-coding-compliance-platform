@@ -25,28 +25,28 @@ export const ADMIN_LINKS: AdminLink[] = [
   // mappings), the deterministic detectors, and the models behind them.
   {
     to: "/admin/analysis",
-    label: "Framework config",
+    label: "Framework Config",
     feature: "admin_authoring",
     permissions: [Permission.platformConfigManage],
   },
   {
     to: "/admin/semgrep",
-    label: "Semgrep config",
+    label: "Semgrep Config",
     feature: "admin_authoring",
     permissions: [Permission.platformConfigManage],
   },
-  { to: "/account/settings/llm", label: "LLM configs", permissions: [Permission.platformConfigManage] },
-  { to: "/usage", label: "Usage and spend" },
+  { to: "/account/settings/llm", label: "LLM Configs", permissions: [Permission.platformConfigManage] },
+  { to: "/usage", label: "Usage & Spend" },
   // Who is in the platform, and how they prove who they are.
-  { to: "/admin/access", label: "Access and roles", permissions: [Permission.identityRead] },
+  { to: "/admin/access", label: "Access & Roles", permissions: [Permission.identityRead] },
   {
     to: "/admin/identity",
-    label: "Identity and email",
+    label: "Identity & Email",
     feature: "sso",
     permissions: [Permission.tenantPolicyManage],
   },
   { to: "/admin/integrations", label: "Integrations", permissions: [Permission.servicePrincipalManage] },
-  { to: "/admin/sso/audit", label: "Auth audit", feature: "sso", permissions: [Permission.auditRead] },
+  { to: "/admin/sso/audit", label: "Auth Audit", feature: "sso", permissions: [Permission.auditRead] },
   // Platform-level settings.
   { to: "/admin/platform", label: "Platform", permissions: [Permission.platformConfigManage] },
   { to: "/admin/appearance", label: "Appearance", permissions: [Permission.platformConfigManage] },

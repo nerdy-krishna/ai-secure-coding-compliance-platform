@@ -9,9 +9,8 @@ import FeaturesPage from "./FeaturesPage";
 /**
  * How the installation behaves for everyone.
  *
- * Feature flags decide which surfaces exist at all; the platform settings decide how
- * the running pieces behave once they do. Flags first, because switching one on can
- * add settings that then need configuring.
+ * The platform settings describe how the running services behave; feature flags then
+ * decide which surfaces exist on top of them.
  */
 const PlatformPage: React.FC = () => {
   const { user } = useAuth();
@@ -19,21 +18,21 @@ const PlatformPage: React.FC = () => {
 
   const tabs: AdminTab[] = [
     {
+      key: "settings",
+      label: "Platform Settings",
+      icon: <Icon.Settings size={13} />,
+      description:
+        "Core behaviour of the running services: LLM mode, allowed origins, and the raw configuration key/values.",
+      render: () => <SystemConfigTab embedded />,
+    },
+    {
       key: "features",
       label: "Features",
       icon: <Icon.Zap size={13} />,
       description:
         "Installation-wide feature flags. A flag switches a whole surface on or off for every tenant; dependencies are resolved automatically.",
+      requires: "the platform settings above (step 1)",
       render: () => <FeaturesPage />,
-    },
-    {
-      key: "settings",
-      label: "Platform settings",
-      icon: <Icon.Settings size={13} />,
-      description:
-        "Core behaviour of the running services: LLM mode, allowed origins, and the raw configuration key/values.",
-      requires: "the features above (step 1)",
-      render: () => <SystemConfigTab embedded />,
     },
   ];
 

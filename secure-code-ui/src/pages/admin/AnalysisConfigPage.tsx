@@ -96,7 +96,7 @@ const AnalysisConfigPage: React.FC<{ only?: TabKey }> = ({ only }) => {
           { label: "Dashboard", to: "/account/dashboard" },
           ...(only ? [{ label: "Analysis config" }] : [{ label: "Administration", to: "/admin/system" }, { label: "Analysis config" }]),
         ]}
-        title={only ? "Security standards" : "Framework configuration"}
+        title={only ? "Security Standards" : "Framework Configuration"}
         subtitle={
           only
             ? "The standards your scans and advisor measure against."

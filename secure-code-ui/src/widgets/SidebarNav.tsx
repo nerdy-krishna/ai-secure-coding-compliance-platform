@@ -18,22 +18,24 @@ type Item = {
 };
 
 const codeScan: Item[] = [
-  { to: "/submission/submit", label: "New scan", icon: Icon.Plus },
-  { to: "/analysis/results", label: "Projects and scans", icon: Icon.Folder },
-  { to: "/account/history", label: "Submission history", icon: Icon.History },
+  { to: "/submission/submit", label: "New Scan", icon: Icon.Plus },
+  { to: "/analysis/results", label: "Projects & Scans", icon: Icon.Folder },
+  { to: "/account/history", label: "Submission History", icon: Icon.History },
+  // The advisor reasons over the findings a scan produced, so it belongs with them.
+  { to: "/advisor", label: "Security Advisor", icon: Icon.Chat, feature: "chat" },
 ];
 // Same shape as the code-scanning group: start one, see the estate, see everything.
 const pentesting: Item[] = [
   {
     to: "/pentesting/new",
-    label: "New pentest",
+    label: "New Pentest",
     icon: Icon.Plus,
     feature: "pentesting",
     permission: Permission.pentestRead,
   },
   {
     to: "/pentesting",
-    label: "Projects and scans",
+    label: "Projects & Scans",
     icon: Icon.Folder,
     feature: "pentesting",
     permission: Permission.pentestRead,
@@ -43,14 +45,11 @@ const pentesting: Item[] = [
   },
   {
     to: "/pentesting/history",
-    label: "Submission history",
+    label: "Submission History",
     icon: Icon.History,
     feature: "pentesting",
     permission: Permission.pentestRead,
   },
-  // The advisor reasons over the same findings a run produces, so it sits here
-  // rather than in administration.
-  { to: "/advisor", label: "Security advisor", icon: Icon.Chat, feature: "chat" },
 ];
 // Standards live inside "Analysis config" for admins; a reader without authoring
 // rights still gets the read-only standards view.
@@ -60,6 +59,7 @@ const pentesting: Item[] = [
 // back to a neutral dot rather than a letter, which is what the collapsed rail
 // used to render.
 const ADMIN_ICON_RULES: Array<[RegExp, IconComponent]> = [
+  [/usage|spend/i, Icon.Dollar],
   [/framework config/i, Icon.Layers],
   [/semgrep/i, Icon.Code],
   [/llm|model/i, Icon.Cpu],
@@ -169,7 +169,7 @@ export function SidebarNav() {
     : [
         {
           to: "/compliance",
-          label: "Security standards",
+          label: "Security Standards",
           icon: Icon.BookOpen,
           feature: "compliance",
         },
@@ -232,19 +232,15 @@ export function SidebarNav() {
       {!collapsed && <span className="side-nav-label">Dashboard</span>}
     </NavLink>
     {group(
-      "Code scanning",
+      "Code Scanning",
       Icon.Code,
       codeScan,
       pathname.startsWith("/analysis") ||
         pathname.startsWith("/submission") ||
-        pathname.startsWith("/account/history"),
+        pathname.startsWith("/account/history") ||
+        pathname.startsWith("/advisor"),
     )}
-    {group(
-      "Pentesting",
-      Icon.Shield,
-      pentesting,
-      pathname.startsWith("/pentesting") || pathname.startsWith("/advisor"),
-    )}
+    {group("Pentesting", Icon.Shield, pentesting, pathname.startsWith("/pentesting"))}
     {adminVisible ? group("Administration", Icon.Settings, adminItems, adminOpen) : null}
   </aside>;
 }

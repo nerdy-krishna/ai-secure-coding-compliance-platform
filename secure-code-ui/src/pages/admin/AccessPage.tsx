@@ -57,8 +57,8 @@ const AccessPage: React.FC = () => {
 
   return (
     <TabbedAdminPage
-      crumbs={[{ label: "Access and roles" }]}
-      title="Access and roles"
+      crumbs={[{ label: "Access & Roles" }]}
+      title="Access & Roles"
       subtitle="Who is in the platform, how they are grouped, and what they are permitted to do."
       tabs={tabs}
       isAdmin={isAdmin}
