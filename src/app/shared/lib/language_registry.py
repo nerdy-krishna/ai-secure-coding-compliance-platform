@@ -19,10 +19,11 @@ from typing import Iterable, Optional
 BANDIT = "bandit"
 SEMGREP = "semgrep"
 GITLEAKS = "gitleaks"
-OSV = "osv"
+OSV = "osv"  # repository-level: OSV scans the manifest tree, not individual files
 
-#: Every scanner the deterministic prescan can schedule.
-ALL_SCANNERS: tuple[str, ...] = (BANDIT, SEMGREP, GITLEAKS, OSV)
+#: Per-file scanners. OSV is excluded on purpose: it runs once per repository against
+#: the manifest tree, and the prescan records it under the "<repository>" input path.
+ALL_SCANNERS: tuple[str, ...] = (BANDIT, SEMGREP, GITLEAKS)
 
 #: extension → (language, scanners that can read it).
 _EXTENSIONS: dict[str, tuple[str, frozenset[str]]] = {}
@@ -34,39 +35,39 @@ def _register(exts: Iterable[str], language: str, scanners: Iterable[str]) -> No
 
 
 # --- languages Bandit parses natively ------------------------------------
-_register((".py", ".pyi"), "python", (BANDIT, SEMGREP, GITLEAKS, OSV))
+_register((".py", ".pyi"), "python", (BANDIT, SEMGREP, GITLEAKS))
 
 # --- languages Semgrep parses; also secret- and dependency-scanned ---------
 _register(
     (".js", ".mjs", ".cjs", ".jsx"),
     "javascript",
-    (SEMGREP, GITLEAKS, OSV),
+    (SEMGREP, GITLEAKS),
 )
-_register((".ts", ".tsx", ".mts", ".cts"), "typescript", (SEMGREP, GITLEAKS, OSV))
-_register((".java",), "java", (SEMGREP, GITLEAKS, OSV))
-_register((".kt", ".kts"), "kotlin", (SEMGREP, GITLEAKS, OSV))
-_register((".scala",), "scala", (SEMGREP, GITLEAKS, OSV))
-_register((".go",), "go", (SEMGREP, GITLEAKS, OSV))
-_register((".rb", ".rake"), "ruby", (SEMGREP, GITLEAKS, OSV))
-_register((".php",), "php", (SEMGREP, GITLEAKS, OSV))
-_register((".cs",), "csharp", (SEMGREP, GITLEAKS, OSV))
+_register((".ts", ".tsx", ".mts", ".cts"), "typescript", (SEMGREP, GITLEAKS))
+_register((".java",), "java", (SEMGREP, GITLEAKS))
+_register((".kt", ".kts"), "kotlin", (SEMGREP, GITLEAKS))
+_register((".scala",), "scala", (SEMGREP, GITLEAKS))
+_register((".go",), "go", (SEMGREP, GITLEAKS))
+_register((".rb", ".rake"), "ruby", (SEMGREP, GITLEAKS))
+_register((".php",), "php", (SEMGREP, GITLEAKS))
+_register((".cs",), "csharp", (SEMGREP, GITLEAKS))
 _register((".fs", ".fsx"), "fsharp", (SEMGREP, GITLEAKS))
 _register((".vb",), "visualbasic", (SEMGREP, GITLEAKS))
 _register((".c", ".h"), "c", (SEMGREP, GITLEAKS))
 _register((".cc", ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".ipp"), "cpp", (SEMGREP, GITLEAKS))
-_register((".rs",), "rust", (SEMGREP, GITLEAKS, OSV))
-_register((".swift",), "swift", (SEMGREP, GITLEAKS, OSV))
+_register((".rs",), "rust", (SEMGREP, GITLEAKS))
+_register((".swift",), "swift", (SEMGREP, GITLEAKS))
 _register((".m", ".mm"), "objectivec", (SEMGREP, GITLEAKS))
-_register((".dart",), "dart", (SEMGREP, GITLEAKS, OSV))
+_register((".dart",), "dart", (SEMGREP, GITLEAKS))
 _register((".lua",), "lua", (SEMGREP, GITLEAKS))
 _register((".pl", ".pm"), "perl", (SEMGREP, GITLEAKS))
-_register((".ex", ".exs"), "elixir", (SEMGREP, GITLEAKS, OSV))
+_register((".ex", ".exs"), "elixir", (SEMGREP, GITLEAKS))
 _register((".erl", ".hrl"), "erlang", (SEMGREP, GITLEAKS))
 _register((".hs", ".lhs"), "haskell", (SEMGREP, GITLEAKS))
 _register((".clj", ".cljs", ".cljc"), "clojure", (SEMGREP, GITLEAKS))
 _register((".groovy", ".gvy"), "groovy", (SEMGREP, GITLEAKS))
-_register((".vue",), "vue", (SEMGREP, GITLEAKS, OSV))
-_register((".svelte",), "svelte", (SEMGREP, GITLEAKS, OSV))
+_register((".vue",), "vue", (SEMGREP, GITLEAKS))
+_register((".svelte",), "svelte", (SEMGREP, GITLEAKS))
 _register((".html", ".htm"), "html", (GITLEAKS,))
 _register((".css", ".scss", ".sass", ".less"), "css", (GITLEAKS,))
 _register((".sql",), "sql", (SEMGREP, GITLEAKS))
@@ -79,7 +80,7 @@ _register((".bat", ".cmd"), "batch", (GITLEAKS,))
 _register((".r", ".rmd"), "r", (GITLEAKS,))
 
 # --- configuration, data and docs: secrets live here ----------------------
-_register((".json", ".json5"), "json", (GITLEAKS, OSV))
+_register((".json", ".json5"), "json", (GITLEAKS))
 _register((".yaml", ".yml"), "yaml", (GITLEAKS,))
 _register((".toml",), "toml", (GITLEAKS,))
 _register((".ini", ".cfg", ".conf", ".properties"), "config", (GITLEAKS,))
@@ -99,20 +100,20 @@ _FILENAMES: dict[str, tuple[str, frozenset[str]]] = {
     "cmakelists.txt": ("cmake", frozenset({GITLEAKS})),
     "jenkinsfile": ("groovy", frozenset({SEMGREP, GITLEAKS})),
     "vagrantfile": ("ruby", frozenset({SEMGREP, GITLEAKS})),
-    "gemfile": ("ruby", frozenset({GITLEAKS, OSV})),
+    "gemfile": ("ruby", frozenset({GITLEAKS})),
     "rakefile": ("ruby", frozenset({SEMGREP, GITLEAKS})),
-    "podfile": ("ruby", frozenset({GITLEAKS, OSV})),
+    "podfile": ("ruby", frozenset({GITLEAKS})),
     "procfile": ("config", frozenset({GITLEAKS})),
-    "requirements.txt": ("requirements", frozenset({GITLEAKS, OSV})),
-    "requirements-dev.txt": ("requirements", frozenset({GITLEAKS, OSV})),
-    "pipfile": ("requirements", frozenset({GITLEAKS, OSV})),
-    "go.mod": ("gomod", frozenset({GITLEAKS, OSV})),
-    "cargo.toml": ("cargo", frozenset({GITLEAKS, OSV})),
-    "package.json": ("npm", frozenset({GITLEAKS, OSV})),
-    "composer.json": ("composer", frozenset({GITLEAKS, OSV})),
-    "pom.xml": ("maven", frozenset({GITLEAKS, OSV})),
-    "build.gradle": ("gradle", frozenset({GITLEAKS, OSV})),
-    "build.gradle.kts": ("gradle", frozenset({GITLEAKS, OSV})),
+    "requirements.txt": ("requirements", frozenset({GITLEAKS})),
+    "requirements-dev.txt": ("requirements", frozenset({GITLEAKS})),
+    "pipfile": ("requirements", frozenset({GITLEAKS})),
+    "go.mod": ("gomod", frozenset({GITLEAKS})),
+    "cargo.toml": ("cargo", frozenset({GITLEAKS})),
+    "package.json": ("npm", frozenset({GITLEAKS})),
+    "composer.json": ("composer", frozenset({GITLEAKS})),
+    "pom.xml": ("maven", frozenset({GITLEAKS})),
+    "build.gradle": ("gradle", frozenset({GITLEAKS})),
+    "build.gradle.kts": ("gradle", frozenset({GITLEAKS})),
     ".env": ("dotenv", frozenset({GITLEAKS})),
     ".npmrc": ("npm", frozenset({GITLEAKS})),
     ".pypirc": ("config", frozenset({GITLEAKS})),
@@ -149,7 +150,7 @@ def resolve(rel_path: str) -> tuple[Optional[str], frozenset[str]]:
     # Composite suffixes we care about: `.min.js` still resolves through `.js`,
     # but `foo.d.ts` should read as TypeScript rather than as a `.ts` unknown.
     if name.endswith(".d.ts"):
-        return ("typescript", frozenset({SEMGREP, GITLEAKS, OSV}))
+        return ("typescript", frozenset({SEMGREP, GITLEAKS}))
     return (None, frozenset())
 
 

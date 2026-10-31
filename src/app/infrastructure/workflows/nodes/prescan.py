@@ -141,6 +141,34 @@ _ROLE_RANK = {
 }
 
 
+#: Roles whose content still deserves a semantic scan when the operator asks for a
+#: deep vendor scan.
+_DEEP_SCAN_ROLES = {
+    "known_third_party_vendor",
+    "unknown_third_party_vendor",
+    "generated_asset",
+    "first_party_minified_bundle",
+}
+
+
+def _role_allows_scanner(
+    scanner_name: str, role: str, policy: Dict[str, Any], deep_vendor_scan: bool
+) -> bool:
+    """Whether a scanner should read a file of this role.
+
+    Capability (`scanners_for_file`) says a scanner *can* read the file; the role says
+    whether it is worth it. Secrets are the exception — they leak from minified
+    bundles and lockfiles as readily as from source.
+    """
+    if deep_vendor_scan and role in _DEEP_SCAN_ROLES:
+        return True
+    if scanner_name == "gitleaks":
+        return bool(policy.get("gitleaks", True))
+    if scanner_name == "bandit":
+        return role == "first_party_source" and bool(policy.get("semgrep", True))
+    return bool(policy.get(scanner_name, True))
+
+
 def _rank(path: str, role: str, size: int) -> tuple[int, int]:
     """Sort key: role first, then shallower paths (entry points) before deep ones."""
     return (_ROLE_RANK.get(role, 1), path.count("/"))
@@ -305,7 +333,11 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             skip(planned_scanners, "binary_input", "The input is a binary or compiled executable.")
             continue
         size = int(profile.get("size_bytes") or len(content.encode("utf-8", "replace")))
-        cap = MINIFIED_BYTE_LIMIT if is_minified(path) else PRESCAN_FILE_BYTE_LIMIT
+        cap = (
+            MINIFIED_BYTE_LIMIT
+            if profile.get("is_minified") or is_minified(path)
+            else PRESCAN_FILE_BYTE_LIMIT
+        )
         if size > cap:
             skipped_by_reason["input_size_limit"] = skipped_by_reason.get("input_size_limit", 0) + 1
             for scanner_name in planned_scanners:
@@ -319,27 +351,34 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 )
             continue
 
-        allowed = [
-            scanner_name
-            for scanner_name in planned_scanners
-            if policy.get(scanner_name, True)
-            or (scanner_name == "gitleaks" and policy.get("gitleaks", True))
-        ]
-        if not allowed:
-            skip(
-                planned_scanners,
-                "low_value_role",
-                f"{role} files are excluded from semantic analysis; secrets scanning only.",
+        # Which of the capable scanners should actually read this file, given what
+        # the file is. Vendored and generated code is worth a secrets scan and not
+        # much else; a lockfile is worth dependency intelligence.
+        allowed: list[str] = []
+        denied: list[str] = []
+        for scanner_name in planned_scanners:
+            if _role_allows_scanner(scanner_name, role, policy, deep_vendor_scan):
+                allowed.append(scanner_name)
+            else:
+                denied.append(scanner_name)
+
+        for scanner_name in denied:
+            coverage_plan[(scanner_name, path)] = CoveragePlanItem(
+                scanner_name=scanner_name,
+                input_path=path,
+                status="skipped",
+                reason_code="low_value_role",
+                reason=f"{role.replace('_', ' ')} files are not analysed by {scanner_name}.",
+                details=detail,
             )
-            # Secrets still matter in vendor bundles and lockfiles.
-            if policy.get("gitleaks"):
-                ranked.append(_rank(path, role, size) + (path,))
-                eligible[path] = content
+            skipped_by_reason["low_value_role"] = skipped_by_reason.get("low_value_role", 0) + 1
+
+        if not allowed:
             continue
 
         eligible[path] = content
         ranked.append(_rank(path, role, size) + (path,))
-        for scanner_name in planned_scanners:
+        for scanner_name in allowed:
             coverage_plan[(scanner_name, path)] = CoveragePlanItem(
                 scanner_name=scanner_name,
                 input_path=path,
