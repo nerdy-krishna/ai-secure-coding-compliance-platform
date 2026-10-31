@@ -198,6 +198,46 @@ def _has_build_manifest(path: str, submitted_paths: set[str]) -> bool:
 
 _COMMENT_ONLY_RE = re.compile(r"^\s*(?:#|//|/\*|\*|--|<!--|;)")
 
+#: Languages where a `#`/`//` line really is a comment. Markdown, JSON, YAML and
+#: friends treat those characters as content, so they are only "empty" when blank.
+_COMMENT_LANGUAGES = frozenset(
+    {
+        "python",
+        "javascript",
+        "typescript",
+        "java",
+        "kotlin",
+        "scala",
+        "groovy",
+        "go",
+        "ruby",
+        "php",
+        "csharp",
+        "fsharp",
+        "c",
+        "cpp",
+        "objectivec",
+        "rust",
+        "swift",
+        "dart",
+        "lua",
+        "perl",
+        "elixir",
+        "erlang",
+        "haskell",
+        "clojure",
+        "shell",
+        "powershell",
+        "batch",
+        "r",
+        "terraform",
+        "makefile",
+        "dockerfile",
+        "graphql",
+        "solidity",
+    }
+)
+
 
 def _has_code(content: str) -> bool:
     """False when every non-blank line is a comment (or there are none)."""
@@ -260,7 +300,8 @@ def classify_file(
 
     raw_bytes = content.encode("utf-8", "replace")
     binary = looks_binary(raw_bytes)
-    empty = not content.strip() or not _has_code(content)
+    comment_language = (language_for(path) or "") in _COMMENT_LANGUAGES
+    empty = not content.strip() or (comment_language and not _has_code(content))
 
     if binary:
         category = CATEGORY_BINARY
@@ -343,6 +384,60 @@ def classify_file(
         "coverage_warnings": warnings,
         "evidence": evidence,
     }
+
+
+#: Roles that only get a secrets scan unless the operator asked for a deep vendor
+#: scan — vendored libraries, generated bundles and minified output.
+DEEP_SCAN_ROLES = frozenset(
+    {
+        "known_third_party_vendor",
+        "unknown_third_party_vendor",
+        "generated_asset",
+        "first_party_minified_bundle",
+        # node_modules / site-packages: third-party code, but this is exactly what an
+        # operator means by "scan vendor and generated files too".
+        "runtime_artifact",
+    }
+)
+
+
+def role_allows_scanner(
+    scanner_name: str,
+    role: str,
+    policy: Dict[str, Any],
+    deep_vendor_scan: bool = False,
+) -> bool:
+    """Whether a scanner should read a file of this role.
+
+    Capability (``scanners_for``) says a scanner *can* read the file; the role says
+    whether it is worth doing. Secrets are the exception: they leak from minified
+    bundles and lockfiles as readily as from source.
+    """
+    if deep_vendor_scan and role in DEEP_SCAN_ROLES:
+        return True
+    if scanner_name == "gitleaks":
+        return bool(policy.get("gitleaks", True))
+    if scanner_name == "bandit":
+        return role == "first_party_source" and bool(policy.get("semgrep", True))
+    return bool(policy.get(scanner_name, True))
+
+
+def split_scanners(
+    scanners: Iterable[str],
+    profile: Dict[str, Any],
+    deep_vendor_scan: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Return ``(allowed, denied)`` for the scanners capable of reading a file."""
+    role = str(profile.get("role") or profile.get("classification") or CATEGORY_UNKNOWN)
+    policy = profile.get("coverage_policy") or {}
+    allowed: list[str] = []
+    denied: list[str] = []
+    for scanner_name in scanners:
+        if role_allows_scanner(scanner_name, role, policy, deep_vendor_scan):
+            allowed.append(scanner_name)
+        else:
+            denied.append(scanner_name)
+    return allowed, denied
 
 
 def should_skip_llm_profile(

@@ -65,7 +65,11 @@ from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.observability import mark_error, span
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
-from app.shared.lib.file_classification import classify_file, should_skip_semgrep
+from app.shared.lib.file_classification import (
+    classify_file,
+    should_skip_semgrep,
+    split_scanners,
+)
 from app.shared.lib.finding_lineage_identity import raw_finding_id
 from app.shared.lib.scan_progress import (
     EV_COMPLETED,
@@ -139,34 +143,6 @@ _ROLE_RANK = {
     "dependency_lockfile": 6,
     "runtime_artifact": 7,
 }
-
-
-#: Roles whose content still deserves a semantic scan when the operator asks for a
-#: deep vendor scan.
-_DEEP_SCAN_ROLES = {
-    "known_third_party_vendor",
-    "unknown_third_party_vendor",
-    "generated_asset",
-    "first_party_minified_bundle",
-}
-
-
-def _role_allows_scanner(
-    scanner_name: str, role: str, policy: Dict[str, Any], deep_vendor_scan: bool
-) -> bool:
-    """Whether a scanner should read a file of this role.
-
-    Capability (`scanners_for_file`) says a scanner *can* read the file; the role says
-    whether it is worth it. Secrets are the exception — they leak from minified
-    bundles and lockfiles as readily as from source.
-    """
-    if deep_vendor_scan and role in _DEEP_SCAN_ROLES:
-        return True
-    if scanner_name == "gitleaks":
-        return bool(policy.get("gitleaks", True))
-    if scanner_name == "bandit":
-        return role == "first_party_source" and bool(policy.get("semgrep", True))
-    return bool(policy.get(scanner_name, True))
 
 
 def _rank(path: str, role: str, size: int) -> tuple[int, int]:
@@ -307,7 +283,6 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
         role = str(profile.get("role") or profile.get("classification") or "unknown")
         roles[role] = roles.get(role, 0) + 1
         language = profile.get("language")
-        policy = profile.get("coverage_policy") or {}
         planned_scanners = scanners_for_file(path)
         detail = {"role": role, "language": language}
 
@@ -354,13 +329,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
         # Which of the capable scanners should actually read this file, given what
         # the file is. Vendored and generated code is worth a secrets scan and not
         # much else; a lockfile is worth dependency intelligence.
-        allowed: list[str] = []
-        denied: list[str] = []
-        for scanner_name in planned_scanners:
-            if _role_allows_scanner(scanner_name, role, policy, deep_vendor_scan):
-                allowed.append(scanner_name)
-            else:
-                denied.append(scanner_name)
+        allowed, denied = split_scanners(planned_scanners, profile, deep_vendor_scan)
 
         for scanner_name in denied:
             coverage_plan[(scanner_name, path)] = CoveragePlanItem(
