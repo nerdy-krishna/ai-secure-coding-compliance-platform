@@ -269,6 +269,11 @@ services:
   pentest-engine:
     restart: unless-stopped
     profiles: ["pentesting-v5"]
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: docker.pentest.{{.Name}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -304,6 +309,11 @@ services:
     command: ["python", "-m", "app.pentest.engine"]
 
   patch-validator:
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: docker.validator.{{.Name}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -354,9 +364,12 @@ services:
     depends_on:
       loki:
         condition: service_started
-    # Simple healthcheck that waits for the "fluentd worker is now running" message
+    # Healthy means the worker is up AND its file buffer is writable. pgrep alone
+    # reported healthy while the worker died on
+    # "Permission denied @ dir_s_mkdir - /fluentd/log/buffer", which silently
+    # stopped every log line from reaching Loki.
     healthcheck:
-      test: [ "CMD", "/bin/sh", "-c", "pgrep -f 'fluentd worker' > /dev/null || exit 1" ]
+      test: [ "CMD", "/bin/sh", "-c", "pgrep -f 'fluentd worker' > /dev/null && test -w /fluentd/log || exit 1" ]
       interval: 5s
       timeout: 3s
       retries: 12
