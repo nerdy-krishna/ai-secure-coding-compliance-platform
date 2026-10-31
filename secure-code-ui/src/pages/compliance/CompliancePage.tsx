@@ -440,7 +440,7 @@ const FrameworkCard: React.FC<{
 // Main page
 // -----------------------------------------------------------------------------
 
-const CompliancePage: React.FC = () => {
+const CompliancePage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -993,14 +993,16 @@ const CompliancePage: React.FC = () => {
           gap: 12,
         }}
       >
-        <div>
-          <h1 style={{ color: "var(--fg)" }}>Compliance</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            {isAdmin
-              ? "Manage security standards used across scans and advisor. Users reference the same frameworks from their scans and chats."
-              : "Security standards used across your scans and the advisor. Your admin manages ingestion."}
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)" }}>Compliance</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              {isAdmin
+                ? "Manage security standards used across scans and advisor. Users reference the same frameworks from their scans and chats."
+                : "Security standards used across your scans and the advisor. Your admin manages ingestion."}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {renderJobBanner()}

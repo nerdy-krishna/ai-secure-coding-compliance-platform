@@ -37,9 +37,7 @@ const SystemConfigTab = React.lazy(() => import("../pages/admin/SystemConfigTab"
 const UserManagementTab = React.lazy(() => import("../pages/admin/UserManagement"));
 const UserGroupsPage = React.lazy(() => import("../pages/admin/UserGroupsPage"));
 const SMTPSettingsTab = React.lazy(() => import("../pages/admin/SMTPSettingsTab"));
-const AgentManagementPage = React.lazy(() => import("../pages/admin/AgentManagementPage"));
-const FrameworkManagementPage = React.lazy(() => import("../pages/admin/FrameworkManagementPage"));
-const PromptManagementPage = React.lazy(() => import("../pages/admin/PromptManagementPage"));
+const AnalysisConfigPage = React.lazy(() => import("../pages/admin/AnalysisConfigPage"));
 const ScanDiagnosticsPage = React.lazy(() => import("../pages/analysis/ScanDiagnosticsPage"));
 const ProjectDetailPage = React.lazy(() => import("../pages/analysis/ProjectDetailPage"));
 const ProjectsPage = React.lazy(() => import("../pages/analysis/ProjectsPage"));
@@ -53,7 +51,6 @@ const TenantsPage = React.lazy(() => import("../pages/admin/TenantsPage"));
 const AuthorizationPage = React.lazy(() => import("../pages/admin/AuthorizationPage"));
 const IntegrationsPage = React.lazy(() => import("../pages/admin/IntegrationsPage"));
 const SecurityAdvisorPage = React.lazy(() => import("../pages/chat/SecurityAdvisorPage"));
-const CompliancePage = React.lazy(() => import("../pages/compliance/CompliancePage"));
 const SubmitPage = React.lazy(() => import("../pages/submission/SubmitPage"));
 const ScanRunningPage = React.lazy(() => import("../pages/submission/ScanRunningPage"));
 const PentestPage = React.lazy(() => import("../pages/pentesting/PentestPage"));
@@ -214,7 +211,10 @@ function AppContent() {
             <Route path="/advisor" element={routeContent(<SecurityAdvisorPage />)} />
           </Route>
           <Route element={<FeatureRoute feature="compliance" />}>
-            <Route path="/compliance" element={routeContent(<CompliancePage />)} />
+            <Route
+              path="/compliance"
+              element={routeContent(<AnalysisConfigPage only="standards" />)}
+            />
           </Route>
           <Route path="/account/history" element={routeContent(<SubmissionHistoryPage />)} />
           <Route path="/usage" element={routeContent(<UsagePage />)} />
@@ -237,12 +237,20 @@ function AppContent() {
             <Route path="/admin/smtp" element={routeContent(<SMTPSettingsTab />)} />
           </Route>
           <Route element={<FeatureRoute feature="admin_authoring" />}>
-            <Route path="/admin/agents" element={routeContent(<AgentManagementPage />)} />
+            <Route path="/admin/analysis" element={routeContent(<AnalysisConfigPage />)} />
+            {/* The five authoring screens are tabs of /admin/analysis now. */}
+            <Route
+              path="/admin/agents"
+              element={<Navigate to="/admin/analysis?tab=agents" replace />}
+            />
             <Route
               path="/admin/frameworks"
-              element={routeContent(<FrameworkManagementPage />)}
+              element={<Navigate to="/admin/analysis?tab=mappings" replace />}
             />
-            <Route path="/admin/prompts" element={routeContent(<PromptManagementPage />)} />
+            <Route
+              path="/admin/prompts"
+              element={<Navigate to="/admin/analysis?tab=prompts" replace />}
+            />
           </Route>
           {/* /admin/rag has been merged into /compliance; redirect any
               bookmarks and the ?framework=…&action=git-ingest deep-link

@@ -35,7 +35,7 @@ const EMPTY_FORM = {
 };
 type FormState = typeof EMPTY_FORM;
 
-const PromptManagementPage: React.FC = () => {
+const PromptManagementPage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -168,14 +168,18 @@ const PromptManagementPage: React.FC = () => {
           gap: 12,
         }}
       >
-        <div>
-          <h1 style={{ color: "var(--fg)" }}>Prompt templates</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            Per-agent prompts; generic and Anthropic-tuned variants with
-            automatic fallback.
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)" }}>Prompt templates</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              Per-agent prompts; generic and Anthropic-tuned variants with automatic fallback.
+            </div>
           </div>
-        </div>
-        <div className="admin-page-heading-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        )}
+        <div
+          className="admin-page-heading-actions"
+          style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}
+        >
           <RestoreDefaultsButton
             label="Prompts"
             invalidateKeys={[["prompts"], ["agents"], ["frameworks"]]}

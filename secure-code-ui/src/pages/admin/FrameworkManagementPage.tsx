@@ -35,7 +35,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { name: "", description: "", source_url: "", agent_ids: [] };
 
-const FrameworkManagementPage: React.FC = () => {
+const FrameworkManagementPage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -222,13 +222,15 @@ const FrameworkManagementPage: React.FC = () => {
           gap: 12,
         }}
       >
-        <div>
-          <h1 style={{ color: "var(--fg)" }}>Frameworks &amp; Rules</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            Security frameworks, agent mappings, and Semgrep rule sources.
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)" }}>Frameworks &amp; Rules</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              Security frameworks, agent mappings, and Semgrep rule sources.
+            </div>
           </div>
-        </div>
-        {activeTab === "frameworks" && (
+        )}
+        {(embedded || activeTab === "frameworks") && (
           <button
             className="sccap-btn sccap-btn-primary"
             onClick={() => {
@@ -242,7 +244,8 @@ const FrameworkManagementPage: React.FC = () => {
         )}
       </div>
 
-      {/* Tab bar */}
+      {/* Tab bar (hidden when embedded in the combined analysis page) */}
+      {!embedded && (
       <div
         className="sccap-tabs"
         style={{ borderBottom: "1px solid var(--border)", paddingBottom: 0 }}
@@ -262,8 +265,9 @@ const FrameworkManagementPage: React.FC = () => {
           </div>
         ))}
       </div>
+      )}
 
-      {activeTab === "semgrep" ? (
+      {!embedded && activeTab === "semgrep" ? (
         <SemgrepRulesTab />
       ) : (
         <>

@@ -26,7 +26,7 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { name: "", description: "", domain_query: "" };
 
-const AgentManagementPage: React.FC = () => {
+const AgentManagementPage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
@@ -157,13 +157,18 @@ const AgentManagementPage: React.FC = () => {
           gap: 12,
         }}
       >
-        <div>
-          <h1 style={{ color: "var(--fg)" }}>AI agents</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            Specialized analysis agents and their RAG retrieval queries.
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)" }}>AI agents</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              Specialized analysis agents and their RAG retrieval queries.
+            </div>
           </div>
-        </div>
-        <div className="admin-page-heading-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        )}
+        <div
+          className="admin-page-heading-actions"
+          style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}
+        >
           <RestoreDefaultsButton
             label="Agents"
             invalidateKeys={[["agents"], ["prompts"], ["frameworks"]]}

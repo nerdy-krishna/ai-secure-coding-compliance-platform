@@ -22,14 +22,17 @@ export interface AdminLink {
 
 export const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/authorization", label: "Authorization" },
+  {
+    to: "/admin/analysis",
+    label: "Analysis config",
+    feature: "admin_authoring",
+    permissions: [Permission.platformConfigManage],
+  },
   { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
   { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
   { to: "/admin/users", label: "Users", feature: "multi_user", permissions: [Permission.identityRead] },
   { to: "/admin/user-groups", label: "Groups", feature: "user_groups", permissions: [Permission.groupManage] },
   { to: "/admin/tenants", label: "Tenants", feature: "multi_tenant", permissions: [Permission.platformTenantManage] },
-  { to: "/admin/agents", label: "Agents", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/frameworks", label: "Frameworks", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/prompts", label: "Prompts", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
   { to: "/admin/smtp", label: "SMTP", feature: "email", permissions: [Permission.platformConfigManage] },
   { to: "/admin/sso/providers", label: "SSO", feature: "sso", permissions: [Permission.tenantPolicyManage] },
   { to: "/admin/scim/tokens", label: "SCIM tokens", feature: "scim", permissions: [Permission.servicePrincipalManage] },

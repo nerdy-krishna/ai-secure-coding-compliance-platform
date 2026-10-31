@@ -49,8 +49,9 @@ const pentesting: Item[] = [
     permission: Permission.pentestRead,
   },
 ];
+// Standards live inside "Analysis config" for admins; a reader without authoring
+// rights still gets the read-only standards view.
 const tools: Item[] = [
-  { to: "/compliance", label: "Compliance", icon: Icon.Check, feature: "compliance" },
   { to: "/advisor", label: "Security advisor", icon: Icon.Chat, feature: "chat" },
   { to: "/usage", label: "Usage", icon: Icon.Gauge },
 ];
@@ -155,13 +156,24 @@ export function SidebarNav() {
   const { pathname } = useLocation();
   const { user } = useAuth();
   const { isFeatureEnabled, featuresLoading } = useFeatures();
+  const complianceOnly: Item[] = hasPermission(user?.permissions, Permission.platformConfigManage)
+    ? []
+    : [
+        {
+          to: "/compliance",
+          label: "Security standards",
+          icon: Icon.BookOpen,
+          feature: "compliance",
+        },
+      ];
   const visible = (items: Item[]) => items.filter((item) => (!item.feature || (!featuresLoading && isFeatureEnabled(item.feature))) && (!item.permission || hasPermission(user?.permissions, item.permission)));
   const admin = ADMIN_LINKS.filter((item) => (!item.feature || isFeatureEnabled(item.feature)) && (!item.permissions || hasAnyPermission(user?.permissions, item.permissions)));
   // Administration holds the platform settings *and* the workspace pages (compliance,
   // advisor, usage) that used to sit in their own "Tools" group.
-  const adminVisible = visible(tools).length > 0 || admin.length > 0;
+  const adminVisible =
+    visible([...complianceOnly, ...tools]).length > 0 || admin.length > 0;
   const adminItems: Item[] = [
-    ...visible(tools),
+    ...visible([...complianceOnly, ...tools]),
     ...admin.map((item) => ({ ...item, icon: adminIcon(item.label) })),
   ];
   const adminOpen =
