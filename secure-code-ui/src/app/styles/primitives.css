@@ -135,7 +135,15 @@
   background: var(--bg-soft); transition: width .18s var(--ease), flex-basis .18s var(--ease);
 }
 .side-nav.is-collapsed { width: 64px; flex-basis: 64px; }
-.side-nav-toggle { width: 100%; min-height: 32px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); color: var(--fg); cursor: pointer; font-size: 20px; }
+.side-nav-toggle {
+  width: 100%; min-height: 32px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); color: var(--fg); cursor: pointer;
+}
+.side-nav-toggle:hover { color: var(--fg); background: color-mix(in oklch, var(--bg-elev) 80%, var(--fg) 6%); }
+.side-nav-toggle svg { transition: transform .18s var(--ease); }
+/* Mirror the panel so the rail side matches the actual layout. */
+.side-nav.is-collapsed .side-nav-toggle svg { transform: scaleX(-1); }
 .side-nav-home,
 .side-nav-group a,
 .side-nav-link {

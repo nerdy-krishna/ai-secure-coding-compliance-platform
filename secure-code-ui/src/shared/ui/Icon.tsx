@@ -371,6 +371,19 @@ const ArrowR: React.FC<IconProps> = (p) => (
   </Svg>
 );
 
+const PanelLeft: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </Svg>
+);
+
+const Menu: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M4 7h16M4 12h16M4 17h16" />
+  </Svg>
+);
+
 const Layers: React.FC<IconProps> = (p) => (
   <Svg {...p}>
     <path d="M12 2l10 6-10 6L2 8l10-6z" />
@@ -497,6 +510,8 @@ export const Icon = {
   Integrate,
   ArrowR,
   Layers,
+  PanelLeft,
+  Menu,
   Mail,
   Key,
   Trash,

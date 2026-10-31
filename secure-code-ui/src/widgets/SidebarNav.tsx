@@ -112,7 +112,17 @@ export function SidebarNav() {
   };
 
   return <aside className={`side-nav${collapsed ? " is-collapsed" : ""}`} aria-label="Application navigation">
-    <button className="side-nav-toggle" type="button" onClick={() => setCollapsed((value) => !value)} aria-expanded={!collapsed} aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}>{collapsed ? "›" : "‹"}</button>
+    <button
+      className="side-nav-toggle"
+      type="button"
+      onClick={() => setCollapsed((value) => !value)}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+      title={collapsed ? "Expand navigation" : "Collapse navigation"}
+    >
+      {/* A panel glyph describes what the control does; it flips with the rail. */}
+      <Icon.PanelLeft size={16} />
+    </button>
     <NavLink className="side-nav-home side-nav-link" to="/account/dashboard" title="Dashboard" aria-label="Dashboard">
       <span className="side-nav-icon" aria-hidden="true">
         <Icon.Home size={16} />
