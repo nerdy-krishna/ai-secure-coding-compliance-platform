@@ -220,7 +220,14 @@ export const FindingsSwimlane: React.FC<{ debug: {
         </div>
       </div>
 
-      <div style={{ overflow: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+      <div
+        style={{
+          overflow: "auto",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          maxHeight: "min(62vh, 620px)",
+        }}
+      >
         <svg
           width={Math.max(width, 720)}
           height={height + 8}
@@ -293,6 +300,15 @@ export const FindingsSwimlane: React.FC<{ debug: {
               />
             );
           })}
+
+          <line
+            x1={CONSOL_X - 66}
+            y1={CHART_TOP - 14}
+            x2={CONSOL_X - 66}
+            y2={height - 8}
+            stroke="var(--border)"
+            strokeDasharray="3 4"
+          />
 
           {/* Raw findings */}
           {placedRaw.map((node) => {
