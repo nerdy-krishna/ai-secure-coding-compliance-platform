@@ -17,6 +17,16 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --include=dev --no-audit --no-fund
 
+# Fail here, with an explanation, instead of three steps later with
+# "sh: tsc: not found" — which is what an npm tree without devDependencies (or a
+# broken node_modules/.bin/tsc symlink copied in from the build context) looks
+# like from the outside.
+RUN test -x node_modules/.bin/tsc \
+    || { echo "ERROR: node_modules/.bin/tsc is missing after npm ci."; \
+         echo "       The install skipped devDependencies. Check for NODE_ENV=production,"; \
+         echo "       npm_config_omit=dev, or a node_modules/.bin left in the build context."; \
+         exit 1; }
+
 COPY . .
 
 ARG VITE_API_BASE_URL

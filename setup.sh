@@ -340,6 +340,20 @@ _sccap_explain_build_failure() {
         echo "    steps for a small VPS) or build on a machine with at least 4 GB free."
         return 0
     fi
+    if grep -qE "sh: tsc: not found|node_modules/.bin/tsc is missing" "$log"; then
+        echo ""
+        echo "[!] The UI build could not find tsc: the npm install in the image had no"
+        echo "    devDependencies (or a stale node_modules was copied into the build"
+        echo "    context). Fix on this host, then re-run:"
+        echo ""
+        echo "      rm -rf secure-code-ui/node_modules secure-code-ui/dist"
+        echo "      docker builder prune -f"
+        echo "      git pull            # needs the .dockerignore + --include=dev fix"
+        echo "      ./setup.sh"
+        echo ""
+        echo "    If you deliberately export NODE_ENV=production, unset it for the build."
+        return 0
+    fi
     if grep -qiE "Temporary failure in name resolution|Could not resolve host|network is unreachable" "$log"; then
         echo ""
         echo "[!] A download inside the build could not reach the network. Check DNS and"
