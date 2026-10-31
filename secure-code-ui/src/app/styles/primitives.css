@@ -137,15 +137,28 @@
 .side-nav.is-collapsed { width: 64px; flex-basis: 64px; }
 .side-nav-toggle { width: 100%; min-height: 32px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); color: var(--fg); cursor: pointer; font-size: 20px; }
 .side-nav-home,
-.side-nav-group a { display: block; margin-top: 4px; padding: 8px 10px; border-radius: 7px; color: var(--fg-muted); text-decoration: none; font-size: 13px; }
+.side-nav-group a,
+.side-nav-link {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 4px; padding: 8px 10px; border-radius: 7px;
+  color: var(--fg-muted); text-decoration: none; font-size: 13px;
+}
 .side-nav-home { margin: 10px 0; font-weight: 700; color: var(--fg); }
+/* Icons never shrink and stay optically centred against the label baseline. */
+.side-nav-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; }
+.side-nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-nav-group { margin-top: 8px; }
-.side-nav-group summary { padding: 8px 7px; cursor: pointer; color: var(--fg-subtle); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.side-nav-group summary { display: flex; align-items: center; gap: 8px; padding: 8px 7px; cursor: pointer; color: var(--fg-subtle); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .side-nav-group a.active { color: var(--fg); background: var(--bg-elev); box-shadow: var(--shadow-xs); }
 .side-nav-group a:hover,
 .side-nav-home:hover { color: var(--fg); background: color-mix(in oklch, var(--bg-elev) 75%, transparent); }
-.side-nav.is-collapsed .side-nav-group summary,
-.side-nav.is-collapsed a { text-align: center; padding-inline: 4px; }
+/* Collapsed rail: icons only, centred, with the label kept as a tooltip. */
+.side-nav.is-collapsed .side-nav-link { justify-content: center; padding-inline: 0; }
+.side-nav.is-collapsed .side-nav-group summary { justify-content: center; padding-inline: 0; letter-spacing: 0; }
+.side-nav.is-collapsed .side-nav-icon { flex-basis: auto; }
+/* A <details> marker plus a centred icon is too much chrome in a 64px rail. */
+.side-nav.is-collapsed .side-nav-group summary { list-style: none; }
+.side-nav.is-collapsed .side-nav-group summary::-webkit-details-marker { display: none; }
 
 .sccap-state-fullscreen {
   min-height: 100vh; display: grid; place-items: center;
