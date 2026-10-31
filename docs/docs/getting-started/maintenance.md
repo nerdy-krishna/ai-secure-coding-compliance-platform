@@ -20,6 +20,31 @@ action; `-y` skips the confirmation prompts.
 | `./setup.sh --repair-tls` | Re-create TLS material from `.env` and exit | The broken certificate | Everything else |
 | `./setup.sh -h` | Print the same table from the terminal | — | — |
 
+## Re-running the installer
+
+`./setup.sh` on an installation that has already been bootstrapped **keeps `.env`
+and skips every configuration question** — the administrator account, LLM
+configuration and feature flags already exist, and asking for them again was
+pointless work.
+
+The state is recorded in `.setup-complete` (timestamp and administrator email, no
+secrets), written when the first-run bootstrap succeeds. If the API is running and
+reports setup complete but the marker is missing — an install from before the marker
+existed — the marker is created on the next run and the questions are skipped from
+then on.
+
+Use `./setup.sh --factory-reset` (or `--purge`, which also drops the data volumes)
+to start over: both delete the marker, so the next install asks again.
+
+If you need to mark an existing installation as bootstrapped by hand — for example
+when the stack is down and the API cannot be asked:
+
+```bash
+printf 'completed_at=%s\nadmin_email=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "you@example.com" > .setup-complete
+chmod 600 .setup-complete
+```
+
 ## Reversible teardown
 
 ```bash

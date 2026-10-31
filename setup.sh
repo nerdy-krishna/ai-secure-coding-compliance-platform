@@ -11,6 +11,10 @@ set -e
 # re-run can offer to skip already-completed configuration and retry the step
 # that failed.
 _SETUP_STAGE_FILE=".setup-stage"
+# Written once the first-run bootstrap (superuser + LLM + feature flags) has
+# succeeded. It is the local truth for "do not ask for the admin credentials
+# again", so a second run does not depend on the API being up.
+_SETUP_COMPLETE_FILE=".setup-complete"
 _sccap_stage() { echo "$1" > "$_SETUP_STAGE_FILE"; }
 
 _sccap_set_env_kv() {
@@ -549,11 +553,37 @@ _sccap_ask_secret() {
 
 _sccap_admin_pw_problem() { _sccap_password_problem "$1" "$ADMIN_EMAIL" "$DEPLOYMENT_TYPE"; }
 
+_sccap_mark_bootstrapped() {
+    # Record the completed first-run bootstrap. No secrets: the administrator
+    # email is not a credential and makes the re-run message useful.
+    local email="${ADMIN_EMAIL:-}"
+    [ -n "$email" ] || email=$(grep -m1 '^SCCAP_ADMIN_EMAIL=' .env 2>/dev/null | cut -d= -f2-)
+    {
+        printf 'completed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf 'admin_email=%s\n' "${email:-unknown}"
+    } > "$_SETUP_COMPLETE_FILE"
+    chmod 600 "$_SETUP_COMPLETE_FILE" 2>/dev/null || true
+}
+
+_sccap_bootstrapped_email() {
+    grep -m1 '^admin_email=' "$_SETUP_COMPLETE_FILE" 2>/dev/null | cut -d= -f2-
+}
+
 _sccap_platform_bootstrapped() {
-    # True when a superuser already exists (the API's setup status). Used on the
-    # resume path: a run that died before first-run bootstrap must re-ask for the
-    # administrator/LLM answers instead of submitting empty ones.
-    docker compose exec -T app python -m app.cli.terminal_setup --check >/dev/null 2>&1
+    # True when the administrator account, LLM configuration and feature flags
+    # already exist.
+    #
+    # The marker is checked first on purpose: the earlier version only asked the
+    # API, and on a resume from the 'build' stage the app container is not running
+    # yet — so every interrupted install asked for the admin email, password and
+    # LLM key again even though it had already been bootstrapped.
+    if [ -f "$_SETUP_COMPLETE_FILE" ]; then
+        return 0
+    fi
+    docker compose exec -T app python -m app.cli.terminal_setup --check >/dev/null 2>&1 || return 1
+    # Installed before the marker existed: adopt it so later runs are instant.
+    _sccap_mark_bootstrapped
+    return 0
 }
 
 _sccap_is_ip() {
@@ -857,7 +887,17 @@ _sccap_run_rollback() {
 }
 
 _sccap_ask_first_run() {
-    # Only asked on a fresh configuration run (skipped when resuming/upgrading).
+    # Only asked on a fresh configuration run (skipped when resuming/upgrading,
+    # and skipped entirely once the platform has been bootstrapped).
+    if _sccap_platform_bootstrapped; then
+        local _admin
+        _admin=$(_sccap_bootstrapped_email)
+        echo "[+] Platform setup is already complete${_admin:+ (administrator: $_admin)}."
+        echo "    Reusing it: no administrator or LLM questions this time."
+        echo "    Start from scratch with ./setup.sh --factory-reset."
+        ADMIN_EMAIL="${ADMIN_EMAIL:-$_admin}"
+        return 0
+    fi
     echo ""
     echo "[*] Administrator account (this is the UI login)"
     while true; do
@@ -974,6 +1014,10 @@ _sccap_write_grafana_credentials() {
 _sccap_run_terminal_setup() {
     # Submit the first-run answers to the API bootstrap endpoint through the
     # container-side client. Idempotent: a completed install is left untouched.
+    if _sccap_platform_bootstrapped; then
+        echo "[+] Administrator, LLM configuration and feature flags already exist."
+        return 0
+    fi
     local args=(
         --api-base http://127.0.0.1:8000
         --wait-seconds 120
@@ -996,7 +1040,8 @@ _sccap_run_terminal_setup() {
     docker compose exec -T \
         -e SCCAP_SETUP_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
         -e SCCAP_SETUP_LLM_API_KEY="$LLM_API_KEY" \
-        app python -m app.cli.terminal_setup "${args[@]}"
+        app python -m app.cli.terminal_setup "${args[@]}" || return $?
+    _sccap_mark_bootstrapped
 }
 
 # ----------------------------------------------------------------------
@@ -1206,6 +1251,12 @@ _sccap_teardown() {
         _sccap_force_remove_leftovers "$project" "$leftover_data"
     fi
 
+    # purge and factory-reset drop the data volumes, so the platform is no longer
+    # bootstrapped: remove the marker or the next install would skip asking for
+    # the administrator account and LLM configuration.
+    if [ "$level" != "uninstall" ]; then
+        rm -f "$_SETUP_COMPLETE_FILE" 2>/dev/null || true
+    fi
     if [ "$level" = "factory-reset" ]; then
         echo "[*] Removing configuration and key material..."
         rm -f .env .env.lock "$_SETUP_STAGE_FILE"
@@ -1297,7 +1348,7 @@ _sccap_fix_ownership() {
     repo_group=$(id -gn "$operator" 2>/dev/null || echo "$operator")
     # .purge-backups is written by root during a --purge teardown; hand it back
     # as well so the operator can read the dump they were told about.
-    for path in .env .env.lock "$_SETUP_STAGE_FILE" "$_PURGE_BACKUP_DIR"; do
+    for path in .env .env.lock "$_SETUP_STAGE_FILE" "$_SETUP_COMPLETE_FILE" "$_PURGE_BACKUP_DIR"; do
         [ -e "$path" ] || continue
         chown "$operator:$repo_group" "$path" 2>/dev/null || true
     done
@@ -1486,7 +1537,16 @@ _sccap_tune_tcp_congestion
 # skip re-configuring and retry that step. A reinstall always skips the
 # questionnaire: the answer file on disk is already the desired configuration.
 _RESUME=0
-if [ -f "$_SETUP_STAGE_FILE" ]; then
+
+# An installation that already has its administrator, LLM configuration and
+# feature flags is a "continue", not a new configuration: keep .env and skip the
+# questionnaire instead of asking for the same credentials a second time.
+if [ "$_SCCAP_REINSTALL" != "1" ] && [ -f .env ] && _sccap_platform_bootstrapped; then
+    _RESUME=1
+    echo "[+] This installation is already bootstrapped; keeping .env and skipping"
+    echo "    the configuration questions (use --factory-reset for a clean install)."
+fi
+if [ "$_RESUME" != "1" ] && [ -f "$_SETUP_STAGE_FILE" ]; then
     _prev_stage=$(cat "$_SETUP_STAGE_FILE" 2>/dev/null || true)
     case "$_prev_stage" in
         build|migrate)

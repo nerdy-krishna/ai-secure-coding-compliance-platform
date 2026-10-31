@@ -214,3 +214,5 @@ AGENTS.md
 .deploy-backups/
 # Pentest tool wordlists are data, not documentation — track them despite *.txt.
 !src/app/pentest/data/wordlists/*.txt
+.setup-stage
+.setup-complete
