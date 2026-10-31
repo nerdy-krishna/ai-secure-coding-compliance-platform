@@ -53,6 +53,7 @@ was deleted; ADR-029 is authoritative.
 | Model loop | Structured `NextAction` per turn (1–4 parallel tool calls, claimed leads, new leads, negative conclusions); normalised probe de-duplication; stuck-loop detection |
 | Lead ledger | Persistent `pentest_leads` queue with priority bands; claims on test; failed probes returned to the queue; `done` refused while testable leads remain |
 | Findings | Weaknesses and surface observations both persisted (`category`); no finding discarded for being non-exploitable |
+| Finding quality | CVSS 3.1 vector + base score derived deterministically with severity from the score band; cross-tool consolidation with provenance and audit-retained duplicates; per-finding PoC replay recording `exploitable`/`not_exploitable`/`needs_review` plus the exact reproducing request |
 | Exploit chaining | Next-level pass over weaknesses, observations and untested leads |
 | Reporting | Markdown, JSON, HTML, PDF with an observations appendix |
 | UI | Live event stream including prompts and tool actions, findings as they land, lead queue, live browser frame, controls, report downloads |
