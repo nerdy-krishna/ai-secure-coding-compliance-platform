@@ -1042,6 +1042,11 @@ _sccap_run_terminal_setup() {
         -e SCCAP_SETUP_LLM_API_KEY="$LLM_API_KEY" \
         app python -m app.cli.terminal_setup "${args[@]}" || return $?
     _sccap_mark_bootstrapped
+    # Persist the administrator email so later runs can name the account in the
+    # "already bootstrapped" message (it is not a secret; the password never is).
+    if [ -n "${ADMIN_EMAIL:-}" ]; then
+        _sccap_set_env_kv "SCCAP_ADMIN_EMAIL" "$ADMIN_EMAIL"
+    fi
 }
 
 # ----------------------------------------------------------------------
