@@ -281,6 +281,14 @@ const Book: React.FC<IconProps> = (p) => (
   </Svg>
 );
 
+const Hourglass: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M6 2h12M6 22h12" />
+    <path d="M7 2v3.5c0 2 2.5 3.3 4 5 1.5-1.7 4-3 4-5V2" />
+    <path d="M7 22v-3.5c0-2 2.5-3.3 4-5 1.5 1.7 4 3 4 5V22" />
+  </Svg>
+);
+
 const Alert: React.FC<IconProps> = (p) => (
   <Svg {...p}>
     <path d="M12 2L2 20h20L12 2z" />
@@ -487,6 +495,7 @@ export const Icon = {
   Zap,
   Play,
   Pause,
+  Hourglass,
   Download,
   Send,
   Plus,

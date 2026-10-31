@@ -20,7 +20,6 @@ import {
   isBlockedStatus,
   isErrorStatus,
   isStoppedStatus,
-  isUnsuccessfulTerminal,
 } from "../../shared/lib/scanStatus";
 import type { PrescanReviewResponse } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
@@ -981,14 +980,13 @@ const ScanRunningPage: React.FC = () => {
   //   isStopped  → CANCELLED / BLOCKED_USER_DECLINE (user pressed Stop)
   //   isBlocked  → BLOCKED_PRE_LLM (auto safety guard tripped)
   //   isExpired  → EXPIRED (auto-aged out, neutral)
-  // Use `isUnsuccessful` for the "no-results" UI affordances (disabled
-  // View results, dimmed progress, etc.) — that grouping is fine; the
-  // failure-only banner is what matters.
+  // `isUnsuccessful` deliberately no longer disables "View results": a scan
+  // stopped at the prescan gate keeps its deterministic findings, so its
+  // results page is real. Only the failure-only banner keys off isError.
   const isError = isErrorStatus(status);
   const isStopped = isStoppedStatus(status);
   const isBlocked = isBlockedStatus(status);
   const isExpired = status === "EXPIRED";
-  const isUnsuccessful = isUnsuccessfulTerminal(status);
   const canRunControl =
     status === "FAILED" || (status === "CANCELLED" && hasResumableArtifacts);
 
@@ -1438,20 +1436,21 @@ const ScanRunningPage: React.FC = () => {
           <button
             className="sccap-btn sccap-btn-primary"
             onClick={() => navigate(`/analysis/results/${scanId}`)}
-            disabled={!isTerminal || isUnsuccessful}
-            style={{ opacity: !isTerminal || isUnsuccessful ? 0.6 : 1 }}
+            disabled={!isTerminal}
+            style={{ opacity: !isTerminal ? 0.6 : 1 }}
+            title={
+              isTerminal
+                ? "Open the scan results"
+                : "Available once the scan finishes"
+            }
           >
-            {!isTerminal
-              ? isWaitingStatus(status)
-                ? "Awaiting your review"
-                : "Scanning…"
-              : isUnsuccessful
-                ? "No results"
-                : (
-                    <>
-                      View results <Icon.ArrowR size={12} />
-                    </>
-                  )}
+            {!isTerminal ? (
+              isWaitingStatus(status) ? "Awaiting your review" : "Scanning…"
+            ) : (
+              <>
+                View results <Icon.ArrowR size={12} />
+              </>
+            )}
           </button>
           {!isTerminal && !isPendingPrescan && (
             <button
@@ -1650,7 +1649,7 @@ const ScanRunningPage: React.FC = () => {
                           }}
                         />
                       ) : state === "paused" ? (
-                        <Icon.Pause size={12} />
+                        <Icon.Hourglass size={12} />
                       ) : (
                         <StageIcon name={s.icon} size={14} />
                       )}

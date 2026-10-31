@@ -42,6 +42,13 @@ function decodeEntities(value?: string | null): string {
   return value.replace(/&(?:amp|lt|gt|quot|apos|nbsp|#x27|#39);/g, (m) => ENTITIES[m] ?? m);
 }
 
+/** Tail of a path, so it stays on one line: `…/src/app/App.tsx`. */
+function shortPath(path: string): string {
+  const parts = path.split("/");
+  if (parts.length <= 3) return path;
+  return `…/${parts.slice(-3).join("/")}`;
+}
+
 const SEVERITY_ORDER: Record<string, number> = {
   Critical: 0,
   High: 1,
@@ -218,17 +225,8 @@ export const PrescanReviewCard: React.FC<Props> = ({
                 <td style={tdStyle}>
                   <code style={{ fontSize: 11 }}>{f.source || "—"}</code>
                 </td>
-                <td style={{ ...tdStyle, width: "24%" }} title={f.file_path}>
-                  <code
-                    style={{
-                      fontSize: 11,
-                      display: "block",
-                      whiteSpace: "normal",
-                      overflowWrap: "anywhere",
-                    }}
-                  >
-                    {f.file_path}
-                  </code>
+                <td style={{ ...tdStyle, width: "26%" }} title={f.file_path}>
+                  <code style={pathStyle}>{shortPath(f.file_path)}</code>
                 </td>
                 <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums" }}>
                   {f.line_number ?? "—"}
@@ -283,6 +281,17 @@ export const PrescanReviewCard: React.FC<Props> = ({
       </div>
     </div>
   );
+};
+
+const pathStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 11,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  direction: "rtl",
+  textAlign: "left",
+  unicodeBidi: "plaintext",
 };
 
 const snippetCellStyle: React.CSSProperties = {
