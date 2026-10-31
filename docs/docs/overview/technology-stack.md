@@ -37,6 +37,25 @@ LangGraph workflow with an `AsyncPostgresSaver` checkpointer. Queues:
 `code_submission_queue`, `analysis_approved_queue` (names live in
 `src/app/config/config.py`).
 
+## Pentesting tooling (opt-in)
+
+The separately gated pentest engine does **not** use the RabbitMQ spine at all —
+PostgreSQL is its only coordination point (ADR-029):
+
+- **One container** — `pentest-engine` (Dockerfile target `worker-pentest-local`)
+  runs `python -m app.pentest.engine`, polls `pentest_runs` for queued work, and
+  executes one run at a time in-process.
+- **Scanners in the image** — nmap, nuclei (full community template library), OWASP
+  ZAP, sqlmap, ffuf, hydra, whatweb, gobuster, hashcat and Playwright Chromium, with
+  wordlists under `src/app/pentest/data/`. Startup verifies each binary and reports
+  availability to the UI.
+- **Networks** — `scpnetwork` for the API, database and model providers;
+  `pentest-egress` for target traffic.
+- **State** — `pentest_runs`, `pentest_run_events`, `pentest_findings` (with
+  `category` = `vulnerability` | `observation`) and `pentest_leads`.
+- **Live view** — the run page polls the event stream, the findings and the lead
+  ledger, and receives the browser frame the engine pushes from Playwright.
+
 ## Data + infra
 
 - **PostgreSQL 16** — primary store for users, scans, findings,
@@ -76,5 +95,8 @@ LangGraph workflow with an `AsyncPostgresSaver` checkpointer. Queues:
   [Verification Strategy](../development/testing-strategy.md).
 - **ruff + black + mypy** for Python lint/format/type-check.
 - **ESLint + tsc** for the frontend.
-- **GitHub Actions CI** runs backend lint, frontend lint + Vite build,
-  `poetry.lock` drift, security checks, documentation, and Docker builds.
+- **No CI service is configured.** Run `ruff check src`, `pytest`,
+  `npm --prefix secure-code-ui run lint` and `npm --prefix secure-code-ui run build`
+  locally or on the installation host; the same commands are listed in `AGENTS.md`.
+  (The repository previously used GitHub Actions; the workflows and the Dependabot /
+  Renovate configs were removed so nothing opens pull requests or runs on push.)

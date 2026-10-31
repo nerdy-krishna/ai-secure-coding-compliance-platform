@@ -7,7 +7,7 @@ Four nodes live here:
 - `pending_prescan_approval_node` is the human-in-the-loop pause when
   any findings landed; it persists state then calls `interrupt()`.
 - `user_decline_node` is the terminal route when the operator chose
-  Stop on the prescan card (status `BLOCKED_USER_DECLINE`).
+  Stop on the prescan card (status `STOPPED_BEFORE_LLM`).
 - `blocked_pre_llm_node` is the terminal route when the operator
   declined the Critical-secret override modal (status
   `BLOCKED_PRE_LLM`).
@@ -65,7 +65,12 @@ from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.observability import mark_error, span
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
-from app.shared.lib.file_classification import should_skip_semgrep
+from app.shared.lib.files import source_line_at
+from app.shared.lib.file_classification import (
+    classify_file,
+    should_skip_semgrep,
+    split_scanners,
+)
 from app.shared.lib.finding_lineage_identity import raw_finding_id
 from app.shared.lib.scan_progress import (
     EV_COMPLETED,
@@ -76,7 +81,7 @@ from app.shared.lib.scan_progress import (
 )
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
-    STATUS_BLOCKED_USER_DECLINE,
+    STATUS_STOPPED_BEFORE_LLM,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,6 +130,52 @@ PRESCAN_FILE_BYTE_LIMIT = 10 * 1024 * 1024
 # Maximum number of files passed to the prescan loop (V02.4.1 — caps
 # prescan walltime on hostile submissions with many small files).
 PRESCAN_MAX_FILES = 10_000
+
+#: Role priority for the ranked selection: lower is scanned first. First-party source
+#: is what an audit is for; vendored and generated code is scanned for secrets only.
+_ROLE_RANK = {
+    "first_party_source": 0,
+    "unknown": 1,
+    "first_party_minified_bundle": 2,
+    "generated_asset": 3,
+    "large_static_asset": 4,
+    "known_third_party_vendor": 5,
+    "unknown_third_party_vendor": 5,
+    "dependency_lockfile": 6,
+    "runtime_artifact": 7,
+}
+
+
+def _rank(path: str, role: str, size: int) -> tuple[int, int]:
+    """Sort key: role first, then shallower paths (entry points) before deep ones."""
+    return (_ROLE_RANK.get(role, 1), path.count("/"))
+
+
+async def _skip_file(
+    path: str,
+    profile: Dict[str, Any],
+    coverage_plan: Dict[tuple[str, str], CoveragePlanItem],
+    skipped_by_reason: Dict[str, int],
+    detail: Dict[str, Any],
+) -> None:
+    """Record that no deterministic scanner can read this file, with the reason."""
+    language = detail.get("language")
+    role = detail.get("role")
+    if role in {"runtime_artifact", "dependency_lockfile", "known_third_party_vendor"}:
+        reason_code, reason = "low_value_role", f"{role} files are not analysed by deterministic scanners."
+    elif language is None:
+        reason_code, reason = "unsupported_file_type", "No deterministic scanner supports this input type."
+    else:
+        reason_code, reason = "unsupported_language", f"No deterministic scanner covers {language}."
+    skipped_by_reason[reason_code] = skipped_by_reason.get(reason_code, 0) + 1
+    coverage_plan[("registry", path)] = CoveragePlanItem(
+        scanner_name="registry",
+        input_path=path,
+        status="unsupported",
+        reason_code=reason_code,
+        reason=reason,
+        details=detail,
+    )
 
 
 def _degrade_promoted_pack_coverage(
@@ -214,52 +265,57 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
         )
         return {}
 
-    # File-eligibility filter (M6 + N2). The policy is "scan
-    # everything that has at least one byte and a scanner that knows
-    # the extension." Empty files contribute nothing and would just
-    # noise up the staging area; oversized files (>10 MiB) still get
-    # capped because Semgrep's parse walltime grows superlinearly on
-    # pathological minified bundles. Both skip paths log a clear
-    # reason so the user can see WHY a file wasn't scanned —
-    # previously the cap silently dropped legitimate source files.
+    # File-eligibility filter. Two questions decide a file's fate, and they are
+    # answered separately: *whose file is it* (the classification role: first-party,
+    # vendored, generated, runtime artefact, lockfile) and *can any scanner read it*
+    # (the language registry). Path alone never decides — a hand-written module that
+    # happens to live in build/ is still first-party, and a generated file outside it
+    # is still generated.
     eligible: Dict[str, str] = {}
     coverage_plan: Dict[tuple[str, str], CoveragePlanItem] = {}
+    skipped_by_reason: Dict[str, int] = {}
+    roles: Dict[str, int] = {}
+    ranked: list[tuple[int, int, str, str]] = []
+
     for path, content in files.items():
+        profile = file_profiles.get(path)
+        if not profile:
+            profile = classify_file(path, content, submitted_paths=set(files))
+        role = str(profile.get("role") or profile.get("classification") or "unknown")
+        roles[role] = roles.get(role, 0) + 1
+        language = profile.get("language")
         planned_scanners = scanners_for_file(path)
-        if not planned_scanners:
-            coverage_plan[("registry", path)] = CoveragePlanItem(
-                scanner_name="registry",
-                input_path=path,
-                status="unsupported",
-                reason_code="unsupported_file_type",
-                reason="No deterministic scanner supports this input type.",
-            )
-            continue
-        if not content:
-            logger.debug(
-                "deterministic_prescan: skipping zero-byte file scan_id=%s path=%s",
-                scan_id,
-                path,
-            )
-            for scanner_name in planned_scanners:
+        detail = {"role": role, "language": language}
+
+        def skip(scanner_names: list[str], reason_code: str, reason: str) -> None:
+            skipped_by_reason[reason_code] = skipped_by_reason.get(reason_code, 0) + 1
+            for scanner_name in scanner_names or ["registry"]:
                 coverage_plan[(scanner_name, path)] = CoveragePlanItem(
                     scanner_name=scanner_name,
                     input_path=path,
-                    status="skipped",
-                    reason_code="empty_input",
-                    reason="The input was empty.",
+                    status="skipped" if scanner_names else "unsupported",
+                    reason_code=reason_code,
+                    reason=reason,
+                    details=detail,
                 )
+
+        if not planned_scanners:
+            await _skip_file(path, profile, coverage_plan, skipped_by_reason, detail)
             continue
-        size = len(content.encode("utf-8", "replace"))
-        cap = MINIFIED_BYTE_LIMIT if is_minified(path) else PRESCAN_FILE_BYTE_LIMIT
+        if not content.strip():
+            skip(planned_scanners, "empty_input", "The input was empty or whitespace only.")
+            continue
+        if profile.get("is_binary"):
+            skip(planned_scanners, "binary_input", "The input is a binary or compiled executable.")
+            continue
+        size = int(profile.get("size_bytes") or len(content.encode("utf-8", "replace")))
+        cap = (
+            MINIFIED_BYTE_LIMIT
+            if profile.get("is_minified") or is_minified(path)
+            else PRESCAN_FILE_BYTE_LIMIT
+        )
         if size > cap:
-            logger.warning(
-                "deterministic_prescan: skipping oversize file scan_id=%s path=%s bytes=%d cap=%d",
-                scan_id,
-                path,
-                size,
-                cap,
-            )
+            skipped_by_reason["input_size_limit"] = skipped_by_reason.get("input_size_limit", 0) + 1
             for scanner_name in planned_scanners:
                 coverage_plan[(scanner_name, path)] = CoveragePlanItem(
                     scanner_name=scanner_name,
@@ -267,24 +323,54 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     status="truncated",
                     reason_code="input_size_limit",
                     reason="The input exceeded the deterministic scanner size limit.",
-                    details={"input_bytes": size, "limit_bytes": cap},
+                    details={**detail, "input_bytes": size, "limit_bytes": cap},
                 )
             continue
-        eligible[path] = content
-        for scanner_name in planned_scanners:
+
+        # Which of the capable scanners should actually read this file, given what
+        # the file is. Vendored and generated code is worth a secrets scan and not
+        # much else; a lockfile is worth dependency intelligence.
+        allowed, denied = split_scanners(planned_scanners, profile, deep_vendor_scan)
+
+        for scanner_name in denied:
             coverage_plan[(scanner_name, path)] = CoveragePlanItem(
                 scanner_name=scanner_name,
                 input_path=path,
+                status="skipped",
+                reason_code="low_value_role",
+                reason=f"{role.replace('_', ' ')} files are not analysed by {scanner_name}.",
+                details=detail,
+            )
+            skipped_by_reason["low_value_role"] = skipped_by_reason.get("low_value_role", 0) + 1
+
+        if not allowed:
+            continue
+
+        eligible[path] = content
+        ranked.append(_rank(path, role, size) + (path,))
+        for scanner_name in allowed:
+            coverage_plan[(scanner_name, path)] = CoveragePlanItem(
+                scanner_name=scanner_name,
+                input_path=path,
+                status="planned",
+                details=detail,
             )
 
     if len(eligible) > PRESCAN_MAX_FILES:
+        # Ranked selection, not "first N in submission order": a truncated scan now
+        # keeps the files most likely to matter and records the rest with a reason.
+        ranked.sort()
+        keep = {entry[-1] for entry in ranked[:PRESCAN_MAX_FILES]}
+        dropped = [path for path in eligible if path not in keep]
         logger.warning(
-            "deterministic_prescan: clamping %d→%d files",
-            len(eligible),
+            "deterministic_prescan: ranked selection kept %d of %d files",
             PRESCAN_MAX_FILES,
+            len(eligible),
         )
-        retained = dict(list(eligible.items())[:PRESCAN_MAX_FILES])
-        for path in set(eligible) - set(retained):
+        for path in dropped:
+            skipped_by_reason["prescan_file_limit"] = (
+                skipped_by_reason.get("prescan_file_limit", 0) + 1
+            )
             for scanner_name in scanners_for_file(path):
                 coverage_plan[(scanner_name, path)] = CoveragePlanItem(
                     scanner_name=scanner_name,
@@ -294,7 +380,37 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     reason="The scan exceeded the deterministic prescan file-count limit.",
                     details={"limit": PRESCAN_MAX_FILES},
                 )
-        eligible = retained
+        eligible = {path: content for path, content in eligible.items() if path in keep}
+
+    top_reasons = ", ".join(
+        f"{reason.replace('_', ' ')} {count}"
+        for reason, count in sorted(skipped_by_reason.items(), key=lambda kv: -kv[1])[:4]
+    )
+    manifest_summary = {
+        "files_total": len(files),
+        "files_scanned": len(eligible),
+        "files_excluded": len(files) - len(eligible),
+        "roles": roles,
+        "excluded_by_reason": skipped_by_reason,
+        # One line the activity stream and the logs can show verbatim.
+        "message": (
+            f"Scanned {len(eligible)} of {len(files)} files"
+            + (
+                f"; {len(files) - len(eligible)} excluded ({top_reasons})"
+                if len(eligible) < len(files) and top_reasons
+                else ""
+            )
+            + "."
+        ),
+    }
+    logger.info(
+        "deterministic_prescan: manifest scan_id=%s total=%d scanned=%d excluded=%d reasons=%s",
+        scan_id,
+        manifest_summary["files_total"],
+        manifest_summary["files_scanned"],
+        manifest_summary["files_excluded"],
+        skipped_by_reason,
+    )
 
     if not eligible:
         if coverage_plan:
@@ -319,7 +435,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             "DETERMINISTIC_PRESCAN",
             EV_COMPLETED,
             {
-                "files_total": len(files),
+                **manifest_summary,
                 "coverage_status": "degraded",
                 "message": "No files were eligible for the configured scanners.",
             },
@@ -552,6 +668,16 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     )
                     raise
                 scanner_findings = result[0] if scanner_name == "osv" else result
+                if (
+                    scanner_name == "osv"
+                    and isinstance(result, tuple)
+                    and len(result) == 3
+                    and result[2] == "no_package_sources"
+                ):
+                    # OSV only reads dependency manifests. A submission of plain
+                    # source has none, which used to be reported as a degraded
+                    # scanner run; it is simply not applicable.
+                    expected_to_run = False
                 outcome = scanner_completion_status(
                     expected_to_run,
                     scanner_name in native_reports,
@@ -568,7 +694,10 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 }
                 if outcome == "skipped":
                     details["message"] = (
-                        "Scanner skipped because no applicable rules or files were available."
+                        "No dependency manifests in this submission; dependency "
+                        "scanning was not applicable."
+                        if scanner_name == "osv"
+                        else "Scanner skipped because no applicable rules or files were available."
                     )
                 elif outcome == "degraded":
                     details["message"] = (
@@ -694,20 +823,28 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                             )
                     continue
                 if scanner_name == "osv":
-                    # OSV returns (findings, bom_cyclonedx_dict).
-                    osv_findings, bom = result
+                    # OSV returns (findings, bom_cyclonedx_dict, status).
+                    osv_findings, bom = result[0], result[1]
                     prescan_findings.extend(osv_findings)
                     bom_cyclonedx = bom
                     finding_count = len(osv_findings)
                 else:
                     prescan_findings.extend(result)
                     finding_count = len(result)
-                execution_status = scanner_completion_status(
-                    not (
-                        scanner_name == "semgrep"
-                        and not (_semgrep_rules and semgrep_eligible)
-                    ),
-                    scanner_name in native_reports,
+                # A scanner that already reported "nothing to do" keeps that
+                # status here; re-deriving it from report presence would call a
+                # not-applicable run degraded.
+                recorded_status = scanner_statuses.get(scanner_name, {}).get("status")
+                execution_status = (
+                    recorded_status
+                    if recorded_status == "skipped"
+                    else scanner_completion_status(
+                        not (
+                            scanner_name == "semgrep"
+                            and not (_semgrep_rules and semgrep_eligible)
+                        ),
+                        scanner_name in native_reports,
+                    )
                 )
                 provenance = toolchain_provenance[scanner_name]
                 status_with_provenance = (
@@ -727,6 +864,25 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     isinstance(report, dict)
                     and (report.get("truncated") or report.get("available") is False)
                 )
+                if scanner_name == "osv" and scanner_statuses.get("osv", {}).get(
+                    "status"
+                ) == "skipped":
+                    # Nothing to analyse: record the skip once, with the reason,
+                    # instead of settling per-input rows as "clean".
+                    coverage_outcomes.append(
+                        CoverageOutcome(
+                            scanner_name="osv",
+                            input_path="<repository>",
+                            status="skipped",
+                            reason_code="no_package_manifests",
+                            reason=(
+                                "No lockfile or package manifest in this submission; "
+                                "dependency scanning was not applicable."
+                            ),
+                            provenance_status=provenance["status"],
+                        )
+                    )
+                    continue
                 scanner_inputs = [
                     item.input_path
                     for item in coverage_plan.values()
@@ -1135,6 +1291,13 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     lineage_counts: Dict[str, int] = {}
     original_file_map = state.get("initial_file_map") or {}
     for finding in prescan_findings:
+        # Anchor the finding to the exact source line. Scanner output carries a
+        # line number but no text, and a bare "line 42" tells the operator
+        # nothing when they are deciding whether to pay for an LLM pass.
+        if not finding.vulnerable_snippet:
+            finding.vulnerable_snippet = source_line_at(
+                files.get(finding.file_path), finding.line_number
+            )
         source = finding.source or "unknown"
         source_counts[source] = source_counts.get(source, 0) + 1
         producer_key = f"scanner:{source}:{finding.file_path}"
@@ -1160,7 +1323,10 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
         "DETERMINISTIC_PRESCAN",
         EV_COMPLETED,
         {
-            "files_total": len(eligible),
+            # What was scanned, and what was left out — with the reasons, so the
+            # operator never has to guess why a file was ignored.
+            **manifest_summary,
+            "files_scanned": len(eligible),
             "findings_count": len(prescan_findings),
             "categories": source_counts,
             "coverage_status": (
@@ -1318,7 +1484,7 @@ async def user_decline_node(state: WorkerState) -> Dict[str, Any]:
     )
     async with AsyncSessionLocal() as db:
         await release_scan_budget(db, scan_id, reason="user_declined")
-        await ScanRepository(db).update_status(scan_id, STATUS_BLOCKED_USER_DECLINE)
+        await ScanRepository(db).update_status(scan_id, STATUS_STOPPED_BEFORE_LLM)
     return {}
 
 

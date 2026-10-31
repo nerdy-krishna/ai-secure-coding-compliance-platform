@@ -198,16 +198,32 @@ async def perform_setup(
             ),
         )
 
+    pricing_note = ""
     try:
+        # Seed the rates from the catalogue instead of leaving 0.0. A zero
+        # override is not a neutral default: for a model the bundled price map
+        # cannot resolve (e.g. `deepseek-flash`) it made every estimate and every
+        # completed scan report $0.0000. Recording the resolved rate keeps the
+        # admin override meaningful and the numbers honest, and the operator can
+        # still edit them in Admin -> LLM configuration.
+        from app.shared.lib.model_pricing import describe_pricing, resolve_model_prices
+
         llm_create = api_models.LLMConfigurationCreate(
             name="Default Configuration",
             provider=request.llm_provider,
             model_name=request.llm_model,
             # llm_api_key: SECRET - Fernet-encrypted by LLMConfigRepository.create before persist
             api_key=request.llm_api_key,
-            input_cost_per_million=0.0,  # Default, user can update later
+            input_cost_per_million=0.0,
             output_cost_per_million=0.0,
         )
+        resolved = resolve_model_prices(llm_create)
+        if resolved is not None:
+            input_per_m, output_per_m = resolved.per_million()
+            llm_create.input_cost_per_million = input_per_m
+            llm_create.output_cost_per_million = output_per_m
+        pricing_note = describe_pricing(llm_create)
+        logger.info("setup: llm pricing %s", pricing_note)
         await llm_repo.create(llm_create)
     except Exception:
         # V13.4.6 / V16.5.1: do NOT echo str(e) to the unauthenticated caller —
@@ -372,4 +388,4 @@ async def perform_setup(
     )
     SystemConfigCache.set_setup_completed(True)
 
-    return {"message": "Setup completed successfully"}
+    return {"message": "Setup completed successfully", "pricing": pricing_note}

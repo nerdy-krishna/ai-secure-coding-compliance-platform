@@ -188,8 +188,18 @@ nav:
       - Resilience and Recovery: operations/resilience-and-recovery.md
       - Evidence-first Findings: operations/evidence-first-findings.md
       - Kubernetes Worker Pools: operations/kubernetes-worker-pools.md
+      - Cloud Kubernetes Deployment (AKS/EKS): operations/cloud-kubernetes-deployment.md
       - Observability and SLOs: operations/observability-slos.md
       - Dependency Degradation: operations/dependency-degradation.md
+      - Pentesting Adaptive Controller: operations/pentesting-adaptive-controller.md
+      - Pentesting Initial Web/API Tool Pack: operations/pentesting-initial-web-api-tool-pack.md
+      - Pentesting Identity-aware Verification: operations/pentesting-identity-verification.md
+      - Local Read-only Gray-box Comparisons: operations/pentesting-readonly-authorization.md
+      - Pentesting White-box Code Scan Integration: operations/pentesting-white-box-code-scan-integration.md
+      - Pentesting Canonical Coverage: operations/pentesting-canonical-coverage.md
+      - Pentesting Reversible Mutations and Cleanup: operations/pentesting-reversible-mutations-cleanup.md
+      - Pentesting Asynchronous Callback Correlation: operations/pentesting-asynchronous-callback-correlation.md
+      - Pentesting Cockpit, Reporting, and Governance: operations/pentesting-cockpit-reporting-governance.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

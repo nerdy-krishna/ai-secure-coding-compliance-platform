@@ -216,7 +216,7 @@ const ProfileForm: React.FC<{
 // Main page
 // ---------------------------------------------------------------------------
 
-const SMTPSettingsTab: React.FC = () => {
+const SMTPSettingsTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const [state, setState] = useState<SmtpProfilesResponse>({ active_id: null, profiles: [] });
   const [loading, setLoading] = useState(true);
@@ -325,12 +325,15 @@ const SMTPSettingsTab: React.FC = () => {
     <div className="fade-in" style={{ display: "grid", gap: 20 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-        <div>
-          <h1 style={{ color: "var(--fg)", margin: 0 }}>SMTP settings</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            Outgoing mail server for password reset and user invitations. One profile is active at a time.
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)", margin: 0 }}>SMTP settings</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              Outgoing mail server for password reset and user invitations. One profile
+              is active at a time.
+            </div>
           </div>
-        </div>
+        )}
         <button className="sccap-btn sccap-btn-primary sccap-btn-sm" onClick={openCreate}>
           <Icon.Plus size={12} /> Add profile
         </button>

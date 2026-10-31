@@ -93,6 +93,14 @@ ENV/
 env.bak/
 venv.bak/
 
+# Local pentest secret material: signing keys and runner env files stay on this
+# laptop. Never commit these; bootstrap scripts regenerate them per environment.
+.secrets/
+
+# Node dependencies and tool caches (including stray root-level ones created by
+# running build tools from the repo root instead of secure-code-ui/).
+node_modules/
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -167,9 +175,7 @@ Desktop.ini
 fluentd/log/
 fluentd/buffer/
 *.pos
-# .agent/ is load-bearing operational docs — track its markdown.
-# The bulky recovery files (.agent/backend.txt, .agent/frontend.txt) are
-# already excluded by the global *.txt rule below.
+# Local text dumps and ad-hoc debugging artifacts (not implementation authority).
 *.txt
 *.patch
 cookies.txt
@@ -177,30 +183,34 @@ debug_*.py
 check_chroma_count.py
 trigger_chat.py
 
-# Claude Code / SCCAP harness — local tooling, not part of the app.
-# .claude/ holds per-session state, agent definitions, and worktrees;
-# .agent/ holds operational notes, runbooks, and per-run work products
-# from the SCCAP harness; CLAUDE.md is the Claude-specific contributor
-# guide. None of this is needed to build or run SCCAP.
+# Retired project-local harnesses/generator outputs: do not accidentally commit
+# them if an external tool recreates them. Pi is the only maintained harness.
 .claude/
-.agent/
 CLAUDE.md
-
-# Securecoder tool runtime config + state — local and per-developer.
 .securecoder/
-
-# Diagram + log output from the swark generator — generated artefacts.
 swark-output/
 
 # Whitelist docs build dependency manifest (the global *.txt rule above
 # catches recovery dumps; pinned-dep manifests must ship).
 !docs/requirements-docs.txt
 
-# Pi coding agent sessions and settings
+# Pi project resources, sessions, and shared local guidance stay on this laptop.
+# These are useful development context, but are not shipped application files.
 .pi/
-# Personal agent instruction files (keep on laptop only)
+.agent/
 AGENTS.md
-CLAUDE.md
 
 # Private local issue tracker and planning workspace.
-.scratch/
+.oldarchivedfiles/
+
+# Vendored wordlists carry their own provenance: generate.py is committed so the
+# corpus can be regenerated and audited, and manifest.json pins the digest of the
+# exact bytes shipped. These are attack input, so their contents must be reviewable
+# in the diff like any other input rather than fetched at build time.
+!src/app/pentesting/catalogs/wordlists/*.txt
+
+# UI-triggered update handshake (request/status files written at runtime)
+.control/
+.deploy-backups/
+# Pentest tool wordlists are data, not documentation — track them despite *.txt.
+!src/app/pentest/data/wordlists/*.txt

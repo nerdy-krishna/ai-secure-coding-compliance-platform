@@ -19,6 +19,7 @@ secure-code-ui/src/
 │   ├── analysis/          # projects grid + results
 │   ├── chat/              # security advisor
 │   ├── compliance/        # per-framework posture
+│   ├── pentesting/         # C13 engagements, cockpit workspaces, reports, and deltas
 │   └── submission/        # submit + scanning progress
 ├── features/              # feature-scoped components
 ├── widgets/               # layouts (TopNav, DashboardLayout, Tweaks)
@@ -51,6 +52,12 @@ this axios instance:
 `agentService`, `promptService`, `ragService`, `llmConfigService`,
 `systemConfigService`, `logService`, `complianceService`,
 `dashboardService`, `searchService`, `userGroupService`, `seedService`.
+
+`capability13Service` maps the versioned safe API into Tenant/Engagement/Attempt
+owner tuples. Its React Query keys include the Tenant and immutable generation;
+tenant switching cancels and removes the entire C13 cache family. Cockpit SSE
+is reconciled against authoritative snapshots, with cursor-chain gaps and forks
+causing a refetch rather than optimistic owner-state inference.
 
 ## Routing + guards
 

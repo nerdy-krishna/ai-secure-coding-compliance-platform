@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/usage", tags=["Usage and Budgets"])
 
 CostStatus = Literal["exact", "estimated", "unknown", "reconciled"]
-OperationKind = Literal["scan", "chat", "rag"]
+OperationKind = Literal["scan", "chat", "rag", "pentest"]
 BreakdownDimension = Literal[
     "operation",
     "project",

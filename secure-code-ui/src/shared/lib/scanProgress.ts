@@ -78,18 +78,46 @@ const CROSS_FILE_STAGE: RailStage = {
   icon: "Link",
 };
 
-const TERMINAL_STATUSES = new Set([
+/** Statuses that mean the scan will not move again. Exported so pages stop
+ *  keeping private copies — a stale copy treats a new terminal status as running. */
+export const TERMINAL_SCAN_STATUSES = [
   "COMPLETED",
   "REMEDIATION_COMPLETED",
   "FAILED",
   "CANCELLED",
   "EXPIRED",
   "BLOCKED_PRE_LLM",
+  "STOPPED_BEFORE_LLM",
   "BLOCKED_USER_DECLINE",
-]);
+  "BUDGET_EXHAUSTED",
+] as const;
+
+const TERMINAL_STATUSES = new Set<string>(TERMINAL_SCAN_STATUSES);
 
 const ERROR_STATUSES = new Set(["FAILED", "EXPIRED"]);
 const SUCCESS_STATUSES = new Set(["COMPLETED", "REMEDIATION_COMPLETED"]);
+
+/**
+ * True when the scan is actively working — i.e. not terminal and not parked at a
+ * human gate. Timers and spinners must not advance in any other state.
+ */
+export function isWorkingStatus(status: string | null | undefined): boolean {
+  if (!status) return false;
+  if (TERMINAL_STATUSES.has(status)) return false;
+  return !WAITING_STATUSES.has(status);
+}
+
+/** Statuses where the worker is parked waiting for a person to act. */
+const WAITING_STATUSES = new Set([
+  "PENDING_PRESCAN_APPROVAL",
+  "PENDING_PROFILING_APPROVAL",
+  "PENDING_COST_APPROVAL",
+]);
+
+/** True when the scan is parked at an approval gate. */
+export function isWaitingStatus(status: string | null | undefined): boolean {
+  return !!status && WAITING_STATUSES.has(status);
+}
 
 /** True when a scan has reached a terminal status. */
 export function isTerminalStatus(status: string | null | undefined): boolean {
@@ -157,7 +185,10 @@ export function deriveScanProgress(
     if (latest.has(stages[i].key)) frontier = i;
   }
   for (let i = 0; i < frontier; i++) {
-    if (states[i] === "pending" || states[i] === "running") states[i] = "done";
+    // "paused" included on purpose: a gate that resumed and was followed by a
+    // later stage is finished. Excluding it left the cost-review icon amber on
+    // every scan that had already run past it.
+    if (states[i] !== "done") states[i] = "done";
   }
   for (let i = frontier + 1; i < stages.length; i++) states[i] = "pending";
   // A done frontier with a successor means the scan has moved on — the

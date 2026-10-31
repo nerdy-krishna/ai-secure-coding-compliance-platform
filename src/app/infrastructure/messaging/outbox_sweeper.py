@@ -36,9 +36,6 @@ async def _tick() -> None:
             rows = await repo.list_unpublished(
                 older_than_seconds=MIN_AGE_SECONDS, limit=BATCH_SIZE
             )
-            if not rows:
-                return
-            logger.info("outbox_sweep.batch", extra={"count": len(rows)})
             for row in rows:
                 try:
                     payload = dict(row.payload)
@@ -69,6 +66,14 @@ async def _tick() -> None:
                         await repo.record_failed_attempt(row.id)
                     except Exception:
                         pass
+            if not rows:
+                return
+            logger.info(
+                "outbox_sweep.batch",
+                extra={
+                    "scan_count": len(rows),
+                },
+            )
 
 
 async def run_outbox_sweeper(stop_event: asyncio.Event) -> None:

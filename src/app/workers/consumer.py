@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import logging.config
+import re
 import signal
 import time
 import uuid
@@ -67,6 +68,7 @@ from app.infrastructure.workflows.budget import (
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
+    STATUS_STOPPED_BEFORE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
     STATUS_BUDGET_EXHAUSTED,
     STATUS_CANCELLED,
@@ -90,6 +92,8 @@ logging.config.dictConfig(LOGGING_CONFIG)
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 
+_CORRELATION_ID_RE = re.compile(r"[A-Za-z0-9._:\-]{1,128}")
+
 
 def _safe(s: Any) -> str:
     """Strip CR/LF from attacker-influenced strings before logging."""
@@ -107,6 +111,7 @@ _TERMINAL_STATUSES_FOR_CLEANUP = frozenset(
         STATUS_REMEDIATION_COMPLETED,
         STATUS_CANCELLED,
         STATUS_BLOCKED_PRE_LLM,
+        STATUS_STOPPED_BEFORE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
         STATUS_BUDGET_EXHAUSTED,
     }
@@ -143,6 +148,7 @@ async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
                     STATUS_REMEDIATION_COMPLETED: "completed",
                     STATUS_CANCELLED: "cancelled",
                     STATUS_BLOCKED_PRE_LLM: "completed",
+                    STATUS_STOPPED_BEFORE_LLM: "completed",
                     STATUS_BLOCKED_USER_DECLINE: "completed",
                     STATUS_BUDGET_EXHAUSTED: "failed",
                 }.get(scan.status)
@@ -256,7 +262,9 @@ async def close_workflow_resources() -> None:
 def queues_for_pool(pool: str) -> tuple[str, ...]:
     """Return the exact queue subscription contract for one worker pool."""
     mapping = {
-        "scanner": (settings.RABBITMQ_SUBMISSION_QUEUE,),
+        "scanner": (
+            settings.RABBITMQ_SUBMISSION_QUEUE,
+        ),
         "llm": (settings.RABBITMQ_APPROVAL_QUEUE,),
         "report": (settings.RABBITMQ_REPORT_QUEUE,),
         "unified": (
@@ -1001,6 +1009,12 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
     semaphore retains the unified worker's three-scan concurrency limit while
     pool-specific prefetch values bound broker delivery in Kubernetes.
     """
+    raw_correlation_id = message.correlation_id or ""
+    correlation_id_var.set(
+        raw_correlation_id
+        if _CORRELATION_ID_RE.fullmatch(raw_correlation_id)
+        else str(uuid.uuid4())
+    )
     logger.info(
         "MSG: Received from queue '%s' (delivery_tag=%s).",
         _safe(message.routing_key),

@@ -167,6 +167,11 @@ export interface CostDetails {
   estimate_confidence?: "low" | "medium" | "high";
   estimate_source?: string;
   estimate_price_source?: string;
+  /** "unknown" means no override and no catalogue price: the amounts are zero
+   *  because pricing is missing, not because the scan is free. */
+  pricing_status?: "resolved" | "unknown";
+  /** Catalogue key (or model name) the price came from. */
+  pricing_model?: string;
   estimate_sample_count?: number;
   estimate_assumptions?: string[];
   planned_request_count?: number;

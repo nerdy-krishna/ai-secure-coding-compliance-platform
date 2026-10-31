@@ -17,7 +17,6 @@ import { saveAs } from "file-saver";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   complianceService,
-  type ComplianceControl,
   type ComplianceFrameworkStats,
 } from "../../shared/api/complianceService";
 import { frameworkService } from "../../shared/api/frameworkService";
@@ -35,11 +34,7 @@ import { useAuth } from "../../shared/hooks/useAuth";
 import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import { useToast } from "../../shared/ui/Toast";
-import {
-  RiskRing,
-  SectionHead,
-  SevBar,
-} from "../../shared/ui/DashboardPrimitives";
+import { SectionHead, SevBar } from "../../shared/ui/DashboardPrimitives";
 import { FrameworkIngestionModal } from "../admin/FrameworkIngestionModal";
 
 function axiosErrorDetail(err: unknown): string {
@@ -127,7 +122,7 @@ const ViewDocumentsModal: React.FC<{
     <Modal
       open={open}
       onClose={onClose}
-      title={`Documents in "${frameworkName}"`}
+      title={`Policies in "${frameworkName}"`}
       width="min(1100px, 95vw)"
       footer={
         <button className="sccap-btn sccap-btn-sm" onClick={onClose}>
@@ -143,7 +138,7 @@ const ViewDocumentsModal: React.FC<{
             color: "var(--fg-muted)",
           }}
         >
-          Loading documents…
+          Loading policies…
         </div>
       ) : isError ? (
         <div
@@ -153,7 +148,7 @@ const ViewDocumentsModal: React.FC<{
             fontSize: 13,
           }}
         >
-          Error loading documents.
+          Error loading policies.
         </div>
       ) : !documents || documents.length === 0 ? (
         <div
@@ -163,7 +158,7 @@ const ViewDocumentsModal: React.FC<{
             fontSize: 13,
           }}
         >
-          No documents for this framework.
+          No policies ingested for this standard yet.
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -291,9 +286,6 @@ const FrameworkCard: React.FC<{
             {stats.display_name}
           </h3>
         </div>
-        <div style={{ width: 56, height: 56, flex: "none" }}>
-          <RiskRing score={stats.score} label="" size={56} />
-        </div>
       </div>
 
       {stats.description && (
@@ -334,8 +326,8 @@ const FrameworkCard: React.FC<{
             Not configured
           </span>
         )}
-        {stats.is_installed && stats.doc_count > 0 && (
-          <span className="chip chip-info">{stats.doc_count} docs</span>
+        {stats.doc_count > 0 && (
+          <span className="chip chip-info">{stats.doc_count} policies</span>
         )}
         {stats.open_findings > 0 && (
           <span className="chip chip-critical">
@@ -369,8 +361,8 @@ const FrameworkCard: React.FC<{
               <>
                 <button
                   className="sccap-btn sccap-btn-icon sccap-btn-ghost sccap-btn-sm"
-                  aria-label="View documents"
-                  title="View documents"
+                  aria-label="View policies"
+                  title="View policies"
                   onClick={(e) => {
                     e.stopPropagation();
                     onView();
@@ -415,7 +407,7 @@ const FrameworkCard: React.FC<{
               <button
                 className="sccap-btn sccap-btn-icon sccap-btn-ghost sccap-btn-sm"
                 aria-label="Delete"
-                title="Delete documents"
+                title="Delete policies"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete();
@@ -435,7 +427,7 @@ const FrameworkCard: React.FC<{
                 onClick();
               }}
             >
-              View controls <Icon.ChevronR size={11} />
+              View policies <Icon.ChevronR size={11} />
             </button>
           )
         )}
@@ -448,7 +440,7 @@ const FrameworkCard: React.FC<{
 // Main page
 // -----------------------------------------------------------------------------
 
-const CompliancePage: React.FC = () => {
+const CompliancePage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -461,20 +453,6 @@ const CompliancePage: React.FC = () => {
     queryKey: ["compliance", "stats"],
     queryFn: complianceService.getStats,
     refetchOnWindowFocus: false,
-  });
-
-  const [selectedName, setSelectedName] = useState<string | null>(null);
-  const selected = useMemo(
-    () => statsList?.find((f) => f.name === selectedName) ?? null,
-    [statsList, selectedName],
-  );
-
-  const { data: controls, isLoading: loadingControls } = useQuery<
-    ComplianceControl[]
-  >({
-    queryKey: ["compliance", "controls", selected?.name],
-    queryFn: () => complianceService.getControls(selected!.name),
-    enabled: !!selected?.is_installed,
   });
 
   // ---------- Admin state ----------
@@ -1015,14 +993,16 @@ const CompliancePage: React.FC = () => {
           gap: 12,
         }}
       >
-        <div>
-          <h1 style={{ color: "var(--fg)" }}>Compliance</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            {isAdmin
-              ? "Manage security standards used across scans and advisor. Users reference the same frameworks from their scans and chats."
-              : "Security standards used across your scans and the advisor. Your admin manages ingestion."}
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)" }}>Compliance</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              {isAdmin
+                ? "Manage security standards used across scans and advisor. Users reference the same frameworks from their scans and chats."
+                : "Security standards used across your scans and the advisor. Your admin manages ingestion."}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {renderJobBanner()}
@@ -1074,11 +1054,9 @@ const CompliancePage: React.FC = () => {
                 key={fw.name}
                 stats={fw}
                 isAdmin={isAdmin}
-                active={selectedName === fw.name}
+                active={viewName === fw.name}
                 adminLoading={ingestLoading === fw.name.split("_")[0]}
-                onClick={() =>
-                  setSelectedName(selectedName === fw.name ? null : fw.name)
-                }
+                onClick={() => setViewName(fw.name)}
                 {...adminActions(fw)}
               />
             ))}
@@ -1146,111 +1124,14 @@ const CompliancePage: React.FC = () => {
                   key={fw.name}
                   stats={fw}
                   isAdmin={isAdmin}
-                  active={selectedName === fw.name}
-                  onClick={() =>
-                    setSelectedName(selectedName === fw.name ? null : fw.name)
-                  }
+                  active={viewName === fw.name}
+                  onClick={() => setViewName(fw.name)}
                   {...adminActions(fw)}
                 />
               ))}
             </div>
           )}
 
-          {selected && (
-            <div className="surface" style={{ padding: 0 }}>
-              <SectionHead
-                title={
-                  <>
-                    <Icon.BookOpen size={16} /> {selected.display_name} ·
-                    controls
-                  </>
-                }
-                right={
-                  isAdmin && (
-                    <button
-                      className="sccap-btn sccap-btn-sm"
-                      onClick={() => {
-                        if (selected.framework_type === "custom") {
-                          handleOpenIngestionModal(selected.name, true);
-                        } else {
-                          adminActions(selected).onEdit();
-                        }
-                      }}
-                    >
-                      <Icon.Edit size={12} />{" "}
-                      {selected.is_installed ? "Update" : "Configure"}
-                    </button>
-                  )
-                }
-                style={{ padding: "18px 20px 10px" }}
-              />
-              {!selected.is_installed ? (
-                <div
-                  style={{
-                    padding: 40,
-                    textAlign: "center",
-                    color: "var(--fg-muted)",
-                    fontSize: 13,
-                  }}
-                >
-                  Not configured yet.{" "}
-                  {isAdmin ? "Click Configure to ingest." : "Ask an admin to ingest this framework."}
-                </div>
-              ) : loadingControls ? (
-                <div
-                  style={{
-                    padding: 40,
-                    textAlign: "center",
-                    color: "var(--fg-muted)",
-                  }}
-                >
-                  Loading controls…
-                </div>
-              ) : !controls || controls.length === 0 ? (
-                <div
-                  style={{
-                    padding: 40,
-                    textAlign: "center",
-                    color: "var(--fg-muted)",
-                  }}
-                >
-                  No controls returned for this framework.
-                </div>
-              ) : (
-                <table className="sccap-t">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 140 }}>Control</th>
-                      <th>Title</th>
-                      <th style={{ width: 80, textAlign: "right" }}>Docs</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {controls.map((c) => (
-                      <tr key={c.control_id} style={{ cursor: "default" }}>
-                        <td className="mono" style={{ fontSize: 12 }}>
-                          {c.control_id}
-                        </td>
-                        <td
-                          style={{ color: "var(--fg-muted)", fontSize: 12.5 }}
-                        >
-                          {c.title}
-                        </td>
-                        <td
-                          style={{
-                            textAlign: "right",
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {c.count}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
         </>
       )}
 

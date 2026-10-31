@@ -28,9 +28,9 @@ import { CopyButton } from "../../shared/ui/CopyButton";
 import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
-import { FindingsDebugPanel } from "../../features/scans/FindingsDebugPanel";
+import { ScanCoveragePanel } from "../../features/scans/ScanCoveragePanel";
+import { getMergedFindings } from "../../shared/api/coverageService";
 import { ActionableRemediationPanel } from "../../features/scans/ActionableRemediationPanel";
-import { FindingGovernancePanel } from "../../features/scans/FindingGovernancePanel";
 import type {
   Finding,
   FindingDisposition,
@@ -39,9 +39,10 @@ import type {
   SubmittedFile,
   SummaryReport,
 } from "../../shared/types/api";
-import type { FindingGovernanceItem, PatchPlanArtifact, ResolvedPatchRange } from "../../shared/lib/scanContract";
+import type { PatchPlanArtifact, ResolvedPatchRange } from "../../shared/lib/scanContract";
 
 const PRESCAN_BLOCKED_STATUSES = new Set([
+  "STOPPED_BEFORE_LLM",
   "BLOCKED_USER_DECLINE",
   "BLOCKED_PRE_LLM",
 ]);
@@ -82,20 +83,57 @@ function frameworkLabel(slug: string): string {
   );
 }
 
-/** Modal listing the settings a scan was submitted with — opened from
- *  the "Scan information" affordance in the results header. */
-const ScanInfoModal: React.FC<{
-  open: boolean;
-  onClose: () => void;
-  data: ScanResultResponse;
-}> = ({ open, onClose, data }) => {
+/** The settings a scan was submitted with, as label/value pairs.
+ *
+ *  These used to live in a modal opened from the header, which meant the same
+ *  facts appeared in three places on one page: the modal, the "Models used"
+ *  card, and the coverage panel below the findings. Models are deliberately
+ *  NOT included here — they are rendered once, with their per-model finding
+ *  stats, in the Models section of the same card. */
+const scanFacts = (
+  data: ScanResultResponse,
+  scanId?: string,
+  /** False for a pre-LLM stop: listing models implies they reviewed the code. */
+  includeModels = true,
+): { label: string; value: React.ReactNode }[] => {
   const report = data.summary_report;
   const frameworks = report?.selected_frameworks ?? [];
   const temps = data.stage_temperatures;
-  const rows: { label: string; value: React.ReactNode }[] = [
+  const stats = data.consolidation_stats;
+  const models = (includeModels ? data.llms_used ?? [] : []).filter((m) =>
+    ["reasoning llm", "utility llm", "secondary reasoning llm"].includes(
+      m.category.toLowerCase(),
+    ),
+  );
+  const kind = statusKind(data.status);
+  const statusTone =
+    kind === "failed"
+      ? "var(--critical)"
+      : kind === "blocked"
+        ? "var(--medium)"
+        : kind === "completed"
+          ? "var(--success)"
+          : "var(--fg)";
+  return [
+    {
+      label: "Status",
+      value: (
+        <span style={{ color: statusTone, fontWeight: 600 }}>
+          {displayStatus(data.status)}
+        </span>
+      ),
+    },
     {
       label: "Scan type",
       value: (data.scan_type ?? report?.scan_type ?? "—").toUpperCase(),
+    },
+    {
+      label: "Scan ID",
+      value: (
+        <span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all" }}>
+          {scanId ?? data.summary_report?.submission_id ?? "—"}
+        </span>
+      ),
     },
     {
       label: "Source",
@@ -106,7 +144,7 @@ const ScanInfoModal: React.FC<{
             {data.repository_url && (
               <>
                 {" · "}
-                <span className="mono" style={{ fontSize: 11.5 }}>
+                <span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all" }}>
                   {data.repository_url}
                 </span>
               </>
@@ -122,9 +160,7 @@ const ScanInfoModal: React.FC<{
     },
     {
       label: frameworks.length === 1 ? "Framework" : "Frameworks",
-      value: frameworks.length
-        ? frameworks.map(frameworkLabel).join(", ")
-        : "—",
+      value: frameworks.length ? frameworks.map(frameworkLabel).join(", ") : "—",
     },
     {
       label: "Cross-file validation",
@@ -140,67 +176,55 @@ const ScanInfoModal: React.FC<{
               .join(" · ")
           : "Provider default",
     },
-    {
-      label: "Models",
-      value: data.llms_used?.length ? (
-        <div style={{ display: "grid", gap: 4 }}>
-          {data.llms_used.map((m) => (
-            <div key={m.category}>
-              <span style={{ color: "var(--fg-subtle)" }}>
-                {m.category}:{" "}
-              </span>
-              <strong style={{ color: "var(--fg)" }}>{m.name}</strong>{" "}
-              <span
-                className="mono"
-                style={{ fontSize: 11, color: "var(--fg-muted)" }}
-              >
-                {m.provider}/{m.model_name}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        "—"
+    ...(stats && stats.raw_count > 0
+      ? [
+          {
+            label: "Consolidation",
+            value: (
+              <>
+                <strong style={{ color: "var(--fg)" }}>{stats.consolidated_count}</strong>{" "}
+                kept from{" "}
+                <strong style={{ color: "var(--fg)" }}>{stats.raw_count}</strong> raw
+                <span style={{ color: "var(--fg-subtle)" }}>
+                  {" "}
+                  · {stats.merged_inputs} merged · {stats.dropped} dropped
+                </span>
+              </>
+            ),
+          },
+        ]
+      : []),
+    ...models.map((model) => ({
+      label: model.category,
+      value: (
+        <>
+          {model.name}
+          <span className="mono" style={{ color: "var(--fg-muted)" }}>
+            {" · "}
+            {model.provider}/{model.model_name}
+          </span>
+        </>
       ),
-    },
+    })),
   ];
-  return (
-    <Modal open={open} onClose={onClose} title="Scan information" width={540}>
-      <div style={{ display: "grid" }}>
-        {rows.map((r, i) => (
-          <div
-            key={r.label}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "160px 1fr",
-              gap: 14,
-              padding: "10px 0",
-              borderBottom:
-                i < rows.length - 1 ? "1px solid var(--border)" : "none",
-              fontSize: 13,
-            }}
-          >
-            <span
-              style={{
-                color: "var(--fg-subtle)",
-                fontWeight: 700,
-                textTransform: "uppercase",
-                fontSize: 10.5,
-                letterSpacing: ".05em",
-                paddingTop: 2,
-              }}
-            >
-              {r.label}
-            </span>
-            <span style={{ color: "var(--fg)", wordBreak: "break-word" }}>
-              {r.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    </Modal>
-  );
 };
+
+/** Small uppercase heading used inside the consolidated details card. */
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span
+    style={{
+      display: "block",
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: ".06em",
+      color: "var(--fg-subtle)",
+      fontWeight: 700,
+      marginBottom: 10,
+    }}
+  >
+    {children}
+  </span>
+);
 
 function prescanToFinding(item: PrescanFindingItem): Finding {
   return {
@@ -214,6 +238,7 @@ function prescanToFinding(item: PrescanFindingItem): Finding {
     remediation: "",
     confidence: "",
     source: item.source ?? undefined,
+    vulnerable_snippet: item.vulnerable_snippet ?? null,
     references: [],
     is_applied_in_remediation: false,
     disposition: "open",
@@ -267,7 +292,6 @@ const ResultsPage: React.FC = () => {
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [scanInfoOpen, setScanInfoOpen] = useState(false);
   const [filePathFilter, setFilePathFilter] = useState<string | null>(null);
   const [diffTab, setDiffTab] = useState<"findings" | "full-diff">("findings");
   const [diffSelectedFile, setDiffSelectedFile] = useState<string | null>(null);
@@ -332,25 +356,6 @@ const ResultsPage: React.FC = () => {
     () => allFindings.filter((f) => !!f.fixes?.code).length,
     [allFindings],
   );
-
-  // Per-reasoning-LLM finding tally — keyed by the LLM config name the
-  // worker stamped onto each finding's `detected_by_llms` (#94). Drives
-  // the per-model stats in the "Models used" card.
-  const llmFindingStats = useMemo(() => {
-    const map: Record<
-      string,
-      { count: number; sev: Record<string, number> }
-    > = {};
-    for (const f of allFindings) {
-      for (const llm of f.detected_by_llms ?? []) {
-        const entry = map[llm] ?? (map[llm] = { count: 0, sev: {} });
-        entry.count += 1;
-        const s = (f.severity || "").toUpperCase();
-        entry.sev[s] = (entry.sev[s] ?? 0) + 1;
-      }
-    }
-    return map;
-  }, [allFindings]);
 
   // All submitted files — used by FileTree and the full-diff panel.
   const allFiles = useMemo<SubmittedFile[]>(() => {
@@ -494,21 +499,6 @@ const ResultsPage: React.FC = () => {
     }
   }, [scanId, toast]);
 
-  const handleDownloadPatchPlan = useCallback(async () => {
-    if (!scanId) return;
-    try {
-      await scanService.downloadPatchPlan(scanId);
-    } catch (err) {
-      const e = err as { response?: { status?: number }; message?: string };
-      toast.error(
-        e.response?.status === 404
-          ? "A deterministic patch plan is not available for this scan."
-          : e.message || "Failed to download the patch plan",
-      );
-    }
-  }, [scanId, toast]);
-
-
   if (isLoading) {
     return (
       <div
@@ -540,23 +530,6 @@ const ResultsPage: React.FC = () => {
   }
 
   const report = data.summary_report;
-  const remediation = report?.remediation;
-  const remediationCandidates = remediation?.candidates ?? {
-    proposed: 0,
-    planned: 0,
-    validated: 0,
-    deduplicated: 0,
-    conflicted: 0,
-    rejected: 0,
-    unverified: 0,
-    applied: 0,
-  };
-  const remediationFiles = remediation?.files ?? {
-    total: 0,
-    planned: 0,
-    manual_review: 0,
-  };
-  const remediationChecks = remediation?.validation_checks ?? {};
   const riskScore = report?.overall_risk_score?.score;
   const riskLabel = typeof riskScore === "number" ? riskScore : riskScore || "—";
 
@@ -587,8 +560,12 @@ const ResultsPage: React.FC = () => {
             ?.fromLabel as string | undefined;
           const fromPath = (location.state as Record<string, unknown>)
             ?.fromPath as string | undefined;
+          const root = { label: "Dashboard", to: "/account/dashboard" };
+          const area = { label: "Code scanning", to: "/submission/submit" };
           if (fromLabel) {
             return [
+              root,
+              area,
               {
                 label: fromLabel,
                 to: fromPath,
@@ -598,7 +575,9 @@ const ResultsPage: React.FC = () => {
             ];
           }
           return [
-            { label: "Projects", to: "/analysis/results" },
+            root,
+            area,
+            { label: "Projects and scans", to: "/analysis/results" },
             {
               label: displayProjectName ?? "…",
               onClick: goToProject,
@@ -606,105 +585,20 @@ const ResultsPage: React.FC = () => {
             { label: scanId?.slice(0, 8) ?? "…" },
           ];
         })()}
-        title={
-          <>
-            {displayProjectName ?? "Scan"}{" "}
-            <span
-              style={{
-                color: "var(--fg-muted)",
-                fontWeight: 500,
-                fontSize: 13,
-                textTransform: "uppercase",
-                letterSpacing: ".04em",
-              }}
-            >
-              {data.scan_type ?? report?.scan_type ?? "Scan"}
-            </span>
-          </>
-        }
+        title={displayProjectName ?? "Scan"}
         subtitle={
           <>
-            {(() => {
-              // Single-source-of-truth status chip. `failed` (real
-              // error) is the only one that goes red; user stops
-              // (CANCELLED, BLOCKED_USER_DECLINE) and EXPIRED are
-              // neutral; BLOCKED_PRE_LLM is amber/warn.
-              const kind = statusKind(data.status);
-              if (kind === "failed") {
-                return (
-                  <span className="chip chip-critical">
-                    {displayStatus(data.status)}
-                  </span>
-                );
-              }
-              if (kind === "blocked") {
-                return (
-                  <span className="chip chip-warn">
-                    {displayStatus(data.status)}
-                  </span>
-                );
-              }
-              if (kind === "stopped" || kind === "expired") {
-                return (
-                  <span className="chip">{displayStatus(data.status)}</span>
-                );
-              }
-              if (kind === "completed") {
-                return (
-                  <span className="chip chip-success">
-                    {displayStatus(data.status)}
-                  </span>
-                );
-              }
-              return null;
-            })()}
-            <span style={{ color: "var(--fg)" }}>
-              <strong>{allFindings.length}</strong> finding
-              {allFindings.length === 1 ? "" : "s"}
-            </span>
+            {isPrescanBlocked && allFindings.length > 0 && (
+              <span className="chip chip-warn" title="Deterministic scanners only">
+                Deterministic findings only
+              </span>
+            )}
             {fixesReady > 0 && (
               <span className="chip chip-ai">
                 <Icon.Sparkle size={10} /> {fixesReady} AI fix
                 {fixesReady === 1 ? "" : "es"} ready
               </span>
             )}
-            {scanId && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  color: "var(--fg-muted)",
-                }}
-              >
-                Scan{" "}
-                <span className="mono" style={{ fontSize: 11 }}>
-                  {scanId}
-                </span>
-                <CopyButton value={scanId} title="Copy scan ID" />
-              </span>
-            )}
-            {/* Scan settings live behind this — keeps the header clean. */}
-            <button
-              type="button"
-              onClick={() => setScanInfoOpen(true)}
-              title="View the settings this scan was submitted with"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                background: "none",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-                color: "var(--accent)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                fontFamily: "inherit",
-              }}
-            >
-              <Icon.Info size={13} /> Scan information
-            </button>
           </>
         }
         actions={
@@ -712,49 +606,38 @@ const ResultsPage: React.FC = () => {
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("html")}
-              title="Download the findings report as HTML"
+              title="Rendered findings report (HTML) — the consolidated findings, ready to read or share"
             >
               <Icon.Download size={13} /> HTML
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("pdf")}
-              title="Download the findings report as PDF"
+              title="Rendered findings report (PDF) — the consolidated findings, ready to circulate"
             >
               <Icon.Download size={13} /> PDF
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("csv")}
-              title="Download the findings report as CSV"
+              title="One row per consolidated finding (CSV) — for spreadsheets, triage imports and diffs between scans"
             >
               <Icon.Download size={13} /> CSV
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("sarif")}
-              title="Download the findings report as SARIF 2.1.0 for GitHub code scanning"
+              title="SARIF 2.1.0 (SARIF) — exact ranges and snippets for GitHub code scanning and CI annotations"
             >
               <Icon.Download size={13} /> SARIF
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={handleDownloadScannerReports}
-              title="Download the original JSON emitted by the deterministic scanners"
+              title="Raw scanner evidence (JSON) — the unmodified Bandit/Semgrep/Gitleaks/OSV output plus binary versions and SHA-256. Not the findings report."
             >
               <Icon.Download size={13} /> Scanner JSON
             </button>
-            {(["SUGGEST", "REMEDIATE"] as const).includes(
-              String(data.scan_type ?? report?.scan_type ?? "").toUpperCase() as "SUGGEST" | "REMEDIATE",
-            ) && (
-              <button
-                className="sccap-btn sccap-btn-sm"
-                onClick={handleDownloadPatchPlan}
-                title="Download exact resolved ranges, candidate-to-hunk lineage, and unified diffs"
-              >
-                <Icon.Download size={13} /> Patch plan
-              </button>
-            )}
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => navigate(`/analysis/scanning/${scanId}`)}
@@ -781,6 +664,31 @@ const ResultsPage: React.FC = () => {
           </>
         }
       />
+
+      {/* A scan stopped at the prescan gate is not a failed scan. State exactly
+          what produced these findings and what never ran. */}
+      {isPrescanBlocked && (
+        <div
+          className="surface"
+          style={{
+            padding: "12px 16px",
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+            borderLeft: "3px solid var(--medium)",
+          }}
+        >
+          <Icon.Info size={15} style={{ marginTop: 1, color: "var(--medium)" }} />
+          <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
+            <strong>Stopped before LLM analysis.</strong> The{" "}
+            {allFindings.length} finding{allFindings.length === 1 ? "" : "s"} below
+            came from the deterministic scanners (Bandit, Semgrep, Gitleaks, OSV) and
+            are complete for what they cover. No LLM review, cross-file validation,
+            exploit reasoning or fix generation was run — severity, remediation and
+            confidence reflect the scanners alone.
+          </div>
+        </div>
+      )}
 
       {/* summary strip */}
       <div
@@ -872,277 +780,46 @@ const ResultsPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Models used — one tile per LLM role, with per-model finding
-          stats; the consolidation tally is a separate pipeline footer. */}
-      {data.llms_used && data.llms_used.length > 0 && (
-        <div className="sccap-card" style={{ display: "grid", gap: 14 }}>
-          <span
-            style={{
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: ".06em",
-              color: "var(--fg-subtle)",
-              fontWeight: 700,
-            }}
-          >
-            Models used
-          </span>
+      {/* Scan details — everything about how this scan was produced, stated
+          once. Previously the same facts were spread across three surfaces: a
+          Scan information modal, a separate "Models used" card, and a coverage
+          panel at the very bottom of the page. Models appear only here, with
+          their per-model finding stats, so there is no second list to drift. */}
+      <div className="sccap-card" style={{ display: "grid", gap: 18 }}>
+        <section>
+          <SectionLabel>Scan information</SectionLabel>
+          {/* One definition list in two columns. Models are facts about the
+              scan, not a separate widget: same format, same grid, no drilling. */}
           <div
             style={{
               display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(230px, 1fr))",
-              gap: 12,
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: "9px 32px",
             }}
           >
-            {data.llms_used.map((m) => {
-              const stats = llmFindingStats[m.name];
-              return (
-                <div
-                  key={m.category}
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    background: "var(--bg-soft)",
-                    padding: "12px 14px",
-                    display: "grid",
-                    gap: 5,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 9.5,
-                      textTransform: "uppercase",
-                      letterSpacing: ".06em",
-                      color: "var(--accent)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {m.category}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      color: "var(--fg)",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {m.name}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{ fontSize: 11, color: "var(--fg-muted)" }}
-                  >
-                    {m.provider}/{m.model_name}
-                  </span>
-                  <div
-                    style={{
-                      borderTop: "1px solid var(--border)",
-                      marginTop: 4,
-                      paddingTop: 8,
-                    }}
-                  >
-                    {stats ? (
-                      <button
-                        type="button"
-                        title={`View ${m.name} interactions in Scan Logs`}
-                        onClick={() =>
-                          navigate(
-                            `/scans/${scanId}/diagnostics?model=${encodeURIComponent(m.name)}`,
-                          )
-                        }
-                        style={{
-                          all: "unset",
-                          cursor: "pointer",
-                          display: "flex",
-                          flexWrap: "wrap",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <span style={{ fontSize: 12.5, color: "var(--fg)" }}>
-                          <strong
-                            style={{
-                              color: "var(--accent)",
-                              fontSize: 15,
-                            }}
-                          >
-                            {stats.count}
-                          </strong>{" "}
-                          finding{stats.count === 1 ? "" : "s"}
-                        </span>
-                        {(
-                          [
-                            ["CRITICAL", "C"],
-                            ["HIGH", "H"],
-                            ["MEDIUM", "M"],
-                            ["LOW", "L"],
-                            ["INFORMATIONAL", "I"],
-                          ] as const
-                        )
-                          .filter(([k]) => stats.sev[k])
-                          .map(([k, short]) => (
-                            <span
-                              key={k}
-                              style={{
-                                fontSize: 10.5,
-                                fontWeight: 700,
-                                padding: "1px 6px",
-                                borderRadius: 5,
-                                background: `${SEV_COLOR[k] ?? "var(--fg-muted)"}22`,
-                                color: SEV_COLOR[k] ?? "var(--fg-muted)",
-                              }}
-                            >
-                              {short} {stats.sev[k]}
-                            </span>
-                          ))}
-                        <Icon.ArrowR size={11} />
-                      </button>
-                    ) : (
-                      <span
-                        style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}
-                      >
-                        No findings attributed
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {/* Consolidation — a pipeline stat, not per-model. */}
-          {data.consolidation_stats &&
-            data.consolidation_stats.raw_count > 0 && (
+            {scanFacts(data, scanId, !isPrescanBlocked).map((fact) => (
               <div
+                key={fact.label}
                 style={{
-                  borderTop: "1px solid var(--border)",
-                  paddingTop: 12,
-                  display: "flex",
-                  flexWrap: "wrap",
+                  display: "grid",
+                  gridTemplateColumns: "128px minmax(0, 1fr)",
+                  gap: 10,
+                  fontSize: 12.5,
                   alignItems: "baseline",
-                  gap: "4px 18px",
+                  minWidth: 0,
                 }}
               >
-                <span
-                  style={{
-                    fontSize: 9.5,
-                    textTransform: "uppercase",
-                    letterSpacing: ".06em",
-                    color: "var(--fg-subtle)",
-                    fontWeight: 700,
-                  }}
-                >
-                  Consolidation
+                <span style={{ color: "var(--fg-subtle)" }}>{fact.label}</span>
+                <span style={{ color: "var(--fg)", wordBreak: "break-word" }}>
+                  {fact.value}
                 </span>
-                {(
-                  [
-                    ["raw findings", data.consolidation_stats.raw_count],
-                    ["kept", data.consolidation_stats.consolidated_count],
-                    ["merged", data.consolidation_stats.merged_inputs],
-                    ["dropped", data.consolidation_stats.dropped],
-                  ] as const
-                ).map(([label, value]) => (
-                  <span
-                    key={label}
-                    style={{ fontSize: 12, color: "var(--fg-muted)" }}
-                  >
-                    <strong style={{ color: "var(--fg)", fontSize: 13 }}>
-                      {value}
-                    </strong>{" "}
-                    {label}
-                  </span>
-                ))}
               </div>
-            )}
-        </div>
-      )}
+            ))}
+          </div>
+        </section>
 
-      <div className="sccap-card" style={{ display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <span
-            style={{
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: ".06em",
-              color: "var(--fg-subtle)",
-              fontWeight: 700,
-            }}
-          >
-            Deterministic scanner provenance
-          </span>
-          <button
-            type="button"
-            className="sccap-btn sccap-btn-sm"
-            onClick={handleDownloadScannerReports}
-          >
-            <Icon.Download size={12} /> Full evidence
-          </button>
-        </div>
-        {Object.keys(data.toolchain_provenance).length === 0 ? (
-          <div style={{ fontSize: 12.5, color: "var(--medium)" }}>
-            Provenance was not retained for this scan. Deterministic coverage is degraded.
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {Object.entries(data.toolchain_provenance).map(([name, provenance]) => {
-              const digest = provenance.binary?.sha256;
-              const rules = provenance.rules;
-              return (
-                <div
-                  key={name}
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    background: "var(--bg-soft)",
-                    padding: "12px 14px",
-                    display: "grid",
-                    gap: 5,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 9.5,
-                      textTransform: "uppercase",
-                      letterSpacing: ".06em",
-                      color:
-                        provenance.status === "verified"
-                          ? "var(--accent)"
-                          : "var(--medium)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {provenance.status}
-                  </span>
-                  <strong style={{ textTransform: "capitalize", fontSize: 14 }}>
-                    {name} {provenance.binary?.version ?? "version unavailable"}
-                  </strong>
-                  <span className="mono" style={{ fontSize: 10.5, color: "var(--fg-muted)" }}>
-                    sha256 {digest ? `${digest.slice(0, 20)}…` : "unavailable"}
-                  </span>
-                  {rules && (
-                    <span style={{ fontSize: 11.5, color: "var(--fg-muted)" }}>
-                      {rules.selected_rule_count ?? 0} selected rules
-                      {rules.ruleset_sha256
-                        ? ` · ${rules.ruleset_sha256.slice(0, 12)}…`
-                        : ""}
-                    </span>
-                  )}
-                  {provenance.advisory_database?.immutable === false && (
-                    <span style={{ fontSize: 11.5, color: "var(--medium)" }}>
-                      Advisory snapshot is not immutable ({provenance.advisory_database.mode ?? "unknown source"}).
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* What the scanners actually read, and why anything was left out. */}
+        {scanId ? <ScanCoveragePanel scanId={scanId} embedded /> : null}
       </div>
 
       {/* Per-source filter row — two-tier: category pills (All / Bandit /
@@ -1293,202 +970,8 @@ const ResultsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Finding counts and scanner coverage are independent signals. A
-          zero-finding result is labelled clean only when every planned
-          deterministic scanner/input completed. */}
-      <div
-        className="sccap-card"
-        style={{
-          borderColor: data.scanner_coverage?.is_complete
-            ? "var(--success)"
-            : "var(--medium)",
-          display: "grid",
-          gap: 8,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "var(--fg)" }}>
-              Scanner coverage · {data.scanner_coverage?.overall_status ?? "unavailable"}
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 12.5, marginTop: 3 }}>
-              {data.scanner_coverage?.is_complete
-                ? "Every planned deterministic scanner/input completed."
-                : "Coverage is incomplete. No findings does not mean this scan is clean."}
-            </div>
-          </div>
-          {data.scanner_coverage?.latest_policy_decision && (
-            <span className={
-              data.scanner_coverage.latest_policy_decision.outcome === "pass"
-                ? "chip chip-success"
-                : "chip chip-warn"
-            }>
-              Policy {data.scanner_coverage.latest_policy_decision.outcome}
-            </span>
-          )}
-        </div>
-        {data.scanner_coverage && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {Object.entries(data.scanner_coverage.counts)
-              .filter(([, count]) => count > 0)
-              .map(([state, count]) => (
-                <span key={state} className="chip">{state}: {count}</span>
-              ))}
-          </div>
-        )}
-        {!!data.scanner_coverage?.entries.some(
-          (entry) => !["completed", "clean"].includes(entry.status),
-        ) && (
-          <details style={{ fontSize: 12.5, color: "var(--fg-muted)" }}>
-            <summary>Review degraded scanner inputs</summary>
-            <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
-              {data.scanner_coverage.entries
-                .filter((entry) => !["completed", "clean"].includes(entry.status))
-                .map((entry) => (
-                  <li key={entry.id}>
-                    <strong>{entry.scanner_name}</strong> · {entry.input_path} · {entry.status}
-                    {entry.reason ? ` — ${entry.reason}` : ""}
-                  </li>
-                ))}
-            </ul>
-          </details>
-        )}
-      </div>
 
-      {/* Baseline classifications and the policy result come from the same
-          immutable records used by portfolio trends and downloadable reports. */}
-      <div className="sccap-card" style={{ display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "var(--fg)" }}>Finding governance</div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 12.5, marginTop: 3 }}>
-              Deterministic baseline against this project&apos;s previous completed scan.
-            </div>
-          </div>
-          {data.finding_governance.policy_evaluation && (
-            <span className={
-              data.finding_governance.policy_evaluation.outcome === "pass"
-                ? "chip chip-success"
-                : "chip chip-warn"
-            }>
-              Gate {data.finding_governance.policy_evaluation.outcome}
-            </span>
-          )}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {(["new", "fixed", "unchanged", "reintroduced"] as const).map((state) => (
-            <span key={state} className="chip">
-              {state}: {data.finding_governance.counts[state]}
-            </span>
-          ))}
-        </div>
-      </div>
 
-      {remediation && (
-        <div
-          className="sccap-card"
-          style={{
-            display: "grid",
-            gap: 12,
-            borderColor:
-              remediationFiles.manual_review > 0
-                ? "var(--medium)"
-                : "var(--success)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 11,
-                  textTransform: "uppercase",
-                  letterSpacing: ".06em",
-                  color: "var(--fg-subtle)",
-                  fontWeight: 700,
-                }}
-              >
-                Patch validation
-              </div>
-              <strong style={{ fontSize: 15 }} role={remediation.outcome === "partial_remediation" ? "alert" : undefined}>
-                {remediation.outcome === "partial_remediation"
-                  ? "PARTIAL REMEDIATION — manual review remains"
-                  : remediation.outcome.replace(/_/g, " ")}
-              </strong>
-            </div>
-            <button
-              type="button"
-              className="sccap-btn sccap-btn-sm"
-              onClick={handleDownloadPatchPlan}
-            >
-              <Icon.Download size={12} /> Validation evidence
-            </button>
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-              gap: 8,
-            }}
-          >
-            {[
-              ["Proposed", remediationCandidates.proposed],
-              ["Planned", remediationCandidates.planned],
-              ["Validated", remediationCandidates.validated],
-              ["Applied", remediationCandidates.applied],
-              ["Rejected", remediationCandidates.rejected],
-              ["Unverified", remediationCandidates.unverified],
-              ["Manual files", remediationFiles.manual_review],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                style={{
-                  padding: "8px 10px",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  background: "var(--bg-soft)",
-                }}
-              >
-                <div style={{ fontSize: 10.5, color: "var(--fg-muted)" }}>
-                  {label}
-                </div>
-                <strong style={{ fontSize: 16 }}>{value}</strong>
-              </div>
-            ))}
-          </div>
-          {Object.keys(remediationChecks).length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {Object.entries(remediationChecks).map(
-                ([status, count]) => (
-                  <span
-                    key={status}
-                    className={
-                      status === "passed" ? "chip chip-success" : "chip"
-                    }
-                  >
-                    {status.replace(/_/g, " ")}: {count}
-                  </span>
-                ),
-              )}
-            </div>
-          )}
-          {remediationFiles.manual_review > 0 && (
-            <div style={{ fontSize: 12.5, color: "var(--medium)" }}>
-              {remediationFiles.manual_review} file
-              {remediationFiles.manual_review === 1 ? " requires" : "s require"}{" "}
-              manual review and was not promoted. Download the evidence for the
-              exact failed or unavailable checks.
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Tab bar — only shown for REMEDIATE scans that have a full diff */}
       {data.summary_report?.scan_type === "REMEDIATE" && changedFiles.length > 0 && (
@@ -1933,9 +1416,6 @@ const ResultsPage: React.FC = () => {
             f={selected}
             scanId={scanId}
             originalCodeMap={data?.original_code_map ?? undefined}
-            governance={data?.finding_governance.items.find(
-              (item) => item.finding_id === selected.id,
-            )}
             scanType={String(data.scan_type ?? report?.scan_type ?? "AUDIT")}
             patchPlan={data.patch_plan}
           />
@@ -1958,12 +1438,6 @@ const ResultsPage: React.FC = () => {
         )}
       </div>
       )}
-
-      <ScanInfoModal
-        open={scanInfoOpen}
-        onClose={() => setScanInfoOpen(false)}
-        data={data}
-      />
 
       <Modal
         open={deleteConfirmOpen}
@@ -1994,6 +1468,7 @@ const ResultsPage: React.FC = () => {
           database. The action cannot be undone.
         </div>
       </Modal>
+
     </div>
   );
 };
@@ -2810,10 +2285,6 @@ const DispositionHistory: React.FC<{
         </div>
       )}
 
-      {/* Findings debug panel — agent-quality troubleshooting */}
-      {scanId ? (
-        <FindingsDebugPanel scanId={scanId} />
-      ) : null}
     </div>
   );
 };
@@ -2822,15 +2293,22 @@ const FindingDetail: React.FC<{
   f: Finding;
   scanId?: string;
   originalCodeMap?: Record<string, string>;
-  governance?: FindingGovernanceItem;
   scanType: string;
   patchPlan?: PatchPlanArtifact | null;
-}> = ({ f, scanId, originalCodeMap, governance, scanType, patchPlan }) => {
+}> = ({ f, scanId, originalCodeMap, scanType, patchPlan }) => {
   const sev = (f.severity || "").toUpperCase();
+  // Which raw findings produced this row. Fetched per finding and only when the
+  // consolidator actually merged something — a pass-through has nothing to show.
+  const contributorCount = (f.contributing_raw_finding_ids ?? []).length;
+  const { data: mergedFindings } = useQuery({
+    queryKey: ["merged-findings", scanId, f.id],
+    queryFn: () => getMergedFindings(scanId!, f.id),
+    enabled: !!scanId && contributorCount > 1,
+    staleTime: 5 * 60_000,
+  });
   const sevColor = SEV_COLOR[sev] ?? "var(--fg-muted)";
   const hasFix = scanType.toUpperCase() !== "AUDIT" && !patchPlan && !!f.fixes?.code;
   const fileContent = originalCodeMap?.[f.file_path] ?? null;
-  const contributingRawIds = f.contributing_raw_finding_ids ?? [];
   const { data: fixLineage } = useQuery({
     queryKey: ["actionable-fix-lineage", scanId],
     queryFn: () => debugService.getFindingLineage(scanId!, [], null, 250),
@@ -2852,23 +2330,9 @@ const FindingDetail: React.FC<{
       .filter((file) => file.file_path === f.file_path)
       .flatMap((file) => file.hunks)
       .filter((hunk) => hunk.candidate_ids.some((id) => linkedCandidateIds.has(id)));
-    if (hunks.length === 0) {
-      const evidence = governance?.exact_ranges.find(
-        (range) => String(range.file_path ?? f.file_path) === f.file_path
-          && typeof range.start_line === "number",
-      );
-      if (!evidence) return null;
-      return {
-        start_byte: Number(evidence.start_byte ?? 0),
-        end_byte: Number(evidence.end_byte ?? 0),
-        start_line: Number(evidence.start_line),
-        start_column: Number(evidence.start_column ?? 1),
-        end_line: Number(evidence.end_line ?? evidence.start_line),
-        end_column: Number(evidence.end_column ?? 1),
-      };
-    }
+    if (hunks.length === 0) return null;
     return hunks[0].resolved_range;
-  }, [f.file_path, governance?.exact_ranges, linkedCandidateIds, patchPlan]);
+  }, [linkedCandidateIds, patchPlan]);
   // Full-screen diff view (#83 follow-up) — the inline pane is narrow;
   // this opens the before/after diff in a near-fullscreen modal.
   const [diffExpanded, setDiffExpanded] = useState(false);
@@ -2982,10 +2446,6 @@ const FindingDetail: React.FC<{
 
       <div className="sccap-divider" />
 
-      {governance && scanId && (
-        <FindingGovernancePanel scanId={scanId} findingId={f.id} initial={governance} />
-      )}
-
       {/* Code snippet — shown for all findings that have source code available */}
       {(fileContent || f.vulnerable_snippet || f.fixes?.original_snippet) && (
         <div style={{ marginBottom: 18 }}>
@@ -3018,6 +2478,65 @@ const FindingDetail: React.FC<{
 
       <div style={{ display: "grid", gap: 18 }}>
         {scanId && <DispositionControl scanId={scanId} f={f} />}
+
+        {contributorCount > 1 && mergedFindings && (
+          <details className="sccard-merge" open={false}>
+            <summary
+              style={{
+                cursor: "pointer",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "var(--fg)",
+              }}
+            >
+              Merged from {mergedFindings.raw_count} findings
+            </summary>
+            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+              <div style={{ fontSize: 11.5, color: "var(--fg-muted)" }}>
+                The consolidator folded these into one finding. Each is a separate
+                claim from a different agent about the same weakness.
+              </div>
+              {mergedFindings.findings.map((raw) => (
+                <div
+                  key={raw.id}
+                  style={{
+                    display: "grid",
+                    gap: 2,
+                    padding: "7px 9px",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    background: "var(--bg-soft)",
+                  }}
+                >
+                  <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <span
+                      className="chip"
+                      style={{
+                        fontSize: 10,
+                        color: SEV_COLOR[(raw.severity || "").toUpperCase()] ?? "var(--fg-muted)",
+                        borderColor: "var(--border)",
+                      }}
+                    >
+                      {raw.severity ?? "—"}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                      {raw.source || "agent"}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
+                      {raw.file_path}:{raw.line_number ?? "?"}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 12.5, color: "var(--fg)" }}>{raw.title}</span>
+                  {raw.corroborating_agents.length > 1 && (
+                    <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
+                      corroborated by {raw.corroborating_agents.join(", ")}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
 
         {f.description && (
           <div>
@@ -3118,17 +2637,6 @@ const FindingDetail: React.FC<{
               {f.remediation}
             </div>
           </div>
-        )}
-
-        {contributingRawIds.length > 0 && (
-          <details className="sccap-card">
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>
-              Canonical lineage · {contributingRawIds.length} contributing finding{contributingRawIds.length === 1 ? "" : "s"}
-            </summary>
-            <ul style={{ marginBottom: 0 }}>
-              {contributingRawIds.map((id) => <li key={id}><code>{id}</code></li>)}
-            </ul>
-          </details>
         )}
 
         {scanId && (

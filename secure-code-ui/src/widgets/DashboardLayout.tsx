@@ -10,19 +10,17 @@
 // (/account/settings/appearance).
 
 import React from "react";
-import { useLocation } from "react-router-dom";
-import AdminSubNav from "./AdminSubNav";
 import { TopNav } from "./TopNav/TopNav";
 import { ConnectivityStatus } from "../shared/ui/ConnectivityStatus";
+import { SidebarNav } from "./SidebarNav";
+import { Breadcrumbs, BreadcrumbProvider } from "../shared/ui/Breadcrumbs";
+import { AdvisorFab } from "../shared/ui/AdvisorFab";
 
 const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
   children,
 }) => {
-  const { pathname } = useLocation();
-  const isAdminArea =
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/account/settings/llm");
   return (
+    <BreadcrumbProvider>
     <div
       style={{
         minHeight: "100vh",
@@ -36,15 +34,16 @@ const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
       </a>
       <TopNav />
       <ConnectivityStatus />
-      <main
-        id="main-content"
-        className="dashboard-main"
-        tabIndex={-1}
-      >
-        {isAdminArea && <AdminSubNav />}
-        {children}
-      </main>
+      <div className="dashboard-shell">
+        <SidebarNav />
+        <main id="main-content" className="dashboard-main" tabIndex={-1}>
+          <Breadcrumbs />
+          {children}
+        </main>
+      </div>
+      <AdvisorFab />
     </div>
+    </BreadcrumbProvider>
   );
 };
 

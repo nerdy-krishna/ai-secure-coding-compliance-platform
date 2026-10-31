@@ -38,6 +38,19 @@ knowledge bases. The platform is organized around three surfaces:
 * **Unified Admin console** — LLM configurations, user groups, users, frameworks (with CSV / git-URL RAG ingestion), agents, prompt templates, SMTP, system config, and runtime logs. A shared sub-nav keeps every surface one click apart.
 * **Encrypted secrets** — every LLM API key and SMTP password is Fernet-encrypted at rest with the installation's `ENCRYPTION_KEY`.
 
+### Pentesting (opt-in, feature-gated)
+
+A separately gated **pentesting engine** (disabled by default; enabled during setup or
+via the `pentesting-v5` profile) adds authorized black-box, gray-box and white-box
+assessments alongside Code Scan, without mutating the Code Scan aggregate:
+
+* **Discovery first** — evasive reconnaissance, then attack-surface expansion: subdomain enumeration with takeover checks, OpenAPI/GraphQL schema discovery, and JavaScript bundle mining for endpoints, parameters and secrets.
+* **Model-driven tools** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a real Playwright browser turn by turn, seeing every result and adapting; identical probes are de-duplicated.
+* **Persistent lead queue** — every observation becomes a queued lead, claimed as it is tested; the queue decides when a run is finished, so pause/resume/restart never loses work.
+* **Observations are findings** — surface intelligence is stored alongside weaknesses, and a follow-up pass chains findings into exploit paths.
+* **One scope guard** — the operator's origin plus the in-scope estate discovered beneath its registrable domain; private and loopback destinations are refused. No intensity, budget, qualification or duration gates.
+* **Live cockpit** — event stream with every prompt and tool action, live browser frame, findings as they land, pause/resume/stop, and Markdown/JSON/HTML/PDF reports.
+
 ### Integrations and automation
 
 * **MCP server** — the scan + advisor workflow is exposed as MCP tools at `/mcp`, reusing JWT auth so Claude Code, Cursor, or other agentic clients can drive the platform remotely.

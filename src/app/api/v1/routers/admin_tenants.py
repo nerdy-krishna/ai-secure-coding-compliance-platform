@@ -464,6 +464,17 @@ async def create_tenant_entry(
     )
     # Remove any legacy ten-minute entry cookie left by an older frontend.
     clear_tenant_entry_cookie(response)
+    # A protected-export grant is tenant- and principal-bound.  Drop the
+    # browser capability before the active tenant changes so it cannot be
+    # presented from the next tenant context, even though the server would
+    # independently reject that binding.
+    response.delete_cookie(
+        "__Host-c13_export_grant",
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
     await db.commit()
     return TenantEntryRead(
         tenant_id=tenant.id,

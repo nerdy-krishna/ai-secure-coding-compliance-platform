@@ -98,7 +98,7 @@ data:
       "refresh": "30s",
       "time": {"from": "now-6h", "to": "now"},
       "panels": [
-        {"type":"timeseries","title":"RabbitMQ backlog","targets":[{"expr":"rabbitmq_queue_messages{queue=~\"code_submission_queue|analysis_approved_queue|report_export_queue\"}"}],"gridPos":{"x":0,"y":0,"w":12,"h":8}},
+        {"type":"timeseries","title":"RabbitMQ backlog","targets":[{"expr":"rabbitmq_queue_messages{queue=~\"code_submission_queue|analysis_approved_queue|report_export_queue|pentest_execution_queue\"}"}],"gridPos":{"x":0,"y":0,"w":12,"h":8}},
         {"type":"timeseries","title":"Oldest message age","targets":[{"expr":"clamp_min(time() - rabbitmq_detailed_queue_head_message_timestamp, 0)"}],"gridPos":{"x":12,"y":0,"w":12,"h":8}},
         {"type":"timeseries","title":"Queue/start and SSE p95","targets":[{"expr":"histogram_quantile(0.95, sum by (le) (rate(sccap_queue_to_start_bucket[15m])))","legendFormat":"queue-to-start"},{"expr":"histogram_quantile(0.95, sum by (le) (rate(sccap_sse_freshness_bucket[15m])))","legendFormat":"SSE freshness"}],"gridPos":{"x":0,"y":8,"w":12,"h":8}},
         {"type":"timeseries","title":"Terminal outcomes and cancellations","targets":[{"expr":"sum by (scan_status) (rate(sccap_workflow_terminal_total[15m]))"},{"expr":"sum(rate(sccap_cancellation_total[15m]))","legendFormat":"cancellations"}],"gridPos":{"x":12,"y":8,"w":12,"h":8}},

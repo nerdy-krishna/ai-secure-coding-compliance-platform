@@ -582,7 +582,7 @@ async def get_prescan_review(
 
     Only valid while the scan sits at ``PENDING_PRESCAN_APPROVAL`` (the
     gate) or has landed in one of the two prescan-terminal states
-    (``BLOCKED_PRE_LLM`` / ``BLOCKED_USER_DECLINE``).
+    (``BLOCKED_PRE_LLM`` / ``STOPPED_BEFORE_LLM``).
     """
     return await service.get_prescan_review(
         scan_id,
@@ -732,6 +732,7 @@ async def stream_scan_progress(
         "EXPIRED",
         # ADR-009 terminal states from the prescan-approval gate.
         "BLOCKED_PRE_LLM",
+        "STOPPED_BEFORE_LLM",
         "BLOCKED_USER_DECLINE",
         "BUDGET_EXHAUSTED",
     }
@@ -1075,6 +1076,29 @@ async def download_scanner_reports(
                 f'attachment; filename="scan-{scan_id}-scanner-reports.json"'
             )
         },
+    )
+
+
+@router.get(
+    "/scans/{scan_id}/findings/{finding_id}/merged",
+    response_model=api_models.MergedFindingsResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
+async def get_merged_findings(
+    scan_id: uuid.UUID,
+    finding_id: int,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    """Raw findings that were merged into one consolidated finding."""
+    return await service.get_merged_findings(
+        scan_id,
+        finding_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
     )
 
 

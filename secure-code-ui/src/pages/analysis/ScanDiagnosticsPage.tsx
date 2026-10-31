@@ -1,5 +1,5 @@
 // Scan Diagnostics page — "Finding Lineage & LLM Logs"
-// Tab 1: Finding Lineage (canonical graph from files to outputs)
+// Tab 1: Finding Lineage (swimlane: raw claims per source -> consolidated)
 // Tab 2: LLM Calls (full interaction log with expandable details)
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -12,7 +12,7 @@ import { redactSensitive } from "../../shared/lib/redact";
 import { Icon } from "../../shared/ui/Icon";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
 import { PageHeader } from "../../shared/ui/PageHeader";
-import { FindingLineage } from "../../features/scans/FindingLineage";
+import { FindingsSwimlane } from "../../features/scans/FindingsSwimlane";
 
 type Tab = "lineage" | "llm";
 
@@ -61,7 +61,13 @@ export const ScanDiagnosticsPage: React.FC = () => {
   return (
     <div className="fade-in" style={{ display: "grid", gap: 20 }}>
       <PageHeader
-        crumbs={[{ label: `Scan ${scanId?.slice(0, 8) ?? "…"}`, to: `/analysis/results/${scanId}` }, { label: "Pipeline & Logs" }]}
+        crumbs={[
+          { label: "Dashboard", to: "/account/dashboard" },
+          { label: "Code scanning", to: "/submission/submit" },
+          { label: "Projects and scans", to: "/analysis/results" },
+          { label: `Scan ${scanId?.slice(0, 8) ?? "…"}`, to: `/analysis/results/${scanId}` },
+          { label: "Pipeline & Logs" },
+        ]}
         title="Pipeline & Logs"
         subtitle="Findings pipeline flow and LLM call inspection for this scan."
       />
@@ -83,7 +89,7 @@ export const ScanDiagnosticsPage: React.FC = () => {
 
       {tab === "lineage" && scanId && (
         <div style={{ display: "grid", gap: 20 }}>
-          <FindingLineage scanId={scanId} />
+          {debug ? <FindingsSwimlane debug={debug} /> : null}
           {debug && <FindingsBreakdown debug={debug} />}
         </div>
       )}

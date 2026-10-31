@@ -88,16 +88,18 @@ docker run --rm --entrypoint python \
   sccap-worker:test -m tests.scanners.scanner_toolchain_smoke
 ```
 
-CI supplies the required application configuration variables. The smoke check fails on any runtime
+The test runner supplies the required application configuration variables. The smoke check fails on any runtime
 version, binary digest, or Gitleaks-config mismatch and permits only OSV's explicitly documented
 `advisory_snapshot_identifier_unavailable` degraded reason.
 
-The CI workflow gives backend unit contracts and real-infrastructure integration tests separate
-jobs. The integration job starts a clean PostgreSQL, RabbitMQ, Qdrant, API, and worker stack,
+Backend unit contracts and real-infrastructure integration tests are run as separate steps: there
+is no CI workflow, so the integration step is invoked explicitly (see the commands below). It
+starts a clean PostgreSQL, RabbitMQ, Qdrant, API, and worker stack,
 runs migrations through the normal API entrypoint, executes the opt-in integration package, and
 then stops RabbitMQ, submits a scan through the public HTTP API, restarts the broker, and proves the
 durable outbox reaches the real worker before cancelling the fixture scan. The outage scenario is
-intentionally CI-orchestrated; do not run its phases against a shared developer stack. While the
+intentionally orchestrated around a disposable stack; do not run its phases against a shared
+developer stack. While the
 broker is paused, CI also exercises public resume/restart transactions without racing dispatch. CI
 removes its volumes afterward. A deterministic OpenAI-compatible fixture drives the prescan,
 profiling, and analysis-cost gates without a paid provider; the scenario asserts that checkpoint

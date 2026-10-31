@@ -11,7 +11,7 @@ and frontend.
   linked from them.
 - `.agent/scanning_flow.md` before changing scan nodes, edges, statuses, events, approvals,
   messaging, or worker behavior.
-- `CLAUDE.md` and `AGENTS.md` for current repository and security guardrails.
+- `AGENTS.md` for the current Pi project instructions and `.agent/conventions.md` for deeper implementation/security context.
 
 If `CONTEXT.md` or `docs/adr/` does not yet exist, proceed using the existing project vocabulary
 and create or update those documents only when a domain term or architectural decision is

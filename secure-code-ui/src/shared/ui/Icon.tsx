@@ -235,6 +235,24 @@ const Send: React.FC<IconProps> = (p) => (
   </Svg>
 );
 
+const Minus: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+);
+
+const Expand: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" />
+  </Svg>
+);
+
+const Collapse: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5" />
+  </Svg>
+);
+
 const Plus: React.FC<IconProps> = (p) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />
@@ -278,6 +296,14 @@ const Book: React.FC<IconProps> = (p) => (
   <Svg {...p}>
     <path d="M4 3h7a3 3 0 013 3v15a2 2 0 00-2-2H4V3z" />
     <path d="M20 3h-7a3 3 0 00-3 3v15a2 2 0 012-2h8V3z" />
+  </Svg>
+);
+
+const Hourglass: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M6 2h12M6 22h12" />
+    <path d="M7 2v3.5c0 2 2.5 3.3 4 5 1.5-1.7 4-3 4-5V2" />
+    <path d="M7 22v-3.5c0-2 2.5-3.3 4-5 1.5 1.7 4 3 4 5V22" />
   </Svg>
 );
 
@@ -368,6 +394,19 @@ const Integrate: React.FC<IconProps> = (p) => (
 const ArrowR: React.FC<IconProps> = (p) => (
   <Svg {...p}>
     <path d="M5 12h14M13 5l7 7-7 7" />
+  </Svg>
+);
+
+const PanelLeft: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </Svg>
+);
+
+const Menu: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M4 7h16M4 12h16M4 17h16" />
   </Svg>
 );
 
@@ -474,9 +513,13 @@ export const Icon = {
   Zap,
   Play,
   Pause,
+  Hourglass,
   Download,
   Send,
   Plus,
+  Minus,
+  Expand,
+  Collapse,
   Filter,
   Sort,
   Terminal,
@@ -497,6 +540,8 @@ export const Icon = {
   Integrate,
   ArrowR,
   Layers,
+  PanelLeft,
+  Menu,
   Mail,
   Key,
   Trash,

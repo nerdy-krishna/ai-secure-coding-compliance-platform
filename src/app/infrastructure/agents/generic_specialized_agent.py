@@ -380,10 +380,9 @@ def _build_rag_context(
     # outer list per query, inner list of hits. An empty collection
     # (or a query with zero hits) returns an empty outer list, so
     # naive `[0]` indexing IndexErrors and silently kills the agent.
-    # Per CLAUDE.md: "Scans against an empty RAG path still complete
-    # — agents produce findings without RAG citations until content
-    # is ingested." Treat missing/empty retrieval as "no documents"
-    # and let the agent run with the empty pattern strings.
+    # An empty RAG path still permits analysis without RAG citations (ADR-003).
+    # Treat missing/empty retrieval as "no documents" and let the agent run
+    # with the empty pattern strings.
     raw_documents = retrieved_guidelines.get("documents") or []
     documents = raw_documents[0] if raw_documents else []
     logger.info(

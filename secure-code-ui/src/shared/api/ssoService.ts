@@ -72,6 +72,8 @@ export interface SsoAuditEvent {
   ts: string;
   event: string;
   user_id: number | null;
+  /** Resolved server-side so the log shows a person, not an id. */
+  user_email: string | null;
   provider_id: string | null;
   email_hash: string | null;
   ip: string | null;

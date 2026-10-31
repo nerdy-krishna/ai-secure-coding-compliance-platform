@@ -172,6 +172,7 @@ class SearchService:
             select(db_models.Project.id, db_models.Project.name)
             .where(scope)
             .where(tenant_scope)
+            .where(db_models.Project.project_kind == "code_scan")
             .where(db_models.Project.name.ilike(pattern, escape="\\"))
             .order_by(db_models.Project.updated_at.desc())
             .limit(limit)

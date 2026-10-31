@@ -55,11 +55,44 @@ ALLOWED_OUTBOX_KEYS: frozenset[str] = frozenset(
         "handoff_checkpoint_node",
         "handoff_retry",
         "outbox_id",
+        "authentication_job_id",
         "tenant_id",
+        "engagement_id",
+        "execution_id",
+        "dispatch_id",
+        "dispatch_generation",
+        "task_digest",
+        # Existing C4 controller locator fields.  These are opaque authority
+        # coordinates already committed in PostgreSQL; the sweeper must
+        # forward them unchanged for the worker's exact reconciliation.
+        "schema_version",
+        "extensions",
+        "phase",
+        "preceding_delta_id",
+        "preceding_delta_digest",
+        "controller_generation",
+        "locator_digest",
+        # Closed C13 report/export locator fields. These are opaque database
+        # coordinates; evidence bytes and storage locators are never allowed.
+        "locator_version",
+        "request_id",
+        "request_kind",
+        # Signed, secret-free C5 tool locator. Capability 10 reuses this
+        # existing worker notification and binds its phase server-side.
+        "locator",
         "traceparent",
         "tracestate",
     }
 )
+
+
+def _is_safe_notification_locator(message_body: dict) -> bool:
+    """No pentest notifications are published anymore; refuse any that linger."""
+
+    kind = str(message_body.get("kind", ""))
+    if kind.startswith("pentest_"):
+        return False
+    return True
 
 
 async def _get_channel() -> AbstractRobustChannel:
@@ -97,6 +130,12 @@ async def publish_message(
         return False
 
     safe_body = {k: v for k, v in message_body.items() if k in ALLOWED_OUTBOX_KEYS}
+    if not _is_safe_notification_locator(safe_body):
+        logger.error(
+            "Rejected unsafe pentest notification locator.",
+            extra={"notification_kind": safe_body.get("kind")},
+        )
+        return False
     with span(
         "sccap.rabbitmq.publish",
         {

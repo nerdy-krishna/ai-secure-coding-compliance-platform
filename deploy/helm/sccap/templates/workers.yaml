@@ -1,6 +1,13 @@
 {{- $root := . -}}
 {{- $pools := dict "scanner" .Values.workerPools.scanner "llm" .Values.workerPools.llm "report" .Values.workerPools.report -}}
 {{- $secrets := dict "scanner" .Values.runtime.scannerSecret "llm" .Values.runtime.llmSecret "report" .Values.runtime.reportSecret -}}
+{{- if .Values.capability13.protectedExport.enabled -}}
+{{- if not .Values.workerPools.splitEnabled -}}{{ fail "C13 protected export requires split worker pools" }}{{- end -}}
+{{- if .Values.workerPools.unified.enabled -}}{{ fail "C13 protected export forbids the unified worker" }}{{- end -}}
+{{- if not .Values.workerPools.report.enabled -}}{{ fail "C13 protected export requires the existing report/export worker" }}{{- end -}}
+{{- if not .Values.capability13.protectedExport.serviceAccountName -}}{{ fail "C13 protected export requires a dedicated service account" }}{{- end -}}
+{{- $_ := set $secrets "report" .Values.runtime.capability13ProtectedExportSecret -}}
+{{- end -}}
 {{- if .Values.workerPools.splitEnabled }}
 {{- range $name, $pool := $pools }}
 {{- if $pool.enabled }}
@@ -26,7 +33,7 @@ spec:
         app.kubernetes.io/component: worker-{{ $name }}
     spec:
       terminationGracePeriodSeconds: {{ $root.Values.drain.gracePeriodSeconds }}
-      serviceAccountName: {{ include "sccap.serviceAccountName" $root }}
+      serviceAccountName: {{ if and (eq $name "report") $root.Values.capability13.protectedExport.enabled }}{{ $root.Values.capability13.protectedExport.serviceAccountName }}{{ else }}{{ include "sccap.serviceAccountName" $root }}{{ end }}
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

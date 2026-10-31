@@ -13,6 +13,7 @@ import os
 from fastapi import APIRouter
 
 from app.api.v1.schemas.features import FeaturesResponse
+from app.config.config import settings
 from app.core.config_cache import SystemConfigCache
 from app.core.features import ALL_FEATURES, catalog_metadata
 
@@ -30,11 +31,17 @@ async def get_features() -> FeaturesResponse:
     setup wizard's custom-variant picker all need this before any user exists.
     It carries no configuration value or secret.
     """
-    enabled = SystemConfigCache.get_enabled_features()
+    enabled = set(SystemConfigCache.get_enabled_features())
+    if (
+        settings.PENTEST_CAPABILITY13_SCHEMA_READ
+        and settings.PENTEST_CAPABILITY13_SAFE_API
+        and settings.PENTEST_CAPABILITY13_COCKPIT
+    ):
+        enabled.add("pentesting_capability13")
     profiles_env = os.environ.get("COMPOSE_PROFILES", "")
     return FeaturesResponse(
         enabled_features=sorted(enabled),
-        all_features=sorted(ALL_FEATURES),
+        all_features=sorted((*ALL_FEATURES, "pentesting_capability13")),
         variant=(os.environ.get("SCCAP_VARIANT", "") or "enterprise").strip().lower(),
         compose_profiles=[p.strip() for p in profiles_env.split(",") if p.strip()],
         catalog=catalog_metadata(),

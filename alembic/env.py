@@ -32,10 +32,28 @@ try:
     log.info("Successfully imported database metadata.")
     # Ensure all models are imported so Base.metadata is populated
     import app.infrastructure.database.models  # noqa: F401 — registers all models with Base.metadata
+    import app.infrastructure.governance.models  # noqa: F401 — split governance models use the same Base
+    import app.pentest.models  # noqa: F401 — the pentesting engine models
+    from app.infrastructure.database.schema_contracts import (
+        register_schema_contracts,
+    )
+
+    register_schema_contracts()
 
     # Migrations are intentionally isolated from application Settings so the
     # hook needs only a database URL, never broker/auth/provider credentials.
     alembic_db_url = os.environ.get("ALEMBIC_DATABASE_URL")
+    alembic_db_url_file = os.environ.get("ALEMBIC_DATABASE_URL_FILE")
+    if alembic_db_url and alembic_db_url_file:
+        raise ValueError(
+            "ALEMBIC_DATABASE_URL and ALEMBIC_DATABASE_URL_FILE are mutually exclusive"
+        )
+    if alembic_db_url_file:
+        url_path = Path(alembic_db_url_file)
+        mode = url_path.stat().st_mode & 0o777
+        if mode & 0o077:
+            raise ValueError("ALEMBIC_DATABASE_URL_FILE must not be group/world accessible")
+        alembic_db_url = url_path.read_text(encoding="utf-8").strip()
     if not alembic_db_url:
         # Keep Alembic independent from application Settings while preserving
         # the documented local-Compose fallback. Production supplies the
@@ -51,7 +69,8 @@ try:
         missing = [name for name in required if not os.environ.get(name)]
         if missing:
             raise ValueError(
-                "ALEMBIC_DATABASE_URL or all migration POSTGRES_* variables "
+                "ALEMBIC_DATABASE_URL, ALEMBIC_DATABASE_URL_FILE, or all migration "
+                "POSTGRES_* variables "
                 f"are required; missing: {', '.join(missing)}"
             )
         user = urllib.parse.quote(os.environ["POSTGRES_USER"], safe="")

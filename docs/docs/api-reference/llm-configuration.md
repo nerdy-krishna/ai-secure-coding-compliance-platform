@@ -154,6 +154,18 @@ Existing usage events retain their original snapshot.
 
 Deletes an LLM configuration by its unique ID.
 
+A configuration is registration data — an endpoint and a credential — so
+withdrawing it is not refused for having been *used*. Records that referred to
+it keep their history and simply stop pointing at it: a finished scan, chat
+session, or pentest model-call audit survives, and which model a call actually
+used stays recoverable from the usage ledger (`provider`, `requested_model`,
+`resolved_models`). Price overrides belong to the configuration and are removed
+with it.
+
+Only *live* work is refused, because a running scan or pentest engagement
+resolves its model on each call and would break underneath it. The `409` names
+the work so you know what to wait for or cancel.
+
 -   **Endpoint:** `DELETE /{config_id}`
 -   **Permissions:** Superuser
 -   **URL Parameters:**
@@ -161,3 +173,6 @@ Deletes an LLM configuration by its unique ID.
 -   **Response:**
     -   `204 No Content`: If the deletion was successful.
     -   `404 Not Found`: If no configuration with the given ID exists.
+    -   `409 Conflict`: A scan, RAG preprocessing job, or pentest engagement is
+        still running on this configuration. The reason names it; completed
+        work never blocks a deletion.

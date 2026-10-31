@@ -51,7 +51,7 @@ flowchart LR
     FD -- "HTTP POST<br/>application/json" --> Loki
     Loki -- "LogQL" --> Graf
     Graf --> Alerts
-    Op -- "browser :3000" --> Graf
+    Op -- "browser /grafana/ (ui nginx proxy)" --> Graf
 
     SDK -- "OTel spans / Langfuse SDK<br/>HTTPS · prompt/response masked" --> LFW
     LFW --> LFP

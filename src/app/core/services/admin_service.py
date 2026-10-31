@@ -164,16 +164,40 @@ class AdminService:
     async def delete_config(
         self, config_id: uuid.UUID, actor_user_id: Optional[str] = None
     ) -> bool:
-        """Deletes an LLM configuration."""
+        """Deletes an LLM configuration, keeping the history that referred to it.
+
+        The operator registers configurations and must be able to withdraw one at
+        any time, so a deletion is not refused merely for being *referenced*.
+        Referrers are history: `scans` records the model it ran with, chat sessions
+        the model they were created for, and the pentest model-call audit the model
+        it audited. Those pointers are cleared by the foreign keys, while the record
+        that a model was used survives in `llm_usage_events` (provider,
+        requested_model, resolved_models) and `llm_interactions`.
+
+        Live work is different. A scan that is still running resolves its model at
+        each call, so withdrawing the configuration underneath it would fail that
+        scan rather than merely orphan a record. Only that is refused, and the
+        reason names the work so the operator knows what to wait for.
+        """
         logger.info(
             "Deleting LLM configuration.",
             extra={"config_id": str(config_id), "actor_user_id": actor_user_id},
         )
         try:
+            conflict = await self.llm_repo.describe_active_usage(config_id)
+            if conflict is not None:
+                raise HTTPException(status_code=409, detail=conflict)
             deleted = await self.llm_repo.delete(config_id)
+        except HTTPException:
+            raise
         except IntegrityError as e:
-            detail = "Cannot delete this configuration — it is still referenced by scans or chat sessions. Remove those references first."
-            logger.info(
+            # Every referrer clears its pointer instead of refusing, so a constraint
+            # failure here means a new referrer was added without one.
+            detail = (
+                "Cannot delete this configuration — a dependent record still forbids "
+                "it, and that referrer needs to clear its pointer on delete."
+            )
+            logger.warning(
                 "LLM config delete rejected by FK constraint: %s",
                 str(e),
                 extra={"action": "delete_config", "config_id": str(config_id)},

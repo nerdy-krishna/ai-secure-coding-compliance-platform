@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
 
 import boto3
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from app.config.config import Settings, settings
+if TYPE_CHECKING:
+    from app.config.config import Settings
 
 _WRAP_AAD = b"sccap:evidence:data-key:v1"
 
@@ -227,7 +228,11 @@ class RotatingKeyProvider:
         return key_id != self.current_key_id
 
 
-def build_key_provider(config: Settings = settings) -> KeyProvider:
+def build_key_provider(config: Settings | None = None) -> KeyProvider:
+    if config is None:
+        from app.config.config import settings  # noqa: PLC0415
+
+        config = settings
     if config.EVIDENCE_KEY_PROVIDER == "aws_kms":
         if not config.EVIDENCE_KMS_KEY_ID:
             raise RuntimeError("EVIDENCE_KMS_KEY_ID is required for AWS KMS.")

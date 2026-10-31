@@ -15,8 +15,6 @@ from collections.abc import Iterator, Mapping, MutableMapping
 from datetime import datetime, timezone
 from typing import Any
 
-from app.config.config import settings
-
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
@@ -116,6 +114,8 @@ def safe_attributes(attributes: Mapping[str, Any] | None) -> dict[str, Any]:
 
 def configure_otel(service_name: str | None = None) -> bool:
     """Configure one OTLP trace/metric provider per process, fail-open."""
+    from app.config.config import settings  # noqa: PLC0415
+
     global _configured, _disabled, _meter, _tracer, _meter_provider, _trace_provider
     if _configured:
         return True

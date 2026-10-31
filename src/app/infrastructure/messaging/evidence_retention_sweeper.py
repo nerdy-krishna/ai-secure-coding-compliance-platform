@@ -132,6 +132,12 @@ async def _delete_orphan_uploads() -> int:
     deleted = 0
     async with AsyncSessionLocal() as db:
         for object_key, object_version in candidates:
+            # Capability 13 export artifacts and immutable redaction children
+            # have their own digest-bound retention ledger.  Treating them as
+            # legacy evidence orphans would bypass legal holds, exact-version
+            # absence proofs, and crypto-shredding ordering.
+            if "/capability13/" in object_key:
+                continue
             exists = await db.scalar(
                 select(db_models.EvidenceObject.id).where(
                     db_models.EvidenceObject.object_key == object_key,

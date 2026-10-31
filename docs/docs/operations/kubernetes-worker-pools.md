@@ -12,10 +12,13 @@ single-node evaluation target.
 - Prometheus Operator CRDs when `monitoring.prometheusRule.enabled=true`.
 - RabbitMQ Prometheus detailed metrics enabled for
   `rabbitmq_detailed_queue_head_message_timestamp`.
-- Six separately managed Secrets named by `runtime.apiSecret`,
+- Separately managed core Secrets named by `runtime.apiSecret`,
   `scannerSecret`, `llmSecret`, `reportSecret`, `unifiedSecret`, and
-  `migrationSecret`. Never put secret values in Helm values or reuse the
-  unified Secret for a least-privilege pool.
+  `migrationSecret`. Enabled Pentesting components also require their own
+  `runnerV3Secret`, `pentestControllerSecret`, `pentestToolWorkerSecret`,
+  `pentestVerificationSecret`, and `pentestSessionBrokerSecret`. Never put
+  secret values in Helm values or reuse a broader Secret for a
+  least-privilege pool.
 
 Put non-secret connection names, ports, queue names, feature flags, and public
 URLs in `runtime.existingConfigMap`. Secret projections are:
@@ -28,12 +31,24 @@ URLs in `runtime.existingConfigMap`. Secret projections are:
 | report | DB/Rabbit credentials, settings-required SCCAP keys, evidence/KMS credentials | LLM/provider, SMTP, scanner-source credentials |
 | unified | union required by all worker workloads; use only for compatibility/bridge | API-only SMTP/integration credentials |
 | migration | `ALEMBIC_DATABASE_URL` only | RabbitMQ, auth, provider, evidence, SMTP, integration credentials |
+| Pentesting runner V3 | only its execution queue, gateway authentication and required runtime configuration | controller, tool-worker, identity, broker, KMS and verifier authority |
+| Pentesting controller | its database, bounded controller queue and optional configured controller model reference | target, adapter, identity-runtime, broker, KMS and verifier-queue authority |
+| Pentesting tool worker | its tool queue, gateway token, task-verification keys and result-signing seed | database, identity secret material, Session Broker database role, STS and verifier-queue authority |
+| Pentesting verification | C6 database role, `pentest_verification_queue_v1` credential and locator-verification keys | API auth, target routes, evidence-store credentials, identity secrets, broker, KMS and model authority |
+| Pentesting Session Broker | its narrow C7 database role only; TLS keys, projected TokenReview/STS tokens and pinned trust bundles use dedicated mounts | API/user auth, general queue, target, finding, severity, coverage and verifier authority |
 
 LLM provider keys are normally encrypted database configuration and therefore
 do not belong in any pod environment. If a deployment adds an environment-only
 provider credential, project it only into the LLM and unified Secrets. Missing
 required settings fail pod startup; do not solve that by sharing a superset
 Secret.
+
+The identity-runtime Pod does not use a release-wide runtime Secret. Its
+one-Execution A16 private key is generated in process, and its bounded service
+account tokens are explicit read-only projected volumes. The Session Broker,
+not the identity Pod, owns the single STS exchange. Identity-aware Pentesting
+components remain disabled until the complete Capability 6/7 qualification
+matrix passes.
 
 Render and validate before each release:
 

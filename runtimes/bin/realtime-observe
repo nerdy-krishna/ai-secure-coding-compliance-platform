@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Thin entrypoint for the realtime-observe adapter runtime.
+
+The chart runs this executable with `--kubernetes-attach-v1` (stdin/stdout
+attach protocol) or `--invocation-stdin`. argv is read by the shared
+`entrypoint.run_adapter_cli`; nothing here interprets untrusted input.
+"""
+from app.infrastructure.pentesting.tool_worker.adapter_processes.realtime import main
+
+if __name__ == "__main__":
+    main()

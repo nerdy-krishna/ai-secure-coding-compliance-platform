@@ -283,7 +283,7 @@ export const FrameworkIngestionModal: React.FC<FrameworkIngestionModalProps> = (
             }}
           >
             {isEdit
-              ? "Update your framework by adding language-specific patterns. Use existing documents or upload a new CSV."
+              ? "Update your framework by adding language-specific patterns. Use the existing policies or upload a new CSV."
               : "Upload a CSV with your security standards. SCCAP will generate code patterns for the selected languages."}
           </div>
 
@@ -336,7 +336,7 @@ export const FrameworkIngestionModal: React.FC<FrameworkIngestionModalProps> = (
             </span>
             {!file && isEdit && (
               <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
-                Leave empty to reuse existing documents from previous jobs.
+                Leave empty to reuse the policies from previous ingestion runs.
               </span>
             )}
           </div>

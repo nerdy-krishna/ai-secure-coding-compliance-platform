@@ -11,11 +11,18 @@ import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDebounce } from "../../shared/hooks/useDebounce";
 import { scanService } from "../../shared/api/scanService";
+import { dashboardService } from "../../shared/api/dashboardService";
+import { ruleSourcesService } from "../../shared/api/ruleSourcesService";
+import { useAuth } from "../../shared/hooks/useAuth";
+import { Permission, hasPermission } from "../../shared/lib/permissions";
+import { useUsageTotals } from "../../shared/hooks/useUsageTotals";
+import { sharedTiles, type Tile } from "../../shared/ui/OverviewTiles";
 import type {
   ProjectHistoryItem,
   ScanHistoryItem,
 } from "../../shared/types/api";
 import { SevBar } from "../../shared/ui/DashboardPrimitives";
+import { PageHeader } from "../../shared/ui/PageHeader";
 import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import { useToast } from "../../shared/ui/Toast";
@@ -35,15 +42,6 @@ function formatWhen(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString();
 }
 
-// Inverted from dashboard: the RiskRing reads "higher is better"; the
-// progress bar on the card reads "higher is worse". Convert here so a
-// posture score of 100 shows an empty bar.
-function exposureColor(exposure: number): string {
-  if (exposure >= 75) return "var(--critical)";
-  if (exposure >= 50) return "var(--high)";
-  if (exposure >= 25) return "var(--medium)";
-  return "var(--success)";
-}
 
 function latestScan(p: ProjectHistoryItem): ScanHistoryItem | null {
   const sorted = [...p.scans].sort(
@@ -63,9 +61,20 @@ const ProjectsPage: React.FC = () => {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
 
+  const { user } = useAuth();
+  const isAdmin = hasPermission(user?.permissions, Permission.platformConfigManage);
+
   const { data, isLoading, isError } = useQuery({
     queryKey: ["projects", debouncedSearch],
     queryFn: () => scanService.getProjectHistory(1, 100, debouncedSearch || undefined),
+  });
+  // The same tiles the home overview shows, on the page an operator actually
+  // works from, so the numbers never need a trip back to the dashboard.
+  const statsQ = useQuery({ queryKey: ["dashboard", "stats"], queryFn: dashboardService.getStats });
+  const sourcesQ = useQuery({
+    queryKey: ["dashboard", "rule-sources"],
+    queryFn: () => ruleSourcesService.listSources(),
+    enabled: isAdmin,
   });
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -90,46 +99,121 @@ const ProjectsPage: React.FC = () => {
   };
 
   const projects = useMemo(() => data?.items ?? [], [data]);
+  const stats = statsQ.data;
+  const sources = sourcesQ.data ?? [];
+  const scanUsage = useUsageTotals("scan");
+  const scansQ = useQuery({
+    queryKey: ["dashboard", "scans-window"],
+    queryFn: () => scanService.getScanHistory(1, 100),
+  });
+  const scansWindow = scansQ.data?.items ?? [];
+  const scansThisWindow = scansQ.data?.total ?? scansWindow.length;
+  const completedScans = scansWindow.filter((scan) => scan.status === "COMPLETED").length;
+  const openFindings = stats?.open_findings;
+  const criticalHigh = (openFindings?.critical ?? 0) + (openFindings?.high ?? 0);
+  const failedSources = sources.filter((source) => source.last_sync_status === "failed");
+  const enabledSources = sources.filter((source) => source.enabled);
+
+  const tiles = sharedTiles({
+    projects: data?.total ?? projects.length,
+    projectsSub: "repositories under scan",
+    runsLabel: "Scans",
+    runs: scansThisWindow,
+    runsSub: `${completedScans} completed`,
+    findings: (openFindings?.critical ?? 0) + (openFindings?.high ?? 0) +
+      (openFindings?.medium ?? 0) + (openFindings?.low ?? 0) +
+      (openFindings?.informational ?? 0),
+    findingsSub: criticalHigh ? `${criticalHigh} critical/high` : "none critical",
+    findingsTone: criticalHigh ? "bad" : undefined,
+    tokens: scanUsage.data,
+    cost: scanUsage.data.cost_usd,
+  }).concat([
+    {
+      label: "Semgrep sources",
+      value: isAdmin ? `${enabledSources.length}/${sources.length}` : "—",
+      sub: failedSources.length
+        ? `${failedSources.length} failed sync`
+        : isAdmin
+          ? `${sources.reduce((total, source) => total + (source.rule_count ?? 0), 0).toLocaleString()} rules`
+          : "admin only",
+      tone: failedSources.length ? "bad" : enabledSources.length ? "ok" : "warn",
+      icon: <Icon.Code size={15} />,
+    },
+    {
+      label: "Scans this month",
+      value: String(stats?.scans_this_month ?? 0),
+      sub: stats ? `≈$${stats.cost_this_month_usd.toFixed(2)} spent` : undefined,
+      icon: <Icon.Clock size={15} />,
+    },
+    {
+      label: "Fixes ready",
+      value: String(stats?.fixes_ready ?? 0),
+      sub: "awaiting review",
+      tone: stats?.fixes_ready ? "warn" : undefined,
+      icon: <Icon.Check size={15} />,
+    },
+  ] as Tile[]);
 
   return (
-    <div className="fade-in" style={{ display: "grid", gap: 16 }}>
-      <div>
-        <h1 style={{ color: "var(--fg)" }}>Projects</h1>
-        <div
-          className="project-page-toolbar"
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            marginTop: 8,
-          }}
-        >
-          <span style={{ color: "var(--fg-muted)", fontSize: 13 }}>
-            {isLoading
-              ? "Loading…"
-              : `${data?.total ?? 0} project${data?.total === 1 ? "" : "s"}`}
-          </span>
-          <div className="project-page-actions" style={{ display: "flex", gap: 8 }}>
-            <div className="input-with-icon project-page-search">
-              <Icon.Search size={14} />
-              <input
-                className="sccap-input"
-                placeholder="Search projects…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ paddingLeft: 32 }}
-              />
-            </div>
+    <div className="c13-page pentest-landing fade-in">
+      <PageHeader
+        crumbs={[
+          { label: "Dashboard", to: "/account/dashboard" },
+          { label: "Code scanning", to: "/submission/submit" },
+          { label: "Projects & Scans" },
+        ]}
+        title="Projects & Scans"
+        subtitle="Repositories under scan, and what the latest assessment of each found."
+        actions={
+          <>
+            <Link className="sccap-btn" to="/account/history">
+              Submission History
+            </Link>
             <button
-              className="sccap-btn sccap-btn-primary"
-              onClick={() => { setNewName(""); setCreateOpen(true); }}
+              className="sccap-btn"
+              onClick={() => {
+                setNewName("");
+                setCreateOpen(true);
+              }}
             >
-              <Icon.Plus size={13} /> New project
+              <Icon.Plus size={13} />New project
             </button>
+            <Link className="sccap-btn sccap-btn-primary" to="/submission/submit">
+              <Icon.Plus size={13} />New scan
+            </Link>
+          </>
+        }
+      />
+
+      <div className="stat-grid">
+        {tiles.map((tile) => (
+          <div key={tile.label} className={`stat-card${tile.tone ? ` is-${tile.tone}` : ""}`}>
+            <div className="stat-icon">{tile.icon}</div>
+            <div>
+              <div className="stat-value">{tile.value}</div>
+              <div className="stat-label">{tile.label}</div>
+              {tile.sub && <div className="stat-sub">{tile.sub}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <section className="sccap-card">
+        <div className="pentest-table-head">
+          <h2 style={{ margin: 0 }}>
+            {isLoading ? "Projects" : `${data?.total ?? 0} project${data?.total === 1 ? "" : "s"}`}
+          </h2>
+          <div className="input-with-icon project-page-search">
+            <Icon.Search size={14} />
+            <input
+              className="sccap-input"
+              placeholder="Search projects…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ paddingLeft: 32 }}
+            />
           </div>
         </div>
-      </div>
 
       {isError ? (
         <div
@@ -184,18 +268,10 @@ const ProjectsPage: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-            gap: 14,
-          }}
-        >
+        <div className="entity-grid">
           {projects.map((p) => {
             const latest = latestScan(p);
             const stats = p.stats;
-            const exposure = stats ? 100 - stats.risk_score : 0;
-            const color = exposureColor(exposure);
             const totalFindings = stats
               ? stats.open_findings.critical +
                 stats.open_findings.high +
@@ -264,28 +340,6 @@ const ProjectsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 11.5,
-                    color: "var(--fg-muted)",
-                    marginBottom: 6,
-                  }}
-                >
-                  <span>Posture score</span>
-                  <span style={{ fontWeight: 600, color }}>
-                    {stats ? stats.risk_score : "—"}
-                  </span>
-                </div>
-                <div className="sccap-progress" style={{ marginBottom: 12 }}>
-                  <span
-                    style={{
-                      width: stats ? `${exposure}%` : "0%",
-                      background: color,
-                    }}
-                  />
-                </div>
                 <SevBar
                   crit={stats?.open_findings.critical}
                   high={stats?.open_findings.high}
@@ -323,6 +377,7 @@ const ProjectsPage: React.FC = () => {
           })}
         </div>
       )}
+      </section>
 
       <Modal
         open={createOpen}

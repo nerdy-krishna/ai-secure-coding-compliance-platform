@@ -12,6 +12,7 @@ from psycopg.errors import DuplicateColumn
 from starlette.responses import JSONResponse
 
 from app.api.v1.routers.projects import router as projects_router
+from app.api.v1.routers.system_info import router as system_info_router
 from app.api.v1.routers.admin import llm_router
 from app.api.v1.routers.admin_frameworks import framework_router
 from app.api.v1.routers.admin_agents import agent_router
@@ -22,7 +23,7 @@ from app.api.v1.routers.chat import router as chat_router
 from app.api.v1.routers.compliance import router as compliance_router
 from app.api.v1.routers.features import router as features_router
 from app.api.v1.routers.admin_features import router as admin_features_router
-from app.api.v1.routers.pentesting import router as pentesting_router
+from app.api.v1.routers.pentest import router as pentest_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.browser_session import router as browser_session_router
 from app.api.v1.routers.sessions import router as sessions_router
@@ -115,6 +116,9 @@ async def lifespan(app: FastAPI):
             session,
             enforce=str(getattr(settings, "ENVIRONMENT", "")).lower() == "production",
         )
+
+    # The old pentesting verification catalogs were dropped with the
+    # better-pentester migration; there is nothing to seed.
 
     # Lifespan-health observability (V14.1.2): announce hydration entry at
     # WARNING so the line survives even when admins set system.log_level to
@@ -1079,6 +1083,8 @@ app.include_router(projects_router, prefix="/api/v1", tags=["Submissions"])
 app.include_router(features_router, prefix="/api/v1", tags=["Features"])
 # Admin feature-flag management (superuser-only) — always mounted.
 app.include_router(admin_features_router, prefix="/api/v1")
+# Build/version reporting + GitHub release check (read-only, no self-update).
+app.include_router(system_info_router, prefix="/api/v1", tags=["System"])
 
 
 def _include_if_enabled(feature: str, *args, **kwargs) -> None:
@@ -1093,9 +1099,9 @@ def _include_if_enabled(feature: str, *args, **kwargs) -> None:
         logger.info("startup.features.router_skipped", extra={"feature": feature})
 
 
-# Foundation 0 Pentesting contract discovery. Runtime assessment behavior is
-# introduced only by later foundations.
-_include_if_enabled("pentesting", pentesting_router, prefix="/api/v1")
+# Pentesting engine. Runtime assessment behavior is feature-gated; the engine
+# container executes runs and streams events through the shared database.
+_include_if_enabled("pentesting", pentest_router)
 
 
 # Router for managing LLM Configurations

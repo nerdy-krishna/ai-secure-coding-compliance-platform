@@ -34,7 +34,7 @@ docker compose down -v                         # also removes volumes (DESTRUCTI
 | Backend API | `http://localhost/api/v1/…` |
 | Swagger UI | `http://localhost/docs` |
 | ReDoc | `http://localhost/redoc` |
-| Grafana | printed at the end of `setup.sh` (defaults to `http://localhost:3000`) |
+| Grafana | `<frontend>/grafana/` (proxied by the `ui` container), e.g. `https://your-domain/grafana/`; the loopback port 3000 stays bound for `ssh -L` fallback |
 | RabbitMQ management | `http://localhost:15672` (credentials in `.env`) |
 | MCP server | `http://localhost/mcp` (JWT auth) |
 

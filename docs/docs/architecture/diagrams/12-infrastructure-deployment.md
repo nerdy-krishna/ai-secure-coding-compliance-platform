@@ -155,7 +155,7 @@ flowchart TB
 | `langfuse-postgres` | `postgres@sha`                                                       | 5432                    | none                         | `pg_isready -U langfuse -d langfuse`                       | `langfuse_postgres_data:/var/lib/postgresql/data`                                                                  |
 | `langfuse-clickhouse` | `clickhouse/clickhouse-server@sha`                                 | 8123, 9000              | none                         | `wget /ping`                                              | `langfuse_clickhouse_data:/var/lib/clickhouse`                                                                     |
 | `langfuse-redis`    | `redis@sha`                                                          | 6379                    | none                         | `redis-cli -a $REDIS_PASSWORD ping`                        | `langfuse_redis_data:/data`                                                                                        |
-| `langfuse-minio`    | `minio/minio@sha`                                                    | 9000, 9001              | none                         | `mc ready local`                                          | `langfuse_minio_data:/data`                                                                                        |
+| `langfuse-minio`    | `zenko/cloudserver@sha` (replaces `minio/minio`, whose images now require auth) | 8000                    | none                         | `curl /_/healthcheck`                                    | `langfuse_minio_data:/data`, `langfuse_minio_meta:/metadata`                                                    |
 | `langfuse-web`      | `langfuse/langfuse@sha`                                              | 3000                    | 3001 (lo)                    | n/a                                                        | none (stateless)                                                                                                   |
 | `langfuse-worker`   | `langfuse/langfuse-worker@sha`                                       | none                    | none                         | n/a                                                        | none                                                                                                                |
 
@@ -243,8 +243,7 @@ Persistence is the 9 named Docker volumes. There is no built-in cron backup — 
 
 | Path                                       | Purpose                                                                                   |
 |--------------------------------------------|-------------------------------------------------------------------------------------------|
-| `.github/workflows/ci.yml`                 | PR + push: ruff 0.11.11 · black 25.1.0 · poetry lock check · bandit · pip-audit · ESLint · Vite build |
-| `.github/workflows/docs.yml`               | mkdocs build                                                                              |
+| *No CI workflows*                          | The repository ships none: lint, tests, docs build and Docker builds are run by the operator |
 | `.pre-commit-config.yaml`                  | end-of-file-fixer · trailing-whitespace · check-merge-conflict · ruff · black · gitleaks 8.21.2 |
 
 ### No Kubernetes / Helm / Terraform
@@ -265,4 +264,4 @@ The current deployment story is Docker Compose on a single host (laptop, VM, or 
 - `setup.sh`, `setup.bat`
 - `scripts/*.py`
 - `.env.example`
-- `.github/workflows/*.yml`, `.pre-commit-config.yaml`
+- `.pre-commit-config.yaml` (local hooks only; no CI workflows)

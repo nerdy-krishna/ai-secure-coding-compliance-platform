@@ -1837,7 +1837,7 @@ const SubmitPage: React.FC = () => {
                   />
                   <span>
                     <span style={{ fontWeight: 500 }}>
-                      Deep vendor/static asset scan
+                      Scan vendor and generated files too
                     </span>
                     <div
                       style={{
@@ -1846,9 +1846,12 @@ const SubmitPage: React.FC = () => {
                         color: "var(--fg-subtle)",
                       }}
                     >
-                      Includes minified/vendor/static assets in deeper Semgrep and
-                      LLM routing. Use for bundled client-side reviews; expect
-                      more cost, time, and noise.
+                      By default only your own source is analysed; dependencies
+                      (<code>node_modules</code>, <code>site-packages</code>),
+                      generated bundles and minified output get a secrets scan only.
+                      Enable this to run Semgrep and the LLM over them as well —
+                      useful for vendored code you cannot upgrade, but slower,
+                      costlier and noisier.
                     </div>
                   </span>
                 </label>

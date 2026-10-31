@@ -108,7 +108,11 @@ MCP, and admin authoring may be enabled according to dependency rules.
 
 ## Current verification posture
 
-CI currently enforces backend formatting/lint, the focused replacement unit suite, frontend
-compilation, dependency lock consistency, security checks, and Docker image construction. A strict
-documentation build and generated OpenAPI drift check are not yet CI gates. Broader database,
-worker, browser, tenancy, and event-stream coverage is still being added at verified production seams.
+CI enforces backend formatting/lint, backend unit contracts, a Postgres + RabbitMQ + worker
+integration job (approval-gate resume on one durable graph thread, RabbitMQ outage and outbox
+recovery), frontend compilation with deterministic bundle budgets, authenticated Playwright
+lifecycle regressions, a strict documentation build, generated OpenAPI drift, dependency lock
+consistency, and security checks (Bandit, pip-audit, Gitleaks).
+
+See [Production status and roadmap](../roadmap.md) for what remains open; that page is the single
+source of truth for pending work.

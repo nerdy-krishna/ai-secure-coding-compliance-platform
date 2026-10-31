@@ -24,6 +24,17 @@ const EVENT_FILTERS: { value: string; label: string }[] = [
   { value: "auth.provider.deleted", label: "Provider deleted" },
 ];
 
+/** `YYYY-MM-DD HH:MM:SS` — an audit trail needs seconds, not "4h ago". */
+function exactTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 60_000) return "just now";
@@ -108,22 +119,37 @@ const SsoAuditPage: React.FC = () => {
             <tbody>
               {data.map((row) => (
                 <tr key={row.id}>
-                  <td style={{ color: "var(--fg-muted)", fontSize: 12.5 }} title={row.ts}>
-                    {relativeTime(row.ts)}
+                  <td className="audit-when" title={`${row.ts} · ${relativeTime(row.ts)}`}>
+                    {exactTime(row.ts)}
                   </td>
                   <td>
                     <span className={`chip ${eventChip(row.event)}`}>
                       {eventIcon(row.event)} {row.event}
                     </span>
                   </td>
-                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                    {row.user_id ? `#${row.user_id}` : row.email_hash ? `hash:${row.email_hash.slice(0, 12)}` : "—"}
+                  <td className="audit-user" title={row.user_email ?? (row.user_id ? `user #${row.user_id}` : undefined)}>
+                    {row.user_email ? (
+                      row.user_email
+                    ) : row.user_id ? (
+                      <span className="pentest-muted">deleted user #{row.user_id}</span>
+                    ) : row.email_hash ? (
+                      <span className="pentest-muted">hash:{row.email_hash.slice(0, 12)}</span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--fg-muted)" }}>
                     {row.ip ?? "—"}
                   </td>
-                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-muted)", maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {row.details ? JSON.stringify(row.details) : ""}
+                  <td className="audit-details">
+                    {row.details ? (
+                      <details>
+                        <summary>{summariseDetails(row.details)}</summary>
+                        <pre>{JSON.stringify(row.details, null, 2)}</pre>
+                      </details>
+                    ) : (
+                      ""
+                    )}
                   </td>
                 </tr>
               ))}
@@ -134,6 +160,21 @@ const SsoAuditPage: React.FC = () => {
     </div>
   );
 };
+
+/** Dotted keys joined as `k=v`, truncated only in the collapsed summary. */
+function summariseDetails(details: Record<string, unknown>): string {
+  const parts = Object.entries(details).map(([key, value]) => {
+    const rendered =
+      value === null || value === undefined
+        ? "—"
+        : typeof value === "object"
+          ? JSON.stringify(value)
+          : String(value);
+    return `${key}=${rendered}`;
+  });
+  const line = parts.join("  ");
+  return line.length > 90 ? `${line.slice(0, 90)}…` : line;
+}
 
 function eventChip(event: string): string {
   if (event.endsWith("success") || event === "sso.linked") return "chip-success";

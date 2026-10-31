@@ -1174,6 +1174,10 @@ class AnalysisResultDetailResponse(BaseModel):
     # the scan-status page to decide if a CANCELLED scan can offer manual
     # resume/restart controls.
     has_resumable_artifacts: bool = False
+    # Seconds this scan actually worked, excluding the time it sat at an approval
+    # gate waiting for a human. `created_at → completed_at` is wall clock and
+    # overstates duration by the entire review wait.
+    active_processing_seconds: Optional[float] = None
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing
@@ -1211,6 +1215,11 @@ class PrescanFindingItem(BaseModel):
     scanner_rule_id: Optional[str] = None
     cwe: Optional[str] = None
     cve_id: Optional[str] = None
+    # The exact source line the scanner points at, so the operator can see what
+    # is being flagged instead of guessing from a line number.
+    vulnerable_snippet: Optional[str] = None
+    # Full-file language, for syntax-neutral rendering of the snippet.
+    language: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -1301,6 +1310,10 @@ class ScanHistoryItem(BaseModel):
     total_findings: Optional[int] = None
     severity_counts: Optional[Dict[str, int]] = None
     has_resumable_artifacts: bool = False
+    # Seconds this scan actually worked, excluding the time it sat at an approval
+    # gate waiting for a human. `created_at → completed_at` is wall clock and
+    # overstates duration by the entire review wait.
+    active_processing_seconds: Optional[float] = None
     active_processing_seconds: Optional[float] = None
 
     class Config:
@@ -1316,6 +1329,27 @@ class SankeyLink(BaseModel):
     source: str
     target: str
     value: int
+
+
+class MergedFindingItem(BaseModel):
+    """One raw finding that consolidation folded into a canonical finding."""
+
+    id: int
+    title: str
+    severity: Optional[str] = None
+    file_path: str
+    line_number: Optional[int] = None
+    source: Optional[str] = None
+    corroborating_agents: List[str] = Field(default_factory=list)
+
+
+class MergedFindingsResponse(BaseModel):
+    scan_id: uuid.UUID
+    finding_id: int
+    # Number of raw findings behind this one. 1 means it passed through
+    # consolidation unchanged; >1 means it is a merge.
+    raw_count: int = 0
+    findings: List[MergedFindingItem] = Field(default_factory=list)
 
 
 class ScanFindingsDebugResponse(BaseModel):

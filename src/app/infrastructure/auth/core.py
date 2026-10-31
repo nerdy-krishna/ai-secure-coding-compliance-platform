@@ -200,6 +200,7 @@ async def current_active_user_sse(
     # we fall through to the regular fastapi-users access-token path
     # so curl smoke tests with a normal Bearer header still work.
     scan_id_str = request.path_params.get("scan_id") if request else None
+    engagement_id_str = request.path_params.get("engagement_id") if request else None
     if token and scan_id_str:
         try:
             scan_id_uuid = uuid.UUID(scan_id_str)
@@ -213,6 +214,27 @@ async def current_active_user_sse(
             logger.error(
                 "sse.auth.sse_token_read_failed",
                 extra={"method": "sse_token", "client_ip": client_ip},
+                exc_info=True,
+            )
+            user = None
+
+    if token and engagement_id_str and user is None:
+        try:
+            from app.infrastructure.auth.sse_token import verify_pentest_stream_token
+
+            engagement_id_uuid = uuid.UUID(engagement_id_str)
+            user_id, stream_tenant_id = verify_pentest_stream_token(
+                token, engagement_id_uuid
+            )
+            user = await user_manager.get(user_id)
+            request.state.sse_tenant_id = stream_tenant_id
+            method = "pentest_sse_token"
+        except (HTTPException, ValueError):
+            user = None
+        except Exception:
+            logger.error(
+                "sse.auth.pentest_token_read_failed",
+                extra={"method": "pentest_sse_token", "client_ip": client_ip},
                 exc_info=True,
             )
             user = None

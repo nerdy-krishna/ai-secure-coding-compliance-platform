@@ -160,11 +160,16 @@ class UsageBudgetService:
         expires_at: datetime | None = None,
         parent_reservation_id: uuid.UUID | None = None,
         prepriced_estimate: bool = False,
-        window_kinds: tuple[str, ...] = ("request", "scan", "day", "month"),
+        window_kinds: tuple[str, ...] | None = None,
         auto_parent: bool = True,
         commit: bool = True,
     ) -> uuid.UUID | None:
         attribution = await self.repo.resolve_attribution(context)
+        effective_windows = window_kinds or (
+            ("request", "attempt", "day", "month")
+            if context.operation_kind == "pentest"
+            else ("request", "scan", "day", "month")
+        )
         amounts = _coerce_amounts(estimate)
         now = datetime.now(timezone.utc)
         policies = await self.repo.list_active_policies(
@@ -173,7 +178,7 @@ class UsageBudgetService:
             group_ids=attribution.group_ids,
             llm_config_id=llm_config_id,
             stage=context.stage,
-            window_kinds=window_kinds,
+            window_kinds=effective_windows,
             at=now,
         )
         if not policies:
@@ -236,9 +241,10 @@ class UsageBudgetService:
                 actor_user_id=attribution.actor_user_id,
                 group_ids=attribution.group_ids,
                 scan_attempt_id=attribution.scan_attempt_id,
+                pentest_attempt_id=attribution.pentest_attempt_id,
                 llm_config_id=llm_config_id,
                 parent_reservation_id=parent_reservation_id,
-                window_kinds=window_kinds,
+                window_kinds=effective_windows,
                 at=now,
             ),
             commit=commit,

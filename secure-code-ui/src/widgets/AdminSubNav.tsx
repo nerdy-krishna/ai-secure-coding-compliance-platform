@@ -12,7 +12,7 @@ import { useFeatures } from "../shared/hooks/useFeatures";
 import { isSafeHttpUrl } from "../shared/lib/safeUrl";
 import { hasAnyPermission, Permission } from "../shared/lib/permissions";
 
-interface AdminLink {
+export interface AdminLink {
   to: string;
   label: string;
   /** When set, the link is hidden unless this feature flag is enabled. */
@@ -20,23 +20,35 @@ interface AdminLink {
   permissions?: readonly string[];
 }
 
-const ADMIN_LINKS: AdminLink[] = [
-  { to: "/admin/authorization", label: "Authorization" },
-  { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/users", label: "Users", feature: "multi_user", permissions: [Permission.identityRead] },
-  { to: "/admin/user-groups", label: "Groups", feature: "user_groups", permissions: [Permission.groupManage] },
-  { to: "/admin/tenants", label: "Tenants", feature: "multi_tenant", permissions: [Permission.platformTenantManage] },
-  { to: "/admin/agents", label: "Agents", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/frameworks", label: "Frameworks", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/prompts", label: "Prompts", feature: "admin_authoring", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/smtp", label: "SMTP", feature: "email", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/sso/providers", label: "SSO", feature: "sso", permissions: [Permission.tenantPolicyManage] },
-  { to: "/admin/scim/tokens", label: "SCIM tokens", feature: "scim", permissions: [Permission.servicePrincipalManage] },
+export const ADMIN_LINKS: AdminLink[] = [
+  // Configuration of how analysis works: frameworks (standards → agents → prompts →
+  // mappings), the deterministic detectors, and the models behind them.
+  {
+    to: "/admin/analysis",
+    label: "Framework Config",
+    feature: "admin_authoring",
+    permissions: [Permission.platformConfigManage],
+  },
+  {
+    to: "/admin/semgrep",
+    label: "Semgrep Config",
+    feature: "admin_authoring",
+    permissions: [Permission.platformConfigManage],
+  },
+  { to: "/account/settings/llm", label: "LLM Configs", permissions: [Permission.platformConfigManage] },
+  { to: "/usage", label: "Usage & Spend" },
+  // Who is in the platform, and how they prove who they are.
+  { to: "/admin/access", label: "Access & Roles", permissions: [Permission.identityRead] },
+  {
+    to: "/admin/identity",
+    label: "Identity & Email",
+    feature: "sso",
+    permissions: [Permission.tenantPolicyManage],
+  },
   { to: "/admin/integrations", label: "Integrations", permissions: [Permission.servicePrincipalManage] },
-  { to: "/admin/sso/audit", label: "Auth audit", feature: "sso", permissions: [Permission.auditRead] },
-  { to: "/admin/findings", label: "Findings", permissions: [Permission.auditRead] },
-  { to: "/account/settings/llm", label: "LLM configs", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/sso/audit", label: "Auth Audit", feature: "sso", permissions: [Permission.auditRead] },
+  // Platform-level settings.
+  { to: "/admin/platform", label: "Platform", permissions: [Permission.platformConfigManage] },
   { to: "/admin/appearance", label: "Appearance", permissions: [Permission.platformConfigManage] },
 ];
 

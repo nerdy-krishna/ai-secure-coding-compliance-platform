@@ -58,6 +58,24 @@
 .chip-warn     { color: var(--high);     background: var(--high-weak);     border-color: transparent; }
 .chip-ai       { color: var(--primary);  background: var(--primary-weak);  border-color: transparent; }
 
+/* ============ text selection ============ */
+/* The browser's default selection inherits the accent colour, which rendered
+   dark body text on an indigo block (unreadable). Pin an explicit, contrasted
+   pair per theme. */
+::selection {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+::-moz-selection {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+/* Inputs sit on --bg-elev in both themes; keep the same pair there. */
+::selection:window-inactive {
+  background: var(--primary-weak);
+  color: var(--fg);
+}
+
 /* ============ buttons ============ */
 .sccap-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -106,10 +124,49 @@
 .skip-link:focus { transform: translateY(0); }
 
 .dashboard-main {
-  width: 100%; max-width: 1440px; margin: 0 auto;
+  width: 100%; max-width: 1440px; margin: 0 auto; min-width: 0;
   padding: 24px 28px 80px; overflow-wrap: anywhere;
 }
-.top-nav-primary { max-width: 100%; overflow-x: auto; scrollbar-width: thin; }
+.dashboard-shell { display: flex; align-items: stretch; min-height: calc(100vh - 58px); }
+.side-nav {
+  position: sticky; top: 58px; align-self: flex-start; width: 236px;
+  height: calc(100vh - 58px); flex: 0 0 236px; overflow-y: auto;
+  padding: 12px 10px 28px; border-right: 1px solid var(--border);
+  background: var(--bg-soft); transition: width .18s var(--ease), flex-basis .18s var(--ease);
+}
+.side-nav.is-collapsed { width: 64px; flex-basis: 64px; }
+.side-nav-toggle {
+  width: 100%; min-height: 32px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); color: var(--fg); cursor: pointer;
+}
+.side-nav-toggle:hover { color: var(--fg); background: color-mix(in oklch, var(--bg-elev) 80%, var(--fg) 6%); }
+.side-nav-toggle svg { transition: transform .18s var(--ease); }
+/* Mirror the panel so the rail side matches the actual layout. */
+.side-nav.is-collapsed .side-nav-toggle svg { transform: scaleX(-1); }
+.side-nav-home,
+.side-nav-group a,
+.side-nav-link {
+  display: flex; align-items: center; gap: 9px;
+  margin-top: 4px; padding: 8px 10px; border-radius: 7px;
+  color: var(--fg-muted); text-decoration: none; font-size: 13px;
+}
+.side-nav-home { margin: 10px 0; font-weight: 700; color: var(--fg); }
+/* Icons never shrink and stay optically centred against the label baseline. */
+.side-nav-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; }
+.side-nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-nav-group { margin-top: 8px; }
+.side-nav-group summary { display: flex; align-items: center; gap: 8px; padding: 8px 7px; cursor: pointer; color: var(--fg-subtle); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.side-nav-group a.active { color: var(--fg); background: var(--bg-elev); box-shadow: var(--shadow-xs); }
+.side-nav-group a:hover,
+.side-nav-home:hover { color: var(--fg); background: color-mix(in oklch, var(--bg-elev) 75%, transparent); }
+/* Collapsed rail: icons only, centred, with the label kept as a tooltip. */
+.side-nav.is-collapsed .side-nav-link { justify-content: center; padding-inline: 0; }
+.side-nav.is-collapsed .side-nav-group summary { justify-content: center; padding-inline: 0; letter-spacing: 0; }
+.side-nav.is-collapsed .side-nav-icon { flex-basis: auto; }
+/* A <details> marker plus a centred icon is too much chrome in a 64px rail. */
+.side-nav.is-collapsed .side-nav-group summary { list-style: none; }
+.side-nav.is-collapsed .side-nav-group summary::-webkit-details-marker { display: none; }
 
 .sccap-state-fullscreen {
   min-height: 100vh; display: grid; place-items: center;
@@ -183,9 +240,13 @@
 }
 .scan-running-main { grid-row: 2; }
 .scan-running-status-card { flex: 1 1 280px; min-width: 0; }
+/* Content-sized pills, not full-width blocks: `flex: 1 1 150px` used to stretch
+   every control into a wide rectangle that read as a card rather than a button. */
 .scan-running-controls > .sccap-btn {
-  flex: 1 1 150px;
-  min-width: min(100%, 150px);
+  flex: 0 0 auto;
+  min-width: 0;
+  align-self: center;
+  border-radius: var(--r-sm);
 }
 .scan-stage-grid {
   display: grid;
@@ -242,6 +303,11 @@
 
 @media (max-width: 700px) {
   .dashboard-main { padding: 18px 14px 64px; }
+  .dashboard-shell { display: block; }
+  .side-nav { position: static; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .side-nav.is-collapsed { width: 100%; }
+  .side-nav.is-collapsed .side-nav-group,
+  .side-nav.is-collapsed .side-nav-home { display: none; }
   .top-nav-grid { grid-template-columns: 1fr !important; }
   .top-nav-brand { grid-column: 1; grid-row: 1; }
   .top-nav-actions {
@@ -566,6 +632,33 @@ mark.diff-hl {
 /* code blocks when used via the .mono/.code helpers — kept from
    the prototype but under a scope-safe name to avoid conflicting
    with any rules Ant pages might have. */
+/* Live activity log: monospace grid of timestamp | kind | message, sized so it
+   is readable while a scan runs and user-resizable for deep inspection. */
+.scan-activity-log {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.scan-activity-row {
+  display: grid;
+  /* Wide enough for "10:35:37 PM" on one line — it used to wrap. */
+  grid-template-columns: 92px 92px minmax(0, 1fr);
+  gap: 8px;
+  padding: 1px 0;
+  border-bottom: 1px solid transparent;
+}
+.scan-activity-row > :first-child {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.scan-activity-row:hover { background: var(--bg-soft); }
+@media (max-width: 720px) {
+  .scan-activity-row { grid-template-columns: 62px minmax(0, 1fr); }
+  .scan-activity-row > :nth-child(2) { display: none; }
+}
+
 pre.sccap-code {
   font-family: var(--font-mono);
   background: var(--bg-inset);
@@ -610,4 +703,532 @@ pre.sccap-code {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 22px;
+}
+
+
+/* ===========================================================
+   Uniform interactive controls.
+   One accent colour for every checkbox/radio/range in the app,
+   one visible focus ring, and a legible placeholder. Without this
+   the browser's default blue competed with the theme's primary.
+   =========================================================== */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--primary);
+}
+input::placeholder,
+textarea::placeholder { color: var(--fg-subtle); opacity: 1; }
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--primary));
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+/* Section headings inside cards share one size and weight everywhere. */
+.sccap-card > h2,
+.sccap-card h2.sccap-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0 0 0.35rem;
+}
+
+/* ===========================================================
+   Stat tiles and data tables.
+   Shared by the home overview and the pentesting pages so a
+   number is rendered identically wherever it appears: same
+   size, weight, colour rules and spacing.
+   =========================================================== */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xs);
+  min-width: 0;
+}
+.stat-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: var(--r-sm);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+}
+.stat-value {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stat-sub { font-size: 12px; color: var(--fg-muted); }
+.stat-card.is-ok .stat-value { color: var(--ok-ink); }
+.stat-card.is-ok .stat-icon { background: var(--success-weak); color: var(--ok-ink); }
+.stat-card.is-warn .stat-value { color: var(--medium-ink); }
+.stat-card.is-warn .stat-icon { background: var(--medium-weak); color: var(--medium-ink); }
+.stat-card.is-bad .stat-value { color: var(--critical-ink); }
+.stat-card.is-bad .stat-icon { background: var(--critical-weak); color: var(--critical-ink); }
+
+.pentest-table-wrap { width: 100%; overflow-x: auto; }
+.pentest-table,
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pentest-table th,
+.data-table th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pentest-table td,
+.data-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--fg);
+}
+.pentest-table tbody tr:hover,
+.data-table tbody tr:hover { background: var(--bg-soft); }
+.pentest-table .is-num,
+.data-table .is-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pentest-table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.pentest-page-foot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.pentest-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
+.pentest-inline-form { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+.sccap-card.is-alert { border-left: 4px solid var(--critical); margin-bottom: 16px; }
+
+/* Layout-level breadcrumb trail (one per page, drawn by the shell). */
+.page-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.page-breadcrumbs-link { color: var(--fg-muted); text-decoration: none; }
+.page-breadcrumbs-link:hover { color: var(--fg); text-decoration: underline; }
+.page-breadcrumbs-sep { color: var(--fg-subtle); }
+.page-breadcrumbs-current { color: var(--fg); font-weight: 600; }
+
+
+/* ===========================================================
+   Entity grids: projects in code scanning and in pentesting use
+   the same card so the two "Projects and scans" pages read the
+   same at a glance.
+   =========================================================== */
+.entity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.entity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xs);
+  min-width: 0;
+}
+.entity-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  min-width: 0;
+}
+.entity-card-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entity-card-stats {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  flex-wrap: wrap;
+}
+.entity-card-links { display: flex; flex-direction: column; gap: 3px; }
+.entity-card-link {
+  font-size: 12px;
+  color: var(--primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entity-card-link:hover { text-decoration: underline; }
+
+/* ============================ audit log table ============================ */
+/* Timestamps and users stay on one line; details wrap instead of truncating. */
+.audit-when {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.audit-user {
+  font-size: 12.5px;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+.audit-details { max-width: 520px; }
+.audit-details summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  list-style: none;
+}
+.audit-details summary::-webkit-details-marker { display: none; }
+.audit-details summary::before { content: "▸ "; color: var(--fg-subtle); }
+.audit-details[open] summary::before { content: "▾ "; }
+.audit-details pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border-radius: var(--r-xs);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+
+/* ============ bare form controls ============ */
+/* Unstyled <input>/<select>/<textarea> (a few admin forms use them) were rendered
+   with the browser's own colours — dark boxes on a light page. They now inherit the
+   theme, sit on a light surface, and stretch to their container so labels, fields
+   and buttons line up. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+select,
+textarea {
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.4;
+  box-sizing: border-box;
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 20%, transparent);
+}
+/* Inside a card the field fills its column, so stacked fields align edge to edge. */
+.sccap-card input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.sccap-card select,
+.sccap-card textarea { width: 100%; }
+.sccap-card label > span:first-child {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+option { background: var(--bg-elev); color: var(--fg); }
+
+/* ===========================================================
+   Ordered tabs for a multi-step configuration surface.
+   The step number states the order explicitly, because the tab
+   order *is* the workflow (standards → rules → mappings →
+   agents → prompts).
+   =========================================================== */
+.analysis-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-soft);
+}
+.analysis-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.analysis-tab:hover { background: var(--bg-elev); color: var(--fg); }
+.analysis-tab.is-active {
+  background: var(--bg-elev);
+  border-color: var(--border);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+.analysis-tab-step {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-inset);
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.analysis-tab.is-active .analysis-tab-step {
+  background: var(--primary);
+  color: var(--primary-ink);
+}
+.analysis-tab-description {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  max-width: 90ch;
+}
+.analysis-tab-panel { min-width: 0; }
+
+/* Step header above each tab: the number, the obligation and its prerequisite. */
+.analysis-step {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev);
+}
+.analysis-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  color: var(--fg);
+}
+.analysis-step-number {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--primary-ink);
+  background: var(--primary);
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+}
+.analysis-step-requires {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+.analysis-step-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+  max-width: 100ch;
+}
+
+/* Floating advisor shortcut, bottom-right on every authenticated page. */
+.advisor-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-ink);
+  box-shadow: var(--shadow-md);
+  transition: transform .15s var(--ease), box-shadow .15s var(--ease);
+}
+.advisor-fab:hover { transform: translateY(-2px) scale(1.03); box-shadow: var(--shadow-lg); }
+.advisor-fab:active { transform: translateY(0) scale(.99); }
+@media (max-width: 640px) {
+  .advisor-fab { right: 14px; bottom: 14px; width: 46px; height: 46px; }
+}
+
+/* Feature flags: two columns, one row per flag, stacking on narrow screens. */
+.feature-flag-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .feature-flag-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ============================ file coverage panel ============================ */
+.coverage-panel { margin-top: 16px; padding: 16px 18px; }
+.coverage-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.coverage-head h2 { font-size: 15px; font-weight: 700; }
+.coverage-summary { font-size: 13px; color: var(--fg-muted); }
+.coverage-summary strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+.coverage-head .sccap-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.coverage-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.coverage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+}
+.coverage-chip strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+.coverage-filters { display: flex; gap: 6px; margin: 12px 0 10px; flex-wrap: wrap; }
+.coverage-table-wrap { max-height: 26rem; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-sm); }
+.coverage-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.coverage-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 7px 10px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.coverage-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.coverage-table tr:hover td { background: var(--bg-soft); }
+.coverage-path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  max-width: 30rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.coverage-lang { color: var(--fg-muted); white-space: nowrap; }
+.coverage-reason { color: var(--fg-muted); }
+.coverage-role {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.coverage-role.is-first_party_source { background: var(--success-weak); color: var(--ok-ink); }
+.coverage-role.is-generated_asset,
+.coverage-role.is-first_party_minified_bundle { background: var(--medium-weak); color: var(--medium-ink); }
+.coverage-role.is-known_third_party_vendor,
+.coverage-role.is-unknown_third_party_vendor,
+.coverage-role.is-runtime_artifact { background: var(--bg-inset); color: var(--fg-muted); }
+.coverage-role.is-binary,
+.coverage-role.is-empty { background: var(--critical-weak); color: var(--critical-ink); }
+.coverage-status {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.coverage-status.is-scanned { color: var(--ok-ink); }
+.coverage-status.is-excluded { color: var(--fg-subtle); }
+.coverage-more { margin: 8px 0 0; font-size: 12px; color: var(--fg-muted); }
+
+/* ============================ findings swimlane ============================ */
+.swimlane-shell {
+  container-type: inline-size;
+}
+.swimlane-scroll {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: min(62vh, 620px);
+}
+/* Fullscreen: the shell becomes the viewport, the diagram fills what is left. */
+.swimlane-shell:fullscreen {
+  background: var(--bg);
+  padding: 20px;
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  align-content: start;
+}
+.swimlane-shell:fullscreen .swimlane-scroll {
+  max-height: none;
+  height: 100%;
+  min-height: 0;
+}
+.swimlane-shell:fullscreen .swimlane-scroll svg {
+  max-width: none;
 }

@@ -1,0 +1,27 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: c11-reconciler}
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app.kubernetes.io/name: c11-reconciler}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: c11-expiry}
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app.kubernetes.io/name: c11-expiry}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: c11-retention-deleter}
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app.kubernetes.io/name: c11-retention-deleter}}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: c11-retention-verifier}
+spec:
+  minAvailable: 1
+  selector: {matchLabels: {app.kubernetes.io/name: c11-retention-verifier}}

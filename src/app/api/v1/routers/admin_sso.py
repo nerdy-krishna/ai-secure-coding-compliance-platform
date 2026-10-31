@@ -140,6 +140,8 @@ class AuditRead(BaseModel):
     ts: datetime
     event: str
     user_id: Optional[int]
+    # Resolved at read time so the log shows *who* rather than an opaque id.
+    user_email: Optional[str] = None
     provider_id: Optional[uuid.UUID]
     email_hash: Optional[str]
     ip: Optional[str]
@@ -638,7 +640,25 @@ async def list_audit_events(
     stmt = stmt.limit(limit)
     result = await db.execute(stmt)
     rows = list(result.scalars().all())
-    return [AuditRead.model_validate(row) for row in rows]
+
+    # The audit row stores the user id (and a privacy-preserving email hash), so the
+    # username is joined in here for the operator reading the log.
+    user_ids = {row.user_id for row in rows if row.user_id is not None}
+    emails: dict[int, str] = {}
+    if user_ids:
+        email_rows = await db.execute(
+            select(db_models.User.id, db_models.User.email).where(
+                db_models.User.id.in_(user_ids)
+            )
+        )
+        emails = {user_id: email for user_id, email in email_rows.all()}
+
+    payloads: list[AuditRead] = []
+    for row in rows:
+        item = AuditRead.model_validate(row)
+        item.user_email = emails.get(row.user_id) if row.user_id is not None else None
+        payloads.append(item)
+    return payloads
 
 
 __all__ = ["router"]

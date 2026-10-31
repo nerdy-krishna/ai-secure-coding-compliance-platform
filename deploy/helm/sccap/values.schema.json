@@ -1,63 +1,1035 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["images", "runtime", "workerPools", "autoscaling", "drain"],
+  "required": [
+    "images",
+    "runtime",
+    "workerPools",
+    "capability13",
+    "runnerV3",
+    "pentestController",
+    "pentestVerification",
+    "pentestC67Pipeline",
+    "pentestSessionBroker",
+    "pentestIdentityRuntime",
+    "pentestToolPack",
+    "autoscaling",
+    "drain"
+  ],
   "properties": {
     "images": {
       "type": "object",
-      "required": ["api", "worker"],
+      "required": [
+        "api",
+        "worker"
+      ],
       "properties": {
-        "api": {"$ref": "#/$defs/image"},
-        "worker": {"$ref": "#/$defs/image"}
+        "api": {
+          "$ref": "#/$defs/image"
+        },
+        "worker": {
+          "$ref": "#/$defs/image"
+        }
       }
     },
     "runtime": {
       "type": "object",
-      "required": ["apiSecret", "scannerSecret", "llmSecret", "reportSecret", "unifiedSecret", "migrationSecret"],
+      "required": [
+        "apiSecret",
+        "scannerSecret",
+        "llmSecret",
+        "reportSecret",
+        "capability13ProtectedExportSecret",
+        "unifiedSecret",
+        "migrationSecret",
+        "runnerV3Secret",
+        "pentestControllerSecret",
+        "pentestToolWorkerSecret",
+        "pentestVerificationSecret",
+        "pentestC67PipelineSecret",
+        "pentestSessionBrokerSecret",
+        "pentestRelayTrustConfigMap"
+      ],
       "properties": {
-        "apiSecret": {"type": "string", "minLength": 1},
-        "scannerSecret": {"type": "string", "minLength": 1},
-        "llmSecret": {"type": "string", "minLength": 1},
-        "reportSecret": {"type": "string", "minLength": 1},
-        "unifiedSecret": {"type": "string", "minLength": 1},
-        "migrationSecret": {"type": "string", "minLength": 1}
+        "apiSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scannerSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "llmSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reportSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability13ProtectedExportSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unifiedSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "migrationSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runnerV3Secret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pentestControllerSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pentestToolWorkerSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pentestVerificationSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pentestC67PipelineSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pentestSessionBrokerSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pentestRelayTrustConfigMap": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "workerPools": {
       "type": "object",
       "properties": {
-        "splitEnabled": {"type": "boolean"},
-        "scanner": {"$ref": "#/$defs/pool"},
-        "llm": {"$ref": "#/$defs/pool"},
-        "report": {"$ref": "#/$defs/pool"}
+        "splitEnabled": {
+          "type": "boolean"
+        },
+        "scanner": {
+          "$ref": "#/$defs/pool"
+        },
+        "llm": {
+          "$ref": "#/$defs/pool"
+        },
+        "report": {
+          "$ref": "#/$defs/pool"
+        }
+      }
+    },
+    "capability13": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protectedExport"
+      ],
+      "properties": {
+        "protectedExport": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "serviceAccountName"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "serviceAccountName": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "runnerV3": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "replicas",
+        "queue",
+        "resources"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "queue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
+    },
+    "pentestController": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "replicas",
+        "queue",
+        "externalModelCidrs",
+        "internalDependencyCidrs",
+        "resources"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "queue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "externalModelCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "internalDependencyCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
+    },
+    "pentestVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "ingressEnabled",
+        "behavioralQualification",
+        "replicas",
+        "queue",
+        "leaseTtlSeconds",
+        "internalDependencyCidrs",
+        "resources"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressEnabled": {
+          "type": "boolean"
+        },
+        "behavioralQualification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "sourceContextProviderDigest",
+            "delegatedExecutionProviderDigest",
+            "sessionBaselineProviderDigest",
+            "recoveryProviderDigest",
+            "truthCommitProviderDigest",
+            "identityPlaywrightProviderDigest"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "sourceContextProviderDigest": {
+              "type": "string",
+              "pattern": "^$|^[0-9a-f]{64}$"
+            },
+            "delegatedExecutionProviderDigest": {
+              "type": "string",
+              "pattern": "^$|^[0-9a-f]{64}$"
+            },
+            "sessionBaselineProviderDigest": {
+              "type": "string",
+              "pattern": "^$|^[0-9a-f]{64}$"
+            },
+            "recoveryProviderDigest": {
+              "type": "string",
+              "pattern": "^$|^[0-9a-f]{64}$"
+            },
+            "truthCommitProviderDigest": {
+              "type": "string",
+              "pattern": "^$|^[0-9a-f]{64}$"
+            },
+            "identityPlaywrightProviderDigest": {
+              "type": "string",
+              "pattern": "^$|^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1
+        },
+        "queue": {
+          "const": "pentest_verification_queue_v1"
+        },
+        "leaseTtlSeconds": {
+          "type": "integer",
+          "minimum": 15,
+          "maximum": 300
+        },
+        "internalDependencyCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
+    },
+    "pentestC67Pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "replicas",
+        "serviceAccountName",
+        "pollIntervalSeconds",
+        "locatorSigningKeyId",
+        "internalDatabaseCidrs",
+        "resources"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "const": 1
+        },
+        "serviceAccountName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pollIntervalSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        },
+        "locatorSigningKeyId": {
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "internalDatabaseCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
+    },
+    "pentestSessionBroker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "replicas",
+        "serviceAccountName",
+        "serviceAccountUid",
+        "tlsSecretName",
+        "identityTokenAudience",
+        "brokerStsTokenAudience",
+        "brokerStsTokenExpirationSeconds",
+        "servicePort",
+        "gatewayControlServiceAccountName",
+        "gatewayControlServiceAccountUid",
+        "gatewayControlSelector",
+        "gatewayControlCallerSelector",
+        "gatewayControlTokenAudience",
+        "gatewayControlTokenExpirationSeconds",
+        "gatewayControlReplicas",
+        "gatewayControlServicePort",
+        "gatewayControlServiceAddress",
+        "gatewayControlTlsSecretName",
+        "gatewayControlClientCaConfigMap",
+        "gatewayControlPipelineClientTlsSecretName",
+        "gatewayControlServerCaConfigMap",
+        "gatewayControlServerTlsServerName",
+        "gatewayControlServerSpkiSha256",
+        "gatewayControlServerTrustBundleDigest",
+        "gatewayControlBrokerCaConfigMap",
+        "gatewayControlBrokerAddress",
+        "gatewayControlBrokerTlsServerName",
+        "gatewayControlBrokerSpkiSha256",
+        "gatewayControlBrokerTrustBundleDigest",
+        "gatewayControlResources",
+        "endpointTrustBundleConfigMap",
+        "endpointTrustBundleDigest",
+        "databaseEndpointCidrs",
+        "tokenReviewEndpointCidrs",
+        "tokenReviewAddress",
+        "tokenReviewCaConfigMap",
+        "stsEndpointCidrs",
+        "stsAddress",
+        "stsTlsServerName",
+        "stsCaConfigMap",
+        "roleArn",
+        "region",
+        "kmsKeyArn",
+        "workerCapabilityDigest",
+        "deploymentConfigurationDigest",
+        "relayReceiptPublicKeys",
+        "resources"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "const": 1
+        },
+        "serviceAccountName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "serviceAccountUid": {
+          "type": "string"
+        },
+        "tlsSecretName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identityTokenAudience": {
+          "const": "sccap-pentest-session-broker"
+        },
+        "brokerStsTokenAudience": {
+          "const": "sts.amazonaws.com"
+        },
+        "brokerStsTokenExpirationSeconds": {
+          "const": 600
+        },
+        "servicePort": {
+          "const": 8443
+        },
+        "gatewayControlServiceAccountName": {
+          "type": "string"
+        },
+        "gatewayControlServiceAccountUid": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-fA-F-]{36}$"
+        },
+        "gatewayControlSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "gatewayControlCallerSelector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "gatewayControlTokenAudience": {
+          "const": "sccap-pentest-session-broker-control"
+        },
+        "gatewayControlTokenExpirationSeconds": {
+          "const": 600
+        },
+        "gatewayControlReplicas": {
+          "const": 1
+        },
+        "gatewayControlServicePort": {
+          "const": 8444
+        },
+        "gatewayControlServiceAddress": {
+          "type": "string"
+        },
+        "gatewayControlTlsSecretName": {
+          "type": "string"
+        },
+        "gatewayControlClientCaConfigMap": {
+          "type": "string"
+        },
+        "gatewayControlPipelineClientTlsSecretName": {
+          "type": "string"
+        },
+        "gatewayControlServerCaConfigMap": {
+          "type": "string"
+        },
+        "gatewayControlServerTlsServerName": {
+          "type": "string"
+        },
+        "gatewayControlServerSpkiSha256": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$"
+        },
+        "gatewayControlServerTrustBundleDigest": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$"
+        },
+        "gatewayControlBrokerCaConfigMap": {
+          "type": "string"
+        },
+        "gatewayControlBrokerAddress": {
+          "type": "string"
+        },
+        "gatewayControlBrokerTlsServerName": {
+          "type": "string"
+        },
+        "gatewayControlBrokerSpkiSha256": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$"
+        },
+        "gatewayControlBrokerTrustBundleDigest": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$"
+        },
+        "gatewayControlResources": {
+          "type": "object"
+        },
+        "endpointTrustBundleConfigMap": {
+          "type": "string"
+        },
+        "endpointTrustBundleDigest": {
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{64}$"
+        },
+        "databaseEndpointCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tokenReviewEndpointCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tokenReviewAddress": {
+          "type": "string"
+        },
+        "tokenReviewCaConfigMap": {
+          "type": "string"
+        },
+        "stsEndpointCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "stsAddress": {
+          "type": "string"
+        },
+        "stsTlsServerName": {
+          "type": "string"
+        },
+        "stsCaConfigMap": {
+          "type": "string"
+        },
+        "roleArn": {
+          "type": "string"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"
+        },
+        "kmsKeyArn": {
+          "type": "string"
+        },
+        "workerCapabilityDigest": {
+          "type": "string"
+        },
+        "deploymentConfigurationDigest": {
+          "type": "string"
+        },
+        "relayReceiptPublicKeys": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 43
+          }
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
+    },
+    "pentestIdentityRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pentestToolPack": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "queue",
+        "minReplicas",
+        "maxReplicas",
+        "backlogTarget",
+        "oldestAgeTargetSeconds",
+        "capabilityDigest",
+        "resultSigningKey",
+        "resultSigningKeyId",
+        "supervisor",
+        "runtimeManager",
+        "runtimes"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "queue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backlogTarget": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "oldestAgeTargetSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capabilityDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "resultSigningKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resultSigningKeyId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supervisor": {
+          "$ref": "#/$defs/toolWorkload"
+        },
+        "runtimeManager": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "serviceAccountName",
+            "apiServerCidrs",
+            "jobTtlSeconds",
+            "relayImage",
+            "secretEncryptionAtRestReady",
+            "relayPublicConfig",
+            "identityRuntime"
+          ],
+          "properties": {
+            "serviceAccountName": {
+              "type": "string"
+            },
+            "apiServerCidrs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "jobTtlSeconds": {
+              "type": "integer",
+              "minimum": 60
+            },
+            "relayImage": {
+              "type": "string"
+            },
+            "secretEncryptionAtRestReady": {
+              "type": "boolean"
+            },
+            "relayPublicConfig": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "version",
+                "gatewayEndpoint",
+                "grantKeys",
+                "permitKeys"
+              ],
+              "properties": {
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "gatewayEndpoint": {
+                  "type": "string"
+                },
+                "grantKeys": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/relayPublicKey"
+                  }
+                },
+                "permitKeys": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/relayPublicKey"
+                  }
+                }
+              }
+            },
+            "identityRuntime": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "enabled",
+                "identityServiceAccountName",
+                "identityServiceAccountUid",
+                "identityTokenAudience",
+                "identityTokenExpirationSeconds",
+                "identityRuntimeMaximumSeconds",
+                "tokenIssuer",
+                "region",
+                "kmsKeyArn",
+                "sessionBrokerEndpoint",
+                "endpointTrustBundleConfigMap",
+                "endpointTrustBundleDigest",
+                "sessionBrokerCaConfigMap",
+                "kmsCaConfigMap",
+                "sessionBrokerSelector",
+                "sessionBrokerPort",
+                "identityKmsEgressCidrs",
+                "awsApiPort",
+                "taskPublicKeys",
+                "identityGrantPublicKeys",
+                "relayGrantPublicKeys"
+              ],
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "identityServiceAccountName": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "identityServiceAccountUid": {
+                  "type": "string"
+                },
+                "identityTokenAudience": {
+                  "type": "string",
+                  "minLength": 8
+                },
+                "identityTokenExpirationSeconds": {
+                  "const": 600
+                },
+                "identityRuntimeMaximumSeconds": {
+                  "const": 300
+                },
+                "tokenIssuer": {
+                  "type": "string"
+                },
+                "region": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$"
+                },
+                "kmsKeyArn": {
+                  "type": "string"
+                },
+                "sessionBrokerEndpoint": {
+                  "type": "string"
+                },
+                "endpointTrustBundleConfigMap": {
+                  "type": "string"
+                },
+                "endpointTrustBundleDigest": {
+                  "type": "string",
+                  "pattern": "^$|^[0-9a-f]{64}$"
+                },
+                "sessionBrokerCaConfigMap": {
+                  "type": "string"
+                },
+                "kmsCaConfigMap": {
+                  "type": "string"
+                },
+                "sessionBrokerSelector": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "sessionBrokerPort": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "identityKmsEgressCidrs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "awsApiPort": {
+                  "const": 443
+                },
+                "taskPublicKeys": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 43
+                  }
+                },
+                "identityGrantPublicKeys": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 43
+                  }
+                },
+                "relayGrantPublicKeys": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 43
+                  }
+                }
+              }
+            }
+          }
+        },
+        "runtimes": {
+          "type": "object",
+          "required": [
+            "playwright",
+            "zap",
+            "nuclei",
+            "nmap"
+          ],
+          "properties": {
+            "playwright": {
+              "$ref": "#/$defs/toolRuntime"
+            },
+            "zap": {
+              "$ref": "#/$defs/toolRuntime"
+            },
+            "nuclei": {
+              "$ref": "#/$defs/toolRuntime"
+            },
+            "nmap": {
+              "$ref": "#/$defs/toolRuntime"
+            }
+          }
+        }
       }
     },
     "drain": {
       "type": "object",
       "properties": {
-        "gracePeriodSeconds": {"type": "integer", "minimum": 600},
-        "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 570}
+        "gracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 600
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 570
+        }
       }
     }
   },
   "$defs": {
     "image": {
       "type": "object",
-      "required": ["repository", "tag"],
+      "required": [
+        "repository",
+        "tag"
+      ],
       "properties": {
-        "repository": {"type": "string", "minLength": 1},
-        "tag": {"type": "string", "minLength": 1, "not": {"const": "latest"}},
-        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "const": "latest"
+          }
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
       }
     },
     "pool": {
       "type": "object",
-      "required": ["queue", "minReplicas", "maxReplicas", "prefetch"],
+      "required": [
+        "queue",
+        "minReplicas",
+        "maxReplicas",
+        "prefetch"
+      ],
       "properties": {
-        "queue": {"type": "string", "minLength": 1},
-        "minReplicas": {"type": "integer", "minimum": 1},
-        "maxReplicas": {"type": "integer", "minimum": 1},
-        "prefetch": {"type": "integer", "minimum": 1, "maximum": 20}
+        "queue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prefetch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      }
+    },
+    "toolWorkload": {
+      "type": "object",
+      "required": [
+        "replicas",
+        "resources"
+      ],
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "resources": {
+          "type": "object"
+        }
+      }
+    },
+    "toolRuntime": {
+      "type": "object",
+      "required": [
+        "image",
+        "command",
+        "egressMode"
+      ],
+      "properties": {
+        "image": {
+          "type": "string"
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "egressMode": {
+          "enum": [
+            "relay",
+            "exact-pinned"
+          ]
+        }
+      }
+    },
+    "relayPublicKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key_id",
+        "status",
+        "algorithm",
+        "public_key",
+        "not_before",
+        "not_after",
+        "revoked_at",
+        "revocation_code"
+      ],
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "retiring",
+            "revoked"
+          ]
+        },
+        "algorithm": {
+          "const": "Ed25519"
+        },
+        "public_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "not_before": {
+          "type": "string",
+          "minLength": 20
+        },
+        "not_after": {
+          "type": "string",
+          "minLength": 20
+        },
+        "revoked_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revocation_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     }
   }

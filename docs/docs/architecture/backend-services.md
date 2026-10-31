@@ -26,6 +26,7 @@ All routers are prefixed with `/api/v1` and live under
 | `compliance.py` | Per-framework posture stats + RAG control listing for the Compliance page. |
 | `dashboard.py` | `/dashboard/stats` — risk score, severity bar, trend, spend. |
 | `search.py` | `/search?q=...` — grouped hits across projects / scans / findings. |
+| `pentesting.py` | Versioned Pentest Engagement/Attempt control plus Capability 13 cockpit, report/export, governance, retest, delta, and SSE routes. |
 
 ### Admin-only (superuser)
 
@@ -74,6 +75,12 @@ One repository per aggregate under
 `framework_repo`, `agent_repo`, `prompt_template_repo`,
 `llm_config_repo`, `rag_job_repo`, `system_config_repo`,
 `user_group_repo`.
+
+Pentesting repositories live under `repositories/pentesting/`. Capability 13
+uses owner-named read adapters for C6, C9, C10, and C11, and commits immutable
+history, audit, safe events, and outbox intent atomically. The API never calls a
+RabbitMQ publisher; report/export locators are published by the existing
+outbox sweeper and consumed only by the report worker pool.
 
 Repositories are intentionally small and focused on one root. The
 `user_group_repo.get_peer_user_ids(user_id)` is a good example: a

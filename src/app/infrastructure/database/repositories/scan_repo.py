@@ -60,13 +60,14 @@ class ScanRepository:
             "name": name,
             "user_id": user_id,
             "repository_url": repo_url,
+            "project_kind": "code_scan",
         }
         if tenant_id is not None:
             values["tenant_id"] = tenant_id
         insert_stmt = (
             pg_insert(db_models.Project)
             .values(**values)
-            .on_conflict_do_nothing(index_elements=["name", "user_id"])
+            .on_conflict_do_nothing(index_elements=["name", "user_id", "project_kind"])
         )
         try:
             await self.db.execute(insert_stmt)
@@ -86,7 +87,9 @@ class ScanRepository:
             )
             raise
 
-        stmt = select(db_models.Project).filter_by(name=name, user_id=user_id)
+        stmt = select(db_models.Project).filter_by(
+            name=name, user_id=user_id, project_kind="code_scan"
+        )
         result = await self.db.execute(stmt)
         project = result.scalars().first()
         if project is None:
@@ -1081,6 +1084,42 @@ class ScanRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_raw_findings_for_consolidated(
+        self,
+        scan_id: uuid.UUID,
+        *,
+        canonical_finding_id: Optional[uuid.UUID],
+        raw_finding_ids: List[uuid.UUID],
+    ) -> List[db_models.Finding]:
+        """Raw findings that were merged into one consolidated finding.
+
+        Matched two ways because both are recorded: by the canonical id the
+        consolidation pass stamped on every contributor, and by the explicit
+        ``contributing_raw_finding_ids`` list on the canonical row. Only the
+        ``raw_llm`` bucket is considered — the SAST findings are separate rows
+        that the LLM pass reads, not merge inputs.
+        """
+        conditions = []
+        if canonical_finding_id is not None:
+            conditions.append(
+                db_models.Finding.canonical_finding_id == canonical_finding_id
+            )
+        if raw_finding_ids:
+            conditions.append(db_models.Finding.raw_finding_id.in_(raw_finding_ids))
+        if not conditions:
+            return []
+        stmt = (
+            select(db_models.Finding)
+            .where(
+                db_models.Finding.scan_id == scan_id,
+                db_models.Finding.finding_bucket == "raw_llm",
+                sa.or_(*conditions),
+            )
+            .order_by(db_models.Finding.id.asc())
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_finding(self, finding_id: int) -> Optional[db_models.Finding]:
         """Retrieve a single finding by its primary key."""
         result = await self.db.execute(
@@ -1528,7 +1567,10 @@ class ScanRepository:
         """Retrieves a single project by its ID."""
         logger.debug("Fetching project from DB.", extra={"project_id": str(project_id)})
         result = await self.db.execute(
-            select(db_models.Project).filter(db_models.Project.id == project_id)
+            select(db_models.Project).filter(
+                db_models.Project.id == project_id,
+                db_models.Project.project_kind == "code_scan",
+            )
         )
         return result.scalars().first()
 
@@ -1626,6 +1668,7 @@ class ScanRepository:
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
             .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
+            .where(db_models.Project.project_kind == "code_scan")
             .where(db_models.Project.name.ilike(f"%{name_query}%"))
             .order_by(db_models.Project.name)
             .limit(10)
@@ -1735,6 +1778,7 @@ class ScanRepository:
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
             .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
+            .where(db_models.Project.project_kind == "code_scan")
         )
         if search:
             stmt = stmt.filter(db_models.Project.name.ilike(f"%{search}%"))
@@ -1758,6 +1802,7 @@ class ScanRepository:
                 self._scope_column(db_models.Project.user_id, user_id, visible_user_ids)
             )
             .where(self._scope_tenant(db_models.Project.tenant_id, tenant_id))
+            .where(db_models.Project.project_kind == "code_scan")
         )
         if search:
             stmt = stmt.filter(db_models.Project.name.ilike(f"%{search}%"))

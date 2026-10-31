@@ -73,14 +73,20 @@ class User(SQLAlchemyBaseUserTable[int], Base):
 
 class Project(Base):
     __tablename__ = "projects"
-    # `(user_id, name)` is the natural key the upsert in
+    # `(user_id, project_kind, name)` is the natural key the Code Scan upsert in
     # scan_repo.get_or_create_project relies on (V15.4.2 — atomic
     # `INSERT ... ON CONFLICT DO NOTHING` to defeat the TOCTOU race
     # between two concurrent submitters of the same project name).
     # Without this constraint Postgres rejects the ON CONFLICT clause
     # outright and every scan submission 500s.
     __table_args__ = (
-        UniqueConstraint("user_id", "name", name="uq_projects_user_id_name"),
+        UniqueConstraint(
+            "user_id", "project_kind", "name", name="uq_projects_user_kind_name"
+        ),
+        sa.CheckConstraint(
+            "project_kind IN ('code_scan', 'pentest_authority')",
+            name="ck_projects_project_kind",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -88,6 +94,11 @@ class Project(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Product-facing Code Scan projects and opaque Pentesting authority rows
+    # share this mature ownership root, but are never listed interchangeably.
+    project_kind: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="code_scan", server_default="code_scan"
+    )
     repository_url: Mapped[Optional[str]] = mapped_column(Text)
     # Mandatory tenant ownership; repository checks and RLS enforce isolation.
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -144,14 +155,14 @@ class Scan(Base):
         String(50), nullable=False, default=STATUS_QUEUED
     )
     reasoning_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     # Utility (cheap) LLM slot — drives trivial steps (the per-file
     # profiler). Nullable: scans created
     # before this column, and submits that omit it, fall back to the
     # reasoning slot at resolution time (see shared.lib.llm_slots).
     utility_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     # Optional second reasoning LLM for the analysis stage (#93 / PRD
     # #91). When set, every routed agent runs on BOTH this config and
@@ -160,7 +171,7 @@ class Scan(Base):
     # analysis. Confined to analysis; consolidation / merge / profiler
     # stay on the primary reasoning + utility slots.
     secondary_reasoning_llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     frameworks: Mapped[Optional[List[str]]] = mapped_column(JSONB)
     cost_details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB)
@@ -403,7 +414,12 @@ class ScanArtifact(Base):
     )
     evidence_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        sa.ForeignKey("evidence_objects.id", ondelete="SET NULL"),
+        sa.ForeignKey(
+            "evidence_objects.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="scan_artifacts_evidence_id_fkey",
+        ),
         nullable=True,
         unique=True,
     )
@@ -1452,6 +1468,10 @@ class LLMCallReservation(Base):
             "status IN ('reserved', 'completed', 'failed')",
             name="ck_llm_call_reservations_status",
         ),
+        sa.CheckConstraint(
+            "num_nonnulls(scan_id, pentest_attempt_id) <= 1",
+            name="ck_llm_call_reservation_operation_identity",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1469,6 +1489,11 @@ class LLMCallReservation(Base):
     attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    pentest_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
     )
@@ -1480,6 +1505,9 @@ class LLMCallReservation(Base):
         ForeignKey("llm_usage_events.id", ondelete="SET NULL"),
         nullable=True,
         unique=True,
+    )
+    provider_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -1509,6 +1537,19 @@ class LLMUsageEvent(Base):
             "cost_status IN ('exact', 'estimated', 'unknown', 'reconciled')",
             name="ck_llm_usage_events_cost_status",
         ),
+        sa.CheckConstraint(
+            "(operation_kind = 'pentest' AND pentest_attempt_id IS NOT NULL "
+            "AND scan_id IS NULL AND attempt_id IS NULL AND chat_session_id IS NULL "
+            "AND rag_job_id IS NULL AND scan_task_id IS NULL) OR "
+            "(operation_kind <> 'pentest' AND pentest_attempt_id IS NULL)",
+            name="ck_llm_usage_event_pentest_identity",
+        ),
+        sa.Index(
+            "ix_llm_usage_event_tenant_pentest_attempt",
+            "tenant_id",
+            "pentest_attempt_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1524,6 +1565,11 @@ class LLMUsageEvent(Base):
     )
     attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("scan_attempts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    pentest_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
         nullable=True,
         index=True,
     )
@@ -1726,7 +1772,7 @@ class UsageBudgetPolicy(Base):
             name="ck_usage_budget_policies_scope_kind",
         ),
         sa.CheckConstraint(
-            "window_kind IN ('request', 'scan', 'day', 'month')",
+            "window_kind IN ('request', 'scan', 'attempt', 'day', 'month')",
             name="ck_usage_budget_policies_window_kind",
         ),
         sa.CheckConstraint(
@@ -1779,7 +1825,7 @@ class UsageBudgetPolicy(Base):
     )
     window_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id", ondelete="RESTRICT"), nullable=True
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
     )
     stage: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     cap_input_tokens: Mapped[Optional[int]] = mapped_column(BIGINT)
@@ -1902,6 +1948,18 @@ class UsageBudgetReservation(Base):
             "state IN ('held', 'settled', 'released', 'expired', 'accounting_unknown')",
             name="ck_usage_budget_reservations_state",
         ),
+        sa.CheckConstraint(
+            "(operation_kind = 'pentest' AND pentest_attempt_id IS NOT NULL "
+            "AND scan_attempt_id IS NULL) OR "
+            "(operation_kind <> 'pentest' AND pentest_attempt_id IS NULL)",
+            name="ck_usage_budget_reservation_pentest_identity",
+        ),
+        sa.Index(
+            "ix_usage_budget_reservation_tenant_pentest_attempt",
+            "tenant_id",
+            "pentest_attempt_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -1923,6 +1981,11 @@ class UsageBudgetReservation(Base):
     request_key: Mapped[str] = mapped_column(String(512), nullable=False)
     scan_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("scan_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    pentest_attempt_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        nullable=True,
+        index=True,
     )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
@@ -2456,7 +2519,7 @@ class ChatSession(Base):
         index=True,
     )
     llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("llm_configurations.id")
+        ForeignKey("llm_configurations.id", ondelete="SET NULL")
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     frameworks: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String))
@@ -2581,8 +2644,8 @@ class RAGPreprocessingJob(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id"), nullable=False)
     framework_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    llm_config_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("llm_configurations.id"), nullable=False
+    llm_config_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("llm_configurations.id", ondelete="SET NULL"), nullable=True
     )
     original_file_hash: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True

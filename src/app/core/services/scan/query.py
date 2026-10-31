@@ -25,8 +25,9 @@ from app.infrastructure.database.repositories.approval_gate_repo import (
     ApprovalGateRepository,
 )
 from app.infrastructure.database.repositories.scan_task_repo import ScanTaskRepository
-from app.shared.lib.files import get_language_from_filename
+from app.shared.lib.files import get_language_from_filename, source_line_at
 from app.shared.lib.risk_score import compute_cvss_aggregate, scoreable_findings
+from app.shared.lib.scan_timing import active_processing_seconds, gate_intervals
 from app.shared.lib.risk_severity import risk_severity_for_score
 from app.shared.lib.scan_visibility import can_view_scan
 from app.shared.lib.scan_status import (
@@ -41,7 +42,10 @@ MAX_PAGE_SIZE = 100
 _VALID_SORT_ORDERS = {"asc", "desc"}
 
 
-def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
+def _scan_metrics(
+    scan: db_models.Scan,
+    gates: Optional[List[db_models.ApprovalGate]] = None,
+) -> Dict[str, object]:
     """Finding-metrics overview for a scan-list row (#86).
 
     Pulls the risk score and the per-severity / total finding counts
@@ -56,17 +60,14 @@ def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
     # depends on durable-task artifacts (validated by the endpoint).
     can_resume = scan.status in ("FAILED", "CANCELLED")
 
-    # Active processing time: use scan events timestamps rather than
-    # created_at → completed_at, which includes dormant periods when
-    # the scan was stopped and later resumed.  Falls back to wall
-    # clock when no events exist.
-    active_seconds: float | None = None
-    if scan.events:
-        timestamps = [e.timestamp for e in scan.events if e.timestamp is not None]
-        if len(timestamps) >= 2:
-            active_seconds = (max(timestamps) - min(timestamps)).total_seconds()
-        elif len(timestamps) == 1 and scan.completed_at:
-            active_seconds = (scan.completed_at - timestamps[0]).total_seconds()
+    # Active processing time: wall clock minus the time parked at approval gates.
+    # Event-timestamp spans were used before, but they still straddle a gate wait —
+    # a scan that sat 20 minutes at the prescan card reported 20 minutes of work.
+    active_seconds = active_processing_seconds(
+        created_at=scan.created_at,
+        completed_at=scan.completed_at,
+        gates=gate_intervals(gates or ()),
+    )
 
     return {
         "risk_score": scan.risk_score,
@@ -134,6 +135,55 @@ class ScanQueryService:
             )
         return scan
 
+    async def get_merged_findings(
+        self,
+        scan_id: uuid.UUID,
+        finding_id: int,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> "api_models.MergedFindingsResponse":
+        """The raw findings that consolidation folded into one finding.
+
+        Deliberately per-finding: the whole point is to show *why this row says
+        what it says*, not how many rows a whole scan produced.
+        """
+        await self.get_scan_status(
+            scan_id,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        )
+        finding = await self.repo.get_finding(finding_id)
+        if finding is None or finding.scan_id != scan_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Finding not found.",
+            )
+        rows = await self.repo.get_raw_findings_for_consolidated(
+            scan_id,
+            canonical_finding_id=finding.canonical_finding_id,
+            raw_finding_ids=list(finding.contributing_raw_finding_ids or []),
+        )
+        return api_models.MergedFindingsResponse(
+            scan_id=scan_id,
+            finding_id=finding_id,
+            raw_count=len(rows),
+            findings=[
+                api_models.MergedFindingItem(
+                    id=row.id,
+                    title=row.title,
+                    severity=row.severity,
+                    file_path=row.file_path,
+                    line_number=row.line_number,
+                    source=row.source,
+                    corroborating_agents=list(row.corroborating_agents or []),
+                )
+                for row in rows
+            ],
+        )
+
     async def get_scanner_reports(
         self,
         scan_id: uuid.UUID,
@@ -184,6 +234,100 @@ class ScanQueryService:
 
         payload = await ScannerCoverageRepository(self.repo.db).manifest(scan_id)
         return api_models.ScannerCoverageManifestResponse.model_validate(payload)
+
+    @staticmethod
+    def _deterministic_only_report(
+        scan: db_models.Scan, original_code_map: Dict[str, str]
+    ) -> "api_models.SummaryReportResponse":
+        """Build a results payload for a scan that never reached the LLM phase."""
+        grouped: Dict[str, List[db_models.Finding]] = {}
+        for finding in scan.findings:
+            grouped.setdefault(finding.file_path, []).append(finding)
+
+        severity_counts: Dict[str, int] = {}
+        known = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"}
+        for finding in scan.findings:
+            key = (finding.severity or "INFORMATIONAL").strip().upper()
+            if key not in known:
+                key = "INFORMATIONAL"
+            severity_counts[key] = severity_counts.get(key, 0) + 1
+
+        def _payload(finding: db_models.Finding) -> api_models.VulnerabilityFindingResponse:
+            payload = api_models.VulnerabilityFindingResponse.from_orm(finding)
+            if not payload.vulnerable_snippet:
+                # Rows persisted before scanners carried snippets still deserve a
+                # code anchor, otherwise the operator sees "line 42" and nothing else.
+                payload.vulnerable_snippet = source_line_at(
+                    original_code_map.get(finding.file_path), finding.line_number
+                )
+            return payload
+
+        files_analyzed = [
+            api_models.SubmittedFileReportItem(
+                file_path=file_path,
+                findings=[
+                    _payload(finding)
+                    for finding in sorted(rows, key=lambda f: f.line_number or 0)
+                ],
+                language=get_language_from_filename(file_path),
+            )
+            for file_path, rows in sorted(grouped.items())
+        ]
+
+        active = scoreable_findings(scan.findings)
+        score = compute_cvss_aggregate(active, scan_id=str(scan.id)) if active else 0.0
+
+        return api_models.SummaryReportResponse(
+            submission_id=scan.id,
+            project_id=scan.project_id,
+            project_name=scan.project.name if scan.project else "N/A",
+            scan_type=scan.scan_type,
+            selected_frameworks=scan.frameworks or [],
+            analysis_timestamp=scan.completed_at or scan.created_at,
+            summary=api_models.SummaryResponse(
+                total_findings_count=len(scan.findings),
+                files_analyzed_count=len(files_analyzed),
+                severity_counts=api_models.SeverityCountsResponse(**severity_counts),
+            ),
+            overall_risk_score=api_models.OverallRiskScoreResponse(
+                score=score, severity=risk_severity_for_score(score)
+            ),
+            files_analyzed=files_analyzed,
+            remediation=None,
+        )
+
+    async def _gates_by_scan(
+        self, scan_ids: List[uuid.UUID]
+    ) -> Dict[uuid.UUID, List[db_models.ApprovalGate]]:
+        """Approval gates for a page of scans, grouped by scan id."""
+        if not scan_ids:
+            return {}
+        try:
+            rows = await ApprovalGateRepository(self.repo.db).gates_for_scans(scan_ids)
+        except Exception:  # noqa: BLE001 - timing must never break a listing
+            logger.warning("scan-query: gate timing lookup failed", exc_info=True)
+            return {}
+        grouped: Dict[uuid.UUID, List[db_models.ApprovalGate]] = {}
+        for row in rows:
+            grouped.setdefault(row.scan_id, []).append(row)
+        return grouped
+
+    async def _active_processing_seconds(self, scan: db_models.Scan) -> Optional[float]:
+        """Working time for *scan*, with approval-gate waits removed."""
+        try:
+            gates = await ApprovalGateRepository(self.repo.db).gates_for_scan(scan.id)
+        except Exception:  # noqa: BLE001 - timing must never break the results page
+            logger.warning(
+                "scan-query: gate timing lookup failed",
+                extra={"scan_id": str(scan.id)},
+                exc_info=True,
+            )
+            gates = []
+        return active_processing_seconds(
+            created_at=scan.created_at,
+            completed_at=scan.completed_at,
+            gates=gate_intervals(gates),
+        )
 
     async def get_patch_plan(
         self,
@@ -302,6 +446,15 @@ class ScanQueryService:
                 }
 
         summary_report_response = None
+        if not scan.summary and scan.findings:
+            # The scan stopped before report generation (operator clicked Stop on the
+            # prescan card, or the safety guard blocked it). The deterministic
+            # findings are already persisted and are the whole result — render them
+            # instead of showing an empty page. Nothing here is synthesized: every
+            # row comes from the findings table.
+            summary_report_response = self._deterministic_only_report(
+                scan, original_code_map or {}
+            )
         if scan.summary:
             files_analyzed_map: Dict[str, api_models.SubmittedFileReportItem] = {}
 
@@ -617,6 +770,8 @@ class ScanQueryService:
                     exc,
                 )
 
+        active_seconds = await self._active_processing_seconds(scan)
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             current_attempt_id=scan.current_attempt_id,
@@ -646,6 +801,7 @@ class ScanQueryService:
             stage_temperatures=scan.stage_temperatures,
             source_type=scan.source_type,
             has_resumable_artifacts=sum(task_counts.values()) > 0,
+            active_processing_seconds=active_seconds,
             repository_url=(scan.project.repository_url if scan.project else None),
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )
@@ -698,6 +854,7 @@ class ScanQueryService:
         # `project_name: Field required` ValidationError. Mirrors the
         # construction pattern used in `get_paginated_user_scans` and
         # `get_user_scan_history` further down this file.
+        gates_by_scan = await self._gates_by_scan([scan.id for scan in scans_raw])
         history_items = [
             api_models.ScanHistoryItem(
                 id=scan.id,
@@ -709,7 +866,7 @@ class ScanQueryService:
                 completed_at=scan.completed_at,
                 cost_details=scan.cost_details,
                 events=[api_models.ScanEventItem.from_orm(e) for e in scan.events],
-                **_scan_metrics(scan),
+                **_scan_metrics(scan, gates_by_scan.get(scan.id)),
             )
             for scan in scans_raw
         ]
@@ -776,6 +933,7 @@ class ScanQueryService:
             )
             raise
 
+        gates_by_scan = await self._gates_by_scan([scan.id for scan in scans_raw])
         history_items = [
             api_models.ScanHistoryItem(
                 id=scan.id,
@@ -787,7 +945,7 @@ class ScanQueryService:
                 completed_at=scan.completed_at,
                 cost_details=scan.cost_details,
                 events=[api_models.ScanEventItem.from_orm(e) for e in scan.events],
-                **_scan_metrics(scan),
+                **_scan_metrics(scan, gates_by_scan.get(scan.id)),
             )
             for scan in scans_raw
         ]
@@ -1305,6 +1463,13 @@ class ScanQueryService:
         project_items: List[api_models.ProjectHistoryItem] = []
         latest_terminal_scan_by_project: Dict[uuid.UUID, uuid.UUID] = {}
 
+        gates_by_scan = await self._gates_by_scan(
+            [
+                row.id
+                for project in projects
+                for row in (await self.repo.get_paginated_scans_for_project(project.id, 0, 5))
+            ]
+        )
         for project in projects:
             scans_raw = await self.repo.get_paginated_scans_for_project(
                 project.id, 0, 5
@@ -1320,7 +1485,7 @@ class ScanQueryService:
                     completed_at=s.completed_at,
                     cost_details=s.cost_details,
                     events=[api_models.ScanEventItem.from_orm(e) for e in s.events],
-                    **_scan_metrics(s),
+                    **_scan_metrics(s, gates_by_scan.get(s.id)),
                 )
                 for s in scans_raw
             ]

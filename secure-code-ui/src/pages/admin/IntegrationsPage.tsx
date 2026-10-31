@@ -166,7 +166,11 @@ const IntegrationsPage: React.FC = () => {
   if (principals.isError) return <ErrorState title="Integrations unavailable" detail="The tenant integration inventory could not be loaded." action={<button className="sccap-btn" onClick={() => principals.refetch()}>Retry</button>} />;
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      <PageHeader crumbs={[{ label: "Administration", to: "/admin/authorization" }, { label: "Integrations" }]} title="Enterprise integrations" subtitle="Tenant-owned GitHub App, Jira Cloud, and signed SIEM delivery with revocable feature grants." />
+      <PageHeader crumbs={[
+        { label: "Dashboard", to: "/account/dashboard" },
+        { label: "Administration", to: "/admin/system" },
+        { label: "Integrations" },
+      ]} title="Enterprise integrations" subtitle="Tenant-owned GitHub App, Jira Cloud, and signed SIEM delivery with revocable feature grants." />
       <ConnectorForm onCreated={refresh} />
       <section style={{ display: "grid", gap: 10 }}>
         <h2 style={{ fontSize: 17 }}>Service principals</h2>

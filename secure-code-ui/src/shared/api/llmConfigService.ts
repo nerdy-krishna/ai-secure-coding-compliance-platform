@@ -95,6 +95,8 @@ export const llmConfigService = {
       name: configData.name,
       provider: configData.provider,
       model_name: configData.model_name,
+      base_url: configData.base_url,
+      tokenizer: configData.tokenizer,
       api_key: configData.api_key,
       input_cost_per_million: configData.input_cost_per_million,
       output_cost_per_million: configData.output_cost_per_million,
@@ -130,6 +132,8 @@ export const llmConfigService = {
     if (configData.name !== undefined) payload.name = configData.name;
     if (configData.provider !== undefined) payload.provider = configData.provider;
     if (configData.model_name !== undefined) payload.model_name = configData.model_name;
+    if (configData.base_url !== undefined) payload.base_url = configData.base_url;
+    if (configData.tokenizer !== undefined) payload.tokenizer = configData.tokenizer;
     if (configData.api_key !== undefined) payload.api_key = configData.api_key;
     if (configData.input_cost_per_million !== undefined) payload.input_cost_per_million = configData.input_cost_per_million;
     if (configData.output_cost_per_million !== undefined) payload.output_cost_per_million = configData.output_cost_per_million;

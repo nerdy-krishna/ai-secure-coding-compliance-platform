@@ -57,7 +57,7 @@ function initials(email: string): string {
     .join("");
 }
 
-const UserManagementTab: React.FC = () => {
+const UserManagementTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<AdminUserRead[]>([]);
@@ -231,12 +231,14 @@ const UserManagementTab: React.FC = () => {
 
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
-      <div>
-        <h1 style={{ color: "var(--fg)" }}>Users</h1>
-        <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-          Manage accounts and verification status in the active tenant.
+      {!embedded && (
+        <div>
+          <h1 style={{ color: "var(--fg)" }}>Users</h1>
+          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+            Manage accounts and verification status in the active tenant.
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="surface" style={{ padding: 0 }}>
         <div

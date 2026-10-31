@@ -34,5 +34,12 @@ fluentd/log/
 # Documentation builds
 site/
 docs/_build/
-# Agent + planning docs (not shipped to runtime images)
+# Pi resources and private guidance/history (not shipped to runtime images)
+AGENTS.md
+.pi/
 .agent/
+.scratch/
+# Retired harness artifacts if external tools recreate them
+CLAUDE.md
+.claude/
+.securecoder/

@@ -5,76 +5,25 @@
 // useAuth for logout + superuser gate, useTheme for theme toggle.
 
 import React, { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../shared/hooks/useAuth";
-import { useFeatures } from "../../shared/hooks/useFeatures";
 import { useTheme } from "../../app/providers/ThemeProvider";
 import { Icon } from "../../shared/ui/Icon";
 import { NotificationCenter } from "../../shared/ui/NotificationCenter";
 import { useToast } from "../../shared/ui/Toast";
 import { SearchCombobox } from "./SearchCombobox";
-import {
-  ADMIN_AREA_PERMISSIONS,
-  hasAnyPermission,
-  hasPermission,
-  Permission,
-} from "../../shared/lib/permissions";
+import { hasPermission, Permission } from "../../shared/lib/permissions";
 import { tenantService, type Tenant } from "../../shared/api/tenantService";
 
-interface NavItem {
-  id: string;
-  label: string;
-  /** Path prefix that marks this item active when the current URL starts with it. */
-  match: string;
-  /** Actual route to navigate to. */
-  to: string;
-  /** When set, the item is hidden unless this feature flag is enabled. */
-  feature?: string;
-}
-
-// Order matches the design's center nav.
-const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", match: "/account/dashboard", to: "/account/dashboard" },
-  { id: "submit", label: "Submit", match: "/submission", to: "/submission/submit" },
-  { id: "projects", label: "Projects", match: "/analysis", to: "/analysis/results" },
-  { id: "compliance", label: "Compliance", match: "/compliance", to: "/compliance", feature: "compliance" },
-  { id: "advisor", label: "Advisor", match: "/advisor", to: "/advisor", feature: "chat" },
-  { id: "history", label: "History", match: "/account/history", to: "/account/history" },
-  { id: "usage", label: "Usage", match: "/usage", to: "/usage" },
-];
-
 export const TopNav: React.FC = () => {
-  const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
-  const { isFeatureEnabled } = useFeatures();
   const isSuperuser = !!user?.is_superuser;
-  const hasAdminAccess = hasAnyPermission(
-    user?.permissions,
-    ADMIN_AREA_PERMISSIONS,
-  );
   const canSwitchTenant = hasPermission(
     user?.permissions,
     Permission.platformTenantManage,
   );
-
-  // Hide nav items whose backing feature is disabled (modular setup).
-  const navItems = NAV_ITEMS.filter(
-    (it) => !it.feature || isFeatureEnabled(it.feature),
-  );
-
-  // Stable capabilities, not the compatibility superuser bit, expose admin UX.
-  if (hasAdminAccess) {
-    navItems.push({
-      id: "admin",
-      label: "Admin",
-      match: "/admin",
-      to: "/admin/authorization",
-    });
-  }
-
-  const activeId =
-    navItems.find((it) => location.pathname.startsWith(it.match))?.id ?? null;
 
   return (
     <header
@@ -94,7 +43,7 @@ export const TopNav: React.FC = () => {
         className="top-nav-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr auto 1fr",
+          gridTemplateColumns: "1fr auto",
           alignItems: "center",
           padding: "10px 24px",
           gap: 20,
@@ -103,46 +52,6 @@ export const TopNav: React.FC = () => {
         }}
       >
         <Brand />
-
-        <nav
-          aria-label="Primary"
-          className="top-nav-primary"
-          style={{
-            display: "flex",
-            gap: 2,
-            background: "var(--bg-soft)",
-            padding: 4,
-            borderRadius: 999,
-            border: "1px solid var(--border)",
-          }}
-        >
-          {navItems.map((it) => {
-            const isActive = activeId === it.id;
-            return (
-              <Link
-                key={it.id}
-                to={it.to}
-                aria-current={isActive ? "page" : undefined}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 999,
-                  background: isActive ? "var(--bg-elev)" : "transparent",
-                  color: isActive ? "var(--fg)" : "var(--fg-muted)",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  boxShadow: isActive ? "var(--shadow-xs)" : "none",
-                  textDecoration: "none",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  transition: "all .15s var(--ease)",
-                }}
-              >
-                {it.label}
-              </Link>
-            );
-          })}
-        </nav>
 
         <div
           className="top-nav-actions"
@@ -250,6 +159,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
   const [tenantsLoading, setTenantsLoading] = useState(false);
   const [switchingTenant, setSwitchingTenant] = useState(false);
   const { logout } = useAuth();
+  const queryClient = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -296,6 +206,8 @@ const UserMenu: React.FC<UserMenuProps> = ({
     if (!tenantId || tenantId === activeTenantId || switchingTenant) return;
     setSwitchingTenant(true);
     try {
+      await queryClient.cancelQueries({ queryKey: ["capability13"] });
+      queryClient.removeQueries({ queryKey: ["capability13"] });
       const selected = await tenantService.enter(tenantId);
       toast.success(`Switched to ${selected.display_name}.`);
       window.location.assign("/account/dashboard");

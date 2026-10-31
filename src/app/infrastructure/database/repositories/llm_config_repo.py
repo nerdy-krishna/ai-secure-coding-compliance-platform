@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from app.infrastructure.database import models as db_models
 from app.api.v1 import models as api_models
@@ -242,6 +242,72 @@ class LLMConfigRepository:
             extra={"config_id": str(db_config.id)},
         )
         return db_config
+
+    async def describe_active_usage(self, config_id: uuid.UUID) -> Optional[str]:
+        """Why this configuration cannot be withdrawn right now, or None.
+
+        Only *live* work blocks a deletion. Completed scans, idle chat sessions and
+        past audit entries are history, and the foreign keys clear their pointer
+        rather than refusing — otherwise an operator could never withdraw a model
+        they had ever used, which is not a safety property but a trap.
+
+        Running work is different: a scan and a pentest engagement resolve their
+        model on every call, so deleting the configuration underneath them breaks
+        that work. The reason names it so the operator knows what to wait for.
+        """
+        from app.shared.lib.scan_status import TERMINAL_SCAN_STATUSES
+
+        running_scans = await self.db.scalar(
+            select(func.count())
+            .select_from(db_models.Scan)
+            .where(
+                or_(
+                    db_models.Scan.reasoning_llm_config_id == config_id,
+                    db_models.Scan.utility_llm_config_id == config_id,
+                    db_models.Scan.secondary_reasoning_llm_config_id == config_id,
+                ),
+                db_models.Scan.status.notin_(tuple(TERMINAL_SCAN_STATUSES)),
+            )
+        )
+        if running_scans:
+            return (
+                f"Cannot delete this configuration yet — {running_scans} scan(s) are "
+                "still running on it. Cancel or wait for them, then delete it; "
+                "finished scans keep their history either way."
+            )
+
+        pending_rag_jobs = await self.db.scalar(
+            select(func.count())
+            .select_from(db_models.RAGPreprocessingJob)
+            .where(
+                db_models.RAGPreprocessingJob.llm_config_id == config_id,
+                db_models.RAGPreprocessingJob.status.notin_(
+                    ("COMPLETED", "FAILED", "CANCELLED")
+                ),
+            )
+        )
+        if pending_rag_jobs:
+            return (
+                f"Cannot delete this configuration yet — {pending_rag_jobs} RAG "
+                "preprocessing job(s) are still running on it."
+            )
+
+        # A running pentest run asks its model every cycle, so live runs count too.
+        from app.pentest import models as pentest_models
+
+        running_attempts = await self.db.scalar(
+            select(func.count())
+            .select_from(pentest_models.PentestRun)
+            .where(
+                pentest_models.PentestRun.status.in_(("queued", "running"))
+            )
+        )
+        if running_attempts:
+            return (
+                f"Cannot delete this configuration yet — {running_attempts} pentest "
+                "run(s) are still running on it. Stop them, then delete it."
+            )
+        return None
 
     async def delete(
         self, config_id: uuid.UUID

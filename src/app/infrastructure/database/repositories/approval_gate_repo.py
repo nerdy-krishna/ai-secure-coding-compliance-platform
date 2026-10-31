@@ -152,6 +152,30 @@ class ApprovalGateRepository:
             .limit(1)
         )
 
+    async def gates_for_scan(
+        self, scan_id: uuid.UUID
+    ) -> list[db_models.ApprovalGate]:
+        """All gates for one scan, oldest first — used for duration accounting."""
+        result = await self.db.execute(
+            select(db_models.ApprovalGate)
+            .where(db_models.ApprovalGate.scan_id == scan_id)
+            .order_by(db_models.ApprovalGate.sequence)
+        )
+        return list(result.scalars().all())
+
+    async def gates_for_scans(
+        self, scan_ids: list[uuid.UUID]
+    ) -> list[db_models.ApprovalGate]:
+        """Gate rows for many scans in one query — used by list views."""
+        if not scan_ids:
+            return []
+        result = await self.db.execute(
+            select(db_models.ApprovalGate).where(
+                db_models.ApprovalGate.scan_id.in_(scan_ids)
+            )
+        )
+        return list(result.scalars().all())
+
     async def get_active_for_scan(
         self, scan_id: uuid.UUID
     ) -> Optional[db_models.ApprovalGate]:

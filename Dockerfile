@@ -29,6 +29,17 @@
 # ---------- base ---------------------------------------------------------
 FROM python:3.12-slim-bookworm AS base
 
+# Build provenance, surfaced by GET /api/v1/system/version so an operator (and
+# the admin "update available" banner) can identify exactly what is running.
+# setup.sh passes these; a plain `docker build` leaves them empty and the API
+# falls back to the version declared in pyproject.toml.
+ARG SCCAP_BUILD_COMMIT=""
+ARG SCCAP_BUILD_TIME=""
+ARG SCCAP_BUILD_VERSION=""
+ENV SCCAP_BUILD_COMMIT=${SCCAP_BUILD_COMMIT} \
+    SCCAP_BUILD_TIME=${SCCAP_BUILD_TIME} \
+    SCCAP_BUILD_VERSION=${SCCAP_BUILD_VERSION}
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -172,6 +183,7 @@ COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
 
 RUN chmod +x /app/app-entrypoint.sh
+ENV SCCAP_MIGRATION_ROLE=wait
 EXPOSE 8000
 ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -287,12 +299,237 @@ RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(Te
 # invoked explicitly with OSV-Scanner's offline flags.
 
 RUN chmod +x /app/app-entrypoint.sh
+ENV SCCAP_MIGRATION_ROLE=wait
 ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["python", "-m", "app.workers.consumer"]
+
+# ---------- Capability 5 tool supervisor / scope relay -----------------
+# Deliberately excludes the general SAST binaries and model cache from the
+# unified worker image. Adapter runtimes are separate digest-pinned workloads;
+# this image owns only RabbitMQ notification reconciliation, narrow gateway
+# calls, runtime supervision, evidence collection, and result signing.
+FROM base AS tool-supervisor
+
+COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
+COPY --chown=appuser:appuser ./src /app/src
+
+USER root
+RUN install -d -o appuser -g appuser -m 0700 /work \
+    && install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
+    && chmod 0555 /opt/sccap-tool-runtimes/*
+USER appuser
+
+CMD ["python", "-m", "app.infrastructure.pentesting.tool_worker.main"]
+
+# ---------- Capability 5 immutable adapter runtimes -------------------
+# These images contain one fixed adapter and its helper only.  They are built
+# during release, scanned/signed by digest, and never download tools or updates
+# while an assessment is running.  Kubernetes still supplies the invocation
+# solely through authenticated pods/attach; these entrypoints accept no target
+# or tool configuration from argv or environment.
+
+FROM mcr.microsoft.com/playwright@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e AS pentest-adapter-playwright
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PATH="/app/.venv/bin:$PATH"
+USER root
+COPY --from=base /usr/local /usr/local
+COPY --from=api-builder /app/.venv /app/.venv
+RUN /app/.venv/bin/python -m ensurepip \
+    && /app/.venv/bin/python -m pip install --no-cache-dir "playwright==1.62.0" \
+    && install -d -o pwuser -g pwuser -m 0700 /work \
+    && install -d -o root -g root -m 0755 /opt/sccap-tools /opt/sccap-tool-runtimes \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_adapters.runtime_helpers.playwright.main "$@"' > /opt/sccap-tools/playwright-chromium-driver \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
+    && chmod 0555 /opt/sccap-tools/playwright-chromium-driver /opt/sccap-tool-runtimes/playwright-observe
+COPY --chown=root:root ./src /app/src
+WORKDIR /work
+USER pwuser
+ENTRYPOINT ["/opt/sccap-tool-runtimes/playwright-observe"]
+CMD ["--kubernetes-attach-v1"]
+
+FROM ghcr.io/zaproxy/zaproxy@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef AS pentest-adapter-zap
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PATH="/app/.venv/bin:$PATH"
+USER root
+COPY --from=base /usr/local /usr/local
+COPY --from=api-builder /app/.venv /app/.venv
+RUN install -d -o zap -g zap -m 0700 /work \
+    && install -d -o root -g root -m 0755 /opt/sccap-tools /opt/sccap-tool-runtimes \
+    && find /zap/plugin -maxdepth 1 -type f \
+        ! -name 'Readme.txt' \
+        ! -name 'callhome-release-0.23.0.zap' \
+        ! -name 'network-beta-0.29.0.zap' \
+        ! -name 'commonlib-release-1.43.0.zap' \
+        ! -name 'pscan-alpha-0.6.0.zap' \
+        ! -name 'pscanrules-release-75.zap' \
+        -delete \
+    && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_adapters.runtime_helpers.zap "$@"' > /opt/sccap-tools/zap-passive-driver \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
+    && chmod 0555 /opt/sccap-tools/zap-passive-driver /opt/sccap-tool-runtimes/zap-passive
+COPY --chown=root:root ./src /app/src
+WORKDIR /work
+USER zap
+ENTRYPOINT ["/opt/sccap-tool-runtimes/zap-passive"]
+CMD ["--kubernetes-attach-v1"]
+
+FROM projectdiscovery/nuclei@sha256:aeb5ea2db32a252b8135707d2ad0e89b90e19a18ea7816d38759bc51efb46b97 AS pentest-nuclei-binary
+
+FROM base AS pentest-adapter-nuclei
+
+COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
+COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
+COPY --chown=root:root src/app/pentest/data/nuclei/bundles /opt/sccap-nuclei-bundles
+COPY --chown=root:root src/app/pentest/data/nuclei/trust /opt/sccap-nuclei-trust
+COPY --chown=appuser:appuser ./src /app/src
+USER root
+RUN install -d -o appuser -g appuser -m 0700 /work \
+    && install -d -o root -g root -m 0555 /opt/sccap-nuclei-bundles /opt/sccap-nuclei-trust /opt/sccap-tool-runtimes \
+    && printf '%s\n' '3.4.10' > /opt/sccap-tools/nuclei.version \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
+    && chmod 0444 /opt/sccap-tools/nuclei.version \
+    && chmod 0555 /opt/sccap-tools/nuclei /opt/sccap-tool-runtimes/nuclei-observe
+WORKDIR /work
+USER appuser
+ENTRYPOINT ["/opt/sccap-tool-runtimes/nuclei-observe"]
+CMD ["--kubernetes-attach-v1"]
+
+FROM python@sha256:09f7da3bc104798d0afb40bc08d23ab2da20a76130cec1f2ef170848f5d85217 AS pentest-adapter-nmap
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PATH="/app/.venv/bin:$PATH"
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends "nmap=7.95+dfsg-3" \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1001 appuser \
+    && useradd --uid 1001 --gid 1001 --create-home --shell /usr/sbin/nologin appuser
+COPY --from=api-builder /app/.venv /app/.venv
+COPY --chown=appuser:appuser ./src /app/src
+RUN install -d -o appuser -g appuser -m 0700 /work \
+    && install -d -o root -g root -m 0755 /opt/sccap-tools /opt/sccap-tool-runtimes \
+    && install -o root -g root -m 0555 /usr/bin/nmap /opt/sccap-tools/nmap \
+    && ln -s /usr/share/nmap /opt/sccap-tools/nmap-data \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && chmod 0555 /opt/sccap-tool-runtimes/nmap-connect
+WORKDIR /work
+USER appuser
+ENTRYPOINT ["/opt/sccap-tool-runtimes/nmap-connect"]
+CMD ["--kubernetes-attach-v1"]
+
+# ---------- development-only local benchmark worker -------------------
+# The ordinary production worker image does not contain target scanners.
+# This successor is selected only by docker-compose.pentesting-local.yml.
+FROM worker AS worker-pentest-local
+
+USER root
+# Offline credential recovery and the wider toolchain a human assessor reaches
+# for.  Everything here is packaged and digest-pinned by apt: no assessment-time
+# download, no unpinned wordlist, and no tool that has to call home to work.
+#
+# hashcat is the cracker.  Debian's john is the non-jumbo build: it cannot make
+# raw md5/sha1/sha256/sha512 digests at all, offers no pot-file control and no run
+# limit, which is the opposite of what a bounded, evidence-producing adapter needs.
+# hashcat covers every family in one tool with an explicit pot path and an explicit
+# runtime, and pocl gives it a CPU OpenCL device so no GPU is required.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        "nmap=7.93+dfsg1-1" \
+        "hashcat=6.2.6+ds1-1+b1" \
+        "hashcat-data=6.2.6+ds1-1" \
+        "sqlmap=1.7.2-1" \
+        "ffuf=1.1.0-1+b8" \
+        "hydra=9.4-1" \
+        "whatweb=0.5.5-1" \
+        "gobuster=3.5.0-1+b1" \
+        "testssl.sh=3.0.8+dfsg-1" \
+        python3-pip \
+        pocl-opencl-icd \
+        default-jre-headless \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libatspi2.0-0 \
+        libcairo2 \
+        libcups2 \
+        libdbus-1-3 \
+        libdrm2 \
+        libgbm1 \
+        libglib2.0-0 \
+        libnspr4 \
+        libnss3 \
+        libpango-1.0-0 \
+        libx11-6 \
+        libxcb1 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=pentest-nuclei-binary /usr/local/bin/nuclei /opt/sccap-tools/nuclei
+COPY --chown=root:root src/app/pentest/data/nuclei/bundles /opt/sccap-nuclei-bundles
+COPY --chown=root:root src/app/pentest/data/nuclei/trust /opt/sccap-nuclei-trust
+COPY --from=pentest-adapter-playwright /ms-playwright /ms-playwright
+COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/playwright /app/.venv/lib/python3.12/site-packages/playwright
+COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/pyee /app/.venv/lib/python3.12/site-packages/pyee
+COPY --from=pentest-adapter-playwright /app/.venv/lib/python3.12/site-packages/greenlet /app/.venv/lib/python3.12/site-packages/greenlet
+COPY --from=pentest-adapter-zap /zap /zap
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+COPY --chown=root:root src/app/pentest/data/wordlists /opt/sccap-wordlists
+RUN chmod -R a+rX /ms-playwright /zap \
+    && chmod 0555 /opt/sccap-tools/nuclei /usr/bin/nmap /zap/zap.sh \
+    # The nuclei adapter stats this file to pin the engine identity; without it
+    # every nuclei execution failed with FileNotFoundError instead of running.
+    && install -d -o root -g root -m 0755 /opt/sccap-tools \
+    && printf '%s\n' '3.4.10' > /opt/sccap-tools/nuclei.version \
+    && chmod 0444 /opt/sccap-tools/nuclei.version \
+    # Debian ships john in /usr/sbin, which the supervised tool PATH does not
+    # include.  A stable path under /opt/sccap-tools keeps the adapter's argv
+    # independent of the distribution's sbin layout.
+    && ln -sf /usr/bin/hashcat /opt/sccap-tools/hashcat \
+    && chmod 0555 /opt/sccap-tools/hashcat /usr/bin/sqlmap /usr/bin/ffuf \
+        /usr/bin/hydra /usr/bin/whatweb /usr/bin/gobuster \
+        /usr/bin/testssl.sh 2>/dev/null || true
+RUN chmod 0555 /opt/sccap-wordlists/* \
+    && chmod -R a+rX /opt/sccap-wordlists
+USER appuser
 
 # ---------- patch validator ----------------------------------------------
 # Deliberately contains no SCCAP application, configuration, or credentials.
 # Compose gives it no network namespace and only a bounded shared job spool.
+# Adapter entrypoints. The tool worker's local execution path verifies one
+# immutable executable per adapter here (verify_runtime_prerequisites); the
+# tools themselves are already in this image (nmap, nuclei, ZAP, Chromium), so a
+# single production-ready worker image can execute assessments without a
+# separate Kubernetes runtime fleet.
+USER root
+RUN install -d -o root -g root -m 0755 /opt/sccap-tool-runtimes \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.authorization "$@"' > /opt/sccap-tool-runtimes/authorization-readonly \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.playwright_process "$@"' > /opt/sccap-tool-runtimes/playwright-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nuclei "$@"' > /opt/sccap-tool-runtimes/nuclei-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.nmap "$@"' > /opt/sccap-tool-runtimes/nmap-connect \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.graphql "$@"' > /opt/sccap-tool-runtimes/graphql-observe \
+    && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.realtime "$@"' > /opt/sccap-tool-runtimes/realtime-observe \
+    && chmod 0555 /opt/sccap-tool-runtimes/*
+USER appuser
+
 FROM python:3.12-slim-bookworm AS patch-validator
 
 RUN apt-get update \

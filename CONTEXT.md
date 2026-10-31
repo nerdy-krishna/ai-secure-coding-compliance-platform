@@ -88,30 +88,41 @@ set.
 
 The runtime feature flags seeded by an installation variant. Scan is always enabled; optional
 features include chat, compliance, multi-user, groups, SSO, SCIM, multi-tenancy, email,
-observability stacks, MCP, admin authoring, and the separately gated Pentesting bounded context.
+observability stacks, MCP, admin authoring, and the separately gated pentest engine.
 
-### Pentest Engagement
+### Pentest run
 
-A Project-linked, tenant-scoped authorization and rules aggregate for black-box, gray-box, or
-white-box pentesting. It is separate from Code Scan and owns Pentest Attempts, decisions,
-executions, evidence references, finding truth, coverage effects, mutations, cleanup, and retests.
+One authorised assessment of one target: the operator supplies a target origin, a box type
+(black, gray, white), optional credentials, and the tools to leave out. It is unconnected to Code
+Scan except in white-box mode, where it reads one completed Code Scan report. A run is a single
+row and a single engine loop — there is no engagement/attempt/execution hierarchy.
 
-### Pentest Attempt
+### Pentest lead
 
-The immutable execution identity for an Engagement run. Resume retains the Attempt; restart or
-retest creates a linked child. Every Attempt pins its contract, policy, catalog, adapter, evidence,
-prompt, model, report, and runner versions.
+A single concrete thing left to test, held in the run's lead ledger. Leads are written whenever a
+tool observes surface (a host, a port, a path, an API operation, a parameter, a form, a secret) and
+carry a priority band: attacker-controlled input first, then endpoints, then hosts, then plain
+inventory. The model claims leads as it tests them, and an early "done" is refused while testable
+leads remain. The ledger, not the conversation, is the completion authority.
 
-### Pentest DecisionDelta
+### Pentest observation
 
-A digest-chained, monotonically sequenced summary of one atomic committed state change. A dependent
-orchestrator decision may consume only committed deltas, never in-flight tool output.
+Surface intelligence recorded as a finding with `category = observation`: open ports, technologies,
+security headers, discovered paths, subdomains, API operations with their parameters, endpoints and
+parameters mined from JavaScript, TLS certificates, leaked secrets, error stack traces. Observations
+are not weaknesses, but they are retained because exploit chains are built out of them.
 
-### Pentest finding truth
+### Pentest finding
 
-The deterministic progression from evidence-backed Observation to CandidateFinding and, only after
-a configured evidence predicate or independent reproduction, ConfirmedFinding. A scanner, adapter,
-specialist, or model cannot directly confirm a finding.
+A weakness recorded with `category = vulnerability`: a scanner verdict (nuclei, ZAP, sqlmap), an
+exposed secret or source map, a published API schema or enabled GraphQL introspection, a
+subdomain-takeover candidate, a sensitive reachable path, missing security headers, or a leaked
+stack trace. Every finding is kept, exploitable or not; exploitability is recorded later.
+
+### Pentest exploit chain
+
+The next-level analysis over a completed run: the model reads weaknesses, observations and untested
+leads, and records ordered chains (steps, impact, confidence) on the findings they involve.
 
 ## Invariants
 
@@ -123,16 +134,20 @@ specialist, or model cannot directly confirm a finding.
 - Scanner and LLM provenance must survive consolidation and reporting.
 - Secrets are encrypted before database persistence and must not appear in logs or public artifacts.
 - Every list operation over user-owned data must enforce tenant and visibility scope.
-- Pentesting remains a separate Project-linked bounded context; it never stretches or mutates the
-  existing Code Scan aggregate or lifecycle.
-- PostgreSQL is authoritative for Pentesting state; RabbitMQ is notification-only through an
-  outbox, and Qdrant is methodology retrieval only.
-- Every Pentesting target interaction requires authorization, tenant/attempt identity, and a pinned
-  deterministic scope-policy decision. Secrets use opaque handles outside their broker boundary.
-- Pentest coverage passes only through exact evidence predicates; absence of a tool alert is not a
-  pass, and no unverified observation is a confirmed finding.
-- Mutations are registered before execution, cleanup remains durable and visible, and cancellation
-  cannot turn partial work into success.
+- Pentesting is a separate engine and never writes Code Scan status, events, checkpointers, outbox
+  rows, or approval state. A white-box run reads one completed Code Scan report and has no write
+  authority.
+- A pentest run's coordination is PostgreSQL alone: no broker message, signed task, or outbox row is
+  required for a run to progress, and none is produced by it.
+- Every pentest target interaction is inside scope: the operator's origin plus the in-scope estate
+  discovered beneath its registrable domain, resolved through `RunContext.scoped_url()`. Nothing
+  outside it is touched, and private/loopback destinations are refused.
+- Findings and observations are both persisted; nothing a scanner observed is discarded, because
+  exploit chaining depends on it.
+- The lead ledger is the completion authority: a run may conclude only when no testable lead
+  remains. Context truncation, pause/resume and an engine restart never lose queued work.
+- An operator stop takes effect inside an in-flight model call and inside a running subprocess, not
+  only between steps.
 - Changes to lifecycle nodes, edges, statuses, events, or approvals update the canonical workflow
   documentation in the same change.
 
@@ -157,6 +172,10 @@ specialist, or model cannot directly confirm a finding.
   while browser-managed access tokens are retired; browser-level longevity testing is still missing.
 - The inherited automated test suites were removed on 2026-08-22. Replacement tests are added only
   at verified production seams as defects and invariants are addressed.
-- Pentesting Foundation 0 currently implements versioned contracts, vocabulary, feature discovery,
-  permissions, generated frontend wire types, and provider/consumer tests only. It does not yet
-  persist Engagements or execute target activity.
+- Pentesting is one autonomous engine (ADR-029), not the controller/qualification stack recorded in
+  ADR-013 to ADR-028. A run is recon (evasive, rate-limited, discovery-first) followed by an LLM +
+  tool loop that works a persistent lead queue until testable surface is exhausted. Findings and
+  observations are both persisted; exploit chaining is a separate pass over a completed run. The
+  binding limits are scope (the operator's origin plus the in-scope estate discovered beneath its
+  registrable domain) and the SSRF guard — there are no intensity, budget, qualification, signature,
+  or per-run duration limits.

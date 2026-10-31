@@ -31,6 +31,34 @@ SECRET_SPECS = (
     SecretSpec("ENCRYPTION_KEY", generate_fernet_key),
     SecretSpec("POSTGRES_PASSWORD", generate_secret),
     SecretSpec("RABBITMQ_DEFAULT_PASS", generate_secret),
+    # Bounded pentest broker users. The published `*-local-only` defaults and the
+    # old `replace-with-a-dedicated-random-secret` placeholder are not real
+    # secrets, so a fresh install (and any install still holding them) rotates
+    # them here. docker-compose builds each consumer URL from these same
+    # variables and rabbitmq/init.sh applies them on boot.
+    SecretSpec(
+        "RABBITMQ_PENTEST_CONTROLLER_PASS",
+        generate_secret,
+        legacy_placeholders=(
+            "replace-with-a-dedicated-random-secret",
+            "pentest-controller-local-only",
+        ),
+    ),
+    SecretSpec(
+        "RABBITMQ_PENTEST_TOOL_PASS",
+        generate_secret,
+        legacy_placeholders=("pentest-tool-local-only",),
+    ),
+    SecretSpec(
+        "RABBITMQ_PENTEST_RUNNER_PASS",
+        generate_secret,
+        legacy_placeholders=("pentest-runner-local-only",),
+    ),
+    SecretSpec(
+        "RABBITMQ_PENTEST_VERIFICATION_PASS",
+        generate_secret,
+        legacy_placeholders=("pentest-verifier-local-only",),
+    ),
     SecretSpec("RABBITMQ_ERLANG_COOKIE", generate_secret),
     SecretSpec(
         "QDRANT_API_KEY",
@@ -51,6 +79,17 @@ SECRET_SPECS = (
 DEFAULT_VALUES = {"GRAFANA_ADMIN_USER": "admin"}
 DEPRECATED_KEYS = {"RAG_VECTOR_STORE"}
 
+# The evidence object store's server credential and the S3 client credential are
+# two keys holding one secret: `EVIDENCE_MINIO_ROOT_PASSWORD` is what the
+# CloudServer container accepts and `EVIDENCE_S3_SECRET_ACCESS_KEY` is what the
+# API/worker present. Repairing them independently would rotate one side only
+# and leave the evidence store permanently unauthenticated, so they are
+# reconciled as a pair below.
+EVIDENCE_SECRET_KEYS = (
+    "EVIDENCE_MINIO_ROOT_PASSWORD",
+    "EVIDENCE_S3_SECRET_ACCESS_KEY",
+)
+
 
 def _is_placeholder(value: str, spec: SecretSpec) -> bool:
     normalized = value.strip()
@@ -69,6 +108,32 @@ def _is_placeholder(value: str, spec: SecretSpec) -> bool:
         or normalized.startswith("REPLACE_ME")
         or normalized in spec.legacy_placeholders
     )
+
+
+def _is_placeholder_plain(value: str) -> bool:
+    normalized = value.strip()
+    if (
+        len(normalized) >= 2
+        and normalized[0] == normalized[-1]
+        and normalized[0] in {"\"", "'"}
+    ):
+        normalized = normalized[1:-1]
+    return not normalized or normalized.startswith("REPLACE_ME")
+
+
+def _repair_evidence_secret_pair(
+    current: dict[str, str], replacements: dict[str, str]
+) -> None:
+    """Give both evidence-store keys the same non-placeholder value."""
+    existing = [
+        current[key]
+        for key in EVIDENCE_SECRET_KEYS
+        if current.get(key) and not _is_placeholder_plain(current[key])
+    ]
+    canonical = existing[0] if existing else generate_secret()
+    for key in EVIDENCE_SECRET_KEYS:
+        if current.get(key) != canonical:
+            replacements[key] = canonical
 
 
 def _atomic_write_owner_only(path: Path, content: str) -> None:
@@ -119,6 +184,7 @@ def bootstrap_env_secrets(path: Path) -> int:
     for key, value in DEFAULT_VALUES.items():
         if not current.get(key):
             replacements[key] = value
+    _repair_evidence_secret_pair(current, replacements)
 
     seen: set[str] = set()
     updated_lines: list[str] = []

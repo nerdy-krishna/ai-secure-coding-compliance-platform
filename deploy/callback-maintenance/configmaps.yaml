@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-reconciler-config
+data:
+  config.json: |
+    {"mode":"reconciler","tenant_id":"00000000-0000-0000-0000-000000000000","worker_id":"c11-reconciler","database_url_file":"/var/run/secrets/c11-database/url","poll_interval_seconds":1,"batch_limit":16,"evidence_bucket":"sccap-c11-restricted","evidence_region":"us-east-1","evidence_s3_endpoint":"https://10.77.0.3:9000","evidence_kms_endpoint":"https://10.77.0.4:443","evidence_kms_key_id":"arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000","aws_credentials_file":"/var/run/secrets/c11-evidence/credentials.json"}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-expiry-config
+data:
+  config.json: |
+    {"mode":"expiry","tenant_id":"00000000-0000-0000-0000-000000000000","worker_id":"c11-expiry","database_url_file":"/var/run/secrets/c11-database/url","poll_interval_seconds":1,"batch_limit":32}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-retention-deleter-config
+data:
+  config.json: |
+    {"mode":"retention-deleter","tenant_id":"00000000-0000-0000-0000-000000000000","worker_id":"c11-retention-deleter","database_url_file":"/var/run/secrets/c11-database/url","poll_interval_seconds":2,"batch_limit":16,"evidence_bucket":"sccap-c11-restricted","evidence_region":"us-east-1","evidence_s3_endpoint":"https://10.77.0.3:9000","evidence_kms_endpoint":"https://10.77.0.4:443","evidence_kms_key_id":"arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000","aws_credentials_file":"/var/run/secrets/c11-evidence/credentials.json"}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c11-retention-verifier-config
+data:
+  config.json: |
+    {"mode":"retention-verifier","tenant_id":"00000000-0000-0000-0000-000000000000","worker_id":"c11-retention-verifier","database_url_file":"/var/run/secrets/c11-database/url","poll_interval_seconds":2,"batch_limit":16,"evidence_bucket":"sccap-c11-restricted","evidence_region":"us-east-1","evidence_s3_endpoint":"https://10.77.0.3:9000","evidence_kms_endpoint":"https://10.77.0.4:443","evidence_kms_key_id":"arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000","aws_credentials_file":"/var/run/secrets/c11-evidence/credentials.json"}

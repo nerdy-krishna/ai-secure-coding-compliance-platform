@@ -13,6 +13,10 @@ packages = [{ include = "app", from = "src" }]
 # ML / AST-parsing stack lives in the optional "worker" group below and
 # is only installed in the worker image.
 aio-pika = ">=9.5.5,<10.0.0"
+# Capability 5 production adapter IPC uses Kubernetes pods/attach over the
+# pinned API TLS boundary. Declare this existing transitive dependency directly
+# so the security-sensitive transport cannot disappear with another package.
+aiohttp = "3.14.3"
 alembic = ">=1.16.1,<2.0.0"
 anthropic = ">=0.96.0,<1.0.0"
 asyncpg = ">=0.30.0,<0.31.0"
@@ -31,6 +35,10 @@ fastapi-users = {extras = ["sqlalchemy"], version = "^15.0.2"}
 gitpython = "^3.1.44"
 google-api-core = "^2.24.2"
 google-genai = "^1.16.1"
+# Foundation 3 canonicalization and isolated resolver semantics are security
+# boundaries, so these transitive packages are declared and pinned directly.
+idna = "3.19"
+dnspython = "2.8.0"
 itsdangerous = ">=2.2.0,<3.0.0"
 # Phase I.1 — LangChain 1.x line. langchain-core 1.3 is the first release
 # of the 1.x series we align to; picks up: standardized `response.usage_metadata`
@@ -77,6 +85,9 @@ pydantic = ">=2.12,<3.0.0"  # pydantic-ai 1.86 requires >=2.12
 pydantic-settings = "^2.9.1"
 python = "~3.12"
 python-dotenv = ">=1.1.0,<2.0.0"
+# Capability 5's Nuclei supply-chain linter parses reviewed templates before
+# any isolated process starts. Keep this security boundary direct and pinned.
+pyyaml = "6.0.3"
 sqlalchemy = {extras = ["asyncio"], version = ">=2.0.41,<3.0.0"}
 tiktoken = "^0.12.0"  # bumped for pydantic-ai-slim[openai] compat
 uvicorn = {extras = ["standard"], version = ">=0.35.0,<0.40.0"}
@@ -103,6 +114,7 @@ croniter = "^5.0"
 # python3-saml is OneLogin's SAML 2.0 SP library; it requires libxmlsec1
 # system packages (added to Dockerfile in the same change).
 httpx-oauth = ">=0.16,<1.0"
+h2 = ">=4.2,<5.0"
 pyjwt = {extras = ["crypto"], version = ">=2.10,<3.0"}
 python3-saml = ">=1.16,<2.0"
 # Phase WebAuthn — passkey / FIDO2 support. Duo's py_webauthn library
@@ -147,6 +159,10 @@ mypy = "^1.10.0"
 # pre-pass node; pip-audit + pre-commit stay in dev.
 pip-audit = "^2.7"
 pre-commit = "^3.7"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.ruff]
 target-version = "py312"

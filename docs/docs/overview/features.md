@@ -142,3 +142,33 @@ Current tool surface:
 
 External agentic clients (Claude Code, Cursor, etc.) authenticate with
 an ordinary user JWT; all visibility-scope rules apply.
+
+## Pentesting (opt-in)
+
+A separately gated engine (disabled by default; enabled during setup or via the
+`pentesting-v5` profile) that sits alongside — and never mutates — the Code Scan
+flow:
+
+- **Launch** — one target origin, a box type (black/gray/white), optional
+  credentials, and the tools to leave out. The page shows whether the engine
+  carries every scanner before a run starts.
+- **Discovery** — evasive reconnaissance followed by subdomain enumeration
+  (six passive indexes, DNS brute-force, dangling-CNAME takeover checks),
+  OpenAPI/Swagger and GraphQL schema discovery, and JavaScript bundle mining for
+  endpoints, parameters, source maps and secrets.
+- **Model loop** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a live
+  Playwright browser, up to four tools per turn, seeing every result. Probes are
+  de-duplicated and a failing tool is recorded untestable rather than retried
+  forever.
+- **Lead queue** — every observation becomes a queued lead with a priority band
+  (attacker-controlled input first). Leads are claimed as they are tested, and a
+  run may only conclude when none remain testable.
+- **Findings and observations** — weaknesses and surface intelligence are both
+  kept; observations are what exploit chains are built from.
+- **Exploit chaining** — available once a run has at least two findings; records
+  ordered chain steps on the findings involved.
+- **Controls and reports** — pause/resume/stop (honoured mid-call), live browser
+  frame, and Markdown/JSON/HTML/PDF downloads.
+
+See [pentesting engine operations](../operations/pentesting-engine.md) and
+[ADR-029](../adr/029-pentesting-autonomous-engine.md).

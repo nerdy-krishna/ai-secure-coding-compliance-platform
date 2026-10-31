@@ -35,3 +35,41 @@ export function useElapsed(
   const end = endIso ? new Date(endIso).getTime() : now;
   return formatDuration(end - start);
 }
+
+/**
+ * Live counter of the time a scan actually worked.
+ *
+ * `created_at → completed_at` is wall clock: it counts every minute the scan sat
+ * waiting for a human at an approval gate. The backend therefore reports
+ * `active_processing_seconds` (wall clock minus gate waits). This hook keeps that
+ * number ticking forward only while the scan is genuinely working, and freezes it
+ * the moment the scan parks at a gate, is stopped, or finishes.
+ */
+export function useActiveElapsed(
+  baseSeconds: number | null | undefined,
+  isWorking: boolean,
+): string {
+  const [seconds, setSeconds] = useState<number | null>(
+    typeof baseSeconds === "number" ? Math.floor(baseSeconds) : null,
+  );
+
+  // Server truth wins whenever it reports more time than we have counted locally
+  // (a resumed scan, a poll after a page was backgrounded).
+  useEffect(() => {
+    if (typeof baseSeconds !== "number") return;
+    setSeconds((prev) =>
+      prev === null || baseSeconds > prev ? Math.floor(baseSeconds) : prev,
+    );
+  }, [baseSeconds]);
+
+  useEffect(() => {
+    if (!isWorking) return;
+    const timer = window.setInterval(() => {
+      setSeconds((prev) => (prev === null ? prev : prev + 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isWorking]);
+
+  if (seconds === null) return "";
+  return formatDuration(seconds * 1000);
+}

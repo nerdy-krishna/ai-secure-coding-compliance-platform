@@ -202,14 +202,16 @@ and affected patch promotion remains blocked.
 
 > **LLM API keys and SMTP Settings are not stored in `.env`.**
 
-The platform includes a secure **Admin Dashboard** for dynamic
-configuration. After launching the app and logging in as the
-**superuser** (the first registered user), you are routed to
-`/setup` to:
+First-run bootstrap happens in the terminal: `setup.sh` asks for the
+administrator account, the LLM provider/model/key, the Grafana
+administrator and (for the custom variant) the feature set, then calls
+`app.cli.terminal_setup` which drives the same bootstrap endpoint the old
+wizard used. The LLM key is encrypted at rest with your `ENCRYPTION_KEY`.
 
-- Add/remove LLM providers (OpenAI, Google, Anthropic, etc.) and
-  securely enter API keys — encrypted at rest with your
-  `ENCRYPTION_KEY`.
+Afterwards the secure **Admin Dashboard** covers everything else:
+
+- Add/remove LLM providers (OpenAI, Google, Anthropic, etc.) and rotate
+  API keys.
 - Configure **SMTP Settings** for password-reset emails.
 - Manage **System Settings** such as log verbosity, CORS origins, and
   the LLM optimization mode.

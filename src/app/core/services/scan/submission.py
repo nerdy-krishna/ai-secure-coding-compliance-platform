@@ -51,7 +51,10 @@ from app.infrastructure.database.repositories.integration_repo import (
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.observability import record_metric, span
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
+from app.shared.lib import ingest_limits
+from app.shared.lib.files import looks_binary
 from app.shared.lib.files import get_language_from_filename
+from app.shared.lib.ingest_manifest import IngestManifest, build_manifest
 from app.shared.lib.framework_validation import validate_framework_selection
 from app.shared.lib.git import clone_repo_and_get_files, fetch_github_selected_files
 from app.shared.lib.integration_contract import IntegrationSourceProvenance
@@ -62,8 +65,8 @@ logger = logging.getLogger(__name__)
 # Submission limits (V02.1.3 / V05.2.1)
 # ---------------------------------------------------------------------------
 MAX_FILES_PER_SCAN: int = 5_000
-MAX_TOTAL_BYTES: int = 200 * 1024 * 1024  # 200 MB aggregate
-MAX_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB per file
+MAX_TOTAL_BYTES: int = ingest_limits.MAX_TOTAL_BYTES
+MAX_FILE_BYTES: int = ingest_limits.MAX_FILE_BYTES
 MAX_PATH_LEN: int = 1_024
 
 # Canonical storage suffixes for the pasted-code language picker. The user can
@@ -130,16 +133,6 @@ _REPO_URL_RE = re.compile(
 )
 
 # Magic bytes for common executable formats (V05.2.2)
-_EXECUTABLE_MAGIC: tuple[bytes, ...] = (
-    b"MZ",  # PE/DOS
-    b"\x7fELF",  # ELF
-    b"\xfe\xed\xfa\xce",  # Mach-O 32-bit
-    b"\xfe\xed\xfa\xcf",  # Mach-O 64-bit
-    b"\xca\xfe\xba\xbe",  # Mach-O fat binary / Java class
-    b"#!",  # shebang (shell scripts etc.)
-)
-
-
 def _redact_repo_url(url: str) -> str:
     """Return *url* with any userinfo (credentials) stripped (V16.2.5)."""
     try:
@@ -210,6 +203,70 @@ class ScanSubmissionService:
     def __init__(self, repo: ScanRepository):
         self.repo = repo
         self.outbox = ScanOutboxRepository(repo.db)
+
+    @staticmethod
+    def _build_manifest(
+        files_data: List[Dict[str, Any]],
+        *,
+        source: str,
+        deep_vendor_scan: bool = False,
+    ) -> IngestManifest:
+        """Ingest the gathered files into one manifest and log the outcome."""
+        manifest = build_manifest(
+            files_data,
+            source=source,
+            deep_vendor_scan=deep_vendor_scan,
+            max_files=MAX_FILES_PER_SCAN,
+            max_total_bytes=MAX_TOTAL_BYTES,
+            max_file_bytes=MAX_FILE_BYTES,
+        )
+        summary = manifest.summary()
+        logger.info(
+            "scan-submission: ingested files",
+            extra={
+                "source": summary["source"],
+                "files_total": summary["files_total"],
+                "files_scannable": summary["files_scannable"],
+                "files_skipped": summary["files_skipped"],
+                "excluded_by_reason": summary["excluded_by_reason"],
+            },
+        )
+        for record in manifest.skipped[:20]:
+            logger.debug(
+                "scan-submission: skipped file",
+                extra={
+                    "path": record.path,
+                    "reason_code": record.reason_code,
+                    "reason": record.reason,
+                },
+            )
+        return manifest
+
+    @staticmethod
+    def _reject_unscannable(manifest: IngestManifest) -> None:
+        """Refuse a submission that would produce a scan with nothing to scan.
+
+        The old behaviour was to accept it and hand the worker an empty file set,
+        which surfaced as an unexplained zero-finding scan. The file count and the
+        reason breakdown are far more useful than that.
+        """
+        if manifest.scannable > 0 and (manifest.first_party > 0 or manifest.deep_vendor_scan):
+            return
+        logger.info(
+            "scan-submission: rejected unscannable submission",
+            extra={
+                "files_total": manifest.files_total,
+                "excluded_by_reason": manifest.reason_counts(),
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                manifest.rejection_detail()
+                if manifest.scannable == 0
+                else manifest.vendor_only_detail()
+            ),
+        )
 
     async def _resolve_user_tenant_id(self, user_id: int) -> Optional[uuid.UUID]:
         """Look up the submitter's tenant for stamping on Project + Scan.
@@ -296,21 +353,13 @@ class ScanSubmissionService:
                 detail="No files were provided for analysis.",
             )
 
-        # --- Aggregate size / count caps (V02.1.3) ---------------------------
-        if len(files_data) > MAX_FILES_PER_SCAN:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Submission exceeds the maximum of {MAX_FILES_PER_SCAN} files.",
-            )
-        total_bytes = sum(len(f["content"].encode()) for f in files_data)
-        if total_bytes > MAX_TOTAL_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Submission exceeds the maximum total size of "
-                    f"{MAX_TOTAL_BYTES // (1024 * 1024)} MB."
-                ),
-            )
+        # --- One manifest: caps, classification, and the "nothing is scannable"
+        # guard, in a single place for every ingestion path (V02.1.3).
+        manifest = self._build_manifest(
+            files_data, source=source_type or "upload", deep_vendor_scan=deep_vendor_scan
+        )
+        self._reject_unscannable(manifest)
+        files_data = manifest.files_for_persistence()
 
         # --- DB write chain (V16.3.4: wrap for structured error logging) -----
         # Resolve the submitter's tenant up-front so both Project and Scan
@@ -369,11 +418,13 @@ class ScanSubmissionService:
                 commit=False,
             )
 
-            # 6. Add "QUEUED" event to the timeline
+            # 6. Add "QUEUED" event to the timeline. The ingest summary rides along
+            # so the timeline can say "604 of 8,112 files will be scanned".
             await self.repo.create_scan_event(
                 scan_id=scan.id,
                 stage_name="QUEUED",
                 status="COMPLETED",
+                details={"ingest": manifest.summary()},
                 commit=False,
             )
 
@@ -510,14 +561,17 @@ class ScanSubmissionService:
                     ),
                 )
 
-            # --- Executable magic-byte rejection (V05.2.2) -------------------
-            header = content_bytes[:8]
-            for magic in _EXECUTABLE_MAGIC:
-                if header.startswith(magic):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"File {fname!r} appears to be an executable and cannot be submitted.",
-                    )
+            # --- Binary rejection (V05.2.2) ---------------------------------
+            # Compiled executables and other non-text payloads cannot be audited, so
+            # they are refused; text that merely starts with a shebang is accepted.
+            if looks_binary(content_bytes):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"File {fname!r} appears to be a binary or compiled executable "
+                        "and cannot be audited. Submit source code instead."
+                    ),
+                )
 
             try:
                 content_str = content_bytes.decode("utf-8")

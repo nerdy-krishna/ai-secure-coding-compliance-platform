@@ -23,6 +23,7 @@ from sqlalchemy import delete, select
 from app.config.config import settings
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
+    STATUS_STOPPED_BEFORE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
     STATUS_BUDGET_EXHAUSTED,
     STATUS_COMPLETED,
@@ -137,6 +138,7 @@ async def notify_scan_completed(scan_id: Any) -> None:
                 outcome = "completed"
             elif status in (
                 STATUS_BLOCKED_PRE_LLM,
+                STATUS_STOPPED_BEFORE_LLM,
                 STATUS_BLOCKED_USER_DECLINE,
                 STATUS_BUDGET_EXHAUSTED,
             ):

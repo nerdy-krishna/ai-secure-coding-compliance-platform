@@ -189,6 +189,9 @@ class ComplianceService:
             )
 
         for fw in custom_rows:
+            # RAG reports document counts for every framework it has ingested,
+            # custom ones included — the previous hardcoded 0 hid the corpus size.
+            custom_docs = doc_counts.get(fw.name, 0)
             out.append(
                 FrameworkStats(
                     name=fw.name,
@@ -197,7 +200,7 @@ class ComplianceService:
                     framework_type="custom",
                     ingest_mode=None,
                     is_installed=True,  # custom = already in the DB
-                    doc_count=0,
+                    doc_count=custom_docs,
                     findings_matched=matched.get(fw.name, 0),
                     open_findings=open_counts.get(fw.name, 0),
                     score=scores.get(fw.name, 100),
