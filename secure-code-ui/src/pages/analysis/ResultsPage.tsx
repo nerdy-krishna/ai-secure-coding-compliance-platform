@@ -912,8 +912,10 @@ const ResultsPage: React.FC = () => {
       </div>
 
       {/* Models used — one tile per LLM role, with per-model finding
-          stats; the consolidation tally is a separate pipeline footer. */}
-      {data.llms_used && data.llms_used.length > 0 && (
+          stats; the consolidation tally is a separate pipeline footer.
+          Hidden when the LLM phase never ran: listing configured models with
+          zero findings implies they reviewed this scan, which they did not. */}
+      {!isPrescanBlocked && data.llms_used && data.llms_used.length > 0 && (
         <div className="sccap-card" style={{ display: "grid", gap: 14 }}>
           <span
             style={{
