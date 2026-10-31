@@ -15,7 +15,8 @@ import { dashboardService } from "../../shared/api/dashboardService";
 import { ruleSourcesService } from "../../shared/api/ruleSourcesService";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { Permission, hasPermission } from "../../shared/lib/permissions";
-import { compactNumber } from "../pentesting/format";
+import { useUsageTotals } from "../../shared/hooks/useUsageTotals";
+import { sharedTiles, type Tile } from "../../shared/ui/OverviewTiles";
 import type {
   ProjectHistoryItem,
   ScanHistoryItem,
@@ -41,15 +42,6 @@ function formatWhen(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString();
 }
 
-// Inverted from dashboard: the RiskRing reads "higher is better"; the
-// progress bar on the card reads "higher is worse". Convert here so a
-// posture score of 100 shows an empty bar.
-function exposureColor(exposure: number): string {
-  if (exposure >= 75) return "var(--critical)";
-  if (exposure >= 50) return "var(--high)";
-  if (exposure >= 25) return "var(--medium)";
-  return "var(--success)";
-}
 
 function latestScan(p: ProjectHistoryItem): ScanHistoryItem | null {
   const sorted = [...p.scans].sort(
@@ -109,43 +101,33 @@ const ProjectsPage: React.FC = () => {
   const projects = useMemo(() => data?.items ?? [], [data]);
   const stats = statsQ.data;
   const sources = sourcesQ.data ?? [];
+  const scanUsage = useUsageTotals("scan");
+  const scansQ = useQuery({
+    queryKey: ["dashboard", "scans-window"],
+    queryFn: () => scanService.getScanHistory(1, 100),
+  });
+  const scansWindow = scansQ.data?.items ?? [];
+  const scansThisWindow = scansQ.data?.total ?? scansWindow.length;
+  const completedScans = scansWindow.filter((scan) => scan.status === "COMPLETED").length;
   const openFindings = stats?.open_findings;
   const criticalHigh = (openFindings?.critical ?? 0) + (openFindings?.high ?? 0);
   const failedSources = sources.filter((source) => source.last_sync_status === "failed");
   const enabledSources = sources.filter((source) => source.enabled);
 
-  const tiles = [
-    {
-      label: "Projects",
-      value: String(data?.total ?? projects.length),
-      sub: "repositories under scan",
-      tone: undefined as "ok" | "warn" | "bad" | undefined,
-      icon: <Icon.Folder size={15} />,
-    },
-    {
-      label: "Open findings",
-      value: compactNumber(
-        (openFindings?.critical ?? 0) +
-          (openFindings?.high ?? 0) +
-          (openFindings?.medium ?? 0) +
-          (openFindings?.low ?? 0) +
-          (openFindings?.informational ?? 0),
-      ),
-      sub: criticalHigh ? `${criticalHigh} critical/high` : "none critical",
-      tone: (criticalHigh ? "bad" : undefined) as "ok" | "warn" | "bad" | undefined,
-      icon: <Icon.Flag size={15} />,
-    },
-    {
-      label: "Risk score",
-      value: stats ? stats.risk_score.toFixed(1) : "—",
-      sub: "CVSS-weighted portfolio",
-      tone: (stats && stats.risk_score >= 7 ? "bad" : stats && stats.risk_score >= 4 ? "warn" : "ok") as
-        | "ok"
-        | "warn"
-        | "bad"
-        | undefined,
-      icon: <Icon.Gauge size={15} />,
-    },
+  const tiles = sharedTiles({
+    projects: data?.total ?? projects.length,
+    projectsSub: "repositories under scan",
+    runsLabel: "Scans",
+    runs: scansThisWindow,
+    runsSub: `${completedScans} completed`,
+    findings: (openFindings?.critical ?? 0) + (openFindings?.high ?? 0) +
+      (openFindings?.medium ?? 0) + (openFindings?.low ?? 0) +
+      (openFindings?.informational ?? 0),
+    findingsSub: criticalHigh ? `${criticalHigh} critical/high` : "none critical",
+    findingsTone: criticalHigh ? "bad" : undefined,
+    tokens: scanUsage.data,
+    cost: scanUsage.data.cost_usd,
+  }).concat([
     {
       label: "Semgrep sources",
       value: isAdmin ? `${enabledSources.length}/${sources.length}` : "—",
@@ -154,28 +136,23 @@ const ProjectsPage: React.FC = () => {
         : isAdmin
           ? `${sources.reduce((total, source) => total + (source.rule_count ?? 0), 0).toLocaleString()} rules`
           : "admin only",
-      tone: (failedSources.length ? "bad" : enabledSources.length ? "ok" : "warn") as
-        | "ok"
-        | "warn"
-        | "bad"
-        | undefined,
+      tone: failedSources.length ? "bad" : enabledSources.length ? "ok" : "warn",
       icon: <Icon.Code size={15} />,
     },
     {
       label: "Scans this month",
       value: String(stats?.scans_this_month ?? 0),
-      sub: stats ? `≈$${stats.cost_this_month_usd.toFixed(2)} spend` : undefined,
-      tone: undefined,
+      sub: stats ? `≈$${stats.cost_this_month_usd.toFixed(2)} spent` : undefined,
       icon: <Icon.Clock size={15} />,
     },
     {
       label: "Fixes ready",
       value: String(stats?.fixes_ready ?? 0),
       sub: "awaiting review",
-      tone: (stats?.fixes_ready ? "warn" : undefined) as "ok" | "warn" | "bad" | undefined,
+      tone: stats?.fixes_ready ? "warn" : undefined,
       icon: <Icon.Check size={15} />,
     },
-  ];
+  ] as Tile[]);
 
   return (
     <div className="c13-page pentest-landing fade-in">
@@ -295,8 +272,6 @@ const ProjectsPage: React.FC = () => {
           {projects.map((p) => {
             const latest = latestScan(p);
             const stats = p.stats;
-            const exposure = stats ? 100 - stats.risk_score : 0;
-            const color = exposureColor(exposure);
             const totalFindings = stats
               ? stats.open_findings.critical +
                 stats.open_findings.high +
@@ -365,28 +340,6 @@ const ProjectsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: 11.5,
-                    color: "var(--fg-muted)",
-                    marginBottom: 6,
-                  }}
-                >
-                  <span>Posture score</span>
-                  <span style={{ fontWeight: 600, color }}>
-                    {stats ? stats.risk_score : "—"}
-                  </span>
-                </div>
-                <div className="sccap-progress" style={{ marginBottom: 12 }}>
-                  <span
-                    style={{
-                      width: stats ? `${exposure}%` : "0%",
-                      background: color,
-                    }}
-                  />
-                </div>
                 <SevBar
                   crit={stats?.open_findings.critical}
                   high={stats?.open_findings.high}

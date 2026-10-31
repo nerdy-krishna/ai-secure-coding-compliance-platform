@@ -9,21 +9,20 @@ import { dashboardService } from "../../shared/api/dashboardService";
 import { scanService } from "../../shared/api/scanService";
 import { ruleSourcesService } from "../../shared/api/ruleSourcesService";
 import { frameworkService } from "../../shared/api/frameworkService";
-import { getDashboard as getPentestDashboard, listToolHealth } from "../../shared/api/pentestService";
+import {
+  getDashboard as getPentestDashboard,
+  listProjects,
+  listRuns,
+  listToolHealth,
+} from "../../shared/api/pentestService";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { Permission, hasPermission } from "../../shared/lib/permissions";
 import type { PentestDashboard } from "../../shared/api/pentestService";
 import { compactNumber } from "../pentesting/format";
+import { useUsageTotals } from "../../shared/hooks/useUsageTotals";
+import { sharedTiles, type Tile } from "../../shared/ui/OverviewTiles";
 import "../pentesting/pentest.css";
 
-interface Tile {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "ok" | "warn" | "bad";
-  icon: React.ReactNode;
-  to?: string;
-}
 
 function Section({
   title,
@@ -95,7 +94,11 @@ const DashboardPage: React.FC = () => {
     enabled: isAdmin,
   });
   const pentestQ = useQuery({ queryKey: ["pentest", "dashboard"], queryFn: getPentestDashboard, refetchInterval: 15_000 });
+  const pentestRunsQ = useQuery({ queryKey: ["pentest", "runs"], queryFn: listRuns });
+  const pentestProjectsQ = useQuery({ queryKey: ["pentest", "projects"], queryFn: listProjects });
   const pentestToolsQ = useQuery({ queryKey: ["pentest", "tool-health"], queryFn: listToolHealth, refetchInterval: 60_000 });
+  const scanUsage = useUsageTotals("scan");
+  const pentestUsageQ = useUsageTotals("pentest");
 
   const stats = statsQ.data;
   const scans = scansQ.data?.items ?? [];
@@ -112,42 +115,27 @@ const DashboardPage: React.FC = () => {
   const criticalHigh = (openFindings?.critical ?? 0) + (openFindings?.high ?? 0);
   const missingTools = pentestToolsQ.data?.missing ?? pentest?.tools.missing ?? [];
   const pentestSeverity = pentest?.findings.by_severity ?? {};
+  const pentestProjects = pentestProjectsQ.data ?? [];
+  const pentestProjectCount = pentestProjects.length;
+  const pentestUnassigned = (pentestRunsQ.data ?? []).filter((run) => !run.project_id).length;
   const pentestCriticalHigh = (pentestSeverity.critical ?? 0) + (pentestSeverity.high ?? 0);
 
   const codeTiles: Tile[] = [
-    {
-      label: "Projects",
-      value: String(projectsQ.data?.total ?? 0),
-      sub: "repositories under scan",
-      icon: <Icon.Folder size={15} />,
-    },
-    {
-      label: "Scans",
-      value: String(scansQ.data?.total ?? scans.length),
-      sub: runningScans ? `${runningScans} running` : `${completedScans} completed`,
-      tone: runningScans ? "ok" : undefined,
-      icon: <Icon.Layers size={15} />,
-    },
-    {
-      label: "Open findings",
-      value: compactNumber(
-        (openFindings?.critical ?? 0) +
-          (openFindings?.high ?? 0) +
-          (openFindings?.medium ?? 0) +
-          (openFindings?.low ?? 0) +
-          (openFindings?.informational ?? 0),
-      ),
-      sub: criticalHigh ? `${criticalHigh} critical/high` : "none critical",
-      tone: criticalHigh ? "bad" : undefined,
-      icon: <Icon.Flag size={15} />,
-    },
-    {
-      label: "Risk score",
-      value: stats ? stats.risk_score.toFixed(1) : "—",
-      sub: "CVSS-weighted portfolio",
-      tone: stats && stats.risk_score >= 7 ? "bad" : stats && stats.risk_score >= 4 ? "warn" : "ok",
-      icon: <Icon.Gauge size={15} />,
-    },
+    ...sharedTiles({
+      projects: projectsQ.data?.total ?? 0,
+      projectsSub: "repositories under scan",
+      runsLabel: "Scans",
+      runs: scansQ.data?.total ?? scans.length,
+      runsSub: runningScans ? `${runningScans} running` : `${completedScans} completed`,
+      runsTone: runningScans ? "ok" : undefined,
+      findings: (openFindings?.critical ?? 0) + (openFindings?.high ?? 0) +
+        (openFindings?.medium ?? 0) + (openFindings?.low ?? 0) +
+        (openFindings?.informational ?? 0),
+      findingsSub: criticalHigh ? `${criticalHigh} critical/high` : "none critical",
+      findingsTone: criticalHigh ? "bad" : undefined,
+      tokens: scanUsage.data,
+      cost: scanUsage.data.cost_usd,
+    }),
     {
       label: "Semgrep sources",
       value: isAdmin ? `${enabledSources.length}/${sources.length}` : "—",
@@ -168,7 +156,7 @@ const DashboardPage: React.FC = () => {
     {
       label: "Scans this month",
       value: String(stats?.scans_this_month ?? 0),
-      sub: stats ? `≈$${stats.cost_this_month_usd.toFixed(2)} spend` : undefined,
+      sub: stats ? `≈$${stats.cost_this_month_usd.toFixed(2)} spent` : undefined,
       icon: <Icon.Clock size={15} />,
     },
     {
@@ -181,20 +169,22 @@ const DashboardPage: React.FC = () => {
   ];
 
   const pentestTiles: Tile[] = [
-    {
-      label: "Assessments",
-      value: String(pentest?.runs.total ?? 0),
-      sub: pentest?.runs.running ? `${pentest.runs.running} in flight` : "none running",
-      tone: pentest?.runs.running ? "ok" : undefined,
-      icon: <Icon.Shield size={15} />,
-    },
-    {
-      label: "Findings",
-      value: String(pentest?.findings.total ?? 0),
-      sub: pentestCriticalHigh ? `${pentestCriticalHigh} critical/high` : "none critical",
-      tone: pentestCriticalHigh ? "bad" : undefined,
-      icon: <Icon.Flag size={15} />,
-    },
+    ...sharedTiles({
+      projects: pentestProjectCount,
+      projectsSub: pentestUnassigned
+        ? `${pentestUnassigned} scan(s) unassigned`
+        : "assessed estates",
+      projectsTone: pentestUnassigned ? "warn" : "ok",
+      runsLabel: "Assessments",
+      runs: pentest?.runs.total ?? 0,
+      runsSub: pentest?.runs.running ? `${pentest.runs.running} in flight` : "none running",
+      runsTone: pentest?.runs.running ? "ok" : undefined,
+      findings: pentest?.findings.total ?? 0,
+      findingsSub: pentestCriticalHigh ? `${pentestCriticalHigh} critical/high` : "none critical",
+      findingsTone: pentestCriticalHigh ? "bad" : undefined,
+      tokens: pentestUsageQ.data,
+      cost: pentest?.usage.cost_usd ?? pentestUsageQ.data.cost_usd,
+    }),
     {
       label: "Proven by replay",
       value: String(pentest?.findings.proven ?? 0),
@@ -228,15 +218,6 @@ const DashboardPage: React.FC = () => {
       sub: missingTools.length ? `missing ${missingTools.join(", ")}` : "all present",
       tone: missingTools.length ? "bad" : "ok",
       icon: <Icon.Terminal size={15} />,
-    },
-    {
-      label: "Model spend",
-      value:
-        pentest?.usage.cost_usd != null
-          ? `≈$${pentest.usage.cost_usd.toFixed(2)}`
-          : `${pentest?.usage.calls ?? 0} calls`,
-      sub: `in ${compactNumber(pentest?.usage.input_tokens)} · out ${compactNumber(pentest?.usage.output_tokens)}`,
-      icon: <Icon.Cpu size={15} />,
     },
   ];
 
