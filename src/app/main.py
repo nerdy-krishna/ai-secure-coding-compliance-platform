@@ -4,6 +4,7 @@ import asyncio
 import logging
 import logging.config
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
@@ -862,6 +863,45 @@ else:
 _CORR_ID_RE = __import__("re").compile(r"[A-Za-z0-9._:\-]{1,128}")
 
 
+# Paths that are polled by health checks, load balancers and the UI shell. They
+# are answered thousands of times a day and say nothing about the application,
+# so they are logged at DEBUG and filtered out of the log pipeline entirely.
+_QUIET_ACCESS_PATHS = (
+    "/api/v1/system/health",
+    "/api/v1/setup/status",
+    "/healthz",
+    "/metrics",
+    "/favicon.ico",
+)
+
+# A request slower than this is logged at WARNING so it is visible in the
+# dashboard without having to chart latency: the value is a pager-grade signal,
+# not a performance budget.
+_SLOW_REQUEST_MS = float(os.getenv("SLOW_REQUEST_MS", "2500"))
+
+
+def _route_template(request: Request) -> str:
+    """The matched route path (``/api/v1/scans/{scan_id}/result``), not the URL.
+
+    Raw paths carry ids, uuids and search terms, which would make the log
+    stream unbounded; the template is what you actually group by.
+    """
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    if isinstance(template, str) and template:
+        # APIRoute.path omits the include_router prefix ("/scans/{id}"), so
+        # rebuild the full template from the actual path: everything before the
+        # template's first segment is the mount prefix.
+        path = request.url.path
+        first = template.split("/", 1)[1] if template.startswith("/") else template
+        head = f"/{first.split('/', 1)[0]}"
+        idx = path.find(head)
+        if idx > 0:
+            return path[:idx] + template
+        return template
+    return request.url.path
+
+
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
     # V02.2.1 / V04.2.4 / V04.2.5 / V14.2.4 / V16.4.1: validate the inbound
@@ -876,8 +916,9 @@ async def correlation_id_middleware(request: Request, call_next):
     # Set the ID in the context variable so our logger can access it
     correlation_id_var.set(corr_id)
 
-    # Process the request
+    started = time.perf_counter()
     response = await call_next(request)
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
 
     # Add the correlation ID to the response headers
     response.headers["X-Correlation-ID"] = corr_id
@@ -887,9 +928,34 @@ async def correlation_id_middleware(request: Request, call_next):
         response.headers.setdefault("Cache-Control", "no-store")
         response.headers.setdefault("Pragma", "no-cache")
 
-    logger.info(
-        "request.completed",
-        extra={"path": request.url.path, "status": response.status_code},
+    path = request.url.path
+    route = _route_template(request)
+    status = response.status_code
+    quiet = path.startswith(_QUIET_ACCESS_PATHS) or route.startswith(_QUIET_ACCESS_PATHS)
+
+    if status >= 500:
+        level = logging.ERROR
+    elif status >= 400:
+        level = logging.WARNING
+    elif duration_ms >= _SLOW_REQUEST_MS:
+        level = logging.WARNING
+    elif quiet:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+
+    logger.log(
+        level,
+        "http.request",
+        extra={
+            "http_method": request.method,
+            "http_route": route,
+            "http_status": status,
+            "duration_ms": duration_ms,
+            "slow": duration_ms >= _SLOW_REQUEST_MS,
+            # Scheme/host are deliberately absent: they identify the deployment,
+            # not the request, and `service_name` already does that.
+        },
     )
     return response
 

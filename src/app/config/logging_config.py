@@ -199,8 +199,43 @@ if not _IS_PRODUCTION:
         # create a log file; logging simply stays on console handlers.
         pass
 
-# Active app logger level: INFO in production, DEBUG elsewhere (V13.4.2 / V14.1.2)
-_APP_LOG_LEVEL = "INFO" if _IS_PRODUCTION else "DEBUG"
+# Active app logger level. `LOG_LEVEL` overrides the environment default so an
+# operator can raise or lower verbosity without redeploying; the admin
+# `system.log_level` setting still wins at runtime (see update_logging_level).
+_APP_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO" if _IS_PRODUCTION else "DEBUG").upper()
+if _APP_LOG_LEVEL not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+    _APP_LOG_LEVEL = "INFO" if _IS_PRODUCTION else "DEBUG"
+
+# Third-party loggers that are chatty at INFO and never say anything an operator
+# can act on. Every one of these was measured in the Loki stream before being
+# pinned: HTTP client traces, watchfiles polling, MIME parsing, and provider
+# SDK debug chatter that duplicates what our own LLM logs already record.
+_NOISY_LIBRARY_LEVELS: dict[str, str] = {
+    "httpx": "WARNING",
+    "httpcore": "WARNING",
+    "urllib3": "WARNING",
+    "hpack": "WARNING",
+    "h2": "WARNING",
+    "multipart": "WARNING",
+    "watchfiles": "WARNING",
+    "filelock": "WARNING",
+    "asyncio": "WARNING",
+    "qdrant_client": "WARNING",
+    "openai": "WARNING",
+    "anthropic": "WARNING",
+    "litellm": "WARNING",
+    "LiteLLM": "WARNING",
+    "google_genai": "WARNING",
+    "pydantic_ai": "WARNING",
+    "langchain": "WARNING",
+    "langchain_core": "WARNING",
+    "langgraph": "INFO",
+    "fastapi_users": "WARNING",
+    "passlib": "WARNING",
+    "botocore": "WARNING",
+    "boto3": "WARNING",
+    "s3transfer": "WARNING",
+}
 
 # Handlers included for the app logger — file handler only in non-production (V13.4.2 / V16.2.3)
 _APP_HANDLERS = ["default"] if _IS_PRODUCTION else ["default", "file"]
@@ -242,9 +277,14 @@ LOGGING_CONFIG = {
         "app": {"handlers": _APP_HANDLERS, "level": _APP_LOG_LEVEL, "propagate": False},
         "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
         "uvicorn.error": {"handlers": ["default"], "level": "INFO", "propagate": False},
+        # uvicorn's access log is unstructured text and duplicates the
+        # `http.request` line this application emits (method, route template,
+        # status, duration, correlation id). Keep the logger configured so
+        # `--access-log` stays a no-op, but stop it writing a second line per
+        # request into Loki.
         "uvicorn.access": {
-            "handlers": ["default"],
-            "level": "INFO",
+            "handlers": [],
+            "level": "WARNING",
             "propagate": False,
         },
         "sqlalchemy": {"handlers": ["default"], "level": "WARNING", "propagate": False},
@@ -255,7 +295,10 @@ LOGGING_CONFIG = {
             "level": "WARNING",
             "propagate": False,
         },
-        "langgraph": {"handlers": ["default"], "level": "INFO", "propagate": False},
+        **{
+            name: {"handlers": ["default"], "level": level, "propagate": False}
+            for name, level in _NOISY_LIBRARY_LEVELS.items()
+        },
         # Root logger — stdout only; file handler is app-logger-scoped above
         "": {"handlers": ["default"], "level": "INFO"},
     },
@@ -289,4 +332,9 @@ def update_logging_level(level: str):
         # However, for now let's keep it simple and just update the main app loggers
         # as too much noise from libraries can be overwhelming.
 
-        logger.info(f"Log level updated to {level}")
+        for name, floor in _NOISY_LIBRARY_LEVELS.items():
+            logging.getLogger(name).setLevel(max(
+                logging.getLevelName(level), logging.getLevelName(floor)
+            ))
+
+        logger.info("logging.level.updated", extra={"level": level})
