@@ -812,11 +812,17 @@ const ScanRunningPage: React.FC = () => {
     if (status && !TERMINAL_STATUSES.has(status)) {
       sawNonTerminalRef.current = true;
     }
+    // Every terminal state except FAILED lands on the results page: a scan
+    // stopped at the prescan gate keeps its deterministic findings, so the user
+    // must end up where those findings are shown.
     if (
       sawNonTerminalRef.current &&
       (status === "COMPLETED" ||
         status === "REMEDIATION_COMPLETED" ||
-        status === "BLOCKED_PRE_LLM")
+        status === "BLOCKED_PRE_LLM" ||
+        status === "BLOCKED_USER_DECLINE" ||
+        status === "CANCELLED" ||
+        status === "EXPIRED")
     ) {
       const t = setTimeout(
         () =>
@@ -1166,7 +1172,9 @@ const ScanRunningPage: React.FC = () => {
       }, idempotencyKey);
       closedGateIdsRef.current.add(contract.gate_id);
       setActiveApprovalGate(null);
-      toast.info("Scan stopped before LLM analysis.");
+      toast.info(
+        "Scan stopped before LLM analysis. The findings the scanners already produced are kept.",
+      );
     } catch (err) {
       const e = err as { message?: string };
       toast.error(e.message || "Failed to stop scan");
