@@ -34,22 +34,17 @@ const SubmissionHistoryPage = React.lazy(() => import("../pages/account/Submissi
 const UsagePage = React.lazy(() => import("../pages/account/UsagePage"));
 const FeaturesPage = React.lazy(() => import("../pages/admin/FeaturesPage"));
 const SystemConfigTab = React.lazy(() => import("../pages/admin/SystemConfigTab"));
-const UserManagementTab = React.lazy(() => import("../pages/admin/UserManagement"));
-const UserGroupsPage = React.lazy(() => import("../pages/admin/UserGroupsPage"));
-const SMTPSettingsTab = React.lazy(() => import("../pages/admin/SMTPSettingsTab"));
 const AnalysisConfigPage = React.lazy(() => import("../pages/admin/AnalysisConfigPage"));
 const SemgrepRulesPage = React.lazy(() => import("../pages/admin/SemgrepRulesPage"));
+const AccessPage = React.lazy(() => import("../pages/admin/AccessPage"));
+const IdentityPage = React.lazy(() => import("../pages/admin/IdentityPage"));
 const ScanDiagnosticsPage = React.lazy(() => import("../pages/analysis/ScanDiagnosticsPage"));
 const ProjectDetailPage = React.lazy(() => import("../pages/analysis/ProjectDetailPage"));
 const ProjectsPage = React.lazy(() => import("../pages/analysis/ProjectsPage"));
 const ResultsPage = React.lazy(() => import("../pages/analysis/ResultsPage"));
 const LoginPage = React.lazy(() => import("../pages/auth/LoginPage"));
 const SsoCallbackPage = React.lazy(() => import("../pages/auth/SsoCallbackPage"));
-const SsoProvidersPage = React.lazy(() => import("../pages/admin/SsoProvidersPage"));
 const SsoAuditPage = React.lazy(() => import("../pages/admin/SsoAuditPage"));
-const ScimTokensPage = React.lazy(() => import("../pages/admin/ScimTokensPage"));
-const TenantsPage = React.lazy(() => import("../pages/admin/TenantsPage"));
-const AuthorizationPage = React.lazy(() => import("../pages/admin/AuthorizationPage"));
 const IntegrationsPage = React.lazy(() => import("../pages/admin/IntegrationsPage"));
 const SecurityAdvisorPage = React.lazy(() => import("../pages/chat/SecurityAdvisorPage"));
 const SubmitPage = React.lazy(() => import("../pages/submission/SubmitPage"));
@@ -235,11 +230,13 @@ function AppContent() {
           <Route path="/admin/appearance" element={routeContent(<AppearanceSettingsPage />)} />
           <Route path="/account/settings/llm" element={routeContent(<LLMSettingsPage />)} />
           <Route element={<FeatureRoute feature="email" />}>
-            <Route path="/admin/smtp" element={routeContent(<SMTPSettingsTab />)} />
+            <Route path="/admin/smtp" element={<Navigate to="/admin/identity?tab=smtp" replace />} />
           </Route>
           <Route element={<FeatureRoute feature="admin_authoring" />}>
             <Route path="/admin/analysis" element={routeContent(<AnalysisConfigPage />)} />
             <Route path="/admin/semgrep" element={routeContent(<SemgrepRulesPage />)} />
+            <Route path="/admin/access" element={routeContent(<AccessPage />)} />
+            <Route path="/admin/identity" element={routeContent(<IdentityPage />)} />
             {/* The five authoring screens are tabs of /admin/analysis now. */}
             <Route
               path="/admin/agents"
@@ -278,34 +275,36 @@ function AppContent() {
             <Route path="/pentesting/runs/:runId" element={routeContent(<PentestRunPage />)} />
           </Route>
         </Route>
+        {/* Access and roles: tenants → users → groups → authorization are one page. */}
         <Route element={<RouteGuard requires="permission" anyPermission={["identity.read"]} />}>
           <Route element={<FeatureRoute feature="multi_user" />}>
-            <Route path="/admin/users" element={routeContent(<UserManagementTab />)} />
+            <Route path="/admin/users" element={<Navigate to="/admin/access?tab=users" replace />} />
+            <Route path="/admin/access" element={routeContent(<AccessPage />)} />
           </Route>
         </Route>
         <Route element={<RouteGuard requires="permission" anyPermission={["group.manage"]} />}>
           <Route element={<FeatureRoute feature="user_groups" />}>
-            <Route path="/admin/user-groups" element={routeContent(<UserGroupsPage />)} />
+            <Route path="/admin/user-groups" element={<Navigate to="/admin/access?tab=groups" replace />} />
           </Route>
         </Route>
         <Route element={<RouteGuard requires="permission" anyPermission={["tenant.policy.manage"]} />}>
           <Route element={<FeatureRoute feature="sso" />}>
-            <Route path="/admin/sso/providers" element={routeContent(<SsoProvidersPage />)} />
+            <Route path="/admin/sso/providers" element={<Navigate to="/admin/identity?tab=sso" replace />} />
           </Route>
         </Route>
         <Route element={<RouteGuard requires="permission" anyPermission={["service_principal.manage"]} />}>
           <Route element={<FeatureRoute feature="scim" />}>
-            <Route path="/admin/scim/tokens" element={routeContent(<ScimTokensPage />)} />
+            <Route path="/admin/scim/tokens" element={<Navigate to="/admin/identity?tab=scim" replace />} />
           </Route>
           <Route path="/admin/integrations" element={routeContent(<IntegrationsPage />)} />
         </Route>
         <Route element={<RouteGuard requires="permission" anyPermission={["platform.tenant.manage"]} />}>
           <Route element={<FeatureRoute feature="multi_tenant" />}>
-            <Route path="/admin/tenants" element={routeContent(<TenantsPage />)} />
+            <Route path="/admin/tenants" element={<Navigate to="/admin/access?tab=tenants" replace />} />
           </Route>
         </Route>
         <Route element={<RouteGuard requires="auth" />}>
-          <Route path="/admin/authorization" element={routeContent(<AuthorizationPage />)} />
+          <Route path="/admin/authorization" element={<Navigate to="/admin/access?tab=authorization" replace />} />
         </Route>
 
         <Route path="/" element={<RouteGuard requires="root-redirect" />} />

@@ -1080,3 +1080,25 @@ option { background: var(--bg-elev); color: var(--fg); }
   color: var(--fg-muted);
   max-width: 100ch;
 }
+
+/* Floating advisor shortcut, bottom-right on every authenticated page. */
+.advisor-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: var(--primary-ink);
+  box-shadow: var(--shadow-md);
+  transition: transform .15s var(--ease), box-shadow .15s var(--ease);
+}
+.advisor-fab:hover { transform: translateY(-2px) scale(1.03); box-shadow: var(--shadow-lg); }
+.advisor-fab:active { transform: translateY(0) scale(.99); }
+@media (max-width: 640px) {
+  .advisor-fab { right: 14px; bottom: 14px; width: 46px; height: 46px; }
+}

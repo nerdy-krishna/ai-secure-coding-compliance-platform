@@ -56,10 +56,10 @@ const TRAILS: Record<string, Crumb[]> = {
   "/pentesting": [PENTEST, { label: "Projects and scans" }],
   "/pentesting/new": [PENTEST, { label: "New pentest" }],
   "/pentesting/history": [PENTEST, { label: "Submission history" }],
-  "/advisor": [ADMIN, { label: "Security advisor" }],
-  "/compliance": [ADMIN, { label: "Analysis config" }, { label: "Security standards" }],
-  "/admin/analysis": [ADMIN, { label: "Analysis config" }],
-  "/admin/semgrep": [ADMIN, { label: "Semgrep rules" }],
+  "/advisor": [PENTEST, { label: "Security advisor" }],
+  "/compliance": [ADMIN, { label: "Framework configuration" }, { label: "Security standards" }],
+  "/admin/analysis": [ADMIN, { label: "Framework configuration" }],
+  "/admin/semgrep": [ADMIN, { label: "Semgrep configuration" }],
   "/usage": [ADMIN, { label: "Usage" }],
   "/account/settings/appearance": [ACCOUNT, { label: "Appearance" }],
   "/account/settings/security": [ACCOUNT, { label: "Security" }],
@@ -67,16 +67,16 @@ const TRAILS: Record<string, Crumb[]> = {
   "/admin/system": [ADMIN, { label: "Platform" }],
   "/admin/features": [ADMIN, { label: "Features" }],
   "/admin/appearance": [ADMIN, { label: "Appearance" }],
-  "/admin/smtp": [ADMIN, { label: "SMTP" }],
+
   "/admin/rag": [ADMIN, { label: "Knowledge base" }],
-  "/admin/sso/providers": [ADMIN, { label: "SSO providers" }],
+  "/admin/identity": [ADMIN, { label: "Identity and email" }],
   "/admin/sso/audit": [ADMIN, { label: "Auth audit" }],
-  "/admin/scim/tokens": [ADMIN, { label: "SCIM tokens" }],
+
   "/admin/integrations": [ADMIN, { label: "Integrations" }],
-  "/admin/users": [ADMIN, { label: "Users" }],
-  "/admin/user-groups": [ADMIN, { label: "Groups" }],
-  "/admin/tenants": [ADMIN, { label: "Tenants" }],
-  "/admin/authorization": [ADMIN, { label: "Authorization" }],
+  "/admin/access": [ADMIN, { label: "Access and roles" }],
+
+
+
 };
 
 const SEGMENT_LABELS: Record<string, string> = {

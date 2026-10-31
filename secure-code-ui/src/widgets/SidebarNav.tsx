@@ -48,18 +48,26 @@ const pentesting: Item[] = [
     feature: "pentesting",
     permission: Permission.pentestRead,
   },
+  // The advisor reasons over the same findings a run produces, so it sits here
+  // rather than in administration.
+  { to: "/advisor", label: "Security advisor", icon: Icon.Chat, feature: "chat" },
 ];
 // Standards live inside "Analysis config" for admins; a reader without authoring
 // rights still gets the read-only standards view.
-const tools: Item[] = [
-  { to: "/advisor", label: "Security advisor", icon: Icon.Chat, feature: "chat" },
-  { to: "/usage", label: "Usage", icon: Icon.Gauge },
-];
+const tools: Item[] = [{ to: "/usage", label: "Usage", icon: Icon.Gauge }];
 
 // Admin links carry only a label, so the icon is chosen by keyword. A miss falls
 // back to a neutral dot rather than a letter, which is what the collapsed rail
 // used to render.
 const ADMIN_ICON_RULES: Array<[RegExp, IconComponent]> = [
+  [/framework config/i, Icon.Layers],
+  [/semgrep/i, Icon.Code],
+  [/llm|model/i, Icon.Cpu],
+  [/access|role/i, Icon.Users],
+  [/identity|email/i, Icon.Key],
+  [/integrations/i, Icon.Integrate],
+  [/auth audit/i, Icon.Clock],
+  [/appearance/i, Icon.Sun],
   [/authorization|policy/i, Icon.Lock],
   [/platform|features|system/i, Icon.Settings],
   [/users|groups|tenants|scim/i, Icon.Users],
@@ -168,8 +176,8 @@ export function SidebarNav() {
       ];
   const visible = (items: Item[]) => items.filter((item) => (!item.feature || (!featuresLoading && isFeatureEnabled(item.feature))) && (!item.permission || hasPermission(user?.permissions, item.permission)));
   const admin = ADMIN_LINKS.filter((item) => (!item.feature || isFeatureEnabled(item.feature)) && (!item.permissions || hasAnyPermission(user?.permissions, item.permissions)));
-  // Administration holds the platform settings *and* the workspace pages (compliance,
-  // advisor, usage) that used to sit in their own "Tools" group.
+  // Administration holds the configuration groups (framework, semgrep, LLM),
+  // access/identity, and the platform settings; the advisor moved to pentesting.
   const adminVisible =
     visible([...complianceOnly, ...tools]).length > 0 || admin.length > 0;
   const adminItems: Item[] = [
@@ -232,7 +240,12 @@ export function SidebarNav() {
         pathname.startsWith("/submission") ||
         pathname.startsWith("/account/history"),
     )}
-    {group("Pentesting", Icon.Shield, pentesting, pathname.startsWith("/pentesting"))}
+    {group(
+      "Pentesting",
+      Icon.Shield,
+      pentesting,
+      pathname.startsWith("/pentesting") || pathname.startsWith("/advisor"),
+    )}
     {adminVisible ? group("Administration", Icon.Settings, adminItems, adminOpen) : null}
   </aside>;
 }

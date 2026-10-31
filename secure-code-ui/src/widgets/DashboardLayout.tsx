@@ -14,6 +14,7 @@ import { TopNav } from "./TopNav/TopNav";
 import { ConnectivityStatus } from "../shared/ui/ConnectivityStatus";
 import { SidebarNav } from "./SidebarNav";
 import { Breadcrumbs, BreadcrumbProvider } from "../shared/ui/Breadcrumbs";
+import { AdvisorFab } from "../shared/ui/AdvisorFab";
 
 const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
   children,
@@ -40,6 +41,7 @@ const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
           {children}
         </main>
       </div>
+      <AdvisorFab />
     </div>
     </BreadcrumbProvider>
   );

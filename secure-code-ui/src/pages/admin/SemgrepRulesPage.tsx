@@ -16,9 +16,9 @@ const SemgrepRulesPage: React.FC = () => (
       crumbs={[
         { label: "Dashboard", to: "/account/dashboard" },
         { label: "Administration", to: "/admin/system" },
-        { label: "Semgrep rules" },
+        { label: "Semgrep configuration" },
       ]}
-      title="Semgrep rules"
+      title="Semgrep configuration"
       subtitle="The deterministic detectors scans run. A scan executes only the rules ingested here — there is no bundled fallback pack, and a language with no enabled source produces no findings."
     />
     <section className="analysis-step">
@@ -31,7 +31,7 @@ const SemgrepRulesPage: React.FC = () => (
         pulls a rule set from a git repository; the rule count and last sync status tell
         you whether coverage is current. Rules feed findings, while security standards,
         agents and prompts interpret them — configure those under{" "}
-        <Link to="/admin/analysis">Analysis configuration</Link>.
+        <Link to="/admin/analysis">Framework configuration</Link>.
       </p>
     </section>
     <SemgrepRulesTab />

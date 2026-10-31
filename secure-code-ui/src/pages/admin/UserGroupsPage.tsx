@@ -28,7 +28,7 @@ function apiDetail(err: unknown): string {
   return "Unknown error";
 }
 
-const UserGroupsPage: React.FC = () => {
+const UserGroupsPage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const qc = useQueryClient();
 
@@ -173,13 +173,14 @@ const UserGroupsPage: React.FC = () => {
           gap: 12,
         }}
       >
-        <div>
-          <h1 style={{ color: "var(--fg)" }}>User groups</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            Members of a group can see each other's scans. Admins see
-            everything.
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)" }}>User groups</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              Members of a group can see each other's scans. Admins see everything.
+            </div>
           </div>
-        </div>
+        )}
         <button
           className="sccap-btn sccap-btn-primary"
           onClick={openCreateModal}

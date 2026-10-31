@@ -21,30 +21,34 @@ export interface AdminLink {
 }
 
 export const ADMIN_LINKS: AdminLink[] = [
-  { to: "/admin/authorization", label: "Authorization" },
+  // Configuration of how analysis works: frameworks (standards → agents → prompts →
+  // mappings), the deterministic detectors, and the models behind them.
   {
     to: "/admin/analysis",
-    label: "Analysis config",
+    label: "Framework config",
     feature: "admin_authoring",
     permissions: [Permission.platformConfigManage],
   },
   {
     to: "/admin/semgrep",
-    label: "Semgrep rules",
+    label: "Semgrep config",
     feature: "admin_authoring",
     permissions: [Permission.platformConfigManage],
   },
-  { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/users", label: "Users", feature: "multi_user", permissions: [Permission.identityRead] },
-  { to: "/admin/user-groups", label: "Groups", feature: "user_groups", permissions: [Permission.groupManage] },
-  { to: "/admin/tenants", label: "Tenants", feature: "multi_tenant", permissions: [Permission.platformTenantManage] },
-  { to: "/admin/smtp", label: "SMTP", feature: "email", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/sso/providers", label: "SSO", feature: "sso", permissions: [Permission.tenantPolicyManage] },
-  { to: "/admin/scim/tokens", label: "SCIM tokens", feature: "scim", permissions: [Permission.servicePrincipalManage] },
+  { to: "/account/settings/llm", label: "LLM configs", permissions: [Permission.platformConfigManage] },
+  // Who is in the platform, and how they prove who they are.
+  { to: "/admin/access", label: "Access and roles", permissions: [Permission.identityRead] },
+  {
+    to: "/admin/identity",
+    label: "Identity and email",
+    feature: "sso",
+    permissions: [Permission.tenantPolicyManage],
+  },
   { to: "/admin/integrations", label: "Integrations", permissions: [Permission.servicePrincipalManage] },
   { to: "/admin/sso/audit", label: "Auth audit", feature: "sso", permissions: [Permission.auditRead] },
-  { to: "/account/settings/llm", label: "LLM configs", permissions: [Permission.platformConfigManage] },
+  // Platform-level settings.
+  { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
   { to: "/admin/appearance", label: "Appearance", permissions: [Permission.platformConfigManage] },
 ];
 

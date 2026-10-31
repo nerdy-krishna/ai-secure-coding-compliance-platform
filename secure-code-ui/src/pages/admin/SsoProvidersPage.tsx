@@ -189,7 +189,7 @@ function buildSamlConfig(form: SamlForm, isEdit: boolean): Record<string, unknow
   return cfg;
 }
 
-const SsoProvidersPage: React.FC = () => {
+const SsoProvidersPage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const qc = useQueryClient();
 
@@ -468,13 +468,15 @@ const SsoProvidersPage: React.FC = () => {
           gap: 12,
         }}
       >
-        <div>
-          <h1 style={{ color: "var(--fg)" }}>SSO Providers</h1>
-          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-            Configure OIDC and SAML 2.0 identity providers. Multiple
-            providers can run side by side.
+        {!embedded && (
+          <div>
+            <h1 style={{ color: "var(--fg)" }}>SSO Providers</h1>
+            <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+              Configure OIDC and SAML 2.0 identity providers. Multiple providers can run
+              side by side.
+            </div>
           </div>
-        </div>
+        )}
         <button
           className="sccap-btn sccap-btn-primary"
           onClick={openCreateModal}

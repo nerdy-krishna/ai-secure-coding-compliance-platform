@@ -22,7 +22,7 @@ const fmt = (iso: string | null): string => {
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
-const TenantsPage: React.FC = () => {
+const TenantsPage: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -225,7 +225,7 @@ const TenantsPage: React.FC = () => {
       </div>
 
       <div className="sccap-card">
-        <SectionHead title={<>Tenants</>} />
+        {!embedded && <SectionHead title={<>Tenants</>} />}
         {loading && (
           <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>Loading…</div>
         )}
