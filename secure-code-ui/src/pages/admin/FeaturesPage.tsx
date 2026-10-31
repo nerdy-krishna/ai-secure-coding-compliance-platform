@@ -115,7 +115,7 @@ const FeaturesPage: React.FC = () => {
   if (loading) return <div style={{ padding: 24 }}>Loading feature flags…</div>;
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div>
       <h2 style={{ marginBottom: 4 }}>Features</h2>
       <p style={{ color: "var(--fg-muted)", fontSize: 13, marginBottom: 16 }}>
         Toggle optional platform features. Dependencies resolve automatically.
@@ -123,7 +123,7 @@ const FeaturesPage: React.FC = () => {
         change them via <code>COMPOSE_PROFILES</code> and a stack restart.
       </p>
 
-      <div style={{ display: "grid", gap: 8 }}>
+      <div className="feature-flag-grid">
         {features.map((f) => {
           const on = enabled.has(f.name);
           const locked = f.always_on || f.container_backed;
@@ -135,7 +135,9 @@ const FeaturesPage: React.FC = () => {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
+                gap: 12,
                 padding: 12,
+                height: "100%",
                 opacity: locked ? 0.7 : 1,
               }}
             >
