@@ -1084,6 +1084,42 @@ class ScanRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_raw_findings_for_consolidated(
+        self,
+        scan_id: uuid.UUID,
+        *,
+        canonical_finding_id: Optional[uuid.UUID],
+        raw_finding_ids: List[uuid.UUID],
+    ) -> List[db_models.Finding]:
+        """Raw findings that were merged into one consolidated finding.
+
+        Matched two ways because both are recorded: by the canonical id the
+        consolidation pass stamped on every contributor, and by the explicit
+        ``contributing_raw_finding_ids`` list on the canonical row. Only the
+        ``raw_llm`` bucket is considered — the SAST findings are separate rows
+        that the LLM pass reads, not merge inputs.
+        """
+        conditions = []
+        if canonical_finding_id is not None:
+            conditions.append(
+                db_models.Finding.canonical_finding_id == canonical_finding_id
+            )
+        if raw_finding_ids:
+            conditions.append(db_models.Finding.raw_finding_id.in_(raw_finding_ids))
+        if not conditions:
+            return []
+        stmt = (
+            select(db_models.Finding)
+            .where(
+                db_models.Finding.scan_id == scan_id,
+                db_models.Finding.finding_bucket == "raw_llm",
+                sa.or_(*conditions),
+            )
+            .order_by(db_models.Finding.id.asc())
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_finding(self, finding_id: int) -> Optional[db_models.Finding]:
         """Retrieve a single finding by its primary key."""
         result = await self.db.execute(

@@ -80,7 +80,15 @@ function fold(entries: CoverageEntry[]): FileRow[] {
   return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export const ScanCoveragePanel: React.FC<{ scanId: string }> = ({ scanId }) => {
+/**
+ * `embedded` drops the outer card chrome so the panel can sit inside the
+ * consolidated "Scan details" card on the results page. The two renderings
+ * share every bit of behaviour — only the wrapper differs.
+ */
+export const ScanCoveragePanel: React.FC<{ scanId: string; embedded?: boolean }> = ({
+  scanId,
+  embedded = false,
+}) => {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<"all" | "scanned" | "excluded">("excluded");
   const query = useQuery({
@@ -107,9 +115,16 @@ export const ScanCoveragePanel: React.FC<{ scanId: string }> = ({ scanId }) => {
   const visible = filter === "scanned" ? scanned : filter === "excluded" ? excluded : rows;
 
   return (
-    <section className="sccap-card coverage-panel">
+    <section
+      className={embedded ? "coverage-panel" : "sccap-card coverage-panel"}
+      style={
+        embedded
+          ? { borderTop: "1px solid var(--border)", paddingTop: 16, display: "grid", gap: 10 }
+          : undefined
+      }
+    >
       <div className="coverage-head">
-        <h2 style={{ margin: 0 }}>
+        <h2 style={{ margin: 0, fontSize: embedded ? 11 : undefined }}>
           File coverage
         </h2>
         <span className="coverage-summary">

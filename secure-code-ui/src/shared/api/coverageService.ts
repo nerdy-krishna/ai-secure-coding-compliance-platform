@@ -45,3 +45,32 @@ export async function getScannerCoverage(scanId: string): Promise<CoverageManife
   const { data } = await apiClient.get<CoverageManifest>(`/scans/${scanId}/scanner-coverage`);
   return data;
 }
+
+
+/** Raw findings that consolidation folded into one consolidated finding. */
+export interface MergedFinding {
+  id: number;
+  title: string;
+  severity?: string | null;
+  file_path: string;
+  line_number?: number | null;
+  source?: string | null;
+  corroborating_agents: string[];
+}
+
+export interface MergedFindings {
+  scan_id: string;
+  finding_id: number;
+  raw_count: number;
+  findings: MergedFinding[];
+}
+
+export async function getMergedFindings(
+  scanId: string,
+  findingId: number,
+): Promise<MergedFindings> {
+  const { data } = await apiClient.get<MergedFindings>(
+    `/scans/${scanId}/findings/${findingId}/merged`,
+  );
+  return data;
+}

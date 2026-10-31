@@ -135,6 +135,55 @@ class ScanQueryService:
             )
         return scan
 
+    async def get_merged_findings(
+        self,
+        scan_id: uuid.UUID,
+        finding_id: int,
+        user: db_models.User,
+        *,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> "api_models.MergedFindingsResponse":
+        """The raw findings that consolidation folded into one finding.
+
+        Deliberately per-finding: the whole point is to show *why this row says
+        what it says*, not how many rows a whole scan produced.
+        """
+        await self.get_scan_status(
+            scan_id,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        )
+        finding = await self.repo.get_finding(finding_id)
+        if finding is None or finding.scan_id != scan_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Finding not found.",
+            )
+        rows = await self.repo.get_raw_findings_for_consolidated(
+            scan_id,
+            canonical_finding_id=finding.canonical_finding_id,
+            raw_finding_ids=list(finding.contributing_raw_finding_ids or []),
+        )
+        return api_models.MergedFindingsResponse(
+            scan_id=scan_id,
+            finding_id=finding_id,
+            raw_count=len(rows),
+            findings=[
+                api_models.MergedFindingItem(
+                    id=row.id,
+                    title=row.title,
+                    severity=row.severity,
+                    file_path=row.file_path,
+                    line_number=row.line_number,
+                    source=row.source,
+                    corroborating_agents=list(row.corroborating_agents or []),
+                )
+                for row in rows
+            ],
+        )
+
     async def get_scanner_reports(
         self,
         scan_id: uuid.UUID,

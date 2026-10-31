@@ -1331,6 +1331,27 @@ class SankeyLink(BaseModel):
     value: int
 
 
+class MergedFindingItem(BaseModel):
+    """One raw finding that consolidation folded into a canonical finding."""
+
+    id: int
+    title: str
+    severity: Optional[str] = None
+    file_path: str
+    line_number: Optional[int] = None
+    source: Optional[str] = None
+    corroborating_agents: List[str] = Field(default_factory=list)
+
+
+class MergedFindingsResponse(BaseModel):
+    scan_id: uuid.UUID
+    finding_id: int
+    # Number of raw findings behind this one. 1 means it passed through
+    # consolidation unchanged; >1 means it is a merge.
+    raw_count: int = 0
+    findings: List[MergedFindingItem] = Field(default_factory=list)
+
+
 class ScanFindingsDebugResponse(BaseModel):
     """Debug view: raw findings + consolidated + Sankey data + groupings."""
 

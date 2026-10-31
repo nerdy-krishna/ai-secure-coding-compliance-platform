@@ -1080,6 +1080,29 @@ async def download_scanner_reports(
 
 
 @router.get(
+    "/scans/{scan_id}/findings/{finding_id}/merged",
+    response_model=api_models.MergedFindingsResponse,
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
+async def get_merged_findings(
+    scan_id: uuid.UUID,
+    finding_id: int,
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    """Raw findings that were merged into one consolidated finding."""
+    return await service.get_merged_findings(
+        scan_id,
+        finding_id,
+        user,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+
+
+@router.get(
     "/scans/{scan_id}/scanner-coverage",
     response_model=api_models.ScannerCoverageManifestResponse,
     dependencies=[Depends(require_permission(SCAN_READ))],

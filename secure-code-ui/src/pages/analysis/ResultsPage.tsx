@@ -28,8 +28,8 @@ import { CopyButton } from "../../shared/ui/CopyButton";
 import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { useToast } from "../../shared/ui/Toast";
-import { FindingsDebugPanel } from "../../features/scans/FindingsDebugPanel";
 import { ScanCoveragePanel } from "../../features/scans/ScanCoveragePanel";
+import { getMergedFindings } from "../../shared/api/coverageService";
 import { ActionableRemediationPanel } from "../../features/scans/ActionableRemediationPanel";
 import type {
   Finding,
@@ -83,17 +83,20 @@ function frameworkLabel(slug: string): string {
   );
 }
 
-/** Modal listing the settings a scan was submitted with — opened from
- *  the "Scan information" affordance in the results header. */
-const ScanInfoModal: React.FC<{
-  open: boolean;
-  onClose: () => void;
-  data: ScanResultResponse;
-}> = ({ open, onClose, data }) => {
+/** The settings a scan was submitted with, as label/value pairs.
+ *
+ *  These used to live in a modal opened from the header, which meant the same
+ *  facts appeared in three places on one page: the modal, the "Models used"
+ *  card, and the coverage panel below the findings. Models are deliberately
+ *  NOT included here — they are rendered once, with their per-model finding
+ *  stats, in the Models section of the same card. */
+const scanFacts = (
+  data: ScanResultResponse,
+): { label: string; value: React.ReactNode }[] => {
   const report = data.summary_report;
   const frameworks = report?.selected_frameworks ?? [];
   const temps = data.stage_temperatures;
-  const rows: { label: string; value: React.ReactNode }[] = [
+  return [
     {
       label: "Scan type",
       value: (data.scan_type ?? report?.scan_type ?? "—").toUpperCase(),
@@ -107,7 +110,7 @@ const ScanInfoModal: React.FC<{
             {data.repository_url && (
               <>
                 {" · "}
-                <span className="mono" style={{ fontSize: 11.5 }}>
+                <span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all" }}>
                   {data.repository_url}
                 </span>
               </>
@@ -123,9 +126,7 @@ const ScanInfoModal: React.FC<{
     },
     {
       label: frameworks.length === 1 ? "Framework" : "Frameworks",
-      value: frameworks.length
-        ? frameworks.map(frameworkLabel).join(", ")
-        : "—",
+      value: frameworks.length ? frameworks.map(frameworkLabel).join(", ") : "—",
     },
     {
       label: "Cross-file validation",
@@ -141,67 +142,25 @@ const ScanInfoModal: React.FC<{
               .join(" · ")
           : "Provider default",
     },
-    {
-      label: "Models",
-      value: data.llms_used?.length ? (
-        <div style={{ display: "grid", gap: 4 }}>
-          {data.llms_used.map((m) => (
-            <div key={m.category}>
-              <span style={{ color: "var(--fg-subtle)" }}>
-                {m.category}:{" "}
-              </span>
-              <strong style={{ color: "var(--fg)" }}>{m.name}</strong>{" "}
-              <span
-                className="mono"
-                style={{ fontSize: 11, color: "var(--fg-muted)" }}
-              >
-                {m.provider}/{m.model_name}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        "—"
-      ),
-    },
   ];
-  return (
-    <Modal open={open} onClose={onClose} title="Scan information" width={540}>
-      <div style={{ display: "grid" }}>
-        {rows.map((r, i) => (
-          <div
-            key={r.label}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "160px 1fr",
-              gap: 14,
-              padding: "10px 0",
-              borderBottom:
-                i < rows.length - 1 ? "1px solid var(--border)" : "none",
-              fontSize: 13,
-            }}
-          >
-            <span
-              style={{
-                color: "var(--fg-subtle)",
-                fontWeight: 700,
-                textTransform: "uppercase",
-                fontSize: 10.5,
-                letterSpacing: ".05em",
-                paddingTop: 2,
-              }}
-            >
-              {r.label}
-            </span>
-            <span style={{ color: "var(--fg)", wordBreak: "break-word" }}>
-              {r.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    </Modal>
-  );
 };
+
+/** Small uppercase heading used inside the consolidated details card. */
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span
+    style={{
+      display: "block",
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: ".06em",
+      color: "var(--fg-subtle)",
+      fontWeight: 700,
+      marginBottom: 10,
+    }}
+  >
+    {children}
+  </span>
+);
 
 function prescanToFinding(item: PrescanFindingItem): Finding {
   return {
@@ -269,7 +228,6 @@ const ResultsPage: React.FC = () => {
   const [selectedFindingId, setSelectedFindingId] = useState<number | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [scanInfoOpen, setScanInfoOpen] = useState(false);
   const [filePathFilter, setFilePathFilter] = useState<string | null>(null);
   const [diffTab, setDiffTab] = useState<"findings" | "full-diff">("findings");
   const [diffSelectedFile, setDiffSelectedFile] = useState<string | null>(null);
@@ -680,27 +638,6 @@ const ResultsPage: React.FC = () => {
                 <CopyButton value={scanId} title="Copy scan ID" />
               </span>
             )}
-            {/* Scan settings live behind this — keeps the header clean. */}
-            <button
-              type="button"
-              onClick={() => setScanInfoOpen(true)}
-              title="View the settings this scan was submitted with"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                background: "none",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-                color: "var(--accent)",
-                fontSize: 12.5,
-                fontWeight: 600,
-                fontFamily: "inherit",
-              }}
-            >
-              <Icon.Info size={13} /> Scan information
-            </button>
           </>
         }
         actions={
@@ -893,192 +830,195 @@ const ResultsPage: React.FC = () => {
         ))}
       </div>
 
-      {/* Models used — one tile per LLM role, with per-model finding
-          stats; the consolidation tally is a separate pipeline footer.
-          Hidden when the LLM phase never ran: listing configured models with
-          zero findings implies they reviewed this scan, which they did not. */}
-      {!isPrescanBlocked && data.llms_used && data.llms_used.length > 0 && (
-        <div className="sccap-card" style={{ display: "grid", gap: 14 }}>
-          <span
-            style={{
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: ".06em",
-              color: "var(--fg-subtle)",
-              fontWeight: 700,
-            }}
-          >
-            Models used
-          </span>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(230px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {data.llms_used.map((m) => {
-              const stats = llmFindingStats[m.name];
-              return (
+      {/* Scan details — everything about how this scan was produced, stated
+          once. Previously the same facts were spread across three surfaces: a
+          Scan information modal, a separate "Models used" card, and a coverage
+          panel at the very bottom of the page. Models appear only here, with
+          their per-model finding stats, so there is no second list to drift. */}
+      <div className="sccap-card" style={{ display: "grid", gap: 18 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+            gap: 20,
+            alignItems: "start",
+          }}
+        >
+          <section>
+            <SectionLabel>Scan information</SectionLabel>
+            <div style={{ display: "grid", gap: 8 }}>
+              {scanFacts(data).map((fact) => (
                 <div
-                  key={m.category}
+                  key={fact.label}
                   style={{
+                    display: "grid",
+                    gridTemplateColumns: "132px minmax(0, 1fr)",
+                    gap: 10,
+                    fontSize: 12.5,
+                    alignItems: "baseline",
+                  }}
+                >
+                  <span style={{ color: "var(--fg-subtle)" }}>{fact.label}</span>
+                  <span style={{ color: "var(--fg)", wordBreak: "break-word" }}>
+                    {fact.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Hidden when the LLM phase never ran: listing configured models
+              with zero findings implies they reviewed this scan, which they
+              did not. */}
+          {!isPrescanBlocked && data.llms_used && data.llms_used.length > 0 && (
+            <section>
+              <SectionLabel>Models used</SectionLabel>
+              <div style={{ display: "grid", gap: 8 }}>
+                {data.llms_used.map((m) => {
+                  const stats = llmFindingStats[m.name];
+                  const rowBody = (
+                    <>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: 9.5,
+                            textTransform: "uppercase",
+                            letterSpacing: ".06em",
+                            color: "var(--accent)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {m.category}
+                        </span>
+                        <span
+                          style={{
+                            display: "block",
+                            fontSize: 13.5,
+                            color: "var(--fg)",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {m.name}
+                        </span>
+                        <span
+                          className="mono"
+                          style={{
+                            display: "block",
+                            fontSize: 10.5,
+                            color: "var(--fg-muted)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={`${m.provider}/${m.model_name}`}
+                        >
+                          {m.provider}/{m.model_name}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "flex-end",
+                          gap: 5,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {stats && (
+                          <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+                            <strong style={{ color: "var(--accent)", fontSize: 13 }}>
+                              {stats.count}
+                            </strong>{" "}
+                            finding{stats.count === 1 ? "" : "s"}
+                          </span>
+                        )}
+                        <Icon.ArrowR size={11} />
+                      </div>
+                    </>
+                  );
+                  const rowStyle: React.CSSProperties = {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
                     border: "1px solid var(--border)",
                     borderRadius: 10,
                     background: "var(--bg-soft)",
-                    padding: "12px 14px",
-                    display: "grid",
-                    gap: 5,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 9.5,
-                      textTransform: "uppercase",
-                      letterSpacing: ".06em",
-                      color: "var(--accent)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {m.category}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 14,
-                      color: "var(--fg)",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {m.name}
-                  </span>
-                  <span
-                    className="mono"
-                    style={{ fontSize: 11, color: "var(--fg-muted)" }}
-                  >
-                    {m.provider}/{m.model_name}
-                  </span>
+                    padding: "9px 12px",
+                  };
+                  return stats ? (
+                    <button
+                      key={m.category}
+                      type="button"
+                      title={`View ${m.name} interactions in Scan Logs`}
+                      onClick={() =>
+                        navigate(
+                          `/scans/${scanId}/diagnostics?model=${encodeURIComponent(m.name)}`,
+                        )
+                      }
+                      style={{ all: "unset", ...rowStyle, cursor: "pointer" }}
+                    >
+                      {rowBody}
+                    </button>
+                  ) : (
+                    <div key={m.category} style={rowStyle}>
+                      {rowBody}
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Consolidation — a pipeline stat, not per-model. */}
+              {data.consolidation_stats &&
+                data.consolidation_stats.raw_count > 0 && (
                   <div
                     style={{
+                      marginTop: 10,
                       borderTop: "1px solid var(--border)",
-                      marginTop: 4,
-                      paddingTop: 8,
+                      paddingTop: 10,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      alignItems: "baseline",
+                      gap: "4px 16px",
                     }}
                   >
-                    {stats ? (
-                      <button
-                        type="button"
-                        title={`View ${m.name} interactions in Scan Logs`}
-                        onClick={() =>
-                          navigate(
-                            `/scans/${scanId}/diagnostics?model=${encodeURIComponent(m.name)}`,
-                          )
-                        }
-                        style={{
-                          all: "unset",
-                          cursor: "pointer",
-                          display: "flex",
-                          flexWrap: "wrap",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <span style={{ fontSize: 12.5, color: "var(--fg)" }}>
-                          <strong
-                            style={{
-                              color: "var(--accent)",
-                              fontSize: 15,
-                            }}
-                          >
-                            {stats.count}
-                          </strong>{" "}
-                          finding{stats.count === 1 ? "" : "s"}
-                        </span>
-                        {(
-                          [
-                            ["CRITICAL", "C"],
-                            ["HIGH", "H"],
-                            ["MEDIUM", "M"],
-                            ["LOW", "L"],
-                            ["INFORMATIONAL", "I"],
-                          ] as const
-                        )
-                          .filter(([k]) => stats.sev[k])
-                          .map(([k, short]) => (
-                            <span
-                              key={k}
-                              style={{
-                                fontSize: 10.5,
-                                fontWeight: 700,
-                                padding: "1px 6px",
-                                borderRadius: 5,
-                                background: `${SEV_COLOR[k] ?? "var(--fg-muted)"}22`,
-                                color: SEV_COLOR[k] ?? "var(--fg-muted)",
-                              }}
-                            >
-                              {short} {stats.sev[k]}
-                            </span>
-                          ))}
-                        <Icon.ArrowR size={11} />
-                      </button>
-                    ) : (
+                    <span
+                      style={{
+                        fontSize: 9.5,
+                        textTransform: "uppercase",
+                        letterSpacing: ".06em",
+                        color: "var(--fg-subtle)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Consolidation
+                    </span>
+                    {(
+                      [
+                        ["raw findings", data.consolidation_stats.raw_count],
+                        ["kept", data.consolidation_stats.consolidated_count],
+                        ["merged", data.consolidation_stats.merged_inputs],
+                        ["dropped", data.consolidation_stats.dropped],
+                      ] as const
+                    ).map(([label, value]) => (
                       <span
-                        style={{ fontSize: 11.5, color: "var(--fg-subtle)" }}
+                        key={label}
+                        style={{ fontSize: 12, color: "var(--fg-muted)" }}
                       >
-                        No findings attributed
+                        <strong style={{ color: "var(--fg)", fontSize: 13 }}>
+                          {value}
+                        </strong>{" "}
+                        {label}
                       </span>
-                    )}
+                    ))}
                   </div>
-                </div>
-              );
-            })}
-          </div>
-          {/* Consolidation — a pipeline stat, not per-model. */}
-          {data.consolidation_stats &&
-            data.consolidation_stats.raw_count > 0 && (
-              <div
-                style={{
-                  borderTop: "1px solid var(--border)",
-                  paddingTop: 12,
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "baseline",
-                  gap: "4px 18px",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 9.5,
-                    textTransform: "uppercase",
-                    letterSpacing: ".06em",
-                    color: "var(--fg-subtle)",
-                    fontWeight: 700,
-                  }}
-                >
-                  Consolidation
-                </span>
-                {(
-                  [
-                    ["raw findings", data.consolidation_stats.raw_count],
-                    ["kept", data.consolidation_stats.consolidated_count],
-                    ["merged", data.consolidation_stats.merged_inputs],
-                    ["dropped", data.consolidation_stats.dropped],
-                  ] as const
-                ).map(([label, value]) => (
-                  <span
-                    key={label}
-                    style={{ fontSize: 12, color: "var(--fg-muted)" }}
-                  >
-                    <strong style={{ color: "var(--fg)", fontSize: 13 }}>
-                      {value}
-                    </strong>{" "}
-                    {label}
-                  </span>
-                ))}
-              </div>
-            )}
+                )}
+            </section>
+          )}
         </div>
-      )}
+
+        {/* What the scanners actually read, and why anything was left out. */}
+        {scanId ? <ScanCoveragePanel scanId={scanId} embedded /> : null}
+      </div>
 
       {/* Per-source filter row — two-tier: category pills (All / Bandit /
           Semgrep / Gitleaks / OSV / LLM) then agent sub-pills when LLM
@@ -1697,12 +1637,6 @@ const ResultsPage: React.FC = () => {
       </div>
       )}
 
-      <ScanInfoModal
-        open={scanInfoOpen}
-        onClose={() => setScanInfoOpen(false)}
-        data={data}
-      />
-
       <Modal
         open={deleteConfirmOpen}
         onClose={() => (deleting ? undefined : setDeleteConfirmOpen(false))}
@@ -1733,11 +1667,6 @@ const ResultsPage: React.FC = () => {
         </div>
       </Modal>
 
-      {/* What the scanners actually read, and why anything was left out. */}
-      {scanId ? <ScanCoveragePanel scanId={scanId} /> : null}
-
-      {/* Findings debug panel — agent-quality troubleshooting */}
-      {scanId ? <FindingsDebugPanel scanId={scanId} /> : null}
     </div>
   );
 };
@@ -2566,6 +2495,15 @@ const FindingDetail: React.FC<{
   patchPlan?: PatchPlanArtifact | null;
 }> = ({ f, scanId, originalCodeMap, scanType, patchPlan }) => {
   const sev = (f.severity || "").toUpperCase();
+  // Which raw findings produced this row. Fetched per finding and only when the
+  // consolidator actually merged something — a pass-through has nothing to show.
+  const contributorCount = (f.contributing_raw_finding_ids ?? []).length;
+  const { data: mergedFindings } = useQuery({
+    queryKey: ["merged-findings", scanId, f.id],
+    queryFn: () => getMergedFindings(scanId!, f.id),
+    enabled: !!scanId && contributorCount > 1,
+    staleTime: 5 * 60_000,
+  });
   const sevColor = SEV_COLOR[sev] ?? "var(--fg-muted)";
   const hasFix = scanType.toUpperCase() !== "AUDIT" && !patchPlan && !!f.fixes?.code;
   const fileContent = originalCodeMap?.[f.file_path] ?? null;
@@ -2738,6 +2676,65 @@ const FindingDetail: React.FC<{
 
       <div style={{ display: "grid", gap: 18 }}>
         {scanId && <DispositionControl scanId={scanId} f={f} />}
+
+        {contributorCount > 1 && mergedFindings && (
+          <details className="sccard-merge" open={false}>
+            <summary
+              style={{
+                cursor: "pointer",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "var(--fg)",
+              }}
+            >
+              Merged from {mergedFindings.raw_count} findings
+            </summary>
+            <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+              <div style={{ fontSize: 11.5, color: "var(--fg-muted)" }}>
+                The consolidator folded these into one finding. Each is a separate
+                claim from a different agent about the same weakness.
+              </div>
+              {mergedFindings.findings.map((raw) => (
+                <div
+                  key={raw.id}
+                  style={{
+                    display: "grid",
+                    gap: 2,
+                    padding: "7px 9px",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                    background: "var(--bg-soft)",
+                  }}
+                >
+                  <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <span
+                      className="chip"
+                      style={{
+                        fontSize: 10,
+                        color: SEV_COLOR[(raw.severity || "").toUpperCase()] ?? "var(--fg-muted)",
+                        borderColor: "var(--border)",
+                      }}
+                    >
+                      {raw.severity ?? "—"}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--fg-muted)" }}>
+                      {raw.source || "agent"}
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
+                      {raw.file_path}:{raw.line_number ?? "?"}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 12.5, color: "var(--fg)" }}>{raw.title}</span>
+                  {raw.corroborating_agents.length > 1 && (
+                    <span style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
+                      corroborated by {raw.corroborating_agents.join(", ")}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
 
         {f.description && (
           <div>
