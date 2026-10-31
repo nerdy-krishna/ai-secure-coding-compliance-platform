@@ -31,7 +31,6 @@ import { useToast } from "../../shared/ui/Toast";
 import { FindingsDebugPanel } from "../../features/scans/FindingsDebugPanel";
 import { ScanCoveragePanel } from "../../features/scans/ScanCoveragePanel";
 import { ActionableRemediationPanel } from "../../features/scans/ActionableRemediationPanel";
-import { FindingGovernancePanel } from "../../features/scans/FindingGovernancePanel";
 import type {
   Finding,
   FindingDisposition,
@@ -40,7 +39,7 @@ import type {
   SubmittedFile,
   SummaryReport,
 } from "../../shared/types/api";
-import type { FindingGovernanceItem, PatchPlanArtifact, ResolvedPatchRange } from "../../shared/lib/scanContract";
+import type { PatchPlanArtifact, ResolvedPatchRange } from "../../shared/lib/scanContract";
 
 const PRESCAN_BLOCKED_STATUSES = new Set([
   "STOPPED_BEFORE_LLM",
@@ -543,23 +542,6 @@ const ResultsPage: React.FC = () => {
   }
 
   const report = data.summary_report;
-  const remediation = report?.remediation;
-  const remediationCandidates = remediation?.candidates ?? {
-    proposed: 0,
-    planned: 0,
-    validated: 0,
-    deduplicated: 0,
-    conflicted: 0,
-    rejected: 0,
-    unverified: 0,
-    applied: 0,
-  };
-  const remediationFiles = remediation?.files ?? {
-    total: 0,
-    planned: 0,
-    manual_review: 0,
-  };
-  const remediationChecks = remediation?.validation_checks ?? {};
   const riskScore = report?.overall_risk_score?.score;
   const riskLabel = typeof riskScore === "number" ? riskScore : riskScore || "—";
 
@@ -1098,94 +1080,6 @@ const ResultsPage: React.FC = () => {
         </div>
       )}
 
-      <div className="sccap-card" style={{ display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <span
-            style={{
-              fontSize: 11,
-              textTransform: "uppercase",
-              letterSpacing: ".06em",
-              color: "var(--fg-subtle)",
-              fontWeight: 700,
-            }}
-          >
-            Deterministic scanner provenance
-          </span>
-          <button
-            type="button"
-            className="sccap-btn sccap-btn-sm"
-            onClick={handleDownloadScannerReports}
-          >
-            <Icon.Download size={12} /> Full evidence
-          </button>
-        </div>
-        {Object.keys(data.toolchain_provenance).length === 0 ? (
-          <div style={{ fontSize: 12.5, color: "var(--medium)" }}>
-            Provenance was not retained for this scan. Deterministic coverage is degraded.
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {Object.entries(data.toolchain_provenance).map(([name, provenance]) => {
-              const digest = provenance.binary?.sha256;
-              const rules = provenance.rules;
-              return (
-                <div
-                  key={name}
-                  style={{
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    background: "var(--bg-soft)",
-                    padding: "12px 14px",
-                    display: "grid",
-                    gap: 5,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: 9.5,
-                      textTransform: "uppercase",
-                      letterSpacing: ".06em",
-                      color:
-                        provenance.status === "verified"
-                          ? "var(--accent)"
-                          : "var(--medium)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {provenance.status}
-                  </span>
-                  <strong style={{ textTransform: "capitalize", fontSize: 14 }}>
-                    {name} {provenance.binary?.version ?? "version unavailable"}
-                  </strong>
-                  <span className="mono" style={{ fontSize: 10.5, color: "var(--fg-muted)" }}>
-                    sha256 {digest ? `${digest.slice(0, 20)}…` : "unavailable"}
-                  </span>
-                  {rules && (
-                    <span style={{ fontSize: 11.5, color: "var(--fg-muted)" }}>
-                      {rules.selected_rule_count ?? 0} selected rules
-                      {rules.ruleset_sha256
-                        ? ` · ${rules.ruleset_sha256.slice(0, 12)}…`
-                        : ""}
-                    </span>
-                  )}
-                  {provenance.advisory_database?.immutable === false && (
-                    <span style={{ fontSize: 11.5, color: "var(--medium)" }}>
-                      Advisory snapshot is not immutable ({provenance.advisory_database.mode ?? "unknown source"}).
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       {/* Per-source filter row — two-tier: category pills (All / Bandit /
           Semgrep / Gitleaks / OSV / LLM) then agent sub-pills when LLM
           is selected. Aggregate counts from backend source_counts, with
@@ -1334,202 +1228,8 @@ const ResultsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Finding counts and scanner coverage are independent signals. A
-          zero-finding result is labelled clean only when every planned
-          deterministic scanner/input completed. */}
-      <div
-        className="sccap-card"
-        style={{
-          borderColor: data.scanner_coverage?.is_complete
-            ? "var(--success)"
-            : "var(--medium)",
-          display: "grid",
-          gap: 8,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "var(--fg)" }}>
-              Scanner coverage · {data.scanner_coverage?.overall_status ?? "unavailable"}
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 12.5, marginTop: 3 }}>
-              {data.scanner_coverage?.is_complete
-                ? "Every planned deterministic scanner/input completed."
-                : "Coverage is incomplete. No findings does not mean this scan is clean."}
-            </div>
-          </div>
-          {data.scanner_coverage?.latest_policy_decision && (
-            <span className={
-              data.scanner_coverage.latest_policy_decision.outcome === "pass"
-                ? "chip chip-success"
-                : "chip chip-warn"
-            }>
-              Policy {data.scanner_coverage.latest_policy_decision.outcome}
-            </span>
-          )}
-        </div>
-        {data.scanner_coverage && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {Object.entries(data.scanner_coverage.counts)
-              .filter(([, count]) => count > 0)
-              .map(([state, count]) => (
-                <span key={state} className="chip">{state}: {count}</span>
-              ))}
-          </div>
-        )}
-        {!!data.scanner_coverage?.entries.some(
-          (entry) => !["completed", "clean"].includes(entry.status),
-        ) && (
-          <details style={{ fontSize: 12.5, color: "var(--fg-muted)" }}>
-            <summary>Review degraded scanner inputs</summary>
-            <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
-              {data.scanner_coverage.entries
-                .filter((entry) => !["completed", "clean"].includes(entry.status))
-                .map((entry) => (
-                  <li key={entry.id}>
-                    <strong>{entry.scanner_name}</strong> · {entry.input_path} · {entry.status}
-                    {entry.reason ? ` — ${entry.reason}` : ""}
-                  </li>
-                ))}
-            </ul>
-          </details>
-        )}
-      </div>
 
-      {/* Baseline classifications and the policy result come from the same
-          immutable records used by portfolio trends and downloadable reports. */}
-      <div className="sccap-card" style={{ display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 700, color: "var(--fg)" }}>Finding governance</div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 12.5, marginTop: 3 }}>
-              Deterministic baseline against this project&apos;s previous completed scan.
-            </div>
-          </div>
-          {data.finding_governance.policy_evaluation && (
-            <span className={
-              data.finding_governance.policy_evaluation.outcome === "pass"
-                ? "chip chip-success"
-                : "chip chip-warn"
-            }>
-              Gate {data.finding_governance.policy_evaluation.outcome}
-            </span>
-          )}
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {(["new", "fixed", "unchanged", "reintroduced"] as const).map((state) => (
-            <span key={state} className="chip">
-              {state}: {data.finding_governance.counts[state]}
-            </span>
-          ))}
-        </div>
-      </div>
 
-      {remediation && (
-        <div
-          className="sccap-card"
-          style={{
-            display: "grid",
-            gap: 12,
-            borderColor:
-              remediationFiles.manual_review > 0
-                ? "var(--medium)"
-                : "var(--success)",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: 11,
-                  textTransform: "uppercase",
-                  letterSpacing: ".06em",
-                  color: "var(--fg-subtle)",
-                  fontWeight: 700,
-                }}
-              >
-                Patch validation
-              </div>
-              <strong style={{ fontSize: 15 }} role={remediation.outcome === "partial_remediation" ? "alert" : undefined}>
-                {remediation.outcome === "partial_remediation"
-                  ? "PARTIAL REMEDIATION — manual review remains"
-                  : remediation.outcome.replace(/_/g, " ")}
-              </strong>
-            </div>
-            <button
-              type="button"
-              className="sccap-btn sccap-btn-sm"
-              onClick={handleDownloadPatchPlan}
-            >
-              <Icon.Download size={12} /> Validation evidence
-            </button>
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-              gap: 8,
-            }}
-          >
-            {[
-              ["Proposed", remediationCandidates.proposed],
-              ["Planned", remediationCandidates.planned],
-              ["Validated", remediationCandidates.validated],
-              ["Applied", remediationCandidates.applied],
-              ["Rejected", remediationCandidates.rejected],
-              ["Unverified", remediationCandidates.unverified],
-              ["Manual files", remediationFiles.manual_review],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                style={{
-                  padding: "8px 10px",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  background: "var(--bg-soft)",
-                }}
-              >
-                <div style={{ fontSize: 10.5, color: "var(--fg-muted)" }}>
-                  {label}
-                </div>
-                <strong style={{ fontSize: 16 }}>{value}</strong>
-              </div>
-            ))}
-          </div>
-          {Object.keys(remediationChecks).length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {Object.entries(remediationChecks).map(
-                ([status, count]) => (
-                  <span
-                    key={status}
-                    className={
-                      status === "passed" ? "chip chip-success" : "chip"
-                    }
-                  >
-                    {status.replace(/_/g, " ")}: {count}
-                  </span>
-                ),
-              )}
-            </div>
-          )}
-          {remediationFiles.manual_review > 0 && (
-            <div style={{ fontSize: 12.5, color: "var(--medium)" }}>
-              {remediationFiles.manual_review} file
-              {remediationFiles.manual_review === 1 ? " requires" : "s require"}{" "}
-              manual review and was not promoted. Download the evidence for the
-              exact failed or unavailable checks.
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Tab bar — only shown for REMEDIATE scans that have a full diff */}
       {data.summary_report?.scan_type === "REMEDIATE" && changedFiles.length > 0 && (
@@ -1974,9 +1674,6 @@ const ResultsPage: React.FC = () => {
             f={selected}
             scanId={scanId}
             originalCodeMap={data?.original_code_map ?? undefined}
-            governance={data?.finding_governance.items.find(
-              (item) => item.finding_id === selected.id,
-            )}
             scanType={String(data.scan_type ?? report?.scan_type ?? "AUDIT")}
             patchPlan={data.patch_plan}
           />
@@ -2866,15 +2563,13 @@ const FindingDetail: React.FC<{
   f: Finding;
   scanId?: string;
   originalCodeMap?: Record<string, string>;
-  governance?: FindingGovernanceItem;
   scanType: string;
   patchPlan?: PatchPlanArtifact | null;
-}> = ({ f, scanId, originalCodeMap, governance, scanType, patchPlan }) => {
+}> = ({ f, scanId, originalCodeMap, scanType, patchPlan }) => {
   const sev = (f.severity || "").toUpperCase();
   const sevColor = SEV_COLOR[sev] ?? "var(--fg-muted)";
   const hasFix = scanType.toUpperCase() !== "AUDIT" && !patchPlan && !!f.fixes?.code;
   const fileContent = originalCodeMap?.[f.file_path] ?? null;
-  const contributingRawIds = f.contributing_raw_finding_ids ?? [];
   const { data: fixLineage } = useQuery({
     queryKey: ["actionable-fix-lineage", scanId],
     queryFn: () => debugService.getFindingLineage(scanId!, [], null, 250),
@@ -2896,23 +2591,9 @@ const FindingDetail: React.FC<{
       .filter((file) => file.file_path === f.file_path)
       .flatMap((file) => file.hunks)
       .filter((hunk) => hunk.candidate_ids.some((id) => linkedCandidateIds.has(id)));
-    if (hunks.length === 0) {
-      const evidence = governance?.exact_ranges.find(
-        (range) => String(range.file_path ?? f.file_path) === f.file_path
-          && typeof range.start_line === "number",
-      );
-      if (!evidence) return null;
-      return {
-        start_byte: Number(evidence.start_byte ?? 0),
-        end_byte: Number(evidence.end_byte ?? 0),
-        start_line: Number(evidence.start_line),
-        start_column: Number(evidence.start_column ?? 1),
-        end_line: Number(evidence.end_line ?? evidence.start_line),
-        end_column: Number(evidence.end_column ?? 1),
-      };
-    }
+    if (hunks.length === 0) return null;
     return hunks[0].resolved_range;
-  }, [f.file_path, governance?.exact_ranges, linkedCandidateIds, patchPlan]);
+  }, [linkedCandidateIds, patchPlan]);
   // Full-screen diff view (#83 follow-up) — the inline pane is narrow;
   // this opens the before/after diff in a near-fullscreen modal.
   const [diffExpanded, setDiffExpanded] = useState(false);
@@ -3025,10 +2706,6 @@ const FindingDetail: React.FC<{
       </div>
 
       <div className="sccap-divider" />
-
-      {governance && scanId && (
-        <FindingGovernancePanel scanId={scanId} findingId={f.id} initial={governance} />
-      )}
 
       {/* Code snippet — shown for all findings that have source code available */}
       {(fileContent || f.vulnerable_snippet || f.fixes?.original_snippet) && (
@@ -3162,17 +2839,6 @@ const FindingDetail: React.FC<{
               {f.remediation}
             </div>
           </div>
-        )}
-
-        {contributingRawIds.length > 0 && (
-          <details className="sccap-card">
-            <summary style={{ cursor: "pointer", fontWeight: 700 }}>
-              Canonical lineage · {contributingRawIds.length} contributing finding{contributingRawIds.length === 1 ? "" : "s"}
-            </summary>
-            <ul style={{ marginBottom: 0 }}>
-              {contributingRawIds.map((id) => <li key={id}><code>{id}</code></li>)}
-            </ul>
-          </details>
         )}
 
         {scanId && (
