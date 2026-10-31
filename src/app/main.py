@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI):
         )
 
     # The old pentesting verification catalogs were dropped with the
-    # better-pentester migration; there is nothing to seed.
+    # pentest-engine migration; there is nothing to seed.
 
     # Lifespan-health observability (V14.1.2): announce hydration entry at
     # WARNING so the line survives even when admins set system.log_level to

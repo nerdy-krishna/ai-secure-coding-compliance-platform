@@ -287,7 +287,7 @@ _sccap_install_own_cert() {
 }
 
 _sccap_provision_pentest_secrets() {
-    # The better-pentester engine derives no signing/gateway secrets; nothing to provision.
+    # The autonomous pentest engine derives no signing/gateway secrets; nothing to provision.
     return 0
 }
 
@@ -687,7 +687,7 @@ EOF
 }
 
 _sccap_install_pentest_runtimes() {
-    # The better-pentester engine image already carries every scanner; nothing to install.
+    # The pentest engine image already carries every scanner; nothing to install.
     return 0
 }
 
@@ -1595,7 +1595,7 @@ esac
 # playwright) - those run via the Kubernetes attach runtime (cloud) or the local
 # kind-cluster qualification, see docs/docs/operations/cloud-kubernetes-deployment.md.
 _sccap_enable_pentesting() {
-    # The better-pentester engine needs no capability flags.
+    # The pentest engine needs no capability flags.
     return 0
 }
 

@@ -40,7 +40,7 @@ events, and downloadable HTML/CSV/PDF/SARIF reports.
 
 ### Pentesting engine
 
-Replaced wholesale on the `better-pentester` branch (ADR-029). The controller,
+Replaced wholesale (ADR-029). The controller,
 qualification, signed-task and work-ledger stack described by ADR-013 to ADR-028
 was deleted; ADR-029 is authoritative.
 
@@ -66,7 +66,7 @@ was deleted; ADR-029 is authoritative.
 ### Release blockers
 
 - **Pentest engine not yet exercised on a live target.** The engine replaced the
-  controller stack on the `better-pentester` branch; discovery, the lead queue,
+  controller stack; discovery, the lead queue,
   observation persistence and the chain pass are implemented and unit-verified, but
   no full assessment against a real target has been run on a deployed installation
   since the replacement.

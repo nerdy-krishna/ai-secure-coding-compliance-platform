@@ -1,6 +1,6 @@
 """Single baseline schema for a fresh install.
 
-better-pentester: the entire database is created from one snapshot instead of
+single baseline: the entire database is created from one snapshot instead of
 the historical, interleaved migration chain. The snapshot is a plain
 ``pg_dump --schema-only`` of the target schema (SAST ledger + the three new
 pentest tables); it already excludes the dropped pentest graph and the alembic
