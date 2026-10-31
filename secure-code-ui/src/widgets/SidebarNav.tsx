@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { Icon } from "../shared/ui/Icon";
 import { useAuth } from "../shared/hooks/useAuth";
@@ -86,6 +86,70 @@ function adminIcon(label: string): IconComponent {
 // purpose: one is the interpreted result, the other is the raw thing it was
 // interpreted from.
 
+/**
+ * A navigation group that remembers whether the user left it open.
+ *
+ * Navigating into a group opens it, but moving to another section only opens that
+ * section — it never closes the one you were in. Only a click on the summary
+ * collapses it, which is what "stay expanded unless the user collapses it" means.
+ */
+const NavGroup: React.FC<{
+  label: string;
+  icon: IconComponent;
+  active: boolean;
+  collapsed: boolean;
+  children: React.ReactNode;
+}> = ({ label, icon: GroupIcon, active, collapsed, children }) => {
+  // Every group starts expanded and remembers the user's choice across reloads.
+  const storageKey = `sccap.nav.group.${label}`;
+  const [open, setOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem(storageKey);
+    return stored === null ? true : stored === "1";
+  });
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, open ? "1" : "0");
+    } catch {
+      /* private mode — the in-memory state is enough */
+    }
+  }, [open, storageKey]);
+
+  useEffect(() => {
+    const node = detailsRef.current;
+    if (node && node.open !== open) node.open = open;
+  }, [open]);
+
+  return (
+    <details
+      ref={detailsRef}
+      className="side-nav-group"
+      open={open}
+      onToggle={(event) => {
+        const next = (event.currentTarget as HTMLDetailsElement).open;
+        setOpen(next);
+      }}
+    >
+      <summary title={label} aria-label={label}>
+        {collapsed ? (
+          <span className="side-nav-icon" aria-hidden="true">
+            <GroupIcon size={16} />
+          </span>
+        ) : (
+          label
+        )}
+      </summary>
+      <div>{children}</div>
+    </details>
+  );
+};
+
 export function SidebarNav() {
   const [collapsed, setCollapsed] = useState(false);
   const { pathname } = useLocation();
@@ -124,25 +188,10 @@ export function SidebarNav() {
     </NavLink>
   );
 
-  const group = (label: string, groupIcon: IconComponent, items: Item[], open = false) => {
+  const group = (label: string, groupIcon: IconComponent, items: Item[], active = false) => {
     const shown = visible(items);
     if (!shown.length) return null;
-    // A capitalized local is required: JSX treats lowercase names as DOM tags.
-    const GroupIcon = groupIcon;
-    return (
-      <details className="side-nav-group" open={open}>
-        <summary title={label} aria-label={label}>
-          {collapsed ? (
-            <span className="side-nav-icon" aria-hidden="true">
-              <GroupIcon size={16} />
-            </span>
-          ) : (
-            label
-          )}
-        </summary>
-        <div>{shown.map(link)}</div>
-      </details>
-    );
+    return <NavGroup key={label} label={label} icon={groupIcon} active={active} collapsed={collapsed}>{shown.map(link)}</NavGroup>;
   };
 
   return <aside className={`side-nav${collapsed ? " is-collapsed" : ""}`} aria-label="Application navigation">
