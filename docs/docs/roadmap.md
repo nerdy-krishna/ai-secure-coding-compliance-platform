@@ -55,6 +55,7 @@ was deleted; ADR-029 is authoritative.
 | Lead ledger | Persistent `pentest_leads` queue with priority bands; claims on test; failed probes returned to the queue; `done` refused while testable leads remain |
 | Findings | Weaknesses and surface observations both persisted (`category`); no finding discarded for being non-exploitable |
 | Finding quality | CVSS 3.1 vector + base score derived deterministically with severity from the score band; cross-tool consolidation with provenance and audit-retained duplicates; per-finding PoC replay recording `exploitable`/`not_exploitable`/`needs_review` plus the exact reproducing request |
+| Recovery and re-scans | Heartbeat per running run; stale runs are reclaimed as `interrupted` (at startup and by watchdog), restart re-queues with findings/leads/recon reused; schedules clone a run template on an interval and each scheduled run is diffed against its predecessor (new/resolved/persisting) |
 | Exploit chaining | Iterative loop: hypothesis → one tested step → observed result → advance/confirm/abandon; `confirmed` requires demonstrated impact; each chain stores its steps and a runnable PoC, is attached to the findings it links, and is rendered in every report |
 | Reporting | Markdown, JSON, HTML, PDF with an observations appendix |
 | UI | Live event stream including prompts and tool actions, findings as they land, lead queue, live browser frame, controls, report downloads |
