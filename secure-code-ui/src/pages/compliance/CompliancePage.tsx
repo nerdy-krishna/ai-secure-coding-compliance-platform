@@ -122,7 +122,7 @@ const ViewDocumentsModal: React.FC<{
     <Modal
       open={open}
       onClose={onClose}
-      title={`Documents in "${frameworkName}"`}
+      title={`Policies in "${frameworkName}"`}
       width="min(1100px, 95vw)"
       footer={
         <button className="sccap-btn sccap-btn-sm" onClick={onClose}>
@@ -138,7 +138,7 @@ const ViewDocumentsModal: React.FC<{
             color: "var(--fg-muted)",
           }}
         >
-          Loading documents…
+          Loading policies…
         </div>
       ) : isError ? (
         <div
@@ -148,7 +148,7 @@ const ViewDocumentsModal: React.FC<{
             fontSize: 13,
           }}
         >
-          Error loading documents.
+          Error loading policies.
         </div>
       ) : !documents || documents.length === 0 ? (
         <div
@@ -158,7 +158,7 @@ const ViewDocumentsModal: React.FC<{
             fontSize: 13,
           }}
         >
-          No documents for this framework.
+          No policies ingested for this standard yet.
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -327,7 +327,7 @@ const FrameworkCard: React.FC<{
           </span>
         )}
         {stats.doc_count > 0 && (
-          <span className="chip chip-info">{stats.doc_count} docs</span>
+          <span className="chip chip-info">{stats.doc_count} policies</span>
         )}
         {stats.open_findings > 0 && (
           <span className="chip chip-critical">
@@ -361,8 +361,8 @@ const FrameworkCard: React.FC<{
               <>
                 <button
                   className="sccap-btn sccap-btn-icon sccap-btn-ghost sccap-btn-sm"
-                  aria-label="View documents"
-                  title="View documents"
+                  aria-label="View policies"
+                  title="View policies"
                   onClick={(e) => {
                     e.stopPropagation();
                     onView();
@@ -407,7 +407,7 @@ const FrameworkCard: React.FC<{
               <button
                 className="sccap-btn sccap-btn-icon sccap-btn-ghost sccap-btn-sm"
                 aria-label="Delete"
-                title="Delete documents"
+                title="Delete policies"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete();
@@ -427,7 +427,7 @@ const FrameworkCard: React.FC<{
                 onClick();
               }}
             >
-              View controls <Icon.ChevronR size={11} />
+              View policies <Icon.ChevronR size={11} />
             </button>
           )
         )}

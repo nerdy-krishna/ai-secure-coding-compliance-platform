@@ -4,7 +4,6 @@ import { PageHeader } from "../../shared/ui/PageHeader";
 import { Icon } from "../../shared/ui/Icon";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { Permission, hasPermission } from "../../shared/lib/permissions";
-import SemgrepRulesTab from "../../features/semgrep/SemgrepRulesTab";
 import CompliancePage from "../compliance/CompliancePage";
 import FrameworkManagementPage from "./FrameworkManagementPage";
 import AgentManagementPage from "./AgentManagementPage";
@@ -20,13 +19,16 @@ import PromptManagementPage from "./PromptManagementPage";
  * header is the only heading on screen.
  */
 
-type TabKey = "standards" | "semgrep" | "mappings" | "agents" | "prompts";
+type TabKey = "standards" | "agents" | "prompts" | "mappings";
 
 interface TabDef {
   key: TabKey;
   label: string;
   icon: React.ReactNode;
+  /** What the operator does on this tab. */
   description: string;
+  /** What must exist before this step is useful. */
+  requires?: string;
   /** Admin-only tab (authoring surfaces). */
   adminOnly?: boolean;
 }
@@ -37,30 +39,15 @@ const TABS: TabDef[] = [
     label: "Security standards",
     icon: <Icon.BookOpen size={13} />,
     description:
-      "The knowledge corpus: which standards are ingested, how many documents back each one, and the posture each is reporting.",
-  },
-  {
-    key: "semgrep",
-    label: "Semgrep rules",
-    icon: <Icon.Code size={13} />,
-    description:
-      "Deterministic detection sources. Scans run only the rules ingested here — no bundled pack.",
-    adminOnly: true,
-  },
-  {
-    key: "mappings",
-    label: "Framework mappings",
-    icon: <Icon.Layers size={13} />,
-    description:
-      "Framework records and which agents analyse findings against each one.",
-    adminOnly: true,
+      "Create the standard and upload its policies. Those policies are chunked and embedded into the cybersecurity RAG corpus — everything downstream reasons over them, so nothing else can be configured until a standard exists.",
   },
   {
     key: "agents",
     label: "Agents",
     icon: <Icon.Sparkle size={13} />,
     description:
-      "Specialised analysis agents and the retrieval query each sends to the corpus.",
+      "Create the agents that analyse findings for a standard, and give each one the RAG query it uses to retrieve the relevant policies from the corpus.",
+    requires: "a security standard with policies ingested (step 1)",
     adminOnly: true,
   },
   {
@@ -68,7 +55,17 @@ const TABS: TabDef[] = [
     label: "Prompts",
     icon: <Icon.File size={13} />,
     description:
-      "Per-agent prompt templates, with provider-tuned variants and automatic fallback.",
+      "Write the prompt each agent sends to the model, with provider-tuned variants that fall back automatically. A prompt inherits its agent's retrieved policies.",
+    requires: "at least one agent (step 2)",
+    adminOnly: true,
+  },
+  {
+    key: "mappings",
+    label: "Framework mappings",
+    icon: <Icon.Layers size={13} />,
+    description:
+      "Finally, assign those agents to the frameworks they should analyse. A scan or advisor question is routed to the agents mapped to the frameworks it references.",
+    requires: "agents with prompts (steps 2 and 3)",
     adminOnly: true,
   },
 ];
@@ -103,7 +100,7 @@ const AnalysisConfigPage: React.FC<{ only?: TabKey }> = ({ only }) => {
         subtitle={
           only
             ? "The standards your scans and advisor measure against."
-            : "One pipeline, in order: standards supply the knowledge, rules supply the detectors, mappings bind them to frameworks, agents run the analysis, prompts shape the output."
+            : "One workflow, in order: create a security standard and upload its policies (the RAG corpus), build the agents that query those policies, write their prompts, then map the agents to the frameworks they analyse. Semgrep rules have their own page — they are deterministic detectors, not part of this pipeline."
         }
       />
 
@@ -126,12 +123,22 @@ const AnalysisConfigPage: React.FC<{ only?: TabKey }> = ({ only }) => {
       )}
 
       {active && (
-        <p className="analysis-tab-description">{active.description}</p>
+        <section className="analysis-step">
+          <div className="analysis-step-head">
+            <span className="analysis-step-number">
+              Step {tabs.findIndex((tab) => tab.key === active.key) + 1}
+            </span>
+            <strong>{active.label}</strong>
+            {active.requires && (
+              <span className="analysis-step-requires">Requires {active.requires}</span>
+            )}
+          </div>
+          <p className="analysis-step-body">{active.description}</p>
+        </section>
       )}
 
       <div className="analysis-tab-panel">
         {active?.key === "standards" && <CompliancePage embedded />}
-        {active?.key === "semgrep" && <SemgrepRulesTab />}
         {active?.key === "mappings" && <FrameworkManagementPage embedded />}
         {active?.key === "agents" && <AgentManagementPage embedded />}
         {active?.key === "prompts" && <PromptManagementPage embedded />}

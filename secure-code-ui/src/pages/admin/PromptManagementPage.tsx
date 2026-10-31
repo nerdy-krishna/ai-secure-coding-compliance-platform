@@ -168,6 +168,12 @@ const PromptManagementPage: React.FC<{ embedded?: boolean }> = ({ embedded = fal
           gap: 12,
         }}
       >
+        {embedded && (
+          <div style={{ color: "var(--fg-muted)", fontSize: 13, maxWidth: "80ch" }}>
+            Prompts are bound to an agent. Write the instruction the model receives
+            after the agent's policies have been retrieved.
+          </div>
+        )}
         {!embedded && (
           <div>
             <h1 style={{ color: "var(--fg)" }}>Prompt templates</h1>

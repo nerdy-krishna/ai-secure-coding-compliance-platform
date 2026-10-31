@@ -28,6 +28,12 @@ export const ADMIN_LINKS: AdminLink[] = [
     feature: "admin_authoring",
     permissions: [Permission.platformConfigManage],
   },
+  {
+    to: "/admin/semgrep",
+    label: "Semgrep rules",
+    feature: "admin_authoring",
+    permissions: [Permission.platformConfigManage],
+  },
   { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
   { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
   { to: "/admin/users", label: "Users", feature: "multi_user", permissions: [Permission.identityRead] },

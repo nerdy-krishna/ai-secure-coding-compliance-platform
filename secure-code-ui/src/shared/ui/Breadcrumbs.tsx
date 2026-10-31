@@ -59,6 +59,7 @@ const TRAILS: Record<string, Crumb[]> = {
   "/advisor": [ADMIN, { label: "Security advisor" }],
   "/compliance": [ADMIN, { label: "Analysis config" }, { label: "Security standards" }],
   "/admin/analysis": [ADMIN, { label: "Analysis config" }],
+  "/admin/semgrep": [ADMIN, { label: "Semgrep rules" }],
   "/usage": [ADMIN, { label: "Usage" }],
   "/account/settings/appearance": [ACCOUNT, { label: "Appearance" }],
   "/account/settings/security": [ACCOUNT, { label: "Security" }],

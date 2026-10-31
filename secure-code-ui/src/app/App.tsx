@@ -38,6 +38,7 @@ const UserManagementTab = React.lazy(() => import("../pages/admin/UserManagement
 const UserGroupsPage = React.lazy(() => import("../pages/admin/UserGroupsPage"));
 const SMTPSettingsTab = React.lazy(() => import("../pages/admin/SMTPSettingsTab"));
 const AnalysisConfigPage = React.lazy(() => import("../pages/admin/AnalysisConfigPage"));
+const SemgrepRulesPage = React.lazy(() => import("../pages/admin/SemgrepRulesPage"));
 const ScanDiagnosticsPage = React.lazy(() => import("../pages/analysis/ScanDiagnosticsPage"));
 const ProjectDetailPage = React.lazy(() => import("../pages/analysis/ProjectDetailPage"));
 const ProjectsPage = React.lazy(() => import("../pages/analysis/ProjectsPage"));
@@ -238,6 +239,7 @@ function AppContent() {
           </Route>
           <Route element={<FeatureRoute feature="admin_authoring" />}>
             <Route path="/admin/analysis" element={routeContent(<AnalysisConfigPage />)} />
+            <Route path="/admin/semgrep" element={routeContent(<SemgrepRulesPage />)} />
             {/* The five authoring screens are tabs of /admin/analysis now. */}
             <Route
               path="/admin/agents"
