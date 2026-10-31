@@ -235,6 +235,24 @@ const Send: React.FC<IconProps> = (p) => (
   </Svg>
 );
 
+const Minus: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+);
+
+const Expand: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M4 9V4h5M20 15v5h-5M15 4h5v5M9 20H4v-5" />
+  </Svg>
+);
+
+const Collapse: React.FC<IconProps> = (p) => (
+  <Svg {...p}>
+    <path d="M9 4v5H4M15 20v-5h5M20 9h-5V4M4 15h5v5" />
+  </Svg>
+);
+
 const Plus: React.FC<IconProps> = (p) => (
   <Svg {...p}>
     <path d="M12 5v14M5 12h14" />
@@ -499,6 +517,9 @@ export const Icon = {
   Download,
   Send,
   Plus,
+  Minus,
+  Expand,
+  Collapse,
   Filter,
   Sort,
   Terminal,

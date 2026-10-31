@@ -1,17 +1,19 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "../../shared/ui/Icon";
 import type { Finding } from "../../shared/types/api";
 
 /**
- * Findings swimlane — what each detection source claimed, and where those claims
- * ended up.
+ * Findings swimlane — what each source claimed, and where those claims ended up.
  *
- * Rows are lanes, one per detection source (an agent or a scanner). Left column:
- * the raw findings that source produced. Right column: the consolidated findings
- * they were folded into. An edge exists only where consolidation actually merged
- * a raw finding, so the picture answers "who said this, and what did it become" —
- * and a raw finding with no edge is one consolidation dropped.
+ * Rows are lanes, one per group (detection agent, severity, file or CWE, chosen by
+ * the operator). Left column: the raw findings in that lane. Right column: the
+ * consolidated findings they were folded into. An edge exists only where
+ * consolidation actually merged a raw finding, so the picture answers "who said
+ * this, and what did it become" — and a raw finding with no edge is one
+ * consolidation dropped.
  */
+
+const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"];
 
 const SEV_COLOR: Record<string, string> = {
   CRITICAL: "var(--critical)",
@@ -36,8 +38,17 @@ const CONSOL_X = RAW_X + RAW_W + 132;
 const CONSOL_W = 340;
 const CHART_TOP = 40;
 
+type GroupBy = "agent" | "severity" | "file" | "cwe";
+
+const GROUP_LABEL: Record<GroupBy, string> = {
+  agent: "Detection source",
+  severity: "Severity",
+  file: "File",
+  cwe: "Weakness (CWE)",
+};
+
 interface Lane {
-  source: string;
+  key: string;
   label: string;
   raw: Finding[];
   height: number;
@@ -46,7 +57,6 @@ interface Lane {
 
 interface PlacedRaw {
   finding: Finding;
-  laneIndex: number;
   x: number;
   y: number;
   dropped: boolean;
@@ -63,12 +73,55 @@ interface PlacedConsolidated {
 const truncate = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max - 1)}…` : value;
 
-export const FindingsSwimlane: React.FC<{ debug: {
-  raw_llm_findings: Finding[];
-  consolidated_findings: Finding[];
-  sast_findings: Finding[];
-} }> = ({ debug }) => {
+/** Lane identity for one raw finding, under the chosen grouping. */
+function groupKey(finding: Finding, groupBy: GroupBy): { key: string; label: string } {
+  switch (groupBy) {
+    case "severity": {
+      const severity = (finding.severity || "UNKNOWN").toUpperCase();
+      return { key: severity, label: severity.toLowerCase() };
+    }
+    case "file":
+      return { key: finding.file_path, label: finding.file_path };
+    case "cwe":
+      return finding.cwe
+        ? { key: finding.cwe, label: finding.cwe }
+        : { key: "__none__", label: "No CWE recorded" };
+    case "agent":
+    default: {
+      const source = finding.source || "unattributed";
+      return {
+        key: source,
+        label: source.replace(/^Asvs/, "").replace(/Agent$/, "") || source,
+      };
+    }
+  }
+}
+
+export const FindingsSwimlane: React.FC<{
+  debug: {
+    raw_llm_findings: Finding[];
+    consolidated_findings: Finding[];
+    sast_findings: Finding[];
+  };
+}> = ({ debug }) => {
   const [hovered, setHovered] = useState<string | null>(null);
+  const [groupBy, setGroupBy] = useState<GroupBy>("agent");
+  const [zoom, setZoom] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const node = shellRef.current;
+    if (!node) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void node.requestFullscreen?.();
+  }, []);
 
   const model = useMemo(() => {
     const raw = debug.raw_llm_findings ?? [];
@@ -82,23 +135,34 @@ export const FindingsSwimlane: React.FC<{ debug: {
       }
     }
 
-    const bySource = new Map<string, Finding[]>();
+    const buckets = new Map<string, { label: string; findings: Finding[] }>();
     for (const finding of raw) {
-      const source = finding.source || "unattributed";
-      const bucket = bySource.get(source);
-      if (bucket) bucket.push(finding);
-      else bySource.set(source, [finding]);
+      const { key, label } = groupKey(finding, groupBy);
+      const bucket = buckets.get(key);
+      if (bucket) bucket.findings.push(finding);
+      else buckets.set(key, { label, findings: [finding] });
     }
 
-    const lanes: Lane[] = [...bySource.entries()]
-      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
-      .map(([source, findings]) => ({
-        source,
-        label: source.replace(/^Asvs/, "").replace(/Agent$/, "") || source,
-        raw: findings,
-        height: LANE_HEADER_H + findings.length * (NODE_H + NODE_GAP) + LANE_PAD,
-        top: 0,
-      }));
+    const entries = [...buckets.entries()];
+    if (groupBy === "severity") {
+      entries.sort(
+        (a, b) =>
+          SEVERITY_ORDER.indexOf(a[0].toUpperCase()) -
+          SEVERITY_ORDER.indexOf(b[0].toUpperCase()),
+      );
+    } else {
+      entries.sort(
+        (a, b) => b[1].findings.length - a[1].findings.length || a[1].label.localeCompare(b[1].label),
+      );
+    }
+
+    const lanes: Lane[] = entries.map(([key, bucket]) => ({
+      key,
+      label: bucket.label,
+      raw: bucket.findings,
+      height: LANE_HEADER_H + bucket.findings.length * (NODE_H + NODE_GAP) + LANE_PAD,
+      top: 0,
+    }));
 
     let cursor = CHART_TOP;
     for (const lane of lanes) {
@@ -107,19 +171,18 @@ export const FindingsSwimlane: React.FC<{ debug: {
     }
 
     const placedRaw: PlacedRaw[] = [];
-    lanes.forEach((lane, laneIndex) => {
+    for (const lane of lanes) {
       lane.raw.forEach((finding, index) => {
         const consolidatedFinding = mergedInto.get(String(finding.raw_finding_id));
         placedRaw.push({
           finding,
-          laneIndex,
           x: RAW_X,
           y: lane.top + LANE_HEADER_H + index * (NODE_H + NODE_GAP),
           dropped: !consolidatedFinding,
           consolidatedId: consolidatedFinding ? String(consolidatedFinding.id) : null,
         });
       });
-    });
+    }
 
     // Consolidated nodes sit opposite the middle of their contributors, pushed
     // down as needed so they never overlap.
@@ -132,27 +195,19 @@ export const FindingsSwimlane: React.FC<{ debug: {
     }
 
     const ordered = [...byConsolidated.entries()].sort(
-      (a, b) =>
-        a[1][0].y - b[1][0].y || a[1].length - b[1].length,
+      (a, b) => a[1][0].y - b[1][0].y || a[1].length - b[1].length,
     );
 
     const placedConsolidated: PlacedConsolidated[] = [];
     let minY = CHART_TOP;
     for (const [id, contributors] of ordered) {
-      const finding = contributors[0].consolidatedId
-        ? consolidated.find((row) => String(row.id) === id)
-        : undefined;
+      const finding = consolidated.find((row) => String(row.id) === id);
       if (!finding) continue;
       const centre =
         contributors.reduce((sum, node) => sum + node.y + NODE_H / 2, 0) /
         contributors.length;
       const y = Math.max(minY, centre - NODE_H / 2);
-      placedConsolidated.push({
-        finding,
-        x: CONSOL_X,
-        y,
-        fromCount: contributors.length,
-      });
+      placedConsolidated.push({ finding, x: CONSOL_X, y, fromCount: contributors.length });
       minY = y + NODE_H + NODE_GAP;
     }
 
@@ -167,20 +222,11 @@ export const FindingsSwimlane: React.FC<{ debug: {
     );
 
     return { lanes, placedRaw, placedConsolidated, orphaned, width, height };
-  }, [debug]);
+  }, [debug, groupBy]);
 
   const { lanes, placedRaw, placedConsolidated, orphaned, width, height } = model;
   const totalRaw = placedRaw.length;
   const dropped = placedRaw.filter((node) => node.dropped).length;
-
-  if (totalRaw === 0 && placedConsolidated.length === 0) {
-    return (
-      <div className="surface" style={{ padding: 24, color: "var(--fg-muted)", fontSize: 13 }}>
-        <Icon.Layers size={14} /> No LLM findings were produced by this scan, so
-        there is nothing to consolidate.
-      </div>
-    );
-  }
 
   const isDimmed = (kind: "raw" | "consolidated", id: string): boolean => {
     if (!hovered) return false;
@@ -191,14 +237,28 @@ export const FindingsSwimlane: React.FC<{ debug: {
     return id !== hovered;
   };
 
+  if (totalRaw === 0 && placedConsolidated.length === 0) {
+    return (
+      <div className="surface" style={{ padding: 24, color: "var(--fg-muted)", fontSize: 13 }}>
+        <Icon.Layers size={14} /> No LLM findings were produced by this scan, so
+        there is nothing to consolidate.
+      </div>
+    );
+  }
+
   return (
-    <section className="sccap-card" style={{ display: "grid", gap: 12, padding: 16 }}>
+    <section
+      ref={shellRef}
+      className="sccap-card swimlane-shell"
+      style={{ display: "grid", gap: 12, padding: 16 }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: 13.5 }}>Findings consolidation</div>
           <div style={{ color: "var(--fg-muted)", fontSize: 12, marginTop: 2 }}>
-            One lane per detection source. Raw claims on the left, the findings they
-            became on the right; a line exists only where consolidation merged them.
+            One lane per {GROUP_LABEL[groupBy].toLowerCase()}. Raw claims on the left,
+            the findings they became on the right; a line exists only where
+            consolidation merged them.
           </div>
         </div>
         <div style={{ display: "flex", gap: 14, alignItems: "baseline", fontSize: 12 }}>
@@ -220,17 +280,86 @@ export const FindingsSwimlane: React.FC<{ debug: {
         </div>
       </div>
 
-      <div
-        style={{
-          overflow: "auto",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
-          maxHeight: "min(62vh, 620px)",
-        }}
-      >
+      {/* Controls: what the lanes group by, plus zoom and fullscreen. */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="radio-group" style={{ width: "fit-content" }}>
+          {(Object.keys(GROUP_LABEL) as GroupBy[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={groupBy === mode ? "active" : ""}
+              onClick={() => setGroupBy(mode)}
+              title={`Group lanes by ${GROUP_LABEL[mode].toLowerCase()}`}
+            >
+              {GROUP_LABEL[mode]}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginLeft: "auto" }}>
+          <span style={{ display: "flex", gap: 6, marginRight: 10 }}>
+            {SEVERITY_ORDER.slice(0, 4).map((severity) => (
+              <span
+                key={severity}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "var(--fg-muted)" }}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 2,
+                    background: sevColor(severity),
+                    display: "inline-block",
+                  }}
+                />
+                {severity.charAt(0) + severity.slice(1).toLowerCase()}
+              </span>
+            ))}
+          </span>
+          <button
+            type="button"
+            className="sccap-btn sccap-btn-sm sccap-btn-icon"
+            onClick={() => setZoom((value) => Math.max(0.5, Math.round((value - 0.15) * 100) / 100))}
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            <Icon.Minus size={12} />
+          </button>
+          <button
+            type="button"
+            className="sccap-btn sccap-btn-sm"
+            onClick={() => setZoom(1)}
+            title="Reset zoom"
+            style={{ fontVariantNumeric: "tabular-nums", minWidth: 52 }}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            className="sccap-btn sccap-btn-sm sccap-btn-icon"
+            onClick={() => setZoom((value) => Math.min(2.2, Math.round((value + 0.15) * 100) / 100))}
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            <Icon.Plus size={12} />
+          </button>
+          <button
+            type="button"
+            className="sccap-btn sccap-btn-sm"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          >
+            {isFullscreen ? <Icon.Collapse size={12} /> : <Icon.Expand size={12} />}
+            {isFullscreen ? "Exit" : "Fullscreen"}
+          </button>
+        </div>
+      </div>
+
+      <div className="swimlane-scroll">
         <svg
-          width={Math.max(width, 720)}
-          height={height + 8}
+          viewBox={`0 0 ${Math.max(width, 720)} ${height + 8}`}
+          width={Math.max(width, 720) * zoom}
+          height={(height + 8) * zoom}
           role="img"
           aria-label="Swimlane diagram of raw findings merging into consolidated findings"
           style={{ display: "block", background: "var(--bg)" }}
@@ -241,7 +370,6 @@ export const FindingsSwimlane: React.FC<{ debug: {
             </marker>
           </defs>
 
-          {/* Column headers */}
           <text x={RAW_X} y={22} fontSize={9.5} fontWeight={700} letterSpacing=".06em" fill="var(--fg-subtle)">
             RAW FINDINGS
           </text>
@@ -249,9 +377,8 @@ export const FindingsSwimlane: React.FC<{ debug: {
             CONSOLIDATED FINDINGS
           </text>
 
-          {/* Lanes */}
           {lanes.map((lane, index) => (
-            <g key={lane.source}>
+            <g key={lane.key}>
               <rect
                 x={8}
                 y={lane.top}
@@ -260,14 +387,8 @@ export const FindingsSwimlane: React.FC<{ debug: {
                 rx={8}
                 fill={index % 2 === 0 ? "var(--bg-soft)" : "transparent"}
               />
-              <text
-                x={20}
-                y={lane.top + 17}
-                fontSize={11.5}
-                fontWeight={600}
-                fill="var(--fg)"
-              >
-                {truncate(lane.label, 20)}
+              <text x={20} y={lane.top + 17} fontSize={11.5} fontWeight={600} fill="var(--fg)">
+                {truncate(lane.label, groupBy === "file" ? 24 : 20)}
               </text>
               <text x={20} y={lane.top + 32} fontSize={10.5} fill="var(--fg-subtle)">
                 {lane.raw.length} claim{lane.raw.length === 1 ? "" : "s"}
@@ -275,7 +396,6 @@ export const FindingsSwimlane: React.FC<{ debug: {
             </g>
           ))}
 
-          {/* Edges */}
           {placedRaw.map((node) => {
             if (!node.consolidatedId) return null;
             const target = placedConsolidated.find(
@@ -310,7 +430,6 @@ export const FindingsSwimlane: React.FC<{ debug: {
             strokeDasharray="3 4"
           />
 
-          {/* Raw findings */}
           {placedRaw.map((node) => {
             const dim = isDimmed("raw", String(node.finding.id));
             return (
@@ -321,7 +440,7 @@ export const FindingsSwimlane: React.FC<{ debug: {
                 onMouseLeave={() => setHovered(null)}
               >
                 <title>
-                  {`${node.finding.severity ?? "?"} · ${node.finding.file_path}:${node.finding.line_number ?? "?"}\n${node.finding.title}${node.dropped ? "\n(dropped by consolidation)" : ""}`}
+                  {`${node.finding.severity ?? "?"} · ${node.finding.source ?? "?"}\n${node.finding.file_path}:${node.finding.line_number ?? "?"}\n${node.finding.title}${node.dropped ? "\n(dropped by consolidation)" : ""}`}
                 </title>
                 <rect
                   x={node.x}
@@ -341,7 +460,6 @@ export const FindingsSwimlane: React.FC<{ debug: {
             );
           })}
 
-          {/* Consolidated findings */}
           {placedConsolidated.map((node) => {
             const id = String(node.finding.id);
             const dim = isDimmed("consolidated", id);
@@ -354,7 +472,7 @@ export const FindingsSwimlane: React.FC<{ debug: {
                 style={{ cursor: "pointer" }}
               >
                 <title>
-                  {`${node.finding.severity ?? "?"} · merged from ${node.fromCount}\n${node.finding.title}`}
+                  {`${node.finding.severity ?? "?"} · merged from ${node.fromCount}\n${node.finding.file_path}:${node.finding.line_number ?? "?"}\n${node.finding.title}`}
                 </title>
                 <rect
                   x={node.x}

@@ -1203,3 +1203,32 @@ option { background: var(--bg-elev); color: var(--fg); }
 .coverage-status.is-scanned { color: var(--ok-ink); }
 .coverage-status.is-excluded { color: var(--fg-subtle); }
 .coverage-more { margin: 8px 0 0; font-size: 12px; color: var(--fg-muted); }
+
+/* ============================ findings swimlane ============================ */
+.swimlane-shell {
+  container-type: inline-size;
+}
+.swimlane-scroll {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: min(62vh, 620px);
+}
+/* Fullscreen: the shell becomes the viewport, the diagram fills what is left. */
+.swimlane-shell:fullscreen {
+  background: var(--bg);
+  padding: 20px;
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  align-content: start;
+}
+.swimlane-shell:fullscreen .swimlane-scroll {
+  max-height: none;
+  height: 100%;
+  min-height: 0;
+}
+.swimlane-shell:fullscreen .swimlane-scroll svg {
+  max-width: none;
+}
