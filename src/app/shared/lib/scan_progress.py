@@ -96,6 +96,7 @@ def activity_kind_for(stage_name: str, event_status: str) -> str:
         "COMPLETED",
         "FAILED",
         "BLOCKED_PRE_LLM",
+        "STOPPED_BEFORE_LLM",
         "BLOCKED_USER_DECLINE",
         "BUDGET_EXHAUSTED",
     }:

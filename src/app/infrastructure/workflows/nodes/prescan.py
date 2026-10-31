@@ -7,7 +7,7 @@ Four nodes live here:
 - `pending_prescan_approval_node` is the human-in-the-loop pause when
   any findings landed; it persists state then calls `interrupt()`.
 - `user_decline_node` is the terminal route when the operator chose
-  Stop on the prescan card (status `BLOCKED_USER_DECLINE`).
+  Stop on the prescan card (status `STOPPED_BEFORE_LLM`).
 - `blocked_pre_llm_node` is the terminal route when the operator
   declined the Critical-secret override modal (status
   `BLOCKED_PRE_LLM`).
@@ -81,7 +81,7 @@ from app.shared.lib.scan_progress import (
 )
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
-    STATUS_BLOCKED_USER_DECLINE,
+    STATUS_STOPPED_BEFORE_LLM,
 )
 
 logger = logging.getLogger(__name__)
@@ -1484,7 +1484,7 @@ async def user_decline_node(state: WorkerState) -> Dict[str, Any]:
     )
     async with AsyncSessionLocal() as db:
         await release_scan_budget(db, scan_id, reason="user_declined")
-        await ScanRepository(db).update_status(scan_id, STATUS_BLOCKED_USER_DECLINE)
+        await ScanRepository(db).update_status(scan_id, STATUS_STOPPED_BEFORE_LLM)
     return {}
 
 

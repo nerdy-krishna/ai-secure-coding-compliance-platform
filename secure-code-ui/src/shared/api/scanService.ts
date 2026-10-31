@@ -189,7 +189,8 @@ export const scanService = {
     const allowedStatuses = new Set([
       "PENDING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED",
       "PENDING_COST_APPROVAL", "PENDING_PRESCAN_APPROVAL",
-      "BLOCKED_PRE_LLM", "BLOCKED_USER_DECLINE", "REMEDIATION_COMPLETED",
+      "BLOCKED_PRE_LLM", "STOPPED_BEFORE_LLM", "BLOCKED_USER_DECLINE",
+      "REMEDIATION_COMPLETED",
     ]);
     const safeStatus = status && status !== "All" && allowedStatuses.has(status) ? status : undefined;
     const response = await apiClient.get<PaginatedScanHistoryResponse>("/scans/history", {

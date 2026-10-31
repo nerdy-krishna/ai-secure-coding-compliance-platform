@@ -68,6 +68,7 @@ from app.infrastructure.workflows.budget import (
 from app.infrastructure.workflows.state import WorkerState
 from app.shared.lib.scan_status import (
     STATUS_BLOCKED_PRE_LLM,
+    STATUS_STOPPED_BEFORE_LLM,
     STATUS_BLOCKED_USER_DECLINE,
     STATUS_BUDGET_EXHAUSTED,
     STATUS_CANCELLED,
@@ -110,6 +111,7 @@ _TERMINAL_STATUSES_FOR_CLEANUP = frozenset(
         STATUS_REMEDIATION_COMPLETED,
         STATUS_CANCELLED,
         STATUS_BLOCKED_PRE_LLM,
+        STATUS_STOPPED_BEFORE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
         STATUS_BUDGET_EXHAUSTED,
     }
@@ -146,6 +148,7 @@ async def _maybe_cleanup_checkpointer_thread(scan_id_str: str) -> None:
                     STATUS_REMEDIATION_COMPLETED: "completed",
                     STATUS_CANCELLED: "cancelled",
                     STATUS_BLOCKED_PRE_LLM: "completed",
+                    STATUS_STOPPED_BEFORE_LLM: "completed",
                     STATUS_BLOCKED_USER_DECLINE: "completed",
                     STATUS_BUDGET_EXHAUSTED: "failed",
                 }.get(scan.status)

@@ -55,7 +55,7 @@ const STATUS_TABLE: Record<string, StatusMeta> = {
     tone: "info",
   },
   PENDING_PRESCAN_APPROVAL: {
-    label: "Awaiting prescan review",
+    label: "Awaiting pre-LLM scan review",
     kind: "needs-input",
     tone: "info",
   },
@@ -75,6 +75,13 @@ const STATUS_TABLE: Record<string, StatusMeta> = {
 
   // User-initiated stops — NOT failures
   CANCELLED: { label: "Stopped", kind: "stopped", tone: "muted" },
+  // The LLM phase never ran; the deterministic findings are the result.
+  STOPPED_BEFORE_LLM: {
+    label: "Stopped before LLM analysis",
+    kind: "stopped",
+    tone: "muted",
+  },
+  // Legacy value for scans stopped before STOPPED_BEFORE_LLM existed.
   BLOCKED_USER_DECLINE: {
     label: "Stopped before LLM analysis",
     kind: "stopped",

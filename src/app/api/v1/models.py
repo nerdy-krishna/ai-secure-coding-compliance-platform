@@ -1174,6 +1174,10 @@ class AnalysisResultDetailResponse(BaseModel):
     # the scan-status page to decide if a CANCELLED scan can offer manual
     # resume/restart controls.
     has_resumable_artifacts: bool = False
+    # Seconds this scan actually worked, excluding the time it sat at an approval
+    # gate waiting for a human. `created_at → completed_at` is wall clock and
+    # overstates duration by the entire review wait.
+    active_processing_seconds: Optional[float] = None
     # Stage-event audit trail (QUEUED / QUEUED_FOR_SCAN / FILE_ANALYZED
     # etc.). The SSE stream emits these live, but a terminal scan's
     # stream emits them then immediately closes — so a user landing
@@ -1306,6 +1310,10 @@ class ScanHistoryItem(BaseModel):
     total_findings: Optional[int] = None
     severity_counts: Optional[Dict[str, int]] = None
     has_resumable_artifacts: bool = False
+    # Seconds this scan actually worked, excluding the time it sat at an approval
+    # gate waiting for a human. `created_at → completed_at` is wall clock and
+    # overstates duration by the entire review wait.
+    active_processing_seconds: Optional[float] = None
     active_processing_seconds: Optional[float] = None
 
     class Config:

@@ -10,9 +10,13 @@
 
 import React from "react";
 
-import { deriveScanProgress, type ProgressEvent } from "../../shared/lib/scanProgress";
+import {
+  deriveScanProgress,
+  isWorkingStatus,
+  type ProgressEvent,
+} from "../../shared/lib/scanProgress";
 import { displayStatus, statusKind } from "../../shared/lib/scanStatus";
-import { formatDuration, useElapsed } from "../../shared/lib/useElapsed";
+import { useActiveElapsed } from "../../shared/lib/useElapsed";
 import type { ScanHistoryItem } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 import { StageIcon } from "../../shared/ui/StageIcon";
@@ -59,18 +63,13 @@ export const ScanCard: React.FC<ScanCardProps> = ({
     progress.isTerminal &&
     (typeof scan.total_findings === "number" || sev !== null);
 
-  // Live timer: ticks while the scan is active, freezes once it ends.
-  // For terminal scans with event-based active time, use that instead
-  // of wall-clock (which includes dormant periods from stop/resume).
-  const activeSeconds = scan.active_processing_seconds;
-  const wallElapsed = useElapsed(
-    scan.created_at,
-    progress.isTerminal ? (scan.completed_at ?? scan.created_at) : null,
+  // Live timer: counts only the time the scan actually worked. The server reports
+  // wall clock minus approval-gate waits, and the ticker pauses while the scan is
+  // parked at a gate or finished.
+  const elapsed = useActiveElapsed(
+    scan.active_processing_seconds,
+    isWorkingStatus(scan.status),
   );
-  const elapsed =
-    progress.isTerminal && typeof activeSeconds === "number"
-      ? formatDuration(activeSeconds * 1000)
-      : wallElapsed;
 
   // Status-coloured left accent so stacked scan items are easy to tell
   // apart at a glance.

@@ -8,7 +8,7 @@ This background task runs on the API container, mirrors the
 human-in-the-loop gate statuses — ``STATUS_PENDING_PRESCAN_APPROVAL``
 (ADR-009) or ``STATUS_PENDING_PROFILING_APPROVAL`` (#71) — for more
 than ``PRESCAN_APPROVAL_TIMEOUT_HOURS`` (default 24h) to
-``STATUS_BLOCKED_USER_DECLINE``. A scan_event row
+``STATUS_STOPPED_BEFORE_LLM``. A scan_event row
 (``PRESCAN_AUTO_DECLINED`` / ``PROFILING_AUTO_DECLINED``) is written so
 operators can correlate.
 """
@@ -28,7 +28,7 @@ from app.infrastructure.database.repositories.approval_gate_repo import (
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.tenant_context import system_principal_task
 from app.shared.lib.scan_status import (
-    STATUS_BLOCKED_USER_DECLINE,
+    STATUS_STOPPED_BEFORE_LLM,
     STATUS_PENDING_PRESCAN_APPROVAL,
     STATUS_PENDING_PROFILING_APPROVAL,
     scan_status_predecessors,
@@ -93,7 +93,7 @@ async def _sweep_once() -> int:
     gate_statuses = list(_GATE_STATUS_EVENTS)
     transitioned = 0
     transitioned_ids: list[str] = []
-    allowed_gate_sources = set(scan_status_predecessors(STATUS_BLOCKED_USER_DECLINE))
+    allowed_gate_sources = set(scan_status_predecessors(STATUS_STOPPED_BEFORE_LLM))
     async with AsyncSessionLocal() as db:
         latest_event_ts = (
             select(func.max(db_models.ScanEvent.timestamp))
@@ -123,7 +123,7 @@ async def _sweep_once() -> int:
                     db_models.Scan.status == gate_status,
                     db_models.Scan.status.in_(tuple(sorted(allowed_gate_sources))),
                 )
-                .values(status=STATUS_BLOCKED_USER_DECLINE)
+                .values(status=STATUS_STOPPED_BEFORE_LLM)
             )
             if res.rowcount != 1:
                 # Operator beat us to it — skip the audit row.
@@ -145,7 +145,7 @@ async def _sweep_once() -> int:
                 "prescan_approval_sweeper: scan_id=%s timed out after %dh -> %s",
                 scan_id,
                 PRESCAN_APPROVAL_TIMEOUT_HOURS,
-                STATUS_BLOCKED_USER_DECLINE,
+                STATUS_STOPPED_BEFORE_LLM,
             )
         await db.commit()
 
@@ -171,7 +171,7 @@ async def run_prescan_approval_sweeper(stop_event: asyncio.Event) -> None:
             if count:
                 logger.info(
                     "prescan_approval_sweeper: transitioned %d scan(s) to "
-                    "BLOCKED_USER_DECLINE",
+                    "STOPPED_BEFORE_LLM",
                     count,
                 )
         except Exception as e:

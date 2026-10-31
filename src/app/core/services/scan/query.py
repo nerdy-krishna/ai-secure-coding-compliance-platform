@@ -27,6 +27,7 @@ from app.infrastructure.database.repositories.approval_gate_repo import (
 from app.infrastructure.database.repositories.scan_task_repo import ScanTaskRepository
 from app.shared.lib.files import get_language_from_filename, source_line_at
 from app.shared.lib.risk_score import compute_cvss_aggregate, scoreable_findings
+from app.shared.lib.scan_timing import active_processing_seconds, gate_intervals
 from app.shared.lib.risk_severity import risk_severity_for_score
 from app.shared.lib.scan_visibility import can_view_scan
 from app.shared.lib.scan_status import (
@@ -41,7 +42,10 @@ MAX_PAGE_SIZE = 100
 _VALID_SORT_ORDERS = {"asc", "desc"}
 
 
-def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
+def _scan_metrics(
+    scan: db_models.Scan,
+    gates: Optional[List[db_models.ApprovalGate]] = None,
+) -> Dict[str, object]:
     """Finding-metrics overview for a scan-list row (#86).
 
     Pulls the risk score and the per-severity / total finding counts
@@ -56,17 +60,14 @@ def _scan_metrics(scan: db_models.Scan) -> Dict[str, object]:
     # depends on durable-task artifacts (validated by the endpoint).
     can_resume = scan.status in ("FAILED", "CANCELLED")
 
-    # Active processing time: use scan events timestamps rather than
-    # created_at → completed_at, which includes dormant periods when
-    # the scan was stopped and later resumed.  Falls back to wall
-    # clock when no events exist.
-    active_seconds: float | None = None
-    if scan.events:
-        timestamps = [e.timestamp for e in scan.events if e.timestamp is not None]
-        if len(timestamps) >= 2:
-            active_seconds = (max(timestamps) - min(timestamps)).total_seconds()
-        elif len(timestamps) == 1 and scan.completed_at:
-            active_seconds = (scan.completed_at - timestamps[0]).total_seconds()
+    # Active processing time: wall clock minus the time parked at approval gates.
+    # Event-timestamp spans were used before, but they still straddle a gate wait —
+    # a scan that sat 20 minutes at the prescan card reported 20 minutes of work.
+    active_seconds = active_processing_seconds(
+        created_at=scan.created_at,
+        completed_at=scan.completed_at,
+        gates=gate_intervals(gates or ()),
+    )
 
     return {
         "risk_score": scan.risk_score,
@@ -244,6 +245,39 @@ class ScanQueryService:
             ),
             files_analyzed=files_analyzed,
             remediation=None,
+        )
+
+    async def _gates_by_scan(
+        self, scan_ids: List[uuid.UUID]
+    ) -> Dict[uuid.UUID, List[db_models.ApprovalGate]]:
+        """Approval gates for a page of scans, grouped by scan id."""
+        if not scan_ids:
+            return {}
+        try:
+            rows = await ApprovalGateRepository(self.repo.db).gates_for_scans(scan_ids)
+        except Exception:  # noqa: BLE001 - timing must never break a listing
+            logger.warning("scan-query: gate timing lookup failed", exc_info=True)
+            return {}
+        grouped: Dict[uuid.UUID, List[db_models.ApprovalGate]] = {}
+        for row in rows:
+            grouped.setdefault(row.scan_id, []).append(row)
+        return grouped
+
+    async def _active_processing_seconds(self, scan: db_models.Scan) -> Optional[float]:
+        """Working time for *scan*, with approval-gate waits removed."""
+        try:
+            gates = await ApprovalGateRepository(self.repo.db).gates_for_scan(scan.id)
+        except Exception:  # noqa: BLE001 - timing must never break the results page
+            logger.warning(
+                "scan-query: gate timing lookup failed",
+                extra={"scan_id": str(scan.id)},
+                exc_info=True,
+            )
+            gates = []
+        return active_processing_seconds(
+            created_at=scan.created_at,
+            completed_at=scan.completed_at,
+            gates=gate_intervals(gates),
         )
 
     async def get_patch_plan(
@@ -687,6 +721,8 @@ class ScanQueryService:
                     exc,
                 )
 
+        active_seconds = await self._active_processing_seconds(scan)
+
         return api_models.AnalysisResultDetailResponse(
             status=scan.status,
             current_attempt_id=scan.current_attempt_id,
@@ -716,6 +752,7 @@ class ScanQueryService:
             stage_temperatures=scan.stage_temperatures,
             source_type=scan.source_type,
             has_resumable_artifacts=sum(task_counts.values()) > 0,
+            active_processing_seconds=active_seconds,
             repository_url=(scan.project.repository_url if scan.project else None),
             events=[api_models.ScanEventItem.from_orm(e) for e in (scan.events or [])],
         )
@@ -768,6 +805,7 @@ class ScanQueryService:
         # `project_name: Field required` ValidationError. Mirrors the
         # construction pattern used in `get_paginated_user_scans` and
         # `get_user_scan_history` further down this file.
+        gates_by_scan = await self._gates_by_scan([scan.id for scan in scans_raw])
         history_items = [
             api_models.ScanHistoryItem(
                 id=scan.id,
@@ -779,7 +817,7 @@ class ScanQueryService:
                 completed_at=scan.completed_at,
                 cost_details=scan.cost_details,
                 events=[api_models.ScanEventItem.from_orm(e) for e in scan.events],
-                **_scan_metrics(scan),
+                **_scan_metrics(scan, gates_by_scan.get(scan.id)),
             )
             for scan in scans_raw
         ]
@@ -846,6 +884,7 @@ class ScanQueryService:
             )
             raise
 
+        gates_by_scan = await self._gates_by_scan([scan.id for scan in scans_raw])
         history_items = [
             api_models.ScanHistoryItem(
                 id=scan.id,
@@ -857,7 +896,7 @@ class ScanQueryService:
                 completed_at=scan.completed_at,
                 cost_details=scan.cost_details,
                 events=[api_models.ScanEventItem.from_orm(e) for e in scan.events],
-                **_scan_metrics(scan),
+                **_scan_metrics(scan, gates_by_scan.get(scan.id)),
             )
             for scan in scans_raw
         ]
@@ -1375,6 +1414,13 @@ class ScanQueryService:
         project_items: List[api_models.ProjectHistoryItem] = []
         latest_terminal_scan_by_project: Dict[uuid.UUID, uuid.UUID] = {}
 
+        gates_by_scan = await self._gates_by_scan(
+            [
+                row.id
+                for project in projects
+                for row in (await self.repo.get_paginated_scans_for_project(project.id, 0, 5))
+            ]
+        )
         for project in projects:
             scans_raw = await self.repo.get_paginated_scans_for_project(
                 project.id, 0, 5
@@ -1390,7 +1436,7 @@ class ScanQueryService:
                     completed_at=s.completed_at,
                     cost_details=s.cost_details,
                     events=[api_models.ScanEventItem.from_orm(e) for e in s.events],
-                    **_scan_metrics(s),
+                    **_scan_metrics(s, gates_by_scan.get(s.id)),
                 )
                 for s in scans_raw
             ]

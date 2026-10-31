@@ -20,7 +20,11 @@ import { isTerminalStatus } from "../../shared/lib/scanProgress";
 import type { ScanHistoryItem } from "../../shared/types/api";
 
 const SUCCESS_STATUSES = new Set(["COMPLETED", "REMEDIATION_COMPLETED"]);
-const BLOCKED_STATUSES = new Set(["BLOCKED_PRE_LLM", "BLOCKED_USER_DECLINE"]);
+const BLOCKED_STATUSES = new Set([
+  "BLOCKED_PRE_LLM",
+  "STOPPED_BEFORE_LLM",
+  "BLOCKED_USER_DECLINE",
+]);
 
 function notifyScanTerminal(
   scan: ScanHistoryItem,

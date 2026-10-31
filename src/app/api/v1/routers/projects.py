@@ -582,7 +582,7 @@ async def get_prescan_review(
 
     Only valid while the scan sits at ``PENDING_PRESCAN_APPROVAL`` (the
     gate) or has landed in one of the two prescan-terminal states
-    (``BLOCKED_PRE_LLM`` / ``BLOCKED_USER_DECLINE``).
+    (``BLOCKED_PRE_LLM`` / ``STOPPED_BEFORE_LLM``).
     """
     return await service.get_prescan_review(
         scan_id,
@@ -732,6 +732,7 @@ async def stream_scan_progress(
         "EXPIRED",
         # ADR-009 terminal states from the prescan-approval gate.
         "BLOCKED_PRE_LLM",
+        "STOPPED_BEFORE_LLM",
         "BLOCKED_USER_DECLINE",
         "BUDGET_EXHAUSTED",
     }

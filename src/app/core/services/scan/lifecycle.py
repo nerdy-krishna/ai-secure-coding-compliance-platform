@@ -731,6 +731,7 @@ class ScanLifecycleService:
         from app.shared.lib.scan_status import (
             STATUS_BLOCKED_PRE_LLM,
             STATUS_BLOCKED_USER_DECLINE,
+            STATUS_STOPPED_BEFORE_LLM,
         )
 
         not_found = HTTPException(
@@ -750,6 +751,7 @@ class ScanLifecycleService:
         review_statuses = {
             STATUS_PENDING_PRESCAN_APPROVAL,
             STATUS_BLOCKED_PRE_LLM,
+            STATUS_STOPPED_BEFORE_LLM,
             STATUS_BLOCKED_USER_DECLINE,
         }
         if scan.status not in review_statuses:

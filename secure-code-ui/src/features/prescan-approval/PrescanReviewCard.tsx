@@ -25,6 +25,23 @@ interface Props {
   readOnly?: boolean;
 }
 
+const ENTITIES: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#x27;": "'",
+  "&#39;": "'",
+  "&apos;": "'",
+  "&nbsp;": " ",
+};
+
+/** Render scanner text as text: decode the entities scanners HTML-escape with. */
+function decodeEntities(value?: string | null): string {
+  if (!value) return "";
+  return value.replace(/&(?:amp|lt|gt|quot|apos|nbsp|#x27|#39);/g, (m) => ENTITIES[m] ?? m);
+}
+
 const SEVERITY_ORDER: Record<string, number> = {
   Critical: 0,
   High: 1,
@@ -72,8 +89,11 @@ export const PrescanReviewCard: React.FC<Props> = ({
     <div
       className="sccap-card prescan-review-card"
       style={{
-        background: hasCriticalSecret ? "var(--critical-weak)" : "var(--primary-weak)",
-        borderColor: "transparent",
+        background: hasCriticalSecret ? "var(--critical-weak)" : "var(--bg-soft)",
+        borderColor: "var(--border)",
+        borderLeftWidth: 3,
+        borderLeftStyle: "solid",
+        borderLeftColor: hasCriticalSecret ? "var(--critical)" : "var(--medium)",
       }}
     >
       <div
@@ -90,7 +110,7 @@ export const PrescanReviewCard: React.FC<Props> = ({
           <div
             style={{
               fontWeight: 600,
-              color: hasCriticalSecret ? "var(--critical)" : "var(--primary-strong)",
+              color: hasCriticalSecret ? "var(--critical)" : "var(--fg)",
               marginBottom: 4,
               display: "flex",
               alignItems: "center",
@@ -98,7 +118,9 @@ export const PrescanReviewCard: React.FC<Props> = ({
             }}
           >
             {hasCriticalSecret ? <Icon.Alert size={14} /> : <Icon.Shield size={14} />}
-            Pre-LLM scan complete — review before continuing
+            {readOnly
+              ? "Pre-LLM scan findings"
+              : "Review the pre-LLM scan findings before continuing"}
           </div>
           <div style={{ color: "var(--fg)", fontSize: 13 }}>
             Deterministic scanners found {findings.length} issue
@@ -234,11 +256,13 @@ export const PrescanReviewCard: React.FC<Props> = ({
                     {f.vulnerable_snippet && (
                       <pre style={snippetStyle}>
                         <span style={lineNumberStyle}>{f.line_number ?? ""}</span>
-                        <code>{f.vulnerable_snippet}</code>
+                        <code>{decodeEntities(f.vulnerable_snippet)}</code>
                       </pre>
                     )}
                     {f.description && (
-                      <div style={descriptionStyle}>{f.description}</div>
+                      <div style={descriptionStyle}>
+                        {decodeEntities(f.description)}
+                      </div>
                     )}
                   </td>
                 </tr>

@@ -44,11 +44,15 @@ STATUS_PENDING_PROFILING_APPROVAL: Final[str] = "PENDING_PROFILING_APPROVAL"
 # it is reachable only via user-decline-of-override.
 STATUS_BLOCKED_PRE_LLM: Final[str] = "BLOCKED_PRE_LLM"
 
-# Terminal status set by the new `user_decline_node` when the operator
-# clicks Stop on the prescan-approval card (regardless of finding
-# severity). Distinct from `STATUS_BLOCKED_PRE_LLM` so the operator
-# can distinguish "I rejected the secret" from "I just don't want to
-# pay for an LLM scan right now".
+# Terminal status set by `user_decline_node` (and the stale-gate sweeper) when the
+# operator stops the scan at the prescan-approval card. The deterministic-scanner
+# findings are kept and rendered as the scan's results — the LLM phase simply never
+# ran. Distinct from COMPLETED (nothing is claimed that did not happen) and from
+# FAILED (nothing went wrong).
+STATUS_STOPPED_BEFORE_LLM: Final[str] = "STOPPED_BEFORE_LLM"
+
+# Legacy alias: scans stopped before this status existed carry this value. Still
+# terminal, still rendered as "stopped before LLM analysis", never written again.
 STATUS_BLOCKED_USER_DECLINE: Final[str] = "BLOCKED_USER_DECLINE"
 
 ALL_SCAN_STATUSES: Final[frozenset[str]] = frozenset(
@@ -67,6 +71,7 @@ ALL_SCAN_STATUSES: Final[frozenset[str]] = frozenset(
         STATUS_CANCELLED,
         STATUS_BUDGET_EXHAUSTED,
         STATUS_BLOCKED_PRE_LLM,
+        STATUS_STOPPED_BEFORE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
     }
 )
@@ -96,6 +101,7 @@ TERMINAL_SCAN_STATUSES: Final[frozenset[str]] = frozenset(
         STATUS_CANCELLED,
         STATUS_BUDGET_EXHAUSTED,
         STATUS_BLOCKED_PRE_LLM,
+        STATUS_STOPPED_BEFORE_LLM,
         STATUS_BLOCKED_USER_DECLINE,
     }
 )
@@ -132,6 +138,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
         {
             STATUS_QUEUED_FOR_SCAN,
             STATUS_BLOCKED_PRE_LLM,
+            STATUS_STOPPED_BEFORE_LLM,
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,
@@ -141,6 +148,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     STATUS_PENDING_PROFILING_APPROVAL: frozenset(
         {
             STATUS_QUEUED_FOR_SCAN,
+            STATUS_STOPPED_BEFORE_LLM,
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,
@@ -150,6 +158,7 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     STATUS_PENDING_APPROVAL: frozenset(
         {
             STATUS_QUEUED_FOR_SCAN,
+            STATUS_STOPPED_BEFORE_LLM,
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,
@@ -161,7 +170,10 @@ SCAN_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
             STATUS_ANALYZING_CONTEXT,
             STATUS_PENDING_APPROVAL,
             STATUS_RUNNING_AGENTS,
+            STATUS_PENDING_PRESCAN_APPROVAL,
+            STATUS_PENDING_PROFILING_APPROVAL,
             STATUS_BLOCKED_PRE_LLM,
+            STATUS_STOPPED_BEFORE_LLM,
             STATUS_BLOCKED_USER_DECLINE,
             STATUS_FAILED,
             STATUS_CANCELLED,

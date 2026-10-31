@@ -25,9 +25,9 @@ import {
 import type { PrescanReviewResponse } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 import { StageIcon } from "../../shared/ui/StageIcon";
-import { deriveScanProgress } from "../../shared/lib/scanProgress";
+import { deriveScanProgress, isWaitingStatus } from "../../shared/lib/scanProgress";
 import type { ApprovalGate, CostDetails } from "../../shared/lib/scanContract";
-import { useElapsed } from "../../shared/lib/useElapsed";
+import { useActiveElapsed } from "../../shared/lib/useElapsed";
 import { SectionHead } from "../../shared/ui/DashboardPrimitives";
 import { Modal } from "../../shared/ui/Modal";
 import { PageHeader } from "../../shared/ui/PageHeader";
@@ -426,6 +426,8 @@ const ScanRunningPage: React.FC = () => {
   const [crossFileValidation, setCrossFileValidation] = useState(false);
   const [hasResumableArtifacts, setHasResumableArtifacts] = useState(false);
   const [events, setEvents] = useState<ScanEventMsg[]>([]);
+  // Working time reported by the server: wall clock minus approval-gate waits.
+  const [activeSeconds, setActiveSeconds] = useState<number | null>(null);
   const [activityKindFilter, setActivityKindFilter] = useState("all");
   const [activityStageFilter, setActivityStageFilter] = useState("all");
   const [activityErrorsOnly, setActivityErrorsOnly] = useState(false);
@@ -502,6 +504,11 @@ const ScanRunningPage: React.FC = () => {
           setCrossFileValidation(r.cross_file_validation);
         }
         setHasResumableArtifacts(Boolean(r.has_resumable_artifacts));
+        setActiveSeconds(
+          typeof r.active_processing_seconds === "number"
+            ? r.active_processing_seconds
+            : null,
+        );
         if (r.project_id) {
           setProjectInfo({
             id: r.project_id,
@@ -565,6 +572,11 @@ const ScanRunningPage: React.FC = () => {
           }
         }
         setHasResumableArtifacts(Boolean(r.has_resumable_artifacts));
+        setActiveSeconds(
+          typeof r.active_processing_seconds === "number"
+            ? r.active_processing_seconds
+            : null,
+        );
         if (r.cost_details) {
           setCostDetails((prev) => ({ ...(prev ?? {}), ...r.cost_details }));
         }
@@ -957,26 +969,11 @@ const ScanRunningPage: React.FC = () => {
   }, [activityLatest, activityClock]);
   // Scan-event timestamps bound the elapsed timer — earliest event is
   // the start; once terminal, the latest event freezes it.
-  const scanStartedAt = useMemo(() => {
-    let earliest: string | null = null;
-    for (const e of events) {
-      if (e.timestamp && (!earliest || e.timestamp < earliest)) {
-        earliest = e.timestamp;
-      }
-    }
-    return earliest;
-  }, [events]);
-  const scanEndedAt = useMemo(() => {
-    if (!isTerminal) return null;
-    let latest: string | null = null;
-    for (const e of events) {
-      if (e.timestamp && (!latest || e.timestamp > latest)) {
-        latest = e.timestamp;
-      }
-    }
-    return latest;
-  }, [events, isTerminal]);
-  const elapsed = useElapsed(scanStartedAt, scanEndedAt);
+  // Work is happening only when the scan is neither terminal nor parked at a gate.
+  // Timers, spinners and pulses all key off this so nothing animates while the
+  // worker is waiting for a person.
+  const isWorking = !isTerminal && !isWaitingStatus(status);
+  const elapsed = useActiveElapsed(activeSeconds, isWorking);
   // Split the previous catch-all `isFailed` lump into the four kinds
   // of unsuccessful terminals so the UI can stop labeling user stops
   // and safety blocks as "Scan failed":
@@ -1355,12 +1352,14 @@ const ScanRunningPage: React.FC = () => {
             {/* Pulse dot only while genuinely running. Suppress while
                 status is still loading (null) — a pulsing chip there
                 would imply progress that hasn't been observed yet. */}
-            {status !== null && !isTerminal && (
-              <span
-                className="pulse-dot dot"
-                style={{ background: "currentColor" }}
-              />
-            )}
+            {status !== null &&
+              !isTerminal &&
+              !isWaitingStatus(status) && (
+                <span
+                  className="pulse-dot dot"
+                  style={{ background: "currentColor" }}
+                />
+              )}
             {isError ? <Icon.Alert size={11} /> : null}
             Scan{" "}
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
@@ -1373,7 +1372,7 @@ const ScanRunningPage: React.FC = () => {
           !status
             ? "Loading scan…"
             : isPendingPrescan
-              ? "Pre-LLM scan complete — review before continuing"
+              ? "Review the pre-LLM scan findings"
               : isPendingApproval
                 ? "Ready to run — approve the estimated cost"
                 : status === "COMPLETED" || status === "REMEDIATION_COMPLETED"
@@ -1443,7 +1442,9 @@ const ScanRunningPage: React.FC = () => {
             style={{ opacity: !isTerminal || isUnsuccessful ? 0.6 : 1 }}
           >
             {!isTerminal
-              ? "Scanning…"
+              ? isWaitingStatus(status)
+                ? "Awaiting your review"
+                : "Scanning…"
               : isUnsuccessful
                 ? "No results"
                 : (
@@ -1452,7 +1453,7 @@ const ScanRunningPage: React.FC = () => {
                     </>
                   )}
           </button>
-          {!isTerminal && (
+          {!isTerminal && !isPendingPrescan && (
             <button
               className="sccap-btn"
               onClick={() => setStopConfirmOpen(true)}
@@ -1562,16 +1563,17 @@ const ScanRunningPage: React.FC = () => {
               const state = s.state;
               const last = i === scanProgress.stages.length - 1;
               const prevDone = i > 0 && scanProgress.stages[i - 1].state === "done";
+              const animating = state === "running" && isWorking;
               const circleBg =
                 state === "done"
                   ? "var(--success)"
-                  : state === "running"
+                  : animating
                     ? "var(--primary)"
                     : state === "paused"
                       ? "var(--medium)"
                       : "var(--bg-elev)";
               const labelColor =
-                state === "running"
+                animating
                   ? "var(--primary)"
                   : state === "paused"
                     ? "var(--medium)"
@@ -1636,7 +1638,7 @@ const ScanRunningPage: React.FC = () => {
                     >
                       {state === "done" ? (
                         <Icon.Check size={12} />
-                      ) : state === "running" ? (
+                      ) : animating ? (
                         <div
                           className="sccap-spin"
                           style={{
@@ -1674,7 +1676,7 @@ const ScanRunningPage: React.FC = () => {
                       textAlign: "center",
                       color: labelColor,
                       fontWeight:
-                        state === "running" || state === "paused" ? 600 : 400,
+                        animating || state === "paused" ? 600 : 400,
                     }}
                   >
                     {s.label}
@@ -2192,8 +2194,9 @@ const ScanRunningPage: React.FC = () => {
                 {activityLatestAgeSeconds !== null && (
                   <span
                     style={{
-                      color:
-                        activityLatestAgeSeconds > 600
+                      color: isWaitingStatus(status)
+                        ? "var(--fg-muted)"
+                        : activityLatestAgeSeconds > 600
                           ? "var(--critical)"
                           : activityLatestAgeSeconds > 120
                             ? "var(--high)"
@@ -2202,7 +2205,11 @@ const ScanRunningPage: React.FC = () => {
                     title="Time since the newest event"
                   >
                     last event {formatAge(activityLatestAgeSeconds)} ago
-                    {activityLatestAgeSeconds > 120 && !isTerminal && " — no progress reported"}
+                    {activityLatestAgeSeconds > 120 &&
+                      !isTerminal &&
+                      (isWaitingStatus(status)
+                        ? " — waiting for your review"
+                        : " — no progress reported")}
                   </span>
                 )}
               </>

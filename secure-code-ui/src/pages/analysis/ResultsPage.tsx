@@ -43,6 +43,7 @@ import type {
 import type { FindingGovernanceItem, PatchPlanArtifact, ResolvedPatchRange } from "../../shared/lib/scanContract";
 
 const PRESCAN_BLOCKED_STATUSES = new Set([
+  "STOPPED_BEFORE_LLM",
   "BLOCKED_USER_DECLINE",
   "BLOCKED_PRE_LLM",
 ]);
