@@ -1,6 +1,7 @@
 # ADR-025: Target-agnostic iterative local assessment loop
 
-- Status: accepted
+- Status: superseded by ADR-029
+- Superseded by: [ADR-029](029-pentesting-autonomous-engine.md) — the controller, qualification, signed-task and work-ledger stack described here was deleted; pentesting is now one autonomous engine. This record is kept as history and does not describe the current codebase.
 - Date: 2026-09-05
 
 ## Context

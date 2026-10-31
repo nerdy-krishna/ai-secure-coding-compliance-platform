@@ -39,19 +39,22 @@ LangGraph workflow with an `AsyncPostgresSaver` checkpointer. Queues:
 
 ## Pentesting tooling (opt-in)
 
-The separately gated Pentesting bounded context adds its own execution plane
-on top of the same RabbitMQ/Postgres spine:
+The separately gated pentest engine does **not** use the RabbitMQ spine at all —
+PostgreSQL is its only coordination point (ADR-029):
 
-- **Dedicated runners** — credential-minimal `runner_v3` with a read-only root,
-  bounded workspace, explicit resolver, and pinned Host/SNI-preserving egress.
-- **Tool pack** — nmap, nuclei, ZAP, and Playwright adapters run in isolated
-  tool workers behind a Tool Broker, relay grants, and connection permits.
-- **Queues** — `pentest_execution_queue`, `pentest_execution_v2_queue`,
-  `pentest_execution_v3_queue`, `pentest_controller_queue`,
-  `pentest_tool_queue_v1`, `pentest_verification_queue_v1` (RabbitMQ is
-  notification-only; PostgreSQL stays authoritative).
-- **Isolation** — seccomp profiles and per-profile deployment manifests
-  (`deploy/helm/sccap/templates/pentest-tool-pack.yaml`, `deploy/seccomp/`).
+- **One container** — `pentest-engine` (Dockerfile target `worker-pentest-local`)
+  runs `python -m app.pentest.engine`, polls `pentest_runs` for queued work, and
+  executes one run at a time in-process.
+- **Scanners in the image** — nmap, nuclei (full community template library), OWASP
+  ZAP, sqlmap, ffuf, hydra, whatweb, gobuster, hashcat and Playwright Chromium, with
+  wordlists under `src/app/pentest/data/`. Startup verifies each binary and reports
+  availability to the UI.
+- **Networks** — `scpnetwork` for the API, database and model providers;
+  `pentest-egress` for target traffic.
+- **State** — `pentest_runs`, `pentest_run_events`, `pentest_findings` (with
+  `category` = `vulnerability` | `observation`) and `pentest_leads`.
+- **Live view** — the run page polls the event stream, the findings and the lead
+  ledger, and receives the browser frame the engine pushes from Playwright.
 
 ## Data + infra
 

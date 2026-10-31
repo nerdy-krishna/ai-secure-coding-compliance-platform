@@ -145,30 +145,30 @@ an ordinary user JWT; all visibility-scope rules apply.
 
 ## Pentesting (opt-in)
 
-A separately gated bounded context (disabled by default; enabled through the
-local development profile) that sits alongside — and never mutates — the Code
-Scan flow:
+A separately gated engine (disabled by default; enabled during setup or via the
+`pentesting-v5` profile) that sits alongside — and never mutates — the Code Scan
+flow:
 
-- **Pentest Projects** — project-scoped credentials (KMS-envelope encrypted,
-  never returned by read APIs) and white-box selection of an immutable
-  completed Code Scan snapshot.
-- **Engagements** — black-box, gray-box, or white-box engagements; each
-  Attempt pins its contract, policy, catalog, adapter, evidence, prompt,
-  model, report, and runner versions.
-- **Attempts & deltas** — immutable Attempt identity with digest-chained
-  `DecisionDelta` projections; the adaptive controller consumes only
-  committed deltas, never in-flight tool output.
-- **Execution** — bounded actions with generation-fenced leases; an atomic
-  Execution commit makes results, evidence manifests, facts, coverage,
-  budgets, and events visible in one transaction.
-- **Tool pack** — deterministic Web/API adapters (nmap, nuclei, ZAP,
-  Playwright) brokered through relay grants and pinned egress.
-- **Finding truth** — evidence-backed Observations → CandidateFinding →
-  ConfirmedFinding only via a configured predicate or independent
-  reproduction.
-- **Cockpit & governance** — engagement/attempt/delta cockpit, immutable
-  reports, redacted exports, retesting, and a governance overlay
-  (Capability 13).
+- **Launch** — one target origin, a box type (black/gray/white), optional
+  credentials, and the tools to leave out. The page shows whether the engine
+  carries every scanner before a run starts.
+- **Discovery** — evasive reconnaissance followed by subdomain enumeration
+  (six passive indexes, DNS brute-force, dangling-CNAME takeover checks),
+  OpenAPI/Swagger and GraphQL schema discovery, and JavaScript bundle mining for
+  endpoints, parameters, source maps and secrets.
+- **Model loop** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a live
+  Playwright browser, up to four tools per turn, seeing every result. Probes are
+  de-duplicated and a failing tool is recorded untestable rather than retried
+  forever.
+- **Lead queue** — every observation becomes a queued lead with a priority band
+  (attacker-controlled input first). Leads are claimed as they are tested, and a
+  run may only conclude when none remain testable.
+- **Findings and observations** — weaknesses and surface intelligence are both
+  kept; observations are what exploit chains are built from.
+- **Exploit chaining** — available once a run has at least two findings; records
+  ordered chain steps on the findings involved.
+- **Controls and reports** — pause/resume/stop (honoured mid-call), live browser
+  frame, and Markdown/JSON/HTML/PDF downloads.
 
-See the pentesting operations runbooks under
-`docs/docs/operations/pentesting-*.md`.
+See [pentesting engine operations](../operations/pentesting-engine.md) and
+[ADR-029](../adr/029-pentesting-autonomous-engine.md).

@@ -40,16 +40,16 @@ knowledge bases. The platform is organized around three surfaces:
 
 ### Pentesting (opt-in, feature-gated)
 
-A separately gated **Pentesting** bounded context (disabled by default; enabled
-through the local development profile) adds authorized black-box, gray-box, and
-white-box engagements alongside Code Scan:
+A separately gated **pentesting engine** (disabled by default; enabled during setup or
+via the `pentesting-v5` profile) adds authorized black-box, gray-box and white-box
+assessments alongside Code Scan, without mutating the Code Scan aggregate:
 
-* **Project-linked engagements** — pentest projects own their scope and KMS-envelope-encrypted credentials; white-box runs select an immutable Code Scan snapshot through a read-only bridge. Read APIs never return credentials.
-* **Deterministic safety model** — every target interaction requires authorization, tenant/attempt identity, and a pinned deterministic scope-policy decision; generation-fenced leases and atomic Execution commits keep results authoritative.
-* **Bounded adaptive controller** — a model may suggest next authorized capabilities, but only committed `DecisionDelta` projections are consumed; scope, execution, budget, and finding authority stay deterministic.
-* **Deterministic Web/API tool pack** — a Tool Broker and relay grants drive nmap, nuclei, ZAP, and Playwright adapters behind pinned egress and connection permits.
-* **Finding truth** — Observations become ConfirmedFindings only through a configured evidence predicate or independent reproduction; tool/model output never directly confirms.
-* **Cockpit, reports, and governance** — engagement/attempt/delta cockpit, immutable reports, redacted exports, retesting, and a governance overlay.
+* **Discovery first** — evasive reconnaissance, then attack-surface expansion: subdomain enumeration with takeover checks, OpenAPI/GraphQL schema discovery, and JavaScript bundle mining for endpoints, parameters and secrets.
+* **Model-driven tools** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a real Playwright browser turn by turn, seeing every result and adapting; identical probes are de-duplicated.
+* **Persistent lead queue** — every observation becomes a queued lead, claimed as it is tested; the queue decides when a run is finished, so pause/resume/restart never loses work.
+* **Observations are findings** — surface intelligence is stored alongside weaknesses, and a follow-up pass chains findings into exploit paths.
+* **One scope guard** — the operator's origin plus the in-scope estate discovered beneath its registrable domain; private and loopback destinations are refused. No intensity, budget, qualification or duration gates.
+* **Live cockpit** — event stream with every prompt and tool action, live browser frame, findings as they land, pause/resume/stop, and Markdown/JSON/HTML/PDF reports.
 
 ### Integrations and automation
 

@@ -38,39 +38,34 @@ events, and downloadable HTML/CSV/PDF/SARIF reports.
 | Operations | Kubernetes 1.30+ Helm chart with KEDA queue autoscaling; OTLP traces/metrics with W3C correlation; Prometheus rules and SLOs; backup/restore and degradation runbooks |
 | CI gates | Backend ruff/black, frontend test+lint+build with deterministic bundle budgets, authenticated Playwright lifecycle, generated OpenAPI drift (`check:api`), Poetry lock drift, Bandit, pip-audit, Gitleaks, and a Postgres+RabbitMQ+worker integration job covering gate resume and outbox recovery |
 
-### Pentesting integration
+### Pentesting engine
 
-Foundations 0–3 and Capabilities 4–13 are implemented: bounded-context contracts,
-exact-origin tracer, durable execution and evidence commit, deterministic scope
-gateway, adaptive controller, initial Web/API tool pack, identity-aware
-verification, white-box Code Scan integration, canonical test catalog and
-coverage, reversible mutations with cleanup, asynchronous callback correlation,
-the private-network execution runner contract, the operator cockpit with
-reports/governance/retesting, the target-agnostic iterative local loop, and the
-threat-model/business-invariant workflow.
+Replaced wholesale on the `better-pentester` branch (ADR-029). The controller,
+qualification, signed-task and work-ledger stack described by ADR-013 to ADR-028
+was deleted; ADR-029 is authoritative.
 
-Of the 21 registered capability profiles, 19 now carry a successor adapter
-(`graphql_observe.v1`, `realtime_observe.v1`, `active_validation.v1`,
-`authorization_readonly.v1`, `file_upload_validation.v1`,
-`codescan_source_facts.v2`, and the passive native pack). The remaining two are
-listed under *Pending* below.
-
-See [capability activation](operations/pentesting-capability-activation.md) for
-deployment overlays and [local audit qualification](operations/pentesting-local-audit-qualification.md)
-for qualification lanes.
+| Area | Implemented |
+| --- | --- |
+| Run orchestration | One engine container polling PostgreSQL; no broker, outbox, signed task, lease or checkpointer; one run at a time; pause/resume/stop honoured inside in-flight model calls and subprocesses |
+| Reconnaissance | Evasive 1 s-spaced pass: HTTP probe, technology fingerprint, TLS, nmap top-1000, directory crawl |
+| Attack-surface discovery | Subdomain enumeration across six passive indexes plus rate-limited DNS brute-force and dangling-CNAME takeover checks; OpenAPI/Swagger parsing; GraphQL introspection; JavaScript bundle mining for endpoints, parameters, source maps and secrets |
+| Scope | Registrable-domain derivation, in-scope subdomains accepted, everything else refused; private/loopback destinations refused |
+| Model loop | Structured `NextAction` per turn (1–4 parallel tool calls, claimed leads, new leads, negative conclusions); normalised probe de-duplication; stuck-loop detection |
+| Lead ledger | Persistent `pentest_leads` queue with priority bands; claims on test; failed probes returned to the queue; `done` refused while testable leads remain |
+| Findings | Weaknesses and surface observations both persisted (`category`); no finding discarded for being non-exploitable |
+| Exploit chaining | Next-level pass over weaknesses, observations and untested leads |
+| Reporting | Markdown, JSON, HTML, PDF with an observations appendix |
+| UI | Live event stream including prompts and tool actions, findings as they land, lead queue, live browser frame, controls, report downloads |
 
 ## Pending
 
 ### Release blockers
 
-- **No demonstrated end-to-end engagement.** The 2026-09-12 black-box run against
-  the Juice Shop fixture blocked at `PENTEST_PROFILE_UNAVAILABLE` before any
-  model call, because the controller container had `PENTEST_CAPABILITY5_ENABLED=false`
-  while the API had `true`. The Compose overlays now set the flag consistently on
-  both services, but the path has **not** been re-run. Readiness reporting,
-  `model_blocked` not propagating to engagement state, retries that do not
-  increment `retry_count`, and the ambiguous bootstrap request count all remain
-  unverified.
+- **Pentest engine not yet exercised on a live target.** The engine replaced the
+  controller stack on the `better-pentester` branch; discovery, the lead queue,
+  observation persistence and the chain pass are implemented and unit-verified, but
+  no full assessment against a real target has been run on a deployed installation
+  since the replacement.
 - **Non-owner forced-RLS qualification.** The qualification lane proves query
   scope, not enforced row-level security under a non-owner runtime role.
 - **Precommit crash/cancellation persistence.** Native cancellation retains only
@@ -79,33 +74,6 @@ for qualification lanes.
 - **Real-broker and middleware coverage in the product lane.** The worker/product
   qualification lane omits real RabbitMQ delivery/recovery, HTTP login/CSRF
   middleware, and a real cockpit browser.
-
-### Pentest capability activation
-
-- **`authentication` and `session_management` profiles** have no Capability 4
-  successor. They resolve through C6/C7 runtime health
-  (`services/profile_registry.py`), so they stay unselectable until that runtime
-  is deployed and reports qualified health.
-- **Step rehydration.** V3 refuses prior advanced work with
-  `committed_step_rehydration_required` rather than restoring verified receipts
-  and budget; whole-attempt recovery is not implemented.
-- **Prerequisite-state replay.** Authenticated and prerequisite-state DOM replay
-  remains unqualified; `auth_kind` is not an exact identity binding.
-- **OAST/C11 end-to-end delivery.** The reviewed payload bundle and correlation
-  bridge exist, but delivery consumers for the full technique set are not wired
-  into the adaptive loop.
-- **C10 execution in the product path.** Mutation and cleanup ledgers with
-  restoration predicates exist; routing product state-changing work through them
-  is gated on intensity and not yet exercised end to end.
-- **Operation × identity scheduling.** Complete scheduling across every canonical
-  operation and brokered identity is unfinished.
-- **Arbitrary native profile qualification.** Only the enumerated adapters are
-  qualified; there is no general qualification path for new native profiles.
-- **Capability 12 runner.** The control-plane contract, network profiles and
-  scope evaluation exist (ADR-027); the customer-hosted runner lifecycle
-  (enrollment, rotation, revocation, spool, remote kill) is not demonstrated.
-- **Live model calls in qualification.** The product lane disables live model
-  calls, so provider behaviour and cost are unqualified there.
 
 ### Trustworthy scanning and evidence
 
@@ -154,10 +122,6 @@ implemented; the entries are kept only so the change is traceable.
 - AI-to-static rule foundry.
 - Evidence-first finding pages, baselines, policy gates, waivers, portfolio trend.
 - OpenTelemetry traces/metrics/log correlation and Kubernetes worker pooling.
-- GraphQL and realtime profiles lacking adapters.
-- Injection lacking a general active adapter mapping.
-- Threat modelling being entirely absent (closed by ADR-026).
-- State-changing tests being hard-rejected (now intensity-gated).
 
 Two long-standing claims were also checked and found stale: documentation build
 and generated-OpenAPI drift **are** CI gates (`docs.yml`,

@@ -127,35 +127,32 @@ separate, opt-in step.
 
 ### Pentesting (opt-in, feature-gated)
 
-A separately gated **Pentesting** bounded context adds authorized black-box,
-gray-box, and white-box engagements alongside Code Scan, without ever
-mutating the Code Scan aggregate:
+A separately gated **pentesting engine** runs authorized black-box, gray-box and
+white-box assessments without ever mutating the Code Scan aggregate:
 
-- **Project-linked engagements** — pentest projects own their scope,
-  KMS-envelope-encrypted credentials, and an immutable Code Scan snapshot
-  selected through a read-only white-box bridge. Read APIs never return
-  credential material.
-- **Deterministic safety model** — every target interaction requires
-  authorization, tenant/attempt identity, and a pinned deterministic
-  scope-policy decision. A generation-fenced lease fences stale workers and
-  an atomic Execution commit makes results authoritative; RabbitMQ is
-  notification-only.
-- **Exact-origin tracer → isolated gateway → bounded controller** — from a
-  harmless public-only HTTP/TLS tracer through a pinned-egress,
-  credential-minimal runner to an adaptive controller that consumes only
-  committed `DecisionDelta` projections.
-- **Deterministic Web/API tool pack** — a Tool Broker and relay grants drive
-  nmap, nuclei, ZAP, and Playwright adapters with pinned egress, connection
-  permits, and typed proposals/results.
-- **Finding truth** — evidence-backed Observations become ConfirmedFindings
-  only through a configured evidence predicate or independent reproduction;
-  a scanner, adapter, specialist, or model can never confirm directly.
-- **Cockpit, reports, and governance** — engagement/attempt/delta cockpit,
-  immutable reports, redacted exports, retesting, and a governance overlay.
+- **Discovery first** — evasive, rate-limited reconnaissance followed by attack-surface
+  expansion: subdomain enumeration (six passive indexes plus DNS brute-force and
+  dangling-CNAME takeover checks), OpenAPI/Swagger and GraphQL schema discovery, and
+  JavaScript bundle mining for endpoints, parameters, source maps and secrets.
+- **Model-driven exploitation** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a
+  real Playwright browser one turn at a time, sees every result, and adapts. Probes are
+  de-duplicated, so it works the surface instead of circling it.
+- **Persistent lead queue** — every observation becomes a queued lead with a priority
+  band, claimed as it is tested. The queue, not the conversation, decides when the run
+  is finished, so pausing, resuming or restarting never loses work.
+- **Observations are findings** — ports, technologies, endpoints, parameters and leaked
+  secrets are stored alongside weaknesses, because chaining needs them. A follow-up
+  pass chains findings into exploit paths.
+- **One scope guard** — the operator's origin plus the in-scope estate discovered
+  beneath its registrable domain; private and loopback destinations are refused. There
+  are no intensity, budget, qualification or duration gates.
+- **Live cockpit** — event stream including every prompt and tool action, live browser
+  frame, findings as they land, pause/resume/stop, and Markdown/JSON/HTML/PDF reports.
 
-Pentesting is off by default and enabled through the local development
-profile (`docker-compose.pentesting-local.yml`). See
-`docs/docs/operations/pentesting-adaptive-controller.md`.
+Pentesting is off by default and enabled by choosing it during setup (or the
+`pentesting-v5` Compose profile). The engine runs as one container
+(`pentest-engine`). See `docs/docs/operations/pentesting-engine.md` and
+`docs/adr/029-pentesting-autonomous-engine.md`.
 
 ### Integrations and automation
 - **MCP server** — the scan + advisor workflow is exposed as MCP tools
