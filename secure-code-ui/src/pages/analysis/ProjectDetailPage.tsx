@@ -90,7 +90,9 @@ const ProjectDetailPage: React.FC = () => {
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
       <PageHeader
         crumbs={[
-          { label: "Projects", to: "/analysis/results" },
+          { label: "Dashboard", to: "/account/dashboard" },
+          { label: "Code scanning", to: "/submission/submit" },
+          { label: "Projects and scans", to: "/analysis/results" },
           { label: projectName },
         ]}
         title={projectName}

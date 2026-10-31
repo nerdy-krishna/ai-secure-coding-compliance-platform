@@ -136,7 +136,7 @@ export const UsagePage: React.FC = () => {
   return (
     <div style={{ display: "grid", gap: 22 }}>
       <PageHeader
-        crumbs={[{ label: "Usage" }]}
+        crumbs={[{ label: "Dashboard", to: "/account/dashboard" }, { label: "Administration", to: "/admin/system" }, { label: "Usage" }]}
         title="Usage & budget center"
         subtitle={
           summary.data

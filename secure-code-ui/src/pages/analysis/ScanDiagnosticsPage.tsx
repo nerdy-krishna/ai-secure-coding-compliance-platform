@@ -61,7 +61,13 @@ export const ScanDiagnosticsPage: React.FC = () => {
   return (
     <div className="fade-in" style={{ display: "grid", gap: 20 }}>
       <PageHeader
-        crumbs={[{ label: `Scan ${scanId?.slice(0, 8) ?? "…"}`, to: `/analysis/results/${scanId}` }, { label: "Pipeline & Logs" }]}
+        crumbs={[
+          { label: "Dashboard", to: "/account/dashboard" },
+          { label: "Code scanning", to: "/submission/submit" },
+          { label: "Projects and scans", to: "/analysis/results" },
+          { label: `Scan ${scanId?.slice(0, 8) ?? "…"}`, to: `/analysis/results/${scanId}` },
+          { label: "Pipeline & Logs" },
+        ]}
         title="Pipeline & Logs"
         subtitle="Findings pipeline flow and LLM call inspection for this scan."
       />

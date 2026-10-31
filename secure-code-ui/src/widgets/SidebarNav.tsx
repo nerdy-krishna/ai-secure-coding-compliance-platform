@@ -93,7 +93,20 @@ export function SidebarNav() {
   const { isFeatureEnabled, featuresLoading } = useFeatures();
   const visible = (items: Item[]) => items.filter((item) => (!item.feature || (!featuresLoading && isFeatureEnabled(item.feature))) && (!item.permission || hasPermission(user?.permissions, item.permission)));
   const admin = ADMIN_LINKS.filter((item) => (!item.feature || isFeatureEnabled(item.feature)) && (!item.permissions || hasAnyPermission(user?.permissions, item.permissions)));
-  const hasAdmin = hasAnyPermission(user?.permissions, ADMIN_AREA_PERMISSIONS) || admin.some((item) => pathname.startsWith(item.to));
+  // Administration holds the platform settings *and* the workspace pages (compliance,
+  // advisor, usage) that used to sit in their own "Tools" group.
+  const adminVisible = visible(tools).length > 0 || admin.length > 0;
+  const adminItems: Item[] = [
+    ...visible(tools),
+    ...admin.map((item) => ({ ...item, icon: adminIcon(item.label) })),
+  ];
+  const adminOpen =
+    hasAnyPermission(user?.permissions, ADMIN_AREA_PERMISSIONS) ||
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/account/settings/llm") ||
+    pathname.startsWith("/compliance") ||
+    pathname.startsWith("/advisor") ||
+    pathname.startsWith("/usage");
 
   const link = (item: Item) => (
     <NavLink
@@ -159,14 +172,6 @@ export function SidebarNav() {
         pathname.startsWith("/account/history"),
     )}
     {group("Pentesting", Icon.Shield, pentesting, pathname.startsWith("/pentesting"))}
-    {group("Tools", Icon.Terminal, tools, pathname.startsWith("/compliance") || pathname.startsWith("/advisor") || pathname.startsWith("/usage"))}
-    {hasAdmin
-      ? group(
-          "Administration",
-          Icon.Settings,
-          admin.map((item) => ({ ...item, icon: adminIcon(item.label) })),
-          pathname.startsWith("/admin") || pathname.startsWith("/account/settings/llm"),
-        )
-      : null}
+    {adminVisible ? group("Administration", Icon.Settings, adminItems, adminOpen) : null}
   </aside>;
 }

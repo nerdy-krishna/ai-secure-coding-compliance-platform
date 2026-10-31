@@ -587,8 +587,12 @@ const ResultsPage: React.FC = () => {
             ?.fromLabel as string | undefined;
           const fromPath = (location.state as Record<string, unknown>)
             ?.fromPath as string | undefined;
+          const root = { label: "Dashboard", to: "/account/dashboard" };
+          const area = { label: "Code scanning", to: "/submission/submit" };
           if (fromLabel) {
             return [
+              root,
+              area,
               {
                 label: fromLabel,
                 to: fromPath,
@@ -598,7 +602,9 @@ const ResultsPage: React.FC = () => {
             ];
           }
           return [
-            { label: "Projects", to: "/analysis/results" },
+            root,
+            area,
+            { label: "Projects and scans", to: "/analysis/results" },
             {
               label: displayProjectName ?? "…",
               onClick: goToProject,

@@ -21,6 +21,7 @@ import type {
   ScanHistoryItem,
 } from "../../shared/types/api";
 import { SevBar } from "../../shared/ui/DashboardPrimitives";
+import { PageHeader } from "../../shared/ui/PageHeader";
 import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import { useToast } from "../../shared/ui/Toast";
@@ -177,7 +178,36 @@ const ProjectsPage: React.FC = () => {
   ];
 
   return (
-    <div className="fade-in" style={{ display: "grid", gap: 16 }}>
+    <div className="c13-page pentest-landing fade-in">
+      <PageHeader
+        crumbs={[
+          { label: "Dashboard", to: "/account/dashboard" },
+          { label: "Code scanning", to: "/submission/submit" },
+          { label: "Projects and scans" },
+        ]}
+        title="Projects and scans"
+        subtitle="Repositories under scan, and what the latest assessment of each found."
+        actions={
+          <>
+            <Link className="sccap-btn" to="/account/history">
+              Submission history
+            </Link>
+            <button
+              className="sccap-btn"
+              onClick={() => {
+                setNewName("");
+                setCreateOpen(true);
+              }}
+            >
+              <Icon.Plus size={13} />New project
+            </button>
+            <Link className="sccap-btn sccap-btn-primary" to="/submission/submit">
+              <Icon.Plus size={13} />New scan
+            </Link>
+          </>
+        }
+      />
+
       <div className="stat-grid">
         {tiles.map((tile) => (
           <div key={tile.label} className={`stat-card${tile.tone ? ` is-${tile.tone}` : ""}`}>
@@ -191,43 +221,22 @@ const ProjectsPage: React.FC = () => {
         ))}
       </div>
 
-      <div>
-        <h1 style={{ color: "var(--fg)" }}>Projects and scans</h1>
-        <div
-          className="project-page-toolbar"
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            marginTop: 8,
-          }}
-        >
-          <span style={{ color: "var(--fg-muted)", fontSize: 13 }}>
-            {isLoading
-              ? "Loading…"
-              : `${data?.total ?? 0} project${data?.total === 1 ? "" : "s"}`}
-          </span>
-          <div className="project-page-actions" style={{ display: "flex", gap: 8 }}>
-            <div className="input-with-icon project-page-search">
-              <Icon.Search size={14} />
-              <input
-                className="sccap-input"
-                placeholder="Search projects…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ paddingLeft: 32 }}
-              />
-            </div>
-            <button
-              className="sccap-btn sccap-btn-primary"
-              onClick={() => { setNewName(""); setCreateOpen(true); }}
-            >
-              <Icon.Plus size={13} /> New project
-            </button>
+      <section className="sccap-card">
+        <div className="pentest-table-head">
+          <h2 style={{ margin: 0 }}>
+            {isLoading ? "Projects" : `${data?.total ?? 0} project${data?.total === 1 ? "" : "s"}`}
+          </h2>
+          <div className="input-with-icon project-page-search">
+            <Icon.Search size={14} />
+            <input
+              className="sccap-input"
+              placeholder="Search projects…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ paddingLeft: 32 }}
+            />
           </div>
         </div>
-      </div>
 
       {isError ? (
         <div
@@ -282,13 +291,7 @@ const ProjectsPage: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-            gap: 14,
-          }}
-        >
+        <div className="entity-grid">
           {projects.map((p) => {
             const latest = latestScan(p);
             const stats = p.stats;
@@ -421,6 +424,7 @@ const ProjectsPage: React.FC = () => {
           })}
         </div>
       )}
+      </section>
 
       <Modal
         open={createOpen}

@@ -13,11 +13,13 @@ import React from "react";
 import { TopNav } from "./TopNav/TopNav";
 import { ConnectivityStatus } from "../shared/ui/ConnectivityStatus";
 import { SidebarNav } from "./SidebarNav";
+import { Breadcrumbs, BreadcrumbProvider } from "../shared/ui/Breadcrumbs";
 
 const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
   children,
 }) => {
   return (
+    <BreadcrumbProvider>
     <div
       style={{
         minHeight: "100vh",
@@ -33,9 +35,13 @@ const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
       <ConnectivityStatus />
       <div className="dashboard-shell">
         <SidebarNav />
-        <main id="main-content" className="dashboard-main" tabIndex={-1}>{children}</main>
+        <main id="main-content" className="dashboard-main" tabIndex={-1}>
+          <Breadcrumbs />
+          {children}
+        </main>
       </div>
     </div>
+    </BreadcrumbProvider>
   );
 };
 

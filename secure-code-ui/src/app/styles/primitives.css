@@ -833,3 +833,66 @@ textarea:focus-visible {
 .pentest-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
 .pentest-inline-form { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
 .sccap-card.is-alert { border-left: 4px solid var(--critical); margin-bottom: 16px; }
+
+/* Layout-level breadcrumb trail (one per page, drawn by the shell). */
+.page-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.page-breadcrumbs-link { color: var(--fg-muted); text-decoration: none; }
+.page-breadcrumbs-link:hover { color: var(--fg); text-decoration: underline; }
+.page-breadcrumbs-sep { color: var(--fg-subtle); }
+.page-breadcrumbs-current { color: var(--fg); font-weight: 600; }
+
+
+/* ===========================================================
+   Entity grids: projects in code scanning and in pentesting use
+   the same card so the two "Projects and scans" pages read the
+   same at a glance.
+   =========================================================== */
+.entity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.entity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xs);
+  min-width: 0;
+}
+.entity-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+  min-width: 0;
+}
+.entity-card-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entity-card-stats {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  flex-wrap: wrap;
+}
+.entity-card-links { display: flex; flex-direction: column; gap: 3px; }
+.entity-card-link {
+  font-size: 12px;
+  color: var(--primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.entity-card-link:hover { text-decoration: underline; }

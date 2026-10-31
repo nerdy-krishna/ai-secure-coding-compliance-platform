@@ -7,6 +7,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "./Icon";
+import { useRegisterBreadcrumbs } from "./Breadcrumbs";
 
 export interface BreadcrumbCrumb {
   label: string;
@@ -31,6 +32,8 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
 }) => {
   const navigate = useNavigate();
   const hasTrail = crumbs.length > 1;
+  // This header renders the trail itself, so the layout's generic one stays hidden.
+  useRegisterBreadcrumbs();
 
   return (
     <div className="page-header">
