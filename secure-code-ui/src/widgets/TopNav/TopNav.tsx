@@ -5,7 +5,6 @@
 // useAuth for logout + superuser gate, useTheme for theme toggle.
 
 import React, { useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { useTheme } from "../../app/providers/ThemeProvider";
@@ -159,7 +158,6 @@ const UserMenu: React.FC<UserMenuProps> = ({
   const [tenantsLoading, setTenantsLoading] = useState(false);
   const [switchingTenant, setSwitchingTenant] = useState(false);
   const { logout } = useAuth();
-  const queryClient = useQueryClient();
   const toast = useToast();
   const navigate = useNavigate();
   const ref = useRef<HTMLDivElement | null>(null);
@@ -206,8 +204,6 @@ const UserMenu: React.FC<UserMenuProps> = ({
     if (!tenantId || tenantId === activeTenantId || switchingTenant) return;
     setSwitchingTenant(true);
     try {
-      await queryClient.cancelQueries({ queryKey: ["capability13"] });
-      queryClient.removeQueries({ queryKey: ["capability13"] });
       const selected = await tenantService.enter(tenantId);
       toast.success(`Switched to ${selected.display_name}.`);
       window.location.assign("/account/dashboard");

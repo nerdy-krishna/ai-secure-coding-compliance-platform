@@ -2,8 +2,6 @@
 
 Module layout:
 
-* ``encryption``    — read-only legacy decoder used during envelope migration
-                      (mirrors the LLM API key + SMTP password patterns).
 * ``models``        — Pydantic models for the decrypted protocol configs
                       (``OidcConfig``, ``SamlConfig``); SSRF / scheme guards.
 * ``repository``    — Async CRUD over ``sso_providers``; always returns the

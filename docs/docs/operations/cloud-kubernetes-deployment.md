@@ -104,7 +104,8 @@ API/LLM secrets — the pod boundary enforces least privilege.
 Recommended: drive these with External Secrets Operator or the Azure Key Vault /
 AWS Secrets Manager CSI providers rather than hand-maintained `kubectl create`.
 A starting point that creates every secret the chart names is committed at
-`scripts/provision-k8s-secrets.sh` (source a populated `.env` first).
+`kubectl create secret generic` from a populated `.env` (one `--from-literal` per key, or
+`--from-env-file .env`).
 
 ## 4. Install on AKS
 

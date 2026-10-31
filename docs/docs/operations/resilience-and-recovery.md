@@ -53,24 +53,11 @@ maximum traffic to a live provider merely to satisfy the fixture matrix.
 
 ## Generate fixtures
 
-Run the generator inside the API image so source limits and Python behavior match
-the deployed release. The output is deterministic, valid comment-only Python,
-ZIP_STORED, and contains the exact uncompressed bytes in the table.
+Workload fixtures (`small.zip`, `representative.zip`, `maximum.zip`) are produced locally
+before a release and stored in a private, access-logged evidence location. Build them with
+`ZIP_STORED` archives containing only the uncompressed payload bytes, and record the file
+count, uncompressed byte count, archive digest and content-stream digest alongside them.
 
-```bash
-mkdir -p /absolute/private/resilience-evidence
-docker compose run --rm --no-deps \
-  --entrypoint python \
-  -v /absolute/private/resilience-evidence:/private-evidence \
-  app \
-  /app/scripts/resilience/generate_workload.py representative \
-  /private-evidence/representative.zip \
-  --manifest /private-evidence/representative.manifest.json
-```
-
-Generate `small.zip`, `representative.zip`, and `maximum.zip` once per release.
-Store them in a private, access-logged evidence location. The generator refuses
-an implicit overwrite; `--force` is only for an intentional fixture replacement.
 Verify the manifest file count, uncompressed byte count, archive digest, and
 content-stream digest before the run.
 
