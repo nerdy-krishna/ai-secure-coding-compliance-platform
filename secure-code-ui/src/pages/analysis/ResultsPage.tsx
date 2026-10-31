@@ -96,11 +96,8 @@ const scanFacts = (
   const report = data.summary_report;
   const frameworks = report?.selected_frameworks ?? [];
   const temps = data.stage_temperatures;
+  const stats = data.consolidation_stats;
   return [
-    {
-      label: "Scan type",
-      value: (data.scan_type ?? report?.scan_type ?? "—").toUpperCase(),
-    },
     {
       label: "Source",
       value:
@@ -142,6 +139,24 @@ const scanFacts = (
               .join(" · ")
           : "Provider default",
     },
+    ...(stats && stats.raw_count > 0
+      ? [
+          {
+            label: "Consolidation",
+            value: (
+              <>
+                <strong style={{ color: "var(--fg)" }}>{stats.consolidated_count}</strong>{" "}
+                kept from{" "}
+                <strong style={{ color: "var(--fg)" }}>{stats.raw_count}</strong> raw
+                <span style={{ color: "var(--fg-subtle)" }}>
+                  {" "}
+                  · {stats.merged_inputs} merged · {stats.dropped} dropped
+                </span>
+              </>
+            ),
+          },
+        ]
+      : []),
   ];
 };
 
@@ -967,51 +982,6 @@ const ResultsPage: React.FC = () => {
                   );
                 })}
               </div>
-              {/* Consolidation — a pipeline stat, not per-model. */}
-              {data.consolidation_stats &&
-                data.consolidation_stats.raw_count > 0 && (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      borderTop: "1px solid var(--border)",
-                      paddingTop: 10,
-                      display: "flex",
-                      flexWrap: "wrap",
-                      alignItems: "baseline",
-                      gap: "4px 16px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 9.5,
-                        textTransform: "uppercase",
-                        letterSpacing: ".06em",
-                        color: "var(--fg-subtle)",
-                        fontWeight: 700,
-                      }}
-                    >
-                      Consolidation
-                    </span>
-                    {(
-                      [
-                        ["raw findings", data.consolidation_stats.raw_count],
-                        ["kept", data.consolidation_stats.consolidated_count],
-                        ["merged", data.consolidation_stats.merged_inputs],
-                        ["dropped", data.consolidation_stats.dropped],
-                      ] as const
-                    ).map(([label, value]) => (
-                      <span
-                        key={label}
-                        style={{ fontSize: 12, color: "var(--fg-muted)" }}
-                      >
-                        <strong style={{ color: "var(--fg)", fontSize: 13 }}>
-                          {value}
-                        </strong>{" "}
-                        {label}
-                      </span>
-                    ))}
-                  </div>
-                )}
             </section>
           )}
         </div>
