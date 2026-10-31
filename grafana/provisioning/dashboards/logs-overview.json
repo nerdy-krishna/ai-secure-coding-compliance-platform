@@ -45,7 +45,9 @@
             "$__all"
           ]
         },
-        "refresh": 2
+        "refresh": 2,
+        "hide": 0,
+        "sort": 1
       },
       {
         "name": "level",
@@ -73,7 +75,9 @@
             "$__all"
           ]
         },
-        "refresh": 2
+        "refresh": 2,
+        "hide": 0,
+        "sort": 1
       }
     ]
   },
@@ -307,7 +311,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "quantile_over_time(0.95, {service_name=~\"${service:regex}\", http_route=~\".+\"} | json | unwrap duration_ms [5m]) by (http_route)",
+          "expr": "quantile_over_time(0.95, {service_name=~\"${service:regex}\"} | json | unwrap duration_ms [5m]) by (http_route)",
           "legendFormat": "{{http_route}}",
           "refId": "A"
         }
@@ -349,7 +353,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (http_status) (rate({service_name=~\"${service:regex}\", http_route=~\".+\"} | json | http_status=~\".+\" [5m]))",
+          "expr": "sum by (http_status) (rate({service_name=~\"${service:regex}\"} | json | http_status=~\".+\" [5m]))",
           "legendFormat": "{{http_status}}",
           "refId": "A"
         }
