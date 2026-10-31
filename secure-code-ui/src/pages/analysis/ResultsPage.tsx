@@ -105,7 +105,28 @@ const scanFacts = (
       m.category.toLowerCase(),
     ),
   );
+  const kind = statusKind(data.status);
+  const statusTone =
+    kind === "failed"
+      ? "var(--critical)"
+      : kind === "blocked"
+        ? "var(--medium)"
+        : kind === "completed"
+          ? "var(--success)"
+          : "var(--fg)";
   return [
+    {
+      label: "Status",
+      value: (
+        <span style={{ color: statusTone, fontWeight: 600 }}>
+          {displayStatus(data.status)}
+        </span>
+      ),
+    },
+    {
+      label: "Scan type",
+      value: (data.scan_type ?? report?.scan_type ?? "—").toUpperCase(),
+    },
     {
       label: "Scan ID",
       value: (
@@ -478,21 +499,6 @@ const ResultsPage: React.FC = () => {
     }
   }, [scanId, toast]);
 
-  const handleDownloadPatchPlan = useCallback(async () => {
-    if (!scanId) return;
-    try {
-      await scanService.downloadPatchPlan(scanId);
-    } catch (err) {
-      const e = err as { response?: { status?: number }; message?: string };
-      toast.error(
-        e.response?.status === 404
-          ? "A deterministic patch plan is not available for this scan."
-          : e.message || "Failed to download the patch plan",
-      );
-    }
-  }, [scanId, toast]);
-
-
   if (isLoading) {
     return (
       <div
@@ -579,58 +585,9 @@ const ResultsPage: React.FC = () => {
             { label: scanId?.slice(0, 8) ?? "…" },
           ];
         })()}
-        title={
-          <>
-            {displayProjectName ?? "Scan"}{" "}
-            <span
-              style={{
-                color: "var(--fg-muted)",
-                fontWeight: 500,
-                fontSize: 13,
-                textTransform: "uppercase",
-                letterSpacing: ".04em",
-              }}
-            >
-              {data.scan_type ?? report?.scan_type ?? "Scan"}
-            </span>
-          </>
-        }
+        title={displayProjectName ?? "Scan"}
         subtitle={
           <>
-            {(() => {
-              // Single-source-of-truth status chip. `failed` (real
-              // error) is the only one that goes red; user stops
-              // (CANCELLED, BLOCKED_USER_DECLINE) and EXPIRED are
-              // neutral; BLOCKED_PRE_LLM is amber/warn.
-              const kind = statusKind(data.status);
-              if (kind === "failed") {
-                return (
-                  <span className="chip chip-critical">
-                    {displayStatus(data.status)}
-                  </span>
-                );
-              }
-              if (kind === "blocked") {
-                return (
-                  <span className="chip chip-warn">
-                    {displayStatus(data.status)}
-                  </span>
-                );
-              }
-              if (kind === "stopped" || kind === "expired") {
-                return (
-                  <span className="chip">{displayStatus(data.status)}</span>
-                );
-              }
-              if (kind === "completed") {
-                return (
-                  <span className="chip chip-success">
-                    {displayStatus(data.status)}
-                  </span>
-                );
-              }
-              return null;
-            })()}
             {isPrescanBlocked && allFindings.length > 0 && (
               <span className="chip chip-warn" title="Deterministic scanners only">
                 Deterministic findings only
@@ -681,17 +638,6 @@ const ResultsPage: React.FC = () => {
             >
               <Icon.Download size={13} /> Scanner JSON
             </button>
-            {(["SUGGEST", "REMEDIATE"] as const).includes(
-              String(data.scan_type ?? report?.scan_type ?? "").toUpperCase() as "SUGGEST" | "REMEDIATE",
-            ) && (
-              <button
-                className="sccap-btn sccap-btn-sm"
-                onClick={handleDownloadPatchPlan}
-                title="Download exact resolved ranges, candidate-to-hunk lineage, and unified diffs"
-              >
-                <Icon.Download size={13} /> Patch plan
-              </button>
-            )}
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => navigate(`/analysis/scanning/${scanId}`)}

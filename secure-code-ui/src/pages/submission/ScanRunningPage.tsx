@@ -816,25 +816,14 @@ const ScanRunningPage: React.FC = () => {
   // terminal status during this page view; only redirect after a
   // genuine transition.
   const sawNonTerminalRef = useRef(false);
-  const redirectedOnMountRef = useRef(false);
   useEffect(() => {
     if (!scanId) return;
     if (status && !TERMINAL_STATUSES.has(status)) {
       sawNonTerminalRef.current = true;
     }
-    if (
-      status &&
-      TERMINAL_STATUSES.has(status) &&
-      !sawNonTerminalRef.current &&
-      !redirectedOnMountRef.current
-    ) {
-      redirectedOnMountRef.current = true;
-      navigate(`/analysis/results/${scanId}`, { replace: true });
-      return;
-    }
-    // Every terminal state except FAILED lands on the results page: a scan
-    // stopped at the prescan gate keeps its deterministic findings, so the user
-    // must end up where those findings are shown.
+    // Opening this page for an already-finished scan is legitimate: it is the
+    // event timeline, linked from the results header. Only a scan that finishes
+    // *while* the user is watching navigates on to the results.
     if (
       sawNonTerminalRef.current &&
       (status === "COMPLETED" ||
