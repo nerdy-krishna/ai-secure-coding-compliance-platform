@@ -5,6 +5,30 @@ API pods use the instrumented ASGI wrapper; outbox payloads retain the request
 trace context, publisher spans continue it in RabbitMQ headers, and workers
 continue it across workflow, database, Qdrant, scanner, and provider spans.
 
+## Log pipeline (Fluentd → Loki → Grafana)
+
+The `log_stack` Compose profile runs the container log pipeline:
+
+| Hop | What it does | Failure mode to know |
+|---|---|---|
+| Docker log driver | `app`, `worker`, `ui`, `pentest-engine` and `patch-validator` ship stdout/stderr to Fluentd on `localhost:24224` with a `docker.<service>.<container>` tag | The driver is resolved by the Docker daemon on the host, so `localhost` is the host, not the container |
+| Fluentd | Parses the JSON line, extracts `service_name`, `level` and `logger_name` as Loki labels, buffers to `./fluentd/log/buffer` | The buffer lives in a bind mount and Fluentd runs as uid 100/gid 101: a root-owned `fluentd/log` makes the worker exit with `Permission denied @ dir_s_mkdir - /fluentd/log/buffer` and **every line is lost**. `setup.sh` hands that tree to the Fluentd user; the container healthcheck fails if the buffer is not writable |
+| Loki | Stores the streams, labelled by service, level and logger | Queries need the tenant header when running more than one tenant |
+| Grafana | `Loki` datasource pinned to uid `loki`, plus the provisioned **SCCAP · Logs** dashboard (`grafana/provisioning/dashboards/logs-overview.json`): volume by service, errors by service, error counts for the last hour, services reporting, and two live log browsers | Dashboards are file-provisioned; editing them in the UI does not persist |
+
+Verify the whole chain in one command:
+
+```bash
+docker exec sccap_loki wget -qO- \
+  --header="X-Scope-OrgID: anonymous" \
+  "http://127.0.0.1:3100/loki/api/v1/query_range?query=%7Bservice_name%3D~%22.%2B%22%7D&limit=3"
+```
+
+A `status: success` with a non-empty `result` array means logs are flowing; an empty
+array with a healthy Fluentd usually means the buffer directory is not writable.
+Grafana itself should report the datasource as healthy under
+*Connections → Data sources → Loki → Save & test*.
+
 ## Privacy boundary
 
 Only bounded identifiers and operational enums are allowlisted. Do not add

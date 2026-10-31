@@ -316,6 +316,30 @@ _sccap_ensure_evidence_bucket() {
     return 0
 }
 
+_sccap_align_fluentd_ownership() {
+    # Fluentd runs as `fluent` (uid 100, gid 101) and writes its file buffer into
+    # the ./fluentd/log bind mount. A root-owned directory (the checkout, or a
+    # dir created by a `sudo` run) makes the worker die with
+    # "Permission denied @ dir_s_mkdir - /fluentd/log/buffer" and every log line
+    # is lost before it reaches Loki. Bind mounts keep host ownership, so hand
+    # the tree to the fluentd user. The image is public and pinned by tag, so the
+    # uid is fixed; resolve it from the image when it is already pulled.
+    local img uid=100 gid=101
+    img=$(docker compose config --images 2>/dev/null | grep -E -- '/fluentd$|fluentd:' | head -1)
+    if [ -n "$img" ] && docker image inspect "$img" >/dev/null 2>&1; then
+        uid=$(docker run --rm --entrypoint sh "$img" -c 'id -u' 2>/dev/null) || uid=100
+        gid=$(docker run --rm --entrypoint sh "$img" -c 'id -g' 2>/dev/null) || gid=101
+    fi
+    case "$uid" in ''|*[!0-9]*) uid=100 ;; esac
+    case "$gid" in ''|*[!0-9]*) gid=101 ;; esac
+    mkdir -p fluentd/log/buffer fluentd/log/pos
+    _sccap_with_root chown -R "$uid:$gid" fluentd/log 2>/dev/null || true
+    _sccap_with_root chmod -R 775 fluentd/log 2>/dev/null || true
+    echo "[+] fluentd buffer state owned by the fluentd user ($uid:$gid)."
+    return 0
+}
+
+
 _sccap_align_certbot_ownership() {
     # The UI container runs as a non-root user (nginx-app) and certbot writes
     # into the ./certbot/conf bind mount. Bind mounts keep host ownership, so a
@@ -684,6 +708,7 @@ _sccap_run_update() {
         --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         || { echo "[!] Build failed; run ./setup.sh --rollback"; return 1; }
     _sccap_align_certbot_ownership
+    _sccap_align_fluentd_ownership
     docker compose up -d || { echo "[!] Start failed; run ./setup.sh --rollback"; return 1; }
     # The broker applies the pentest users' passwords from .env only when its
     # container starts (rabbitmq/init.sh change_password). If an update rotates
@@ -1954,6 +1979,7 @@ echo "[*] Launching Docker containers (this may take a few minutes)..."
 # Sourcing .env is one way, but docker compose reads .env automatically
 docker compose build
 _sccap_align_certbot_ownership
+_sccap_align_fluentd_ownership
 docker compose up -d
 
 echo "[*] Waiting for database to be healthy..."
@@ -2019,6 +2045,7 @@ _sccap_stage done
 # (config) or the container UIDs (certbot state, tool-worker key).
 _sccap_fix_ownership
 _sccap_align_certbot_ownership
+_sccap_align_fluentd_ownership
 _sccap_install_update_units
 echo "Access the application at:"
 if [ "$DEPLOYMENT_TYPE" = "local" ]; then

@@ -1,0 +1,16 @@
+# Grafana Provisioning: load the shipped dashboards from this directory.
+# The JSON files are version-controlled so a fresh install has something to
+# look at immediately instead of an empty Grafana.
+apiVersion: 1
+
+providers:
+  - name: sccap
+    orgId: 1
+    folder: SCCAP
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
