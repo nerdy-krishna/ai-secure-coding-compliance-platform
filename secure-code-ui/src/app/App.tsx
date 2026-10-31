@@ -264,7 +264,9 @@ function AppContent() {
           <Route element={<FeatureRoute feature="pentesting" />}>
             <Route path="/pentesting" element={routeContent(<PentestPage />)} />
             <Route path="/pentesting/new" element={routeContent(<PentestNewPage />)} />
-            <Route path="/pentesting/scans" element={routeContent(<PentestScansPage />)} />
+            <Route path="/pentesting/history" element={routeContent(<PentestScansPage />)} />
+            {/* Old path kept as a redirect so a bookmarked URL still resolves. */}
+            <Route path="/pentesting/scans" element={<Navigate to="/pentesting/history" replace />} />
             <Route path="/pentesting/runs/:runId" element={routeContent(<PentestRunPage />)} />
           </Route>
         </Route>

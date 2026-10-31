@@ -13,11 +13,13 @@ type Item = {
   icon: IconComponent;
   feature?: string;
   permission?: string;
+  /** Match the path exactly, so a parent route does not light up too. */
+  exact?: boolean;
 };
 
 const codeScan: Item[] = [
   { to: "/submission/submit", label: "New scan", icon: Icon.Plus },
-  { to: "/analysis/results", label: "Projects and results", icon: Icon.Folder },
+  { to: "/analysis/results", label: "Projects and scans", icon: Icon.Folder },
   { to: "/account/history", label: "Submission history", icon: Icon.History },
 ];
 // Same shape as the code-scanning group: start one, see the estate, see everything.
@@ -35,11 +37,14 @@ const pentesting: Item[] = [
     icon: Icon.Folder,
     feature: "pentesting",
     permission: Permission.pentestRead,
+    // Without `end` this entry also matches /pentesting/history and /pentesting/new,
+    // so two rows lit up at once.
+    exact: true,
   },
   {
-    to: "/pentesting/scans",
-    label: "Scans and tests",
-    icon: Icon.Layers,
+    to: "/pentesting/history",
+    label: "Submission history",
+    icon: Icon.History,
     feature: "pentesting",
     permission: Permission.pentestRead,
   },
@@ -94,6 +99,7 @@ export function SidebarNav() {
     <NavLink
       key={item.to}
       to={item.to}
+      end={item.exact}
       title={item.label}
       aria-label={item.label}
       className="side-nav-link"
@@ -144,7 +150,14 @@ export function SidebarNav() {
       </span>
       {!collapsed && <span className="side-nav-label">Dashboard</span>}
     </NavLink>
-    {group("Code scanning", Icon.Code, codeScan, pathname.startsWith("/analysis") || pathname.startsWith("/submission"))}
+    {group(
+      "Code scanning",
+      Icon.Code,
+      codeScan,
+      pathname.startsWith("/analysis") ||
+        pathname.startsWith("/submission") ||
+        pathname.startsWith("/account/history"),
+    )}
     {group("Pentesting", Icon.Shield, pentesting, pathname.startsWith("/pentesting"))}
     {group("Tools", Icon.Terminal, tools, pathname.startsWith("/compliance") || pathname.startsWith("/advisor") || pathname.startsWith("/usage"))}
     {hasAdmin

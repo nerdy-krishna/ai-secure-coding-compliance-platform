@@ -11,6 +11,11 @@ import React, { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDebounce } from "../../shared/hooks/useDebounce";
 import { scanService } from "../../shared/api/scanService";
+import { dashboardService } from "../../shared/api/dashboardService";
+import { ruleSourcesService } from "../../shared/api/ruleSourcesService";
+import { useAuth } from "../../shared/hooks/useAuth";
+import { Permission, hasPermission } from "../../shared/lib/permissions";
+import { compactNumber } from "../pentesting/format";
 import type {
   ProjectHistoryItem,
   ScanHistoryItem,
@@ -63,9 +68,20 @@ const ProjectsPage: React.FC = () => {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
 
+  const { user } = useAuth();
+  const isAdmin = hasPermission(user?.permissions, Permission.platformConfigManage);
+
   const { data, isLoading, isError } = useQuery({
     queryKey: ["projects", debouncedSearch],
     queryFn: () => scanService.getProjectHistory(1, 100, debouncedSearch || undefined),
+  });
+  // The same tiles the home overview shows, on the page an operator actually
+  // works from, so the numbers never need a trip back to the dashboard.
+  const statsQ = useQuery({ queryKey: ["dashboard", "stats"], queryFn: dashboardService.getStats });
+  const sourcesQ = useQuery({
+    queryKey: ["dashboard", "rule-sources"],
+    queryFn: () => ruleSourcesService.listSources(),
+    enabled: isAdmin,
   });
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -90,11 +106,93 @@ const ProjectsPage: React.FC = () => {
   };
 
   const projects = useMemo(() => data?.items ?? [], [data]);
+  const stats = statsQ.data;
+  const sources = sourcesQ.data ?? [];
+  const openFindings = stats?.open_findings;
+  const criticalHigh = (openFindings?.critical ?? 0) + (openFindings?.high ?? 0);
+  const failedSources = sources.filter((source) => source.last_sync_status === "failed");
+  const enabledSources = sources.filter((source) => source.enabled);
+
+  const tiles = [
+    {
+      label: "Projects",
+      value: String(data?.total ?? projects.length),
+      sub: "repositories under scan",
+      tone: undefined as "ok" | "warn" | "bad" | undefined,
+      icon: <Icon.Folder size={15} />,
+    },
+    {
+      label: "Open findings",
+      value: compactNumber(
+        (openFindings?.critical ?? 0) +
+          (openFindings?.high ?? 0) +
+          (openFindings?.medium ?? 0) +
+          (openFindings?.low ?? 0) +
+          (openFindings?.informational ?? 0),
+      ),
+      sub: criticalHigh ? `${criticalHigh} critical/high` : "none critical",
+      tone: (criticalHigh ? "bad" : undefined) as "ok" | "warn" | "bad" | undefined,
+      icon: <Icon.Flag size={15} />,
+    },
+    {
+      label: "Risk score",
+      value: stats ? stats.risk_score.toFixed(1) : "—",
+      sub: "CVSS-weighted portfolio",
+      tone: (stats && stats.risk_score >= 7 ? "bad" : stats && stats.risk_score >= 4 ? "warn" : "ok") as
+        | "ok"
+        | "warn"
+        | "bad"
+        | undefined,
+      icon: <Icon.Gauge size={15} />,
+    },
+    {
+      label: "Semgrep sources",
+      value: isAdmin ? `${enabledSources.length}/${sources.length}` : "—",
+      sub: failedSources.length
+        ? `${failedSources.length} failed sync`
+        : isAdmin
+          ? `${sources.reduce((total, source) => total + (source.rule_count ?? 0), 0).toLocaleString()} rules`
+          : "admin only",
+      tone: (failedSources.length ? "bad" : enabledSources.length ? "ok" : "warn") as
+        | "ok"
+        | "warn"
+        | "bad"
+        | undefined,
+      icon: <Icon.Code size={15} />,
+    },
+    {
+      label: "Scans this month",
+      value: String(stats?.scans_this_month ?? 0),
+      sub: stats ? `≈$${stats.cost_this_month_usd.toFixed(2)} spend` : undefined,
+      tone: undefined,
+      icon: <Icon.Clock size={15} />,
+    },
+    {
+      label: "Fixes ready",
+      value: String(stats?.fixes_ready ?? 0),
+      sub: "awaiting review",
+      tone: (stats?.fixes_ready ? "warn" : undefined) as "ok" | "warn" | "bad" | undefined,
+      icon: <Icon.Check size={15} />,
+    },
+  ];
 
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
+      <div className="stat-grid">
+        {tiles.map((tile) => (
+          <div key={tile.label} className={`stat-card${tile.tone ? ` is-${tile.tone}` : ""}`}>
+            <div className="stat-icon">{tile.icon}</div>
+            <div>
+              <div className="stat-value">{tile.value}</div>
+              <div className="stat-label">{tile.label}</div>
+              {tile.sub && <div className="stat-sub">{tile.sub}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div>
-        <h1 style={{ color: "var(--fg)" }}>Projects</h1>
+        <h1 style={{ color: "var(--fg)" }}>Projects and scans</h1>
         <div
           className="project-page-toolbar"
           style={{
