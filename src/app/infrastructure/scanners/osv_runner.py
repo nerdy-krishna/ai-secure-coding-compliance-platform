@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import re
+from functools import lru_cache
 import subprocess
 import tempfile
 import uuid
@@ -41,6 +42,38 @@ from app.infrastructure.scanners.bandit_runner import _resolve_binary
 from app.shared.lib.owned_subprocess import run_owned_subprocess
 
 logger = logging.getLogger(__name__)
+
+
+#: OSV-Scanner exits 128 when the scanned tree contains no package sources
+#: (lockfiles, manifests, SBOMs). A submission of plain source files is not a
+#: failure — there is simply nothing for a dependency scanner to read.
+OSV_NO_PACKAGE_SOURCES = "no_package_sources"
+OSV_OK = "ok"
+OSV_UNAVAILABLE = "unavailable"
+
+_NO_PACKAGE_SOURCES_MARKER = "no package sources found"
+
+
+@lru_cache(maxsize=2)
+def _osv_output_flag(binary: str) -> str:
+    """Return the output flag this OSV-Scanner build understands.
+
+    v2 deprecated `--output` in favour of `--output-file`; using the right flag
+    keeps the log clean today and keeps working when the deprecated alias is
+    finally removed.
+    """
+    try:
+        proc = run_owned_subprocess(
+            [binary, "--version"], capture_output=True, text=True, timeout=10, check=False
+        )
+    except Exception:  # noqa: BLE001 - fall back to the old flag
+        return "--output"
+    first = (proc.stdout or proc.stderr or "").strip().splitlines()
+    version = first[0] if first else ""
+    match = re.search(r"v?(\d+)\.", version)
+    if match and int(match.group(1)) >= 2:
+        return "--output-file"
+    return "--output"
 
 
 def _osv_binary() -> str:
@@ -327,6 +360,7 @@ def _run_osv_subprocess(
     CycloneDX run's content lives at ``bom_path``. Returned stderr is
     pre-redacted via `_redact_stderr`.
     """
+    output_flag = _osv_output_flag(binary)
     offline_args = (
         ["--offline", "--offline-vulnerabilities", "--no-resolve"]
         if offline_snapshot is not None
@@ -349,7 +383,7 @@ def _run_osv_subprocess(
             *offline_args,
             "--format",
             "cyclonedx-1-5",
-            "--output",
+            output_flag,
             str(bom_path),
             str(staged_dir),
         ],
@@ -375,7 +409,7 @@ def _run_osv_subprocess(
             *offline_args,
             "--format",
             "json",
-            "--output",
+            output_flag,
             str(json_path),
             str(staged_dir),
         ],
@@ -398,10 +432,12 @@ async def run_osv(
     *,
     scan_id: Optional[uuid.UUID] = None,
     report_collector: Optional[Callable[[Any], None]] = None,
-) -> Tuple[List[VulnerabilityFinding], Optional[Dict[str, Any]]]:
+) -> Tuple[List[VulnerabilityFinding], Optional[Dict[str, Any]], str]:
     """Run OSV-Scanner against the staged file tree.
 
-    Returns ``(findings, bom_cyclonedx)``. `bom_cyclonedx` is ``None``
+    Returns ``(findings, bom_cyclonedx, status)`` where status is ``ok``,
+    ``no_package_sources`` (nothing for a dependency scanner to read — not an
+    error) or ``unavailable``. `bom_cyclonedx` is ``None``
     when OSV is unavailable or returned an unparseable BOM; findings
     is the empty list on the same conditions. Either or both can be
     empty/None on a clean repo.
@@ -416,7 +452,7 @@ async def run_osv(
             "scanner=osv binary not found at %s; skipping prescan",
             osv_bin,
         )
-        return [], None
+        return [], None, OSV_UNAVAILABLE
 
     # `scan_id` is accepted for log correlation only; the runner does
     # not stamp it on findings (the worker graph attaches scan_id at
@@ -437,7 +473,7 @@ async def run_osv(
                 "scanner=osv configured offline snapshot rejected reason=%s",
                 exc.code,
             )
-            return [], None
+            return [], None, OSV_UNAVAILABLE
     with tempfile.TemporaryDirectory(prefix="osv-out-") as tmp:
         tmp_path = Path(tmp)
         bom_path = tmp_path / "bom.cyclonedx.json"
@@ -455,10 +491,10 @@ async def run_osv(
             logger.warning(
                 "scanner=osv timed out after %ds; skipping", OSV_TIMEOUT_SECONDS
             )
-            return [], None
+            return [], None, OSV_UNAVAILABLE
         except Exception as e:
             logger.warning("scanner=osv subprocess error: %s", e)
-            return [], None
+            return [], None, OSV_UNAVAILABLE
 
         if offline_snapshot is not None:
             try:
@@ -468,15 +504,21 @@ async def run_osv(
                     "scanner=osv offline snapshot changed or failed after scan reason=%s",
                     exc.code,
                 )
-                return [], None
+                return [], None, OSV_UNAVAILABLE
             if verified_after.database_sha256 != offline_snapshot.database_sha256:
                 logger.warning("scanner=osv offline snapshot changed during scan")
-                return [], None
+                return [], None, OSV_UNAVAILABLE
 
+        if _NO_PACKAGE_SOURCES_MARKER in stderr.lower():
+            logger.info(
+                "scanner=osv found no package sources (no lockfile or manifest "
+                "in this submission); dependency scanning not applicable"
+            )
+            return [], None, OSV_NO_PACKAGE_SOURCES
         if rc not in (0, 1):
             logger.warning("scanner=osv exited rc=%d; stderr=%s", rc, stderr[:500])
             if offline_snapshot is not None:
-                return [], None
+                return [], None, OSV_UNAVAILABLE
             # Fall through and try to parse what we have anyway.
 
         bom: Optional[Dict[str, Any]] = None
@@ -527,4 +569,4 @@ async def run_osv(
             len(findings),
             bom is not None,
         )
-        return findings, bom
+        return findings, bom, OSV_OK

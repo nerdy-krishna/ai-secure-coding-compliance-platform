@@ -30,6 +30,7 @@ from app.infrastructure.database.repositories.approval_gate_repo import (
     ApprovalGateRepository,
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.shared.lib.files import get_language_from_filename
 from app.infrastructure.database.repositories.scan_attempt_repo import (
     ScanAttemptRepository,
 )
@@ -764,7 +765,14 @@ class ScanLifecycleService:
             raise not_found
 
         rows = await self.repo.get_findings_for_scan(scan_id)
-        items = [api_models.PrescanFindingItem.model_validate(r) for r in rows]
+        snippets = await self._prescan_snippets(scan, rows)
+        items = []
+        for row in rows:
+            item = api_models.PrescanFindingItem.model_validate(row)
+            if not item.vulnerable_snippet:
+                item.vulnerable_snippet = snippets.get(row.id)
+            item.language = get_language_from_filename(row.file_path)
+            items.append(item)
         has_critical_secret = any(
             (r.source == "gitleaks") and (r.severity == "Critical") for r in rows
         )
@@ -774,6 +782,54 @@ class ScanLifecycleService:
             findings=items,
             has_critical_secret=has_critical_secret,
         )
+
+    async def _prescan_snippets(
+        self, scan: db_models.Scan, rows: list[db_models.Finding]
+    ) -> dict[int, str]:
+        """Source line for each deterministic finding that has no snippet of its own.
+
+        Findings persisted before the prescan started carrying snippets (or by a
+        scanner that omits the text) are resolved against the original snapshot,
+        so the review card never shows a bare line number.
+        """
+        missing = [row for row in rows if not row.vulnerable_snippet and row.line_number]
+        if not missing:
+            return {}
+        try:
+            detailed = await self.repo.get_scan_with_details(scan.id)
+            snapshot = next(
+                (
+                    candidate
+                    for candidate in (getattr(detailed, "snapshots", None) or [])
+                    if candidate.snapshot_type == "ORIGINAL_SUBMISSION"
+                ),
+                None,
+            )
+            if snapshot is None:
+                return {}
+            contents = await self.repo.get_source_files_by_hashes(
+                list(snapshot.file_map.values())
+            )
+        except Exception:  # noqa: BLE001 - the card must render without snippets
+            logger.warning(
+                "get_prescan_review: snippet lookup failed for scan %s",
+                scan.id,
+                exc_info=True,
+            )
+            return {}
+
+        resolved: dict[int, str] = {}
+        for row in missing:
+            file_hash = snapshot.file_map.get(row.file_path)
+            body = contents.get(file_hash) if file_hash else None
+            if not body:
+                continue
+            lines = body.splitlines()
+            if 0 < int(row.line_number) <= len(lines):
+                line = lines[int(row.line_number) - 1].strip()
+                if line:
+                    resolved[row.id] = line[:500]
+        return resolved
 
     async def cancel_scan(
         self,

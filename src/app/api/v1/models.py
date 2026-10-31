@@ -1211,6 +1211,11 @@ class PrescanFindingItem(BaseModel):
     scanner_rule_id: Optional[str] = None
     cwe: Optional[str] = None
     cve_id: Optional[str] = None
+    # The exact source line the scanner points at, so the operator can see what
+    # is being flagged instead of guessing from a line number.
+    vulnerable_snippet: Optional[str] = None
+    # Full-file language, for syntax-neutral rendering of the snippet.
+    language: Optional[str] = None
 
     class Config:
         from_attributes = True

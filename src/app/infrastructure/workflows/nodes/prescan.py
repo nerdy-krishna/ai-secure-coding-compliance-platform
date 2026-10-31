@@ -65,6 +65,7 @@ from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.observability import mark_error, span
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
+from app.shared.lib.files import source_line_at
 from app.shared.lib.file_classification import (
     classify_file,
     should_skip_semgrep,
@@ -667,6 +668,16 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     )
                     raise
                 scanner_findings = result[0] if scanner_name == "osv" else result
+                if (
+                    scanner_name == "osv"
+                    and isinstance(result, tuple)
+                    and len(result) == 3
+                    and result[2] == "no_package_sources"
+                ):
+                    # OSV only reads dependency manifests. A submission of plain
+                    # source has none, which used to be reported as a degraded
+                    # scanner run; it is simply not applicable.
+                    expected_to_run = False
                 outcome = scanner_completion_status(
                     expected_to_run,
                     scanner_name in native_reports,
@@ -683,7 +694,10 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 }
                 if outcome == "skipped":
                     details["message"] = (
-                        "Scanner skipped because no applicable rules or files were available."
+                        "No dependency manifests in this submission; dependency "
+                        "scanning was not applicable."
+                        if scanner_name == "osv"
+                        else "Scanner skipped because no applicable rules or files were available."
                     )
                 elif outcome == "degraded":
                     details["message"] = (
@@ -809,20 +823,28 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                             )
                     continue
                 if scanner_name == "osv":
-                    # OSV returns (findings, bom_cyclonedx_dict).
-                    osv_findings, bom = result
+                    # OSV returns (findings, bom_cyclonedx_dict, status).
+                    osv_findings, bom = result[0], result[1]
                     prescan_findings.extend(osv_findings)
                     bom_cyclonedx = bom
                     finding_count = len(osv_findings)
                 else:
                     prescan_findings.extend(result)
                     finding_count = len(result)
-                execution_status = scanner_completion_status(
-                    not (
-                        scanner_name == "semgrep"
-                        and not (_semgrep_rules and semgrep_eligible)
-                    ),
-                    scanner_name in native_reports,
+                # A scanner that already reported "nothing to do" keeps that
+                # status here; re-deriving it from report presence would call a
+                # not-applicable run degraded.
+                recorded_status = scanner_statuses.get(scanner_name, {}).get("status")
+                execution_status = (
+                    recorded_status
+                    if recorded_status == "skipped"
+                    else scanner_completion_status(
+                        not (
+                            scanner_name == "semgrep"
+                            and not (_semgrep_rules and semgrep_eligible)
+                        ),
+                        scanner_name in native_reports,
+                    )
                 )
                 provenance = toolchain_provenance[scanner_name]
                 status_with_provenance = (
@@ -842,6 +864,25 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     isinstance(report, dict)
                     and (report.get("truncated") or report.get("available") is False)
                 )
+                if scanner_name == "osv" and scanner_statuses.get("osv", {}).get(
+                    "status"
+                ) == "skipped":
+                    # Nothing to analyse: record the skip once, with the reason,
+                    # instead of settling per-input rows as "clean".
+                    coverage_outcomes.append(
+                        CoverageOutcome(
+                            scanner_name="osv",
+                            input_path="<repository>",
+                            status="skipped",
+                            reason_code="no_package_manifests",
+                            reason=(
+                                "No lockfile or package manifest in this submission; "
+                                "dependency scanning was not applicable."
+                            ),
+                            provenance_status=provenance["status"],
+                        )
+                    )
+                    continue
                 scanner_inputs = [
                     item.input_path
                     for item in coverage_plan.values()
@@ -1250,6 +1291,13 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     lineage_counts: Dict[str, int] = {}
     original_file_map = state.get("initial_file_map") or {}
     for finding in prescan_findings:
+        # Anchor the finding to the exact source line. Scanner output carries a
+        # line number but no text, and a bare "line 42" tells the operator
+        # nothing when they are deciding whether to pay for an LLM pass.
+        if not finding.vulnerable_snippet:
+            finding.vulnerable_snippet = source_line_at(
+                files.get(finding.file_path), finding.line_number
+            )
         source = finding.source or "unknown"
         source_counts[source] = source_counts.get(source, 0) + 1
         producer_key = f"scanner:{source}:{finding.file_path}"

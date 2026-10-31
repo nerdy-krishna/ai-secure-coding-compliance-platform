@@ -182,8 +182,8 @@ export const PrescanReviewCard: React.FC<Props> = ({
           </thead>
           <tbody>
             {sorted.map((f) => (
+              <React.Fragment key={f.id}>
               <tr
-                key={f.id}
                 style={{
                   borderTop: "1px solid var(--border)",
                 }}
@@ -228,6 +228,22 @@ export const PrescanReviewCard: React.FC<Props> = ({
                   )}
                 </td>
               </tr>
+              {(f.vulnerable_snippet || f.description) && (
+                <tr>
+                  <td colSpan={6} style={snippetCellStyle}>
+                    {f.vulnerable_snippet && (
+                      <pre style={snippetStyle}>
+                        <span style={lineNumberStyle}>{f.line_number ?? ""}</span>
+                        <code>{f.vulnerable_snippet}</code>
+                      </pre>
+                    )}
+                    {f.description && (
+                      <div style={descriptionStyle}>{f.description}</div>
+                    )}
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             ))}
             {sorted.length === 0 && (
               <tr>
@@ -243,6 +259,42 @@ export const PrescanReviewCard: React.FC<Props> = ({
       </div>
     </div>
   );
+};
+
+const snippetCellStyle: React.CSSProperties = {
+  padding: "0 10px 8px 10px",
+  background: "var(--bg)",
+};
+
+const snippetStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  margin: 0,
+  padding: "6px 8px",
+  borderRadius: 4,
+  background: "var(--bg-inset, var(--bg-soft))",
+  border: "1px solid var(--border)",
+  fontSize: 11.5,
+  lineHeight: 1.5,
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+  maxHeight: 160,
+  overflowY: "auto",
+};
+
+const lineNumberStyle: React.CSSProperties = {
+  flex: "0 0 auto",
+  color: "var(--fg-subtle)",
+  fontVariantNumeric: "tabular-nums",
+  userSelect: "none",
+};
+
+const descriptionStyle: React.CSSProperties = {
+  marginTop: 4,
+  fontSize: 11.5,
+  lineHeight: 1.5,
+  color: "var(--fg-muted)",
+  whiteSpace: "pre-wrap",
 };
 
 const thStyle: React.CSSProperties = {

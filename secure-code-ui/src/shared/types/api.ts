@@ -229,6 +229,9 @@ export interface PrescanFindingItem {
   scanner_rule_id?: string | null;
   cwe?: string | null;
   cve_id?: string | null;
+  /** The exact source line the scanner points at. */
+  vulnerable_snippet?: string | null;
+  language?: string | null;
 }
 
 export interface PrescanReviewResponse {

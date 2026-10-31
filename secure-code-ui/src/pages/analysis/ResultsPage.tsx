@@ -215,6 +215,7 @@ function prescanToFinding(item: PrescanFindingItem): Finding {
     remediation: "",
     confidence: "",
     source: item.source ?? undefined,
+    vulnerable_snippet: item.vulnerable_snippet ?? null,
     references: [],
     is_applied_in_remediation: false,
     disposition: "open",
@@ -665,6 +666,11 @@ const ResultsPage: React.FC = () => {
               }
               return null;
             })()}
+            {isPrescanBlocked && allFindings.length > 0 && (
+              <span className="chip chip-warn" title="Deterministic scanners only">
+                Deterministic findings only
+              </span>
+            )}
             <span style={{ color: "var(--fg)" }}>
               <strong>{allFindings.length}</strong> finding
               {allFindings.length === 1 ? "" : "s"}
@@ -788,6 +794,31 @@ const ResultsPage: React.FC = () => {
           </>
         }
       />
+
+      {/* A scan stopped at the prescan gate is not a failed scan. State exactly
+          what produced these findings and what never ran. */}
+      {isPrescanBlocked && (
+        <div
+          className="surface"
+          style={{
+            padding: "12px 16px",
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+            borderLeft: "3px solid var(--medium)",
+          }}
+        >
+          <Icon.Info size={15} style={{ marginTop: 1, color: "var(--medium)" }} />
+          <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
+            <strong>Stopped before LLM analysis.</strong> The{" "}
+            {allFindings.length} finding{allFindings.length === 1 ? "" : "s"} below
+            came from the deterministic scanners (Bandit, Semgrep, Gitleaks, OSV) and
+            are complete for what they cover. No LLM review, cross-file validation,
+            exploit reasoning or fix generation was run — severity, remediation and
+            confidence reflect the scanners alone.
+          </div>
+        </div>
+      )}
 
       {/* summary strip */}
       <div

@@ -25,7 +25,7 @@ from app.infrastructure.database.repositories.approval_gate_repo import (
     ApprovalGateRepository,
 )
 from app.infrastructure.database.repositories.scan_task_repo import ScanTaskRepository
-from app.shared.lib.files import get_language_from_filename
+from app.shared.lib.files import get_language_from_filename, source_line_at
 from app.shared.lib.risk_score import compute_cvss_aggregate, scoreable_findings
 from app.shared.lib.risk_severity import risk_severity_for_score
 from app.shared.lib.scan_visibility import can_view_scan
@@ -185,6 +185,67 @@ class ScanQueryService:
         payload = await ScannerCoverageRepository(self.repo.db).manifest(scan_id)
         return api_models.ScannerCoverageManifestResponse.model_validate(payload)
 
+    @staticmethod
+    def _deterministic_only_report(
+        scan: db_models.Scan, original_code_map: Dict[str, str]
+    ) -> "api_models.SummaryReportResponse":
+        """Build a results payload for a scan that never reached the LLM phase."""
+        grouped: Dict[str, List[db_models.Finding]] = {}
+        for finding in scan.findings:
+            grouped.setdefault(finding.file_path, []).append(finding)
+
+        severity_counts: Dict[str, int] = {}
+        known = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL"}
+        for finding in scan.findings:
+            key = (finding.severity or "INFORMATIONAL").strip().upper()
+            if key not in known:
+                key = "INFORMATIONAL"
+            severity_counts[key] = severity_counts.get(key, 0) + 1
+
+        def _payload(finding: db_models.Finding) -> api_models.VulnerabilityFindingResponse:
+            payload = api_models.VulnerabilityFindingResponse.from_orm(finding)
+            if not payload.vulnerable_snippet:
+                # Rows persisted before scanners carried snippets still deserve a
+                # code anchor, otherwise the operator sees "line 42" and nothing else.
+                payload.vulnerable_snippet = source_line_at(
+                    original_code_map.get(finding.file_path), finding.line_number
+                )
+            return payload
+
+        files_analyzed = [
+            api_models.SubmittedFileReportItem(
+                file_path=file_path,
+                findings=[
+                    _payload(finding)
+                    for finding in sorted(rows, key=lambda f: f.line_number or 0)
+                ],
+                language=get_language_from_filename(file_path),
+            )
+            for file_path, rows in sorted(grouped.items())
+        ]
+
+        active = scoreable_findings(scan.findings)
+        score = compute_cvss_aggregate(active, scan_id=str(scan.id)) if active else 0.0
+
+        return api_models.SummaryReportResponse(
+            submission_id=scan.id,
+            project_id=scan.project_id,
+            project_name=scan.project.name if scan.project else "N/A",
+            scan_type=scan.scan_type,
+            selected_frameworks=scan.frameworks or [],
+            analysis_timestamp=scan.completed_at or scan.updated_at,
+            summary=api_models.SummaryResponse(
+                total_findings_count=len(scan.findings),
+                files_analyzed_count=len(files_analyzed),
+                severity_counts=api_models.SeverityCountsResponse(**severity_counts),
+            ),
+            overall_risk_score=api_models.OverallRiskScoreResponse(
+                score=score, severity=risk_severity_for_score(score)
+            ),
+            files_analyzed=files_analyzed,
+            remediation=None,
+        )
+
     async def get_patch_plan(
         self,
         scan_id: uuid.UUID,
@@ -302,6 +363,15 @@ class ScanQueryService:
                 }
 
         summary_report_response = None
+        if not scan.summary and scan.findings:
+            # The scan stopped before report generation (operator clicked Stop on the
+            # prescan card, or the safety guard blocked it). The deterministic
+            # findings are already persisted and are the whole result — render them
+            # instead of showing an empty page. Nothing here is synthesized: every
+            # row comes from the findings table.
+            summary_report_response = self._deterministic_only_report(
+                scan, original_code_map or {}
+            )
         if scan.summary:
             files_analyzed_map: Dict[str, api_models.SubmittedFileReportItem] = {}
 

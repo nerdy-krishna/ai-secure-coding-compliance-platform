@@ -125,3 +125,14 @@ def looks_binary(content: bytes) -> bool:
     except UnicodeDecodeError:
         printable = sum(1 for byte in sample if 32 <= byte < 127 or byte in (9, 10, 13))
         return printable / len(sample) < _PRINTABLE_FLOOR
+
+
+def source_line_at(body: Optional[str], line_number: Optional[int]) -> Optional[str]:
+    """Return the stripped source line at a 1-based line number, if available."""
+    if not body or not line_number or line_number < 1:
+        return None
+    lines = body.splitlines()
+    if line_number > len(lines):
+        return None
+    snippet = lines[line_number - 1].strip()
+    return snippet[:500] if snippet else None
