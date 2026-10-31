@@ -2548,13 +2548,15 @@ const DispositionHistory: React.FC<{
         </div>
       )}
 
-      {/* What the scanners actually read, and why anything was left out. */}
-      {scanId ? <ScanCoveragePanel scanId={scanId} /> : null}
+      {/* These sit inside the findings grid; span every column so they read as
+          full-width sections instead of a card squeezed into the detail column. */}
+      <div style={{ gridColumn: "1 / -1" }}>
+        {/* What the scanners actually read, and why anything was left out. */}
+        {scanId ? <ScanCoveragePanel scanId={scanId} /> : null}
 
-      {/* Findings debug panel — agent-quality troubleshooting */}
-      {scanId ? (
-        <FindingsDebugPanel scanId={scanId} />
-      ) : null}
+        {/* Findings debug panel — agent-quality troubleshooting */}
+        {scanId ? <FindingsDebugPanel scanId={scanId} /> : null}
+      </div>
     </div>
   );
 };
