@@ -92,12 +92,26 @@ function frameworkLabel(slug: string): string {
  *  stats, in the Models section of the same card. */
 const scanFacts = (
   data: ScanResultResponse,
+  scanId?: string,
 ): { label: string; value: React.ReactNode }[] => {
   const report = data.summary_report;
   const frameworks = report?.selected_frameworks ?? [];
   const temps = data.stage_temperatures;
   const stats = data.consolidation_stats;
+  const models = (data.llms_used ?? []).filter((m) =>
+    ["reasoning llm", "utility llm", "secondary reasoning llm"].includes(
+      m.category.toLowerCase(),
+    ),
+  );
   return [
+    {
+      label: "Scan ID",
+      value: (
+        <span className="mono" style={{ fontSize: 11.5, wordBreak: "break-all" }}>
+          {scanId ?? data.summary_report?.submission_id ?? "—"}
+        </span>
+      ),
+    },
     {
       label: "Source",
       value:
@@ -157,6 +171,18 @@ const scanFacts = (
           },
         ]
       : []),
+    ...models.map((model) => ({
+      label: model.category,
+      value: (
+        <>
+          {model.name}
+          <span className="mono" style={{ color: "var(--fg-muted)" }}>
+            {" · "}
+            {model.provider}/{model.model_name}
+          </span>
+        </>
+      ),
+    })),
   ];
 };
 
@@ -307,25 +333,6 @@ const ResultsPage: React.FC = () => {
     () => allFindings.filter((f) => !!f.fixes?.code).length,
     [allFindings],
   );
-
-  // Per-reasoning-LLM finding tally — keyed by the LLM config name the
-  // worker stamped onto each finding's `detected_by_llms` (#94). Drives
-  // the per-model stats in the "Models used" card.
-  const llmFindingStats = useMemo(() => {
-    const map: Record<
-      string,
-      { count: number; sev: Record<string, number> }
-    > = {};
-    for (const f of allFindings) {
-      for (const llm of f.detected_by_llms ?? []) {
-        const entry = map[llm] ?? (map[llm] = { count: 0, sev: {} });
-        entry.count += 1;
-        const s = (f.severity || "").toUpperCase();
-        entry.sev[s] = (entry.sev[s] ?? 0) + 1;
-      }
-    }
-    return map;
-  }, [allFindings]);
 
   // All submitted files — used by FileTree and the full-diff panel.
   const allFiles = useMemo<SubmittedFile[]>(() => {
@@ -627,30 +634,10 @@ const ResultsPage: React.FC = () => {
                 Deterministic findings only
               </span>
             )}
-            <span style={{ color: "var(--fg)" }}>
-              <strong>{allFindings.length}</strong> finding
-              {allFindings.length === 1 ? "" : "s"}
-            </span>
             {fixesReady > 0 && (
               <span className="chip chip-ai">
                 <Icon.Sparkle size={10} /> {fixesReady} AI fix
                 {fixesReady === 1 ? "" : "es"} ready
-              </span>
-            )}
-            {scanId && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  color: "var(--fg-muted)",
-                }}
-              >
-                Scan{" "}
-                <span className="mono" style={{ fontSize: 11 }}>
-                  {scanId}
-                </span>
-                <CopyButton value={scanId} title="Copy scan ID" />
               </span>
             )}
           </>
@@ -851,140 +838,37 @@ const ResultsPage: React.FC = () => {
           panel at the very bottom of the page. Models appear only here, with
           their per-model finding stats, so there is no second list to drift. */}
       <div className="sccap-card" style={{ display: "grid", gap: 18 }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-            gap: 20,
-            alignItems: "start",
-          }}
-        >
-          <section>
-            <SectionLabel>Scan information</SectionLabel>
-            <div style={{ display: "grid", gap: 8 }}>
-              {scanFacts(data).map((fact) => (
-                <div
-                  key={fact.label}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "132px minmax(0, 1fr)",
-                    gap: 10,
-                    fontSize: 12.5,
-                    alignItems: "baseline",
-                  }}
-                >
-                  <span style={{ color: "var(--fg-subtle)" }}>{fact.label}</span>
-                  <span style={{ color: "var(--fg)", wordBreak: "break-word" }}>
-                    {fact.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Hidden when the LLM phase never ran: listing configured models
-              with zero findings implies they reviewed this scan, which they
-              did not. */}
-          {!isPrescanBlocked && data.llms_used && data.llms_used.length > 0 && (
-            <section>
-              <SectionLabel>Models used</SectionLabel>
-              <div style={{ display: "grid", gap: 8 }}>
-                {data.llms_used.map((m) => {
-                  const stats = llmFindingStats[m.name];
-                  const rowBody = (
-                    <>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <span
-                          style={{
-                            display: "block",
-                            fontSize: 9.5,
-                            textTransform: "uppercase",
-                            letterSpacing: ".06em",
-                            color: "var(--accent)",
-                            fontWeight: 700,
-                          }}
-                        >
-                          {m.category}
-                        </span>
-                        <span
-                          style={{
-                            display: "block",
-                            fontSize: 13.5,
-                            color: "var(--fg)",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {m.name}
-                        </span>
-                        <span
-                          className="mono"
-                          style={{
-                            display: "block",
-                            fontSize: 10.5,
-                            color: "var(--fg-muted)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                          title={`${m.provider}/${m.model_name}`}
-                        >
-                          {m.provider}/{m.model_name}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "flex-end",
-                          gap: 5,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {stats && (
-                          <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>
-                            <strong style={{ color: "var(--accent)", fontSize: 13 }}>
-                              {stats.count}
-                            </strong>{" "}
-                            finding{stats.count === 1 ? "" : "s"}
-                          </span>
-                        )}
-                        <Icon.ArrowR size={11} />
-                      </div>
-                    </>
-                  );
-                  const rowStyle: React.CSSProperties = {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    border: "1px solid var(--border)",
-                    borderRadius: 10,
-                    background: "var(--bg-soft)",
-                    padding: "9px 12px",
-                  };
-                  return stats ? (
-                    <button
-                      key={m.category}
-                      type="button"
-                      title={`View ${m.name} interactions in Scan Logs`}
-                      onClick={() =>
-                        navigate(
-                          `/scans/${scanId}/diagnostics?model=${encodeURIComponent(m.name)}`,
-                        )
-                      }
-                      style={{ all: "unset", ...rowStyle, cursor: "pointer" }}
-                    >
-                      {rowBody}
-                    </button>
-                  ) : (
-                    <div key={m.category} style={rowStyle}>
-                      {rowBody}
-                    </div>
-                  );
-                })}
+        <section>
+          <SectionLabel>Scan information</SectionLabel>
+          {/* One definition list in two columns. Models are facts about the
+              scan, not a separate widget: same format, same grid, no drilling. */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: "9px 32px",
+            }}
+          >
+            {scanFacts(data, scanId).map((fact) => (
+              <div
+                key={fact.label}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "128px minmax(0, 1fr)",
+                  gap: 10,
+                  fontSize: 12.5,
+                  alignItems: "baseline",
+                  minWidth: 0,
+                }}
+              >
+                <span style={{ color: "var(--fg-subtle)" }}>{fact.label}</span>
+                <span style={{ color: "var(--fg)", wordBreak: "break-word" }}>
+                  {fact.value}
+                </span>
               </div>
-            </section>
-          )}
-        </div>
+            ))}
+          </div>
+        </section>
 
         {/* What the scanners actually read, and why anything was left out. */}
         {scanId ? <ScanCoveragePanel scanId={scanId} embedded /> : null}

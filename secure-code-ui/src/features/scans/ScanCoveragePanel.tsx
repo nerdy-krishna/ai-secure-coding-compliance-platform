@@ -77,7 +77,10 @@ function fold(entries: CoverageEntry[]): FileRow[] {
       existing.reason = entry.reason;
     }
   }
-  return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path));
+  return [...byPath.values()].sort((a, b) => {
+    if (a.scanned !== b.scanned) return a.scanned ? -1 : 1;
+    return a.path.localeCompare(b.path);
+  });
 }
 
 /**
@@ -90,7 +93,7 @@ export const ScanCoveragePanel: React.FC<{ scanId: string; embedded?: boolean }>
   embedded = false,
 }) => {
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<"all" | "scanned" | "excluded">("excluded");
+  const [filter, setFilter] = useState<"all" | "scanned" | "excluded">("all");
   const query = useQuery({
     queryKey: ["scan-coverage", scanId],
     queryFn: () => getScannerCoverage(scanId),
@@ -159,18 +162,18 @@ export const ScanCoveragePanel: React.FC<{ scanId: string; embedded?: boolean }>
       {open && (
         <>
           <div className="coverage-filters">
-            {(["excluded", "scanned", "all"] as const).map((value) => (
+            {(["all", "scanned", "excluded"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
                 className={`sccap-btn sccap-btn-sm${filter === value ? " sccap-btn-primary" : ""}`}
                 onClick={() => setFilter(value)}
               >
-                {value === "excluded"
-                  ? `Excluded (${excluded.length})`
+                {value === "all"
+                  ? `All (${rows.length})`
                   : value === "scanned"
                     ? `Scanned (${scanned.length})`
-                    : `All (${rows.length})`}
+                    : `Excluded (${excluded.length})`}
               </button>
             ))}
           </div>
