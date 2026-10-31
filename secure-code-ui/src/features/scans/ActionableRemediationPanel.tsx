@@ -70,9 +70,12 @@ export const ActionableRemediationPanel: React.FC<{
   );
   const plannedFileCount = files.filter((file) => file.status === "planned").length;
   const manualFileCount = files.filter((file) => file.status === "manual_review_required").length;
-  const heading = files.length === 0
-    ? "No actionable patch was persisted"
-    : mode === "SUGGEST"
+  if (mode === "AUDIT" || !patchPlan || files.length === 0) {
+    // Nothing to show for this finding — render nothing rather than an
+    // explanatory empty box ("No actionable patch was persisted").
+    return null;
+  }
+  const heading = mode === "SUGGEST"
     ? plannedFileCount === 0
       ? "Manual review required · no validated patch"
       : manualFileCount > 0
@@ -84,10 +87,6 @@ export const ActionableRemediationPanel: React.FC<{
         ? "Partial remediation · review remaining files"
         : "Persisted remediation evidence";
 
-  if (mode === "AUDIT" || !patchPlan) {
-    // No patch to show: render nothing rather than an explanatory empty box.
-    return null;
-  }
 
   return (
     <section className="sccap-card" data-testid="actionable-remediation" style={{ display: "grid", gap: 12 }}>
