@@ -42,6 +42,15 @@ function decodeEntities(value?: string | null): string {
   return value.replace(/&(?:amp|lt|gt|quot|apos|nbsp|#x27|#39);/g, (m) => ENTITIES[m] ?? m);
 }
 
+/**
+ * Scanner descriptions arrive as HTML-escaped prose with hard-wrapped lines, which
+ * produced dangling quotes and a stray "Go Back" line in the table. Decode, then
+ * collapse all whitespace so it reads as one paragraph.
+ */
+function prose(value?: string | null): string {
+  return decodeEntities(value).replace(/\s+/g, " ").trim();
+}
+
 /** Tail of a path, so it stays on one line: `…/src/app/App.tsx`. */
 function shortPath(path: string): string {
   const parts = path.split("/");
@@ -254,13 +263,11 @@ export const PrescanReviewCard: React.FC<Props> = ({
                     {f.vulnerable_snippet && (
                       <pre style={snippetStyle}>
                         <span style={lineNumberStyle}>{f.line_number ?? ""}</span>
-                        <code>{decodeEntities(f.vulnerable_snippet)}</code>
+                        <code>{f.vulnerable_snippet}</code>
                       </pre>
                     )}
                     {f.description && (
-                      <div style={descriptionStyle}>
-                        {decodeEntities(f.description)}
-                      </div>
+                      <div style={descriptionStyle}>{prose(f.description)}</div>
                     )}
                   </td>
                 </tr>

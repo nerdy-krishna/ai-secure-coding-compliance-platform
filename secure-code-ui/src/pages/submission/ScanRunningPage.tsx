@@ -1445,7 +1445,7 @@ const ScanRunningPage: React.FC = () => {
             }
           >
             {!isTerminal ? (
-              isWaitingStatus(status) ? "Awaiting your review" : "Scanning…"
+              "View results"
             ) : (
               <>
                 View results <Icon.ArrowR size={12} />
@@ -1649,7 +1649,7 @@ const ScanRunningPage: React.FC = () => {
                           }}
                         />
                       ) : state === "paused" ? (
-                        <Icon.Hourglass size={12} />
+                        <StageIcon name={s.icon} size={13} />
                       ) : (
                         <StageIcon name={s.icon} size={14} />
                       )}
