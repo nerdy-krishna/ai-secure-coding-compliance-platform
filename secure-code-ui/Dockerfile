@@ -11,21 +11,18 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install deps first for layer-cache stability. `--include=dev` is explicit:
-# `tsc` and vite live in devDependencies, and an inherited `NODE_ENV=production`
-# or a `npm config omit=dev` would otherwise install a tree that cannot build.
-COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --include=dev --no-audit --no-fund
-
-# Fail here, with an explanation, instead of three steps later with
-# "sh: tsc: not found" — which is what an npm tree without devDependencies (or a
-# broken node_modules/.bin/tsc symlink copied in from the build context) looks
-# like from the outside.
-RUN test -x node_modules/.bin/tsc \
-    || { echo "ERROR: node_modules/.bin/tsc is missing after npm ci."; \
-         echo "       The install skipped devDependencies. Check for NODE_ENV=production,"; \
-         echo "       npm_config_omit=dev, or a node_modules/.bin left in the build context."; \
-         exit 1; }
+# Install dependencies for the build.
+#
+# `tsc` and vite live in devDependencies. NODE_ENV=production, npm_config_omit or a
+# cached layer from an earlier build can each drop them, and `--include=dev` alone
+# does not win because npm gives --omit precedence over --include. The variables
+# are cleared for the install, and docker-build-install.sh verifies the result
+# instead of trusting it. Changing this command also changes the layer cache key,
+# so a poisoned npm ci layer is never silently reused.
+COPY package.json package-lock.json docker-build-install.sh ./
+RUN --mount=type=cache,target=/root/.npm \
+    env -u NODE_ENV -u npm_config_omit -u npm_config_production -u npm_config_only \
+    sh ./docker-build-install.sh
 
 COPY . .
 
