@@ -61,7 +61,7 @@ services:
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: 127.0.0.1:24224
         tag: docker.app.{{.Name}}
         fluentd-async: "true"
         fluentd-retry-wait: "1s"
@@ -97,7 +97,7 @@ services:
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: 127.0.0.1:24224
         tag: docker.db.{{.Name}}
         fluentd-async: "true"
         fluentd-retry-wait: "1s"
@@ -253,7 +253,7 @@ services:
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: 127.0.0.1:24224
         tag: docker.worker.{{.Name}}
         fluentd-async: "true"
         fluentd-retry-wait: "1s"
@@ -269,10 +269,17 @@ services:
   pentest-engine:
     restart: unless-stopped
     profiles: ["pentesting-v5"]
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+      fluentd:
+        condition: service_healthy
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: 127.0.0.1:24224
         tag: docker.pentest.{{.Name}}
     build:
       context: .
@@ -300,19 +307,19 @@ services:
     tmpfs:
       - /tmp:size=2147483648,mode=1777
       - /work:size=2147483648,mode=0777
-    depends_on:
-      db: {condition: service_healthy}
-      app: {condition: service_started}
     networks:
       - scpnetwork
       - pentest-egress
     command: ["python", "-m", "app.pentest.engine"]
 
   patch-validator:
+    depends_on:
+      fluentd:
+        condition: service_healthy
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: 127.0.0.1:24224
         tag: docker.validator.{{.Name}}
     build:
       context: .
@@ -678,7 +685,7 @@ services:
     logging:
       driver: "fluentd"
       options:
-        fluentd-address: localhost:24224
+        fluentd-address: 127.0.0.1:24224
         tag: docker.ui.{{.Name}}
         fluentd-async: "true"
         fluentd-retry-wait: "1s"
