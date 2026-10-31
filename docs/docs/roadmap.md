@@ -48,7 +48,8 @@ was deleted; ADR-029 is authoritative.
 | --- | --- |
 | Run orchestration | One engine container polling PostgreSQL; no broker, outbox, signed task, lease or checkpointer; one run at a time; pause/resume/stop honoured inside in-flight model calls and subprocesses |
 | Reconnaissance | Evasive 1 s-spaced pass: HTTP probe, technology fingerprint, TLS, nmap top-1000, directory crawl |
-| Attack-surface discovery | Subdomain enumeration across six passive indexes plus rate-limited DNS brute-force and dangling-CNAME takeover checks; OpenAPI/Swagger parsing; GraphQL introspection; JavaScript bundle mining for endpoints, parameters, source maps and secrets |
+| Attack-surface discovery | Subdomain enumeration across six passive indexes plus rate-limited DNS brute-force and dangling-CNAME takeover checks; vhost and S3-bucket enumeration (gobuster); OpenAPI/Swagger parsing; GraphQL introspection; JavaScript bundle mining for endpoints, parameters, source maps and secrets |
+| Scanner coverage | Every installed scanner is a tool: nmap, nuclei, ZAP, sqlmap, ffuf, gobuster (vhost/DNS/S3), whatweb product/version fingerprinting, hydra credential attacks, hashcat hash cracking, plus the Playwright browser |
 | Scope | Registrable-domain derivation, in-scope subdomains accepted, everything else refused; private/loopback destinations refused |
 | Model loop | Structured `NextAction` per turn (1–4 parallel tool calls, claimed leads, new leads, negative conclusions); normalised probe de-duplication; stuck-loop detection |
 | Lead ledger | Persistent `pentest_leads` queue with priority bands; claims on test; failed probes returned to the queue; `done` refused while testable leads remain |
