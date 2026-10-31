@@ -832,7 +832,7 @@ _is_production = str(getattr(settings, "ENVIRONMENT", "")).lower() == "productio
 app = FastAPI(
     title="SCCAP API",
     version="0",
-    description="API for SCCAP — the Secure Coding & Compliance Automation Platform. Provides analysis, remediation, and compliance features.",
+    description="API for SCCAP — the Secure Coding Compliance and Pentesting. Provides analysis, remediation, and compliance features.",
     lifespan=_combined_lifespan,
     docs_url=None if _is_production else "/docs",
     redoc_url=None if _is_production else "/redoc",

@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "secure_coding_platform"
 version = "0.1.0"
-description = "SCCAP — Secure Coding & Compliance Automation Platform. Open-source AI-powered code auditing, remediation, and compliance tooling."
+description = "SCCAP — Secure Coding Compliance and Pentesting. Open-source, AI-assisted code auditing, remediation, compliance evidence, and autonomous penetration testing."
 authors = ["dev@nerdykrishna.com"]
 license = "Apache-2.0"
 readme = "README.md"

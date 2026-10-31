@@ -99,7 +99,7 @@ const AuthLayout: React.FC<AuthLayoutProps> = ({ children }) => {
             fontSize: 11.5,
           }}
         >
-          SCCAP · Secure Coding & Compliance Automation
+          SCCAP · Secure Coding Compliance and Pentesting
         </div>
       </div>
     </div>

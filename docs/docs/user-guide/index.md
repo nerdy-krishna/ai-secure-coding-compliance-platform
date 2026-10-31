@@ -31,5 +31,5 @@ see everything.
 All admin surfaces are superuser-gated server-side. A single
 `AdminSubNav` strip in the `DashboardLayout` makes every admin page
 one click apart. See the
-[Platform Features → Admin console](../overview/features.md#admin-console)
+[Platform Features → Admin console](../overview/features.md#administration)
 section for the full index.

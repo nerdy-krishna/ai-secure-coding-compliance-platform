@@ -1,6 +1,6 @@
 # SCCAP Architecture Diagrams
 
-**SCCAP — Secure Coding & Compliance Automation Platform**
+**SCCAP — Secure Coding Compliance and Pentesting**
 
 This directory contains the canonical, end-to-end architecture diagrams for SCCAP. Every functional capability in the platform — from raw source-code ingestion to final compliance report — is covered.
 

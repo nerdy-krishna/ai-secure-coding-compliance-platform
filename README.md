@@ -1,243 +1,184 @@
-# SCCAP — Secure Coding & Compliance Automation Platform
+# SCCAP — Secure Coding Compliance and Pentesting
 
-An open-source, AI-powered platform that helps developers and security
-teams audit code for vulnerabilities and apply intelligent
-remediations. SCCAP follows an **"Audit-First, Remediate-Intelligently"**
-approach: every scan runs a cheap deterministic pass, profiles each
-file, surfaces explicit cost estimates, and waits for your approval at
-each gate before spending on the deep analysis. Remediation is a
-separate, opt-in step.
+An open-source platform that audits your source code against OWASP frameworks, proves
+what it reports, and then attacks the deployed application — on one installation, with
+one login.
 
-## Key Features
+Two independent engines share a tenant, a user model and a reporting layer:
 
-### For developers and security users
-- **Live dashboard** — risk ring, severity breakdown, 14-day scan
-  trend, fixes-ready counter, and monthly LLM spend, all driven by real
-  data (no placeholders). Admins see a platform-wide snapshot variant.
-- **Versatile submission** — upload individual files, pick a Git
-  repository URL, or drop in a `.zip` / `.tar.gz` archive. GitHub
-  repos are previewed via the GitHub API (no clone required for
-  source-tree listing). The selective-files tree lets you exclude
-  what you don't want analyzed.
-- **Gated, user-approved scan** — the worker pauses the LangGraph
-  workflow with native `interrupt()`s at up to three gates: a
-  deterministic-prescan review, a profiling-cost approval, and the
-  deep-analysis cost approval. Nothing expensive runs without your
-  explicit OK.
-- **Per-file profiler + baseline-aware routing** — before analysis,
-  every file is profiled (summary, security-relevant operations,
-  applicable security domains) on a cheap *utility* model, with the
-  prompt grounded in the file's tree-sitter symbol index. Routing then
-  unions a deterministic, human-curated **per-language baseline** of
-  agents with the profiler's content picks — so an agent that should
-  always run for a language can never be silently dropped — and the
-  cost estimate reflects that routed set.
-- **Consolidated findings** — a reasoning-model consolidation pass
-  merges the raw per-agent findings into one root finding per real
-  issue: it leads with the root cause and fix, lists every affected
-  location, carries corroborating agents, and drops false positives
-  and noise. No more duplicate rows for the same bug.
-- **Opt-in cross-file validation** — enable it at submit time and each
-  eligible finding is re-judged against the code that calls and feeds
-  it across other files. The non-destructive verdict (`confirmed` /
-  `mitigated` / `unconfirmed` + a rationale) collapses upstream-
-  mitigated findings out of the default Results view and badges the
-  confirmed ones — no severity is ever changed.
-- **Downloadable findings report** — export any scan's findings as a
-  self-contained HTML page, a CSV (one row per finding), a paginated PDF,
-  or SARIF 2.1.0 for GitHub code scanning, straight from the Results page.
-- **Remediation scan mode** — choose `REMEDIATE` when submitting a
-  scan to have agents generate fixes during analysis, merge conflicting
-  edits, verify supported patches, and produce a downloadable patched
-  snapshot. Post-result selection and incremental apply are not yet
-  implemented.
-- **Projects page with per-project stats** — every card shows the
-  latest terminal scan's risk score, severity bar, and fixes-ready
-  count, no client-side heuristics.
-- **Global search** — one TopNav combobox searches projects, scans,
-  and findings simultaneously; scoped to what each user is allowed to
-  see.
-- **Security Advisor with a live context rail** — framework-scoped
-  chat against your RAG-ingested guidelines, with a right-hand rail
-  that surfaces the knowledge sources, referenced findings, and files
-  most likely discussed.
-- **Compliance page** — per-framework coverage card for each of the 8
-  bundled OWASP frameworks (ASVS, Proactive Controls, Cheatsheets, CWE
-  Essentials, ISVS, LLM Top 10, Agentic Top 10, MASVS) plus any custom
-  frameworks, with an AI-computed posture score.
-- **Multi-provider LLM support** — OpenAI, Anthropic, Google, DeepSeek,
-  xAI, and custom OpenAI-compatible endpoints. Each scan is configured with two slots: a *utility* (cheap)
-  model for profiling and verification, and a *reasoning* (capable)
-  model for analysis and consolidation, plus a per-stage temperature
-  (profiler / analysis / consolidation / merge) tunable at submit
-  time. API keys are Fernet-encrypted server-side.
-- **Dual-reasoning-LLM scans** — optionally add a *second* reasoning
-  LLM: every analysis agent then runs on both models and the findings
-  union, so a vulnerability one model misses the other may catch. Each
-  finding records which model(s) detected it. The second model takes
-  its own analysis temperature, so "same model, two temperatures" is a
-  valid diversity strategy. You can also disable the temperature
-  setting entirely and let each model run at its provider default.
-- **Durable tasks & resume/restart** — every analysis and consolidation
-  invocation is persisted as a durable scan task keyed by input hash.
-  Failed or interrupted scans can be manually **resumed** (reuses
-  completed durable work) or **restarted** (discards partial
-  artifacts, reruns from the original snapshot), preserving full
-  audit history either way.
-- **File classification & vendor/minified policy** — every submitted
-  file is deterministically classified before analysis. Vendor,
-  minified, and static assets skip expensive LLM profiling and full
-  agent routing by default while keeping cheap SAST checks active.
-  An advanced **deep vendor scan** option gives full LLM inspection
-  when needed, reflected in cost and time estimates.
-- **Per-config resilience controls** — scan LLM calls use a fixed
-  concurrency pool per configuration, per-config RPM/TPM budgets,
-  retry with jitter, and circuit breakers. Configured prompt-size caps
-  reject oversized calls; automatic prompt splitting/compaction is
-  planned rather than implemented.
+- **Code scanning** — deterministic SAST first (Bandit · Semgrep · Gitleaks · OSV), then
+  LLM agents over the files that matter. Findings are consolidated to one root cause,
+  scored with CVSS 3.1, replayed for proof, and exported as HTML, PDF, CSV or SARIF.
+- **Pentesting** — an autonomous, scope-bounded engine that reconnoiters the attack
+  surface, drives real tools (nmap, nuclei, ZAP, sqlmap, ffuf, a Playwright browser,
+  whatweb, gobuster, hydra, hashcat) through a model-in-the-loop, chains findings into
+  exploit paths, and reports what it proved.
 
-### For security admins
-- **User Groups + scoped visibility** — an admin creates groups and
-  adds users by email; a regular user sees their own scans plus any
-  scan owned by a peer they share a group with. Admins see everything.
-- **Terminal-only first run** — `setup.sh` asks for the administrator
-  email/password, the LLM provider/model/key, the Grafana administrator
-  (when the log stack is on) and — for the custom variant — the feature
-  set. It bootstraps the superuser, LLM configuration, CORS allowlist and
-  feature flags before the UI is ever opened, so there is no second
-  in-browser setup step.
-- **Modular feature flags** — every optional surface (chat, compliance,
-  SSO, SCIM, multi-tenancy, the log stack, …) is a runtime flag. The
-  install variant seeds them; *Admin → Features* toggles them live, with
-  dependencies resolved automatically. See
-  [Modular Setup](docs/docs/architecture/modular-setup.md).
-- **Admin console** — LLM configurations, user groups, users,
-  frameworks (including CSV / git-URL RAG ingestion), agents, prompt
-  templates, system config, SMTP, and runtime logs. A shared Admin
-  sub-nav keeps every surface one click apart.
-- **Semgrep Rule Ingestion** — admins configure public git repos as
-  rule sources via a dedicated *Semgrep Rules* tab. Rules are stored in
-  Postgres; syncs run on demand or on a configurable cron schedule.
-  Semgrep runs exclusively on DB-ingested rules — no bundled pack. The
-  submission page shows a live Scan Readiness panel; if no rules cover
-  the detected languages, a single-step wizard prompts the admin to
-  enable a source before submitting.
-- **Encrypted secrets** — every LLM API key and SMTP password is
-  Fernet-encrypted at rest with the installation's `ENCRYPTION_KEY`.
+The design rule throughout: **nothing is claimed that was not observed**. A clean report
+says what was scanned and what was skipped; a finding says which scanner or agent
+produced it, at which line, verified how.
 
-### Pentesting (opt-in, feature-gated)
+## Table of contents
 
-A separately gated **pentesting engine** runs authorized black-box, gray-box and
-white-box assessments without ever mutating the Code Scan aggregate:
+- [What it looks like](#what-it-looks-like)
+- [Code scanning](#code-scanning)
+- [Pentesting](#pentesting)
+- [Findings, evidence and reports](#findings-evidence-and-reports)
+- [Administration, tenancy and identity](#administration-tenancy-and-identity)
+- [Integrations and observability](#integrations-and-observability)
+- [Installation](#installation)
+- [Upgrading, rolling back, uninstalling](#upgrading-rolling-back-uninstalling)
+- [First run](#first-run)
+- [Stack](#stack)
+- [Development](#development)
+- [License](#license)
 
-- **Discovery first** — evasive, rate-limited reconnaissance followed by attack-surface
-  expansion: subdomain enumeration (six passive indexes plus DNS brute-force and
-  dangling-CNAME takeover checks), OpenAPI/Swagger and GraphQL schema discovery, and
-  JavaScript bundle mining for endpoints, parameters, source maps and secrets.
-- **Model-driven exploitation** — the model drives nmap, nuclei, ZAP, sqlmap, ffuf and a
-  real Playwright browser one turn at a time, sees every result, and adapts. Probes are
-  de-duplicated, so it works the surface instead of circling it.
-- **Persistent lead queue** — every observation becomes a queued lead with a priority
-  band, claimed as it is tested. The queue, not the conversation, decides when the run
-  is finished, so pausing, resuming or restarting never loses work.
+## What it looks like
+
+| Surface | What it does |
+|---|---|
+| **Dashboard** | Two sections — Code Scanning and Pentesting. Projects, scans/assessments, findings, tokens in/out and estimated spend, then product-specific tiles. |
+| **Projects & Scans** | Every project with its latest terminal scan, risk score and severity bar. Scans open into the results page. |
+| **New Scan** | Upload files, paste code, drop an archive (`.zip`/`.tar.gz`/`.rar`) or point at a GitHub/GitLab/Bitbucket repository. Choose frameworks, models, and which scanners and tools may run. |
+| **Results** | Risk score, scan information, file coverage, findings tree and detail with code, triage disposition, and per-finding consolidation evidence. |
+| **Pentesting** | Three pages: launch an engagement, browse projects and assessments, review history. A live cockpit per run shows the event stream, findings as they land and the browser frame. |
+| **Compliance** | Per-framework coverage for the 8 bundled OWASP frameworks plus custom frameworks, with document counts from the RAG store. |
+| **Security Advisor** | Framework-scoped chat grounded in ingested guidelines, with a context rail of the sources it used. |
+
+## Code scanning
+
+**Submission and ingestion.** Uploads, pasted code, archives and clones all pass through
+one ingest manifest: paths are normalised, duplicates collapsed, per-file and total size
+caps applied, and binaries, empty files and unsupported types recorded with a reason
+instead of vanishing. A submission whose every file would be skipped is refused up front
+with the breakdown rather than producing an empty scan.
+
+**File classification by evidence, not by path.** Every file is classified as first-party
+source, vendored library, generated artefact, runtime file, lockfile, empty or binary. The
+decision is evidence-based: a hand-written module inside `build/` is still first-party, and
+a `@generated` file outside it is still generated. Vendored and generated files get a
+secrets scan and nothing more unless you enable **Scan vendor and generated files too**.
+
+**Language and scanner capability in one table.** ~50 languages plus filename rules
+(`Dockerfile`, `Makefile`, `Jenkinsfile`, `requirements.txt`, `go.mod`, `.env*`, `*.d.ts`)
+resolve to a language and the scanners that can read it. Semgrep rule selection reads the
+same table, so a Kotlin or Rust repository is covered rather than silently skipped.
+
+**Three human gates, all optional to pass through.** A scan pauses at
+`PENDING_PRESCAN_APPROVAL` with the deterministic findings, at
+`PENDING_PROFILING_APPROVAL` with a profiling-cost estimate, and at
+`PENDING_COST_APPROVAL` with the deep-analysis estimate. Each gate can be approved,
+stopped, or left; nothing expensive runs without an explicit decision.
+
+**Stopping is a first-class outcome.** Pressing Stop at the pre-LLM gate records
+`STOPPED_BEFORE_LLM`: the deterministic findings are kept, the results page renders them
+with a banner stating that no LLM review, cross-file validation or fix generation ran, and
+the duration reported is the time the scan actually worked — not the time it waited for
+you.
+
+**Analysis.** Specialised agents run per file under a fixed per-configuration concurrency
+pool with RPM/TPM budgets, retry with jitter and circuit breakers. Each invocation is a
+durable task keyed by input hash, so a resumed scan reuses completed work. An optional
+second reasoning model runs every agent twice and unions the findings.
+
+**Consolidation and proof.** A per-file reasoning pass merges same-root-cause findings, and
+a deterministic global pass merges cross-file duplicates. Every finding carries a stable
+fingerprint, a CVSS 3.1 score derived from its CWE/reach/authentication, a confirmation
+status from a deterministic replay (curl reproduction when one exists), and its
+contributors — the raw findings and agents that argued for it, visible per finding.
+
+**Coverage you can audit.** The results page shows how many files were scanned, a per-file
+table of scanned and excluded files with the reason each was excluded, and a per-scanner,
+per-input coverage ledger. A zero-finding report distinguishes "the tools looked and found
+nothing" from "something did not run".
+
+## Pentesting
+
+Feature-gated (off by default; enabled during setup or with the `pentesting-v5` Compose
+profile). Authorised black-box, grey-box and white-box assessment that never mutates the
+code-scan aggregate.
+
+- **Attack-surface discovery** — six passive subdomain indexes with retries and per-source
+  timeouts, DNS brute-forcing, dangling-CNAME takeover checks, OpenAPI/Swagger/GraphQL
+  discovery, and JavaScript bundle mining for endpoints, parameters, source maps and
+  secrets.
+- **Scope is the only limit** — the operator's origin plus the in-scope estate beneath its
+  registrable domain. Private and loopback destinations are refused, for raw-TCP tools by
+  resolving and refusing non-public addresses. There are no intensity, budget,
+  qualification or duration gates.
+- **Model-in-the-loop tools** — nmap, nuclei (full template library), ZAP active scan,
+  sqlmap, ffuf, whatweb, gobuster, a real Playwright browser, hydra and hashcat, driven one
+  turn at a time against de-duplicated probes.
+- **Persistent lead ledger** — every observation becomes a lead with a priority band,
+  claimed as it is tested. The ledger, not the conversation, decides when a run is done, so
+  pause/resume/restart never loses work.
 - **Observations are findings** — ports, technologies, endpoints, parameters and leaked
-  secrets are stored alongside weaknesses, because chaining needs them. A follow-up
-  pass chains findings into exploit paths.
-- **One scope guard** — the operator's origin plus the in-scope estate discovered
-  beneath its registrable domain; private and loopback destinations are refused. There
-  are no intensity, budget, qualification or duration gates.
-- **Live cockpit** — event stream including every prompt and tool action, live browser
-  frame, findings as they land, pause/resume/stop, and Markdown/JSON/HTML/PDF reports.
+  secrets are retained for chaining; a follow-up pass chains findings into exploit paths,
+  and a chain is only `confirmed` when a step demonstrated impact.
+- **Secret vault** — discovered credentials and keys are stored encrypted, masked
+  everywhere else, revealed only on explicit audited action, and reports are masked by
+  default (`&secrets=unmasked` for the full variant).
+- **Live cockpit** — event stream including prompts and tool actions, live browser frame,
+  findings as they land, pause/resume/stop, and Markdown/JSON/HTML/PDF reports.
+- **Recovery and schedules** — a heartbeat marks stale runs `interrupted` and can re-queue
+  them without losing findings; a run can be cloned on an interval (1 hour to 30 days) and
+  each clone reports what is new, resolved and still present versus its predecessor.
 
-Pentesting is off by default and enabled by choosing it during setup (or the
-`pentesting-v5` Compose profile). The engine runs as one container
-(`pentest-engine`). See `docs/docs/operations/pentesting-engine.md` and
-`docs/adr/029-pentesting-autonomous-engine.md`.
+Documents: [pentesting engine](docs/docs/operations/pentesting-engine.md) and
+[ADR-029](docs/adr/029-pentesting-autonomous-engine.md).
 
-### Integrations and automation
-- **MCP server** — the scan + advisor workflow is exposed as MCP tools
-  (`sccap_submit_scan`, `sccap_get_scan_status`,
-  `sccap_get_scan_result`, `sccap_approve_scan`,
-  `sccap_ask_advisor`) at `/mcp`, reusing JWT auth so Claude Code,
-  Cursor, or other agentic clients can drive the platform remotely.
-- **LiteLLM-backed cost ledger** — token counting and cost estimation
-  go through LiteLLM's community-maintained model price map, with an
-  admin override per `LLMConfiguration` row for bespoke endpoints.
-  Offline-pinnable via `LITELLM_LOCAL_MODEL_COST_MAP=True`.
-- **Pydantic AI structured output** — every agent returns a validated
-  Pydantic model; malformed outputs trigger a typed retry loop inside
-  the model call instead of a fragile regex fallback.
-- **Observability** — every request gets an `X-Correlation-ID`
-  attached to all logs; the stack ships Fluentd → Loki → Grafana
-  dashboards out of the box.
+## Findings, evidence and reports
 
-## How It Works
+- **Ranked, proven claims** — severity always follows the CVSS 3.1 band; a finding with no
+  deterministic replay is marked `needs_review` rather than promoted.
+- **One finding per root cause** — duplicates are merged with provenance
+  (`sources`, `reported_by`, corroborating evidence) and marked `duplicate` with a pointer
+  to the canonical row.
+- **Triage** — `open`, `confirmed`, `false positive`, `remediated`, `risk accepted`, with an
+  audited history per finding and bulk changes across a selection.
+- **Reports** — HTML, PDF, CSV and SARIF 2.1.0 rendered from the consolidated findings,
+  plus a raw **Scanner JSON** export: the unmodified per-scanner output with binary
+  versions and SHA-256, for audit rather than for reading.
+- **Evidence chain** — each finding records its attempt, fingerprint, exact ranges,
+  coverage entries and contributing raw findings.
 
-1. **Submit** code (upload, Git URL, or archive) and pick frameworks,
-   the two LLM slots (utility + reasoning), the per-stage temperatures,
-   and — optionally — a second reasoning LLM, cross-file finding
-   validation, or disabling the temperature setting altogether.
-2. **Pre-LLM scan** — deterministic SAST (Bandit · Semgrep · Gitleaks ·
-   OSV) builds a repo map + dependency graph and runs first. If it
-   finds anything the scan pauses at `PENDING_PRESCAN_APPROVAL` so you
-   can review the deterministic findings before any code is sent to an
-   LLM. Critical secrets need an explicit override to continue.
-3. **File classification** — every submitted file is deterministically
-   classified (first-party source, minified bundle, known/unknown
-   third-party vendor, generated asset, static asset). The resulting
-   policy skips LLM profiling and full agent routing for low-value
-   vendor/minified/static files by default while keeping Gitleaks active.
-   An advanced **deep vendor scan** option is available at submit time
-   for deeper inspection of vendor code.
-4. **Profiling gate** — the scan pauses at `PENDING_PROFILING_APPROVAL`
-   with a profiling-cost estimate. On approval, eligible files are
-   profiled on the utility model: a summary, its security-relevant
-   operations, and the security domains that apply to it.
-5. **Cost gate** — a dry run, scoped to each file's routed agent set
-   (the per-language baseline unioned with the profiler's picks),
-   produces the deep-analysis cost and estimated processing duration.
-   The scan pauses at `PENDING_COST_APPROVAL`. With a second reasoning
-   LLM configured the estimate is priced on both models, broken down
-   per LLM.
-6. **Approve** (or cancel) each gate in the UI. A live SSE stream
-   surfaces estimates and reconnects through token expiry; the worker
-   resumes the same LangGraph thread from the checkpoint.
-7. **Analyze** — specialized agents run in parallel under a fixed
-   per-LLM-configuration concurrency pool, bound by per-config RPM/TPM
-   limits and circuit breakers. Each analysis invocation is a
-   **durable task** persisted in a scan-scoped task ledger — if the
-   worker is interrupted, completed analysis chunks are reused on
-   resume rather than re-invoked. If a second reasoning LLM was
-   chosen, every agent runs on both models and the findings union.
-8. **Consolidate (per-file)** — a reasoning-model pass merges
-   same-root-cause findings per file into one root finding per real
-   issue and drops false positives and noise. Each finding records
-   which reasoning LLM(s) detected it. Per-file consolidation is also
-   a durable task, reusable on resume.
-9. **Global consolidation** — deterministic exact-field grouping
-   merges cross-file findings that share normalized source, CWE, title,
-   and remediation. Broader LLM-assisted root-cause clustering is not
-   yet implemented.
-10. **Cross-file validation (opt-in)** — if enabled at submit, each
-    eligible finding is re-judged against its cross-file callers and
-    inputs, attaching a non-destructive `confirmed` / `mitigated` /
-    `unconfirmed` verdict.
-11. **Review** findings in the Results page — both deterministic and
-    LLM-emitted, tagged by source — and download the report as HTML,
-    CSV, PDF, or SARIF 2.1.0.
-12. **Remediate** — scans submitted in `REMEDIATE` mode merge generated
-    fixes, verify supported patches, and save a patched tree for download.
-13. **Resume or restart** — failed scans (and eligible cancelled scans
-    with durable artifacts) can be manually resumed (reuses completed
-    durable work) or restarted (discards partial artifacts, reruns
-    from the original snapshot). Both preserve audit history.
+## Administration, tenancy and identity
 
-The full worker graph and state transitions live in
-[`.agent/scanning_flow.md`](.agent/scanning_flow.md).
+- **Groups and scoped visibility** — users see their own work plus that of peers in a
+  shared group; admins see everything. Every list endpoint enforces the same scope.
+- **Tenants** — platform or multi-tenant operation, with tenant-scoped data, credentials
+  and reports.
+- **SSO and SCIM** — OIDC/SAML sign-in and directory provisioning, with an auth audit trail
+  resolving usernames server-side.
+- **Identity and email** — SSO, SCIM and SMTP grouped in one admin area.
+- **Framework config** — standards, agents, prompt templates and CWE mappings.
+- **Semgrep config** — rule sources as git repositories with on-demand and scheduled syncs;
+  Semgrep runs only on ingested rules, and the submission page tells you when no rule
+  covers the detected languages.
+- **LLM configs, usage and spend** — per-configuration models, RPM/TPM budgets, price
+  overrides, and a usage/spend centre.
+- **Encrypted secrets** — LLM keys, SMTP passwords and tenant credentials are
+  envelope-encrypted at rest; nothing secret is stored plaintext.
+- **Platform and features** — runtime feature flags for every optional surface, with
+  dependencies resolved automatically.
+- **Audit** — scan events, LLM interactions, auth events and pentest run events all
+  retained and exportable.
+
+## Integrations and observability
+
+- **MCP server** at `/mcp` — submit scans, read status and results, approve gates and ask
+  the advisor from Claude Code, Cursor or any MCP client, over the same JWT auth.
+- **CI policy endpoints** — coverage and finding-governance gates with SARIF output, so a
+  pipeline can fail on a new high-severity finding or on degraded coverage.
+- **REST API** at `/api/v1` with OpenAPI docs, plus a generated frontend client contract.
+- **Observability** — `X-Correlation-ID` on every request, structured JSON logs, and an
+  optional Fluentd → Loki → Grafana stack with provisioned dashboards.
 
 ## Installation
 
-### Automatic setup (recommended)
+**Prerequisites:** Docker Engine with the Compose plugin, and Git. Nothing else — the UI is
+built inside its image, so Node.js and Python are not host requirements. Linux hosts get
+BBR and the firewall rules applied by the installer; Windows and macOS use Docker Desktop.
 
 ```bash
 git clone https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform.git
@@ -246,123 +187,89 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-The interactive script checks prerequisites, generates secrets, asks
-which **installation variant** to use, writes `.env` (including
-`SCCAP_VARIANT` and `COMPOSE_PROFILES`), builds + starts the compose
-stack, and runs Alembic migrations. The UI is built inside its Docker
-image — Node.js is not a host prerequisite. On Windows, run `setup.bat`
-from the project root. Re-running either installer after an upgrade preserves
-every non-placeholder secret and safely adds newly required values.
+The installer is terminal-first and resumable. It checks prerequisites, asks which
+**installation variant** to use, generates secrets, asks for the administrator
+email/password, the LLM provider/model/key, the domain (with optional Let's Encrypt
+provisioning) and, for the custom variant, the optional stacks and features. It then
+writes `.env`, builds and starts the stack, runs Alembic migrations and health-checks the
+API before printing the URL. On Windows run `setup.bat`.
 
-For a non-interactive upgrade, repair the existing file before the first
-Compose command:
+**Variants** — *Vibe coder* (scan, chat, compliance), *Developer* (adds users, groups,
+email, MCP, admin authoring), *Enterprise* (adds SSO, SCIM, multi-tenancy and the
+log stack), *Custom*. The variant seeds runtime feature flags and selects the Compose
+profiles; change them later under *Admin → Platform*. Pentesting is an extra opt-in asked
+during setup.
+
+Configuration bootstrap without the wizard (for pipelines):
 
 ```bash
 python3 scripts/bootstrap_env_secrets.py --env-file .env
 docker compose config --quiet
 ```
 
-The bootstrap writes `.env` atomically, applies mode `0600` where POSIX modes
-are available, and reports only how many values changed; it never prints
-generated values.
+Details: [installation guide](docs/docs/getting-started/installation.md),
+[configuration](docs/docs/getting-started/configuration.md) and
+[maintenance & uninstallation](docs/docs/getting-started/maintenance.md).
 
-### Installation variants
+## Upgrading, rolling back, uninstalling
 
-`setup.sh` asks which packaging variant to install:
+`setup.sh` owns the whole lifecycle. Every destructive step names what it deletes and asks
+you to type the action; `-y` skips the prompts.
 
-- **Vibe coder** — scan, chat, and compliance only; a single superuser.
-- **Developer** — adds multi-user accounts, groups, email, the MCP
-  surface, and admin authoring.
-- **Enterprise** — every feature, including SSO, SCIM, multi-tenancy,
-  and the log stack.
-- **Custom** — pick the optional container stacks in `setup.sh`, then the
-  individual features in `setup.sh`.
+| Command | Effect |
+|---|---|
+| `./setup.sh --update` | Pull the current branch, back up the database, rebuild, migrate and health-check in place. Keeps the previous images for rollback. |
+| `./setup.sh --rollback` | Return code **and** images to the state before the last `--update`. |
+| `./setup.sh --uninstall` | Stop and remove the stack. Volumes (database), `.env`, `.secrets/` and certificates are **kept** — re-running `./setup.sh` brings it back. |
+| `./setup.sh --purge` | Also drop the data volumes and the images built here. A `pg_dumpall` backup is written to `.purge-backups/` first. `.env`, `.secrets/` and `certbot/` survive. |
+| `./setup.sh --factory-reset` | Purge plus delete `.env`, `.secrets/` and `certbot/` state — a genuinely clean install, with a fresh certificate next time. |
+| `./setup.sh --repair-tls` | Re-create TLS material from `.env` when the UI reports `tls_cert_missing` or "connection closed". |
 
-The variant seeds a set of runtime feature flags and selects which
-optional container stacks boot (`COMPOSE_PROFILES`). Change features
-later under *Admin → Features*. See
-[Modular Setup](docs/docs/architecture/modular-setup.md).
+Teardown is verified rather than assumed: it force-removes containers left by an older
+profile generation and the networks they keep busy, and exits non-zero if anything of the
+project survives. Re-running the installer after `--uninstall` or `--purge` restores the
+stack from the preserved configuration, keeping every non-placeholder secret.
 
-### Manual setup
+## First run
 
-See the [Installation Guide](docs/docs/getting-started/installation.md)
-for the step-by-step path, including VPS-specific notes and
-troubleshooting.
-
-### Upgrading, uninstalling and clean reinstalls
-
-`setup.sh` takes no arguments for a normal install. It also manages teardown,
-and offers the same choices as a menu when it detects an existing installation:
-
-```bash
-./setup.sh                    # install, upgrade, or re-run setup
-./setup.sh --uninstall        # stop and remove the stack; data, .env, keys
-                              # and certificates are kept
-./setup.sh --purge            # also drop data volumes and the images built
-                              # from this checkout; a pg_dumpall backup is
-                              # written to .purge-backups/ first
-./setup.sh --factory-reset    # purge plus delete .env, .secrets/ and certbot/
-                              # — a true clean install (fresh certificate)
-```
-
-Add `-y` to skip the confirmation prompts (each level asks you to type the
-action name, and `--purge`/`--factory-reset` are not recoverable without the
-backup). Re-running `./setup.sh` after `--uninstall` or `--purge` brings the
-stack back using the preserved configuration.
-
-Teardown also force-removes what `docker compose down` cannot see — containers
-left by an overlay or an older profile generation, and the networks they keep
-busy (`Resource is still in use`) — and exits non-zero if anything of the
-project survives, so "teardown complete" always means it. Configuration written
-by a `sudo` run is handed back to the operating user, so a later non-root
-`./setup.sh` no longer fails with `open .../.env: permission denied`.
-
-Ownership is handled for you: `.env` and `.setup-stage` end up owned by the
-operating user (with `0600`/`0700` modes) even when the script runs under
-`sudo`, while container-writable paths (Let's Encrypt state, the pentest
-result-signing key) are handed to the UIDs the containers run as.
-
-## Getting Started
-
-1. **Log in** at the URL the setup script printed (default
-   `http://localhost`) with the administrator email and password you gave
-   the terminal installer. The superuser, default LLM configuration and
-   feature flags were already created during setup.
-2. **Optional afterwards** — add SMTP, extra LLM configurations or adjust
-   system settings under *Admin*.
-3. **Create user groups (optional)** — under *Admin → Groups*, grant
-   teams of users visibility into each other's scans.
-4. **Enable Semgrep rules (post-deploy)** — Semgrep runs exclusively
-   on rules ingested from public rule repos (no bundled pack). On a
-   fresh deploy Semgrep produces zero findings until an admin enables
-   at least one source. Go to *Admin → Frameworks → Semgrep Rules tab*,
-   click **Load built-in sources**, enable one or more sources, and
-   click **Sync Now**. See
-   [`docs/rule-source-ingestion.md`](docs/rule-source-ingestion.md) for
-   the full operator guide.
-5. **Submit a scan** from *Submit*, approve the cost estimate, and
-   review findings when analysis completes.
-6. **Ask the Advisor** — start a conversation from *Advisor*,
-   optionally scoped to a project so the context rail surfaces the
-   relevant findings and files.
+1. Open the URL the installer printed and sign in with the administrator account it
+   created.
+2. **Enable Semgrep rules** — Semgrep runs only on ingested rules, so a fresh install
+   yields zero Semgrep findings until you open *Admin → Semgrep Config*, click **Load
+   built-in sources**, enable one or more sources and **Sync Now**.
+3. Optional: add SMTP, extra LLM configurations, SSO/SCIM, or create user groups.
+4. Submit a scan and approve the estimates as they appear.
+5. For pentesting, open *Pentesting → New engagement*, add the target scope and launch.
 
 ## Stack
 
-Python 3.12 + FastAPI + Poetry · SQLAlchemy async + Alembic ·
-LangGraph 1.x + LangChain 1.x · LiteLLM · Pydantic AI · FastMCP ·
-WeasyPrint (PDF reports) · fastapi-users (JWT Bearer) · Postgres 16 ·
-RabbitMQ · Qdrant (fastembed `all-MiniLM-L6-v2`) · Fluentd → Loki →
-Grafana · React 18 + Vite + TypeScript · custom SCCAP UI primitives · TanStack Query ·
-React Router v7 · nmap / nuclei / ZAP / Playwright (pentesting tool pack).
+Python 3.12 · FastAPI · SQLAlchemy async + Alembic · LangGraph + LangChain · LiteLLM ·
+Pydantic AI · FastMCP · WeasyPrint · Postgres 16 · RabbitMQ · Qdrant (fastembed
+`all-MiniLM-L6-v2`) · React 18 + Vite + TypeScript · TanStack Query · React Router ·
+Fluentd → Loki → Grafana (optional) · nmap · nuclei · ZAP · sqlmap · ffuf · whatweb ·
+gobuster · Playwright · hydra · hashcat.
 
-Full breakdown in
-[`docs/docs/overview/technology-stack.md`](docs/docs/overview/technology-stack.md).
+Full breakdown: [technology stack](docs/docs/overview/technology-stack.md).
 
-## Contributing
+## Development
 
-See [`docs/docs/development/contributing.md`](docs/docs/development/contributing.md).
-Issues and PRs welcome.
+Backend and worker commands run inside Docker, because `.env` uses Compose service
+hostnames (`db`, `rabbitmq`, `qdrant`) that only resolve there.
+
+```bash
+docker compose up -d --build          # bring the stack up
+docker compose logs -f app worker     # follow logs
+docker compose exec app alembic upgrade head
+docker compose exec app python -m ruff check src
+docker compose exec app python -m pytest tests -q
+npm --prefix secure-code-ui run lint
+npm --prefix secure-code-ui run build
+```
+
+There is **no CI service**: workflows and the Dependabot/Renovate configs were removed, so
+gates run where you run them. `AGENTS.md` holds the project-specific rules; `CONTEXT.md`
+and `docs/adr/` hold the domain vocabulary and decisions.
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [`LICENSE`](./LICENSE) for the full text and [`NOTICE`](./NOTICE) for attribution.
+Apache License 2.0 — see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).

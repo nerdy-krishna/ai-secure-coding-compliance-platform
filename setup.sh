@@ -925,8 +925,6 @@ SCCAP setup
                                  A pg_dumpall backup is written first.
   ./setup.sh --factory-reset     Purge plus delete .env, .secrets and certbot
                                  state. This is a clean install.
-                                 digest as the adapter qualification and restart
-                                 the tool worker. Run after changing the image.
   ./setup.sh --update            Pull the current branch, back up the database,
                                  rebuild, migrate and health-check in place.
   ./setup.sh --rollback          Return code + images to the previous --update.
