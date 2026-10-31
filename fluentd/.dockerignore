@@ -1,0 +1,2 @@
+# Buffers and position files are runtime state, not build input.
+log/

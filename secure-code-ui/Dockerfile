@@ -11,9 +11,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install deps first for layer-cache stability.
+# Install deps first for layer-cache stability. `--include=dev` is explicit:
+# `tsc` and vite live in devDependencies, and an inherited `NODE_ENV=production`
+# or a `npm config omit=dev` would otherwise install a tree that cannot build.
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --include=dev --no-audit --no-fund
 
 COPY . .
 

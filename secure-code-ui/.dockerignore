@@ -1,0 +1,17 @@
+# The build context for the UI image is this directory (compose: context:
+# ./secure-code-ui), so the repository-root .dockerignore does not apply here.
+# Without this file `COPY . .` copied the operator's node_modules — up to 130 MB,
+# and whatever state it happened to be in — over the freshly installed tree.
+# That is how a build fails with `sh: tsc: not found` on a machine whose local
+# node_modules was installed without devDependencies.
+node_modules/
+dist/
+coverage/
+*.log
+npm-debug.log*
+.env
+.env.*
+.DS_Store
+.vscode/
+.idea/
+*.local
