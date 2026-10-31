@@ -119,6 +119,8 @@ re-sync Semgrep rule sources after an upgrade that changes rule handling
 | Port already in use | Host port conflict | Change `APP_PORT` / `RABBITMQ_PORT` in `.env`, then `docker compose up -d` |
 | Database never becomes healthy | Disk full, or a long migration | `docker compose logs db`, free space, re-run `./setup.sh --update` |
 | Build fails on a small VPS | Not enough RAM for the frontend build | Add swap (see the installation guide) |
+| `sh: tsc: not found` during the UI build | npm installed without devDependencies (an inherited `NODE_ENV=production` / `npm_config_omit=dev`), or a `node_modules` leaked into the build context | Remove `secure-code-ui/node_modules` and `dist`, `docker builder prune -f`, pull, rebuild. The build now clears those variables and verifies `tsc` itself |
+| `npm error Exit handler never called` | npm crashed — out-of-memory on a small VM, or a corrupt npm cache | `COMPOSE_PARALLEL_LIMIT=1 ./setup.sh` (one image at a time), or `docker compose build ui`; add swap if it repeats. The installer defaults to 2 concurrent builds |
 
 ## Removing only what you added
 

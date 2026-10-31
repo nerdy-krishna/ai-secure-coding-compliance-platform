@@ -334,6 +334,17 @@ _sccap_explain_build_failure() {
         echo "    every dependency and silently upgrades the runtime."
         return 0
     fi
+    if grep -q "Exit handler never called" "$log"; then
+        echo ""
+        echo "[!] npm crashed during the UI install ('Exit handler never called'). That is"
+        echo "    out-of-memory, not configuration. Options, cheapest first:"
+        echo ""
+        echo "      COMPOSE_PARALLEL_LIMIT=1 ./setup.sh     # build one image at a time"
+        echo "      docker compose build ui                 # or just the UI"
+        echo ""
+        echo "    and, on a small VM, add swap (the installation guide has the steps)."
+        return 0
+    fi
     if grep -qiE "Killed|out of memory|Cannot allocate memory|exit code: 137" "$log"; then
         echo ""
         echo "[!] The build ran out of memory. Add swap (the installation guide has the"
@@ -387,6 +398,13 @@ _sccap_align_fluentd_ownership() {
     return 0
 }
 
+
+_sccap_build_parallel_limit() {
+    # Concurrent image builds are the difference between a clean install and an
+    # OOM kill on a 4 GB VM: npm crashes with "Exit handler never called" and the
+    # UI build then fails on the missing tsc. Compose v2 reads this variable.
+    printf '%s' "${COMPOSE_PARALLEL_LIMIT:-2}"
+}
 
 _sccap_align_certbot_ownership() {
     # The UI container runs as a non-root user (nginx-app) and certbot writes
@@ -752,7 +770,7 @@ _sccap_run_update() {
     _sccap_fix_ownership
     echo "[*] Building images at ${target:0:8}..."
     local build_log=".build-${target:0:8}.log"
-    if ! docker compose build \
+    if ! COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
         --build-arg "SCCAP_BUILD_COMMIT=$target" \
         --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>&1 | tee "$build_log"; then
         _sccap_explain_build_failure "$build_log"
@@ -2030,7 +2048,7 @@ _sccap_stage build
 echo "[*] Launching Docker containers (this may take a few minutes)..."
 # We need to ensure the VITE variables are available to the build context
 # Sourcing .env is one way, but docker compose reads .env automatically
-docker compose build
+COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build
 _sccap_align_certbot_ownership
 _sccap_align_fluentd_ownership
 docker compose up -d
