@@ -51,6 +51,7 @@ from app.infrastructure.database.repositories.integration_repo import (
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.observability import record_metric, span
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
+from app.shared.lib.files import looks_binary
 from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.framework_validation import validate_framework_selection
 from app.shared.lib.git import clone_repo_and_get_files, fetch_github_selected_files
@@ -130,16 +131,6 @@ _REPO_URL_RE = re.compile(
 )
 
 # Magic bytes for common executable formats (V05.2.2)
-_EXECUTABLE_MAGIC: tuple[bytes, ...] = (
-    b"MZ",  # PE/DOS
-    b"\x7fELF",  # ELF
-    b"\xfe\xed\xfa\xce",  # Mach-O 32-bit
-    b"\xfe\xed\xfa\xcf",  # Mach-O 64-bit
-    b"\xca\xfe\xba\xbe",  # Mach-O fat binary / Java class
-    b"#!",  # shebang (shell scripts etc.)
-)
-
-
 def _redact_repo_url(url: str) -> str:
     """Return *url* with any userinfo (credentials) stripped (V16.2.5)."""
     try:
@@ -510,14 +501,17 @@ class ScanSubmissionService:
                     ),
                 )
 
-            # --- Executable magic-byte rejection (V05.2.2) -------------------
-            header = content_bytes[:8]
-            for magic in _EXECUTABLE_MAGIC:
-                if header.startswith(magic):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"File {fname!r} appears to be an executable and cannot be submitted.",
-                    )
+            # --- Binary rejection (V05.2.2) ---------------------------------
+            # Compiled executables and other non-text payloads cannot be audited, so
+            # they are refused; text that merely starts with a shebang is accepted.
+            if looks_binary(content_bytes):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"File {fname!r} appears to be a binary or compiled executable "
+                        "and cannot be audited. Submit source code instead."
+                    ),
+                )
 
             try:
                 content_str = content_bytes.decode("utf-8")
