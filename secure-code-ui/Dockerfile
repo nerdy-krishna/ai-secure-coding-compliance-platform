@@ -43,8 +43,13 @@ COPY nginx-https.conf /etc/nginx/nginx-https.conf
 
 # Exercise the same assembled HTTP configuration used by local/runtime startup.
 # This catches duplicate http-context declarations and invalid server fragments
-# while the image is being built rather than after deployment.
-RUN cp /etc/nginx/nginx-http.conf /etc/nginx/conf.d/default.conf && nginx -t
+# while the image is being built rather than after deployment. The runtime
+# placeholders (__NGINX_RESOLVER__, __SSL_DOMAIN__) are substituted here with
+# syntax-valid stand-ins so `nginx -t` validates the structure, not the values.
+RUN sed -e 's|__NGINX_RESOLVER__|127.0.0.11|g' -e 's|__SSL_DOMAIN__|example.invalid|g' \
+        -e 's|__BACKEND_HOST__|app|g' -e 's|__GRAFANA_HOST__|grafana|g' \
+        /etc/nginx/nginx-http.conf > /etc/nginx/conf.d/default.conf \
+    && nginx -t
 
 COPY nginx-entrypoint.sh /docker-entrypoint.d/99-ssl-setup.sh
 RUN chmod +x /docker-entrypoint.d/99-ssl-setup.sh

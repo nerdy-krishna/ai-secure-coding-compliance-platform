@@ -37,6 +37,31 @@ validate_email() {
     fi
 }
 
+# Resolver for the variable proxy_pass targets. Compose's embedded DNS lives at
+# 127.0.0.11, Kubernetes uses the cluster DNS IP, and a bare host uses whatever
+# is in /etc/resolv.conf — hardcoding 127.0.0.11 made every /api/v1/* request
+# fail with 502 outside Compose. NGINX_RESOLVER overrides the lookup.
+nginx_resolver() {
+    if [ -n "${NGINX_RESOLVER:-}" ]; then
+        printf '%s' "$NGINX_RESOLVER"
+        return 0
+    fi
+    local ns
+    ns=$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf 2>/dev/null)
+    printf '%s' "${ns:-127.0.0.1}"
+}
+
+_subst_resolver() {
+    # BACKEND_HOST / GRAFANA_HOST default to the Compose service names. On
+    # Kubernetes, point them at the fully-qualified service name: nginx resolves
+    # the proxy_pass target as one name and does not apply DNS search domains.
+    sed -e "s|__SSL_DOMAIN__|${DOMAIN}|g" \
+        -e "s|__NGINX_RESOLVER__|$(nginx_resolver)|g" \
+        -e "s|__BACKEND_HOST__|${BACKEND_HOST:-app}|g" \
+        -e "s|__GRAFANA_HOST__|${GRAFANA_HOST:-grafana}|g" \
+        "$1"
+}
+
 # Helper: render nginx-https.conf by substituting __SSL_DOMAIN__ with the real domain.
 # V01.3.7: validate rendered config with nginx -t before proceeding.
 render_https_conf() {
@@ -58,7 +83,7 @@ render_https_conf() {
         echo "or re-run: sudo ./setup.sh --repair-tls"
         exit 1
     fi
-    sed "s|__SSL_DOMAIN__|${DOMAIN}|g" /etc/nginx/nginx-https.conf > /etc/nginx/conf.d/default.conf
+    _subst_resolver /etc/nginx/nginx-https.conf > /etc/nginx/conf.d/default.conf
     if ! nginx -t 2>/dev/null; then
         echo "ERROR: rendered nginx config failed validation (nginx -t). Aborting."
         exit 1
@@ -69,7 +94,7 @@ render_https_conf() {
 # nginx.conf's http{} context. Validate the complete assembled configuration,
 # not an individual server-block fragment.
 render_http_conf() {
-    cp /etc/nginx/nginx-http.conf /etc/nginx/conf.d/default.conf
+    _subst_resolver /etc/nginx/nginx-http.conf > /etc/nginx/conf.d/default.conf
     if ! nginx -t 2>/dev/null; then
         echo "ERROR: rendered HTTP nginx config failed validation (nginx -t). Aborting."
         exit 1
