@@ -58,6 +58,8 @@ const CompliancePage = React.lazy(() => import("../pages/compliance/CompliancePa
 const SubmitPage = React.lazy(() => import("../pages/submission/SubmitPage"));
 const ScanRunningPage = React.lazy(() => import("../pages/submission/ScanRunningPage"));
 const PentestPage = React.lazy(() => import("../pages/pentesting/PentestPage"));
+const PentestNewPage = React.lazy(() => import("../pages/pentesting/PentestNewPage"));
+const PentestScansPage = React.lazy(() => import("../pages/pentesting/PentestScansPage"));
 const PentestRunPage = React.lazy(() => import("../pages/pentesting/PentestRunPage"));
 
 const NotFoundPage: React.FC = () => (
@@ -261,6 +263,8 @@ function AppContent() {
         <Route element={<RouteGuard requires="permission" anyPermission={["pentest.read"]} />}>
           <Route element={<FeatureRoute feature="pentesting" />}>
             <Route path="/pentesting" element={routeContent(<PentestPage />)} />
+            <Route path="/pentesting/new" element={routeContent(<PentestNewPage />)} />
+            <Route path="/pentesting/scans" element={routeContent(<PentestScansPage />)} />
             <Route path="/pentesting/runs/:runId" element={routeContent(<PentestRunPage />)} />
           </Route>
         </Route>

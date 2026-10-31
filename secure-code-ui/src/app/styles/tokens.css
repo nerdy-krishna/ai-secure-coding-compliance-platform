@@ -31,6 +31,15 @@
 /* ============ LIGHT — Variation A (indigo + warm risk) ============ */
 :root,
 [data-theme='light'][data-variant='A'] {
+  /* Text-safe severity inks: the fill tokens above are too light for small text. */
+  --critical-ink: #b3123c;
+  --high-ink: #c2410c;
+  --medium-ink: #8a6508;
+  --low-ink: #0e7490;
+  --info-ink: #4338ca;
+  --ok-ink: #15803d;
+  --focus-ring: #4f46e5;
+
   --bg: #fbfaf7;               /* warm paper */
   --bg-elev: #ffffff;
   --bg-soft: #f5f3ee;
@@ -75,6 +84,14 @@
 
 /* ============ LIGHT — Variation B (teal + cool risk) ============ */
 [data-theme='light'][data-variant='B'] {
+  --critical-ink: #b3123c;
+  --high-ink: #c2410c;
+  --medium-ink: #8a6508;
+  --low-ink: #0e7490;
+  --info-ink: #1d4ed8;
+  --ok-ink: #047857;
+  --focus-ring: #0d9488;
+
   --bg: #f7f9fb;
   --bg-elev: #ffffff;
   --bg-soft: #eef2f6;
@@ -119,6 +136,14 @@
 
 /* ============ DARK — Variation A ============ */
 [data-theme='dark'][data-variant='A'] {
+  --critical-ink: #fda4af;
+  --high-ink: #fdba74;
+  --medium-ink: #fde68a;
+  --low-ink: #67e8f9;
+  --info-ink: #a5b4fc;
+  --ok-ink: #86efac;
+  --focus-ring: #818cf8;
+
   --bg: #0e0f13;
   --bg-elev: #16181f;
   --bg-soft: #1b1e27;
@@ -163,6 +188,14 @@
 
 /* ============ DARK — Variation B ============ */
 [data-theme='dark'][data-variant='B'] {
+  --critical-ink: #fda4af;
+  --high-ink: #fdba74;
+  --medium-ink: #fde68a;
+  --low-ink: #67e8f9;
+  --info-ink: #93c5fd;
+  --ok-ink: #6ee7b7;
+  --focus-ring: #2dd4bf;
+
   --bg: #08101a;
   --bg-elev: #0f1a26;
   --bg-soft: #142131;

@@ -699,3 +699,137 @@ pre.sccap-code {
   gap: 10px;
   margin-top: 22px;
 }
+
+
+/* ===========================================================
+   Uniform interactive controls.
+   One accent colour for every checkbox/radio/range in the app,
+   one visible focus ring, and a legible placeholder. Without this
+   the browser's default blue competed with the theme's primary.
+   =========================================================== */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--primary);
+}
+input::placeholder,
+textarea::placeholder { color: var(--fg-subtle); opacity: 1; }
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--primary));
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+/* Section headings inside cards share one size and weight everywhere. */
+.sccap-card > h2,
+.sccap-card h2.sccap-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0 0 0.35rem;
+}
+
+/* ===========================================================
+   Stat tiles and data tables.
+   Shared by the home overview and the pentesting pages so a
+   number is rendered identically wherever it appears: same
+   size, weight, colour rules and spacing.
+   =========================================================== */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xs);
+  min-width: 0;
+}
+.stat-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: var(--r-sm);
+  background: var(--bg-soft);
+  color: var(--fg-muted);
+}
+.stat-value {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stat-sub { font-size: 12px; color: var(--fg-muted); }
+.stat-card.is-ok .stat-value { color: var(--ok-ink); }
+.stat-card.is-ok .stat-icon { background: var(--success-weak); color: var(--ok-ink); }
+.stat-card.is-warn .stat-value { color: var(--medium-ink); }
+.stat-card.is-warn .stat-icon { background: var(--medium-weak); color: var(--medium-ink); }
+.stat-card.is-bad .stat-value { color: var(--critical-ink); }
+.stat-card.is-bad .stat-icon { background: var(--critical-weak); color: var(--critical-ink); }
+
+.pentest-table-wrap { width: 100%; overflow-x: auto; }
+.pentest-table,
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pentest-table th,
+.data-table th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pentest-table td,
+.data-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--fg);
+}
+.pentest-table tbody tr:hover,
+.data-table tbody tr:hover { background: var(--bg-soft); }
+.pentest-table .is-num,
+.data-table .is-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pentest-table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.pentest-page-foot { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.pentest-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
+.pentest-inline-form { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px; }
+.sccap-card.is-alert { border-left: 4px solid var(--critical); margin-bottom: 16px; }

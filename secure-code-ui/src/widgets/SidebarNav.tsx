@@ -20,11 +20,26 @@ const codeScan: Item[] = [
   { to: "/analysis/results", label: "Projects and results", icon: Icon.Folder },
   { to: "/account/history", label: "Submission history", icon: Icon.History },
 ];
+// Same shape as the code-scanning group: start one, see the estate, see everything.
 const pentesting: Item[] = [
   {
+    to: "/pentesting/new",
+    label: "New pentest",
+    icon: Icon.Plus,
+    feature: "pentesting",
+    permission: Permission.pentestRead,
+  },
+  {
     to: "/pentesting",
-    label: "Pentesting",
-    icon: Icon.Shield,
+    label: "Projects and scans",
+    icon: Icon.Folder,
+    feature: "pentesting",
+    permission: Permission.pentestRead,
+  },
+  {
+    to: "/pentesting/scans",
+    label: "Scans and tests",
+    icon: Icon.Layers,
     feature: "pentesting",
     permission: Permission.pentestRead,
   },
