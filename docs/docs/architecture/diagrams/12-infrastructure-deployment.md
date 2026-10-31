@@ -243,8 +243,7 @@ Persistence is the 9 named Docker volumes. There is no built-in cron backup — 
 
 | Path                                       | Purpose                                                                                   |
 |--------------------------------------------|-------------------------------------------------------------------------------------------|
-| `.github/workflows/ci.yml`                 | PR + push: ruff 0.11.11 · black 25.1.0 · poetry lock check · bandit · pip-audit · ESLint · Vite build |
-| `.github/workflows/docs.yml`               | mkdocs build                                                                              |
+| *No CI workflows*                          | The repository ships none: lint, tests, docs build and Docker builds are run by the operator |
 | `.pre-commit-config.yaml`                  | end-of-file-fixer · trailing-whitespace · check-merge-conflict · ruff · black · gitleaks 8.21.2 |
 
 ### No Kubernetes / Helm / Terraform
@@ -265,4 +264,4 @@ The current deployment story is Docker Compose on a single host (laptop, VM, or 
 - `setup.sh`, `setup.bat`
 - `scripts/*.py`
 - `.env.example`
-- `.github/workflows/*.yml`, `.pre-commit-config.yaml`
+- `.pre-commit-config.yaml` (local hooks only; no CI workflows)

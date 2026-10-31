@@ -18,9 +18,10 @@ def build_predicate(
     digest: str,
     revision: str,
     repository: str,
-    workflow_ref: str,
+    workflow_ref: str | None,
     target: str,
     invocation_id: str,
+    builder_uri: str | None = None,
 ) -> dict:
     digest_algorithm, separator, digest_value = digest.partition(":")
     if digest_algorithm != "sha256" or separator != ":" or not _HEX_64.fullmatch(
@@ -31,9 +32,17 @@ def build_predicate(
         raise ValueError("--revision must be a full immutable Git object ID")
     if target not in {"api", "worker"}:
         raise ValueError("--target must be api or worker")
-    if not workflow_ref.startswith(f"{repository}/.github/workflows/"):
-        raise ValueError("--workflow-ref must identify this repository workflow")
-    workflow_uri = f"https://github.com/{workflow_ref}"
+    # This repository ships no CI workflows, so a release is normally built from an
+    # operator shell. A workflow ref is still accepted for callers that build in CI
+    # elsewhere; without one the builder identifies the operator build system.
+    if workflow_ref:
+        if not workflow_ref.startswith(f"{repository}/.github/workflows/"):
+            raise ValueError("--workflow-ref must identify this repository workflow")
+        workflow_uri = f"https://github.com/{workflow_ref}"
+    elif builder_uri:
+        workflow_uri = builder_uri
+    else:
+        raise ValueError("provide --workflow-ref or --builder-uri")
     return {
         "buildDefinition": {
             # This is SCCAP's pinned GitHub Actions workflow, not the official
@@ -68,7 +77,15 @@ def main() -> int:
     parser.add_argument("--digest", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--repository", required=True)
-    parser.add_argument("--workflow-ref", required=True)
+    parser.add_argument(
+        "--workflow-ref",
+        help="GitHub workflow that produced the image, when CI builds it.",
+    )
+    parser.add_argument(
+        "--builder-uri",
+        default="https://sccap.dev/buildsystem/operator-shell/v1",
+        help="Build system identity used when --workflow-ref is not given.",
+    )
     parser.add_argument("--target", required=True)
     parser.add_argument("--invocation-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -80,6 +97,7 @@ def main() -> int:
             revision=args.revision,
             repository=args.repository,
             workflow_ref=args.workflow_ref,
+            builder_uri=args.builder_uri,
             target=args.target,
             invocation_id=args.invocation_id,
         )

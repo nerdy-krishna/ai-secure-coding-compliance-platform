@@ -36,7 +36,7 @@ events, and downloadable HTML/CSV/PDF/SARIF reports.
 | Rule foundry | Governed AI-to-static promotion: candidate generation, fixture validation, precision/recall scoring, reviewer approval, versioned registry, shadow deployment, rollback |
 | Integrations | Signed SIEM delivery, Jira ticket identity, CI policy endpoints and SARIF output |
 | Operations | Kubernetes 1.30+ Helm chart with KEDA queue autoscaling; OTLP traces/metrics with W3C correlation; Prometheus rules and SLOs; backup/restore and degradation runbooks |
-| CI gates | Backend ruff/black, frontend test+lint+build with deterministic bundle budgets, authenticated Playwright lifecycle, generated OpenAPI drift (`check:api`), Poetry lock drift, Bandit, pip-audit, Gitleaks, and a Postgres+RabbitMQ+worker integration job covering gate resume and outbox recovery |
+| Local gates | Backend ruff/black + pytest, frontend test+lint+build with deterministic bundle budgets, generated OpenAPI drift (`check:api`), Poetry lock drift, Bandit, pip-audit, Gitleaks, and a Postgres+RabbitMQ+worker integration run covering gate resume and outbox recovery — all invoked from the operator shell; the repository has no CI service |
 
 ### Pentesting engine
 
@@ -128,8 +128,9 @@ implemented; the entries are kept only so the change is traceable.
 - OpenTelemetry traces/metrics/log correlation and Kubernetes worker pooling.
 
 Two long-standing claims were also checked and found stale: documentation build
-and generated-OpenAPI drift **are** CI gates (`docs.yml`,
-`ci.yml` `check:api`), and the product roadmap no longer depends on
+and generated-OpenAPI drift used to be enforced by GitHub Actions (`docs.yml`,
+`ci.yml` `check:api`), which are no longer part of this repository — run
+`npm --prefix secure-code-ui run check:api` before merging — and the product roadmap no longer depends on
 `.scratch/pentesting-full-vision/GAP_REGISTER.md`, which was superseded by the
 committed ADRs.
 

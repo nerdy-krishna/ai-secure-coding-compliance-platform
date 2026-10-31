@@ -95,5 +95,8 @@ PostgreSQL is its only coordination point (ADR-029):
   [Verification Strategy](../development/testing-strategy.md).
 - **ruff + black + mypy** for Python lint/format/type-check.
 - **ESLint + tsc** for the frontend.
-- **GitHub Actions CI** runs backend lint, frontend lint + Vite build,
-  `poetry.lock` drift, security checks, documentation, and Docker builds.
+- **No CI service is configured.** Run `ruff check src`, `pytest`,
+  `npm --prefix secure-code-ui run lint` and `npm --prefix secure-code-ui run build`
+  locally or on the installation host; the same commands are listed in `AGENTS.md`.
+  (The repository previously used GitHub Actions; the workflows and the Dependabot /
+  Renovate configs were removed so nothing opens pull requests or runs on push.)

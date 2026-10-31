@@ -60,9 +60,9 @@ images:
 ```
 
 The chart's `pentestToolPack.runtimes` already carries the exact
-`repository@sha256` digests for the six tool-runtime images. Rebuild/push with
-`scripts/build-tool-runtimes.sh` (docker login first) and
-`.github/workflows/tool-runtime-release.yml`.
+`repository@sha256` digests for the six tool-runtime images. Rebuild and push them with
+`scripts/build-tool-runtimes.sh` (docker login first); this repository has no CI workflows, so the
+script is the release path.
 
 pentestToolPack:
   enabled: true

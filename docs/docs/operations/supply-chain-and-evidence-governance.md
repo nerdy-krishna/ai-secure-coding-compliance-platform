@@ -25,7 +25,9 @@ the caller.
 
 ## Signed images, SBOM, and provenance
 
-`.github/workflows/supply-chain-release.yml` builds API and worker images with pinned actions. It
+Release images are built outside GitHub Actions: this repository ships no CI workflows by design,
+so image build, SBOM generation and signing run from an operator shell (see
+`scripts/` and the release checklist below) and nothing is produced by a hosted runner. The build
 scans each pushed image digest with Syft and normalizes that image-specific inventory to CycloneDX
 without changing Syft's supported CycloneDX 1.5/1.6 schema label. The resulting API and worker SBOMs
 therefore retain their different OS packages and runtimes.
@@ -40,41 +42,35 @@ bundle manifest independently binds every multi-file scanner runtime asset by pa
 Existing Syft component references and dependency edges are preserved, and the normalizer retains
 the CycloneDX version Syft emitted rather than relabeling an older document.
 
-The generated SLSA v1 predicate truthfully identifies this repository's pinned GitHub Actions
-workflow as its builder/build type. It is not a pre-wrapped in-toto Statement: `cosign attest`
-constructs that envelope and digest-qualified subject. It is not an attestation from the official
-SLSA GitHub generator and does not invent build start or finish timestamps. BuildKit's native
-SBOM/provenance remain attached separately. Cosign signs the immutable image digest and predicates.
+The generated SLSA v1 predicate identifies the operator build as its builder/build type. It is not
+a pre-wrapped in-toto Statement: `cosign attest` constructs that envelope and digest-qualified
+subject. It is not an attestation from the official SLSA GitHub generator and does not invent build
+start or finish timestamps. BuildKit's native SBOM/provenance remain attached separately. Cosign
+signs the immutable image digest and predicates.
 
-- Tag releases and normal manual releases use GitHub OIDC keyless signing.
-- Private manual releases choose `private_kms`. Configure repository secret
-  `SUPPLY_CHAIN_AWS_ROLE_ARN`, repository variables `SUPPLY_CHAIN_AWS_REGION` and
-  `SUPPLY_CHAIN_AWS_ACCOUNT_ID`, and secret `COSIGN_KMS_URI=awskms://...`. The role trust policy must
-  restrict GitHub's OIDC `sub` to this repository/workflow/ref and its permissions to the one signing
-  key. The workflow checks the expected account and clears inherited AWS credentials. Do not create
-  static AWS access-key secrets.
+- Releases are signed from the operator shell with a cosign key held outside the repository.
+  Nothing in the build is issued by a hosted runner, so there is no OIDC identity to verify.
+- Private manual releases choose `private_kms`. Provide `SUPPLY_CHAIN_AWS_ROLE_ARN`,
+  `SUPPLY_CHAIN_AWS_REGION`, `SUPPLY_CHAIN_AWS_ACCOUNT_ID` and `COSIGN_KMS_URI=awskms://...` in the
+  release environment. The KMS key policy must restrict the calling principal to the one signing
+  key and nothing broader. Do not create static AWS access-key secrets.
 - Artifacts are retained 35 days to align with the approved backup window.
 
-Pin the digest, exact certificate identity, and issuer when admitting a public release:
+Pin the digest and the signing key when admitting a release. Without a hosted runner there is no
+OIDC identity to check, so verification is key-based (`cosign verify --key cosign.pub`) against the
+public key exported during the release ceremony:
 
 ```bash
-cosign verify \
-  --certificate-identity \
-  'https://github.com/OWNER/REPOSITORY/.github/workflows/supply-chain-release.yml@refs/tags/v1.2.3' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+cosign verify --key cosign.pub \
   'ghcr.io/OWNER/REPOSITORY/sccap-worker@sha256:FULL_DIGEST'
 
-cosign verify-attestation --type cyclonedx \
-  --certificate-identity \
-  'https://github.com/OWNER/REPOSITORY/.github/workflows/supply-chain-release.yml@refs/tags/v1.2.3' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+cosign verify-attestation --key cosign.pub --type cyclonedx \
   'ghcr.io/OWNER/REPOSITORY/sccap-worker@sha256:FULL_DIGEST'
 ```
 
-Use the same identity/issuer pair for `--type slsaprovenance`. Admission policy must encode those
-exact values (for example, Kyverno `verifyImages[].attestors[].entries[].keyless.subject` and
-`.issuer`), set `required: true`, and match digest-qualified SCCAP image references. Do not use a
-repository-wide wildcard identity.
+Use the same key for `--type slsaprovenance`. Admission policy must encode that exact public key
+(for example, Kyverno `verifyImages[].attestors[].entries[].keys.publicKeys`), set
+`required: true`, and match digest-qualified SCCAP image references.
 
 For private releases, export the KMS public key during a connected ceremony, record its canonical
 KMS key ARN and SHA-256 of its DER SubjectPublicKeyInfo in the change record, then distribute the
