@@ -226,7 +226,7 @@ const ScanReadinessPanel: React.FC = () => {
         )}
         {!isForbidden && (
           <a
-            href="/admin/frameworks?tab=semgrep"
+            href="/admin/semgrep"
             style={{
               display: "block",
               marginTop: 8,

@@ -3,7 +3,7 @@
 // Dashboard-level readiness gate for Semgrep rule ingestion.
 //
 // Semgrep runs exclusively on rules ingested from the public rule sources
-// (Admin → Frameworks → Semgrep Rules). On a fresh deployment nothing is
+// (Admin → Semgrep Config). On a fresh deployment nothing is
 // enabled yet, so a scan completes "successfully" with zero findings — which
 // reads as a broken scanner. This banner surfaces that before the operator
 // starts their first scan and links straight to the sync page.
@@ -19,7 +19,9 @@ import { useAuth } from "../../shared/hooks/useAuth";
 import type { RuleSourceRead } from "../../shared/types/api";
 import { Icon } from "../../shared/ui/Icon";
 
-const SEMGREP_RULES_PATH = "/admin/frameworks?tab=semgrep";
+// Semgrep has its own admin page since the configuration areas were split out
+// of Framework Config; the old `?tab=semgrep` query no longer selects anything.
+const SEMGREP_RULES_PATH = "/admin/semgrep";
 
 const SemgrepReadinessBanner: React.FC = () => {
   const { user } = useAuth();
@@ -106,7 +108,7 @@ const SemgrepReadinessBanner: React.FC = () => {
         <Link className="sccap-btn sccap-btn-primary" to={SEMGREP_RULES_PATH}>
           <Icon.Settings size={14} /> Open Semgrep rules
         </Link>
-        <Link className="sccap-btn" to="/admin/frameworks?tab=semgrep">
+        <Link className="sccap-btn" to={SEMGREP_RULES_PATH}>
           <Icon.Refresh size={14} /> Load built-in sources &amp; sync
         </Link>
       </div>

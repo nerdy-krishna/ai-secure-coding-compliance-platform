@@ -27,7 +27,7 @@ flowchart TB
       Sc["ScimTokensPage<br/>/admin/scim/tokens"]:::edge
       LLM["LLMSettingsPage<br/>/account/settings/llm"]:::edge
       App["AppearanceSettingsPage<br/>/admin/appearance"]:::edge
-      RuleS["Semgrep Rules tab<br/>(inside FrameworkMgmt)"]:::edge
+      RuleS["SemgrepRulesPage<br/>/admin/semgrep"]:::edge
       Seed["Seed defaults<br/>(button on Setup / Admin home)"]:::edge
     end
 

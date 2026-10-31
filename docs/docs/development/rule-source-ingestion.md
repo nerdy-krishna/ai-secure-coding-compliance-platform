@@ -6,7 +6,7 @@ SCCAP runs Semgrep exclusively on rules stored in Postgres. There is no bundled 
 
 ## Quick start
 
-1. Log in as superuser and go to **Admin → Frameworks → Semgrep Rules** tab.
+1. Log in as superuser and go to **Admin → Semgrep Config** (`/admin/semgrep`).
 2. Click **Load built-in sources** — this upserts 16 curated community sources (all disabled by default).
 3. Toggle **Enabled** on the sources you want. Use the **select-all checkbox** and the **bulk action bar** to Enable, Disable, Auto-sync, or Sync multiple sources at once.
 4. Click **Sync Now** on each enabled source (or use **Sync selected** in the bulk bar) and wait for the status to turn green.
@@ -32,7 +32,7 @@ At scan time the prescan node:
 
 ## System settings
 
-All settings live in `system_configurations` and are editable at **Admin → Frameworks → Semgrep Rules → Settings**:
+All settings live in `system_configurations` and are editable on the same page under **Settings**:
 
 | Key | Default | Description |
 |-----|---------|-------------|
