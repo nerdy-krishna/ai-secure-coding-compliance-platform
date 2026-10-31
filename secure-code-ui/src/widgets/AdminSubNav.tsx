@@ -36,6 +36,7 @@ export const ADMIN_LINKS: AdminLink[] = [
     permissions: [Permission.platformConfigManage],
   },
   { to: "/account/settings/llm", label: "LLM configs", permissions: [Permission.platformConfigManage] },
+  { to: "/usage", label: "Usage and spend" },
   // Who is in the platform, and how they prove who they are.
   { to: "/admin/access", label: "Access and roles", permissions: [Permission.identityRead] },
   {
@@ -47,8 +48,7 @@ export const ADMIN_LINKS: AdminLink[] = [
   { to: "/admin/integrations", label: "Integrations", permissions: [Permission.servicePrincipalManage] },
   { to: "/admin/sso/audit", label: "Auth audit", feature: "sso", permissions: [Permission.auditRead] },
   // Platform-level settings.
-  { to: "/admin/system", label: "Platform", permissions: [Permission.platformConfigManage] },
-  { to: "/admin/features", label: "Features", permissions: [Permission.platformConfigManage] },
+  { to: "/admin/platform", label: "Platform", permissions: [Permission.platformConfigManage] },
   { to: "/admin/appearance", label: "Appearance", permissions: [Permission.platformConfigManage] },
 ];
 

@@ -54,7 +54,7 @@ const pentesting: Item[] = [
 ];
 // Standards live inside "Analysis config" for admins; a reader without authoring
 // rights still gets the read-only standards view.
-const tools: Item[] = [{ to: "/usage", label: "Usage", icon: Icon.Gauge }];
+// Usage lives in the administration list (under LLM configs); nothing left here.
 
 // Admin links carry only a label, so the icon is chosen by keyword. A miss falls
 // back to a neutral dot rather than a letter, which is what the collapsed rail
@@ -178,10 +178,9 @@ export function SidebarNav() {
   const admin = ADMIN_LINKS.filter((item) => (!item.feature || isFeatureEnabled(item.feature)) && (!item.permissions || hasAnyPermission(user?.permissions, item.permissions)));
   // Administration holds the configuration groups (framework, semgrep, LLM),
   // access/identity, and the platform settings; the advisor moved to pentesting.
-  const adminVisible =
-    visible([...complianceOnly, ...tools]).length > 0 || admin.length > 0;
+  const adminVisible = visible(complianceOnly).length > 0 || admin.length > 0;
   const adminItems: Item[] = [
-    ...visible([...complianceOnly, ...tools]),
+    ...visible(complianceOnly),
     ...admin.map((item) => ({ ...item, icon: adminIcon(item.label) })),
   ];
   const adminOpen =

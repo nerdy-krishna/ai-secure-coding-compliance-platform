@@ -64,8 +64,8 @@ const TRAILS: Record<string, Crumb[]> = {
   "/account/settings/appearance": [ACCOUNT, { label: "Appearance" }],
   "/account/settings/security": [ACCOUNT, { label: "Security" }],
   "/account/settings/llm": [ADMIN, { label: "LLM configs" }],
-  "/admin/system": [ADMIN, { label: "Platform" }],
-  "/admin/features": [ADMIN, { label: "Features" }],
+  "/admin/platform": [ADMIN, { label: "Platform" }],
+
   "/admin/appearance": [ADMIN, { label: "Appearance" }],
 
   "/admin/rag": [ADMIN, { label: "Knowledge base" }],

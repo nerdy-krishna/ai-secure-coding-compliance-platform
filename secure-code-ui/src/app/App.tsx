@@ -32,12 +32,11 @@ const DashboardPage = React.lazy(() => import("../pages/account/DashboardPage"))
 const SecuritySettingsPage = React.lazy(() => import("../pages/account/SecuritySettingsPage"));
 const SubmissionHistoryPage = React.lazy(() => import("../pages/account/SubmissionHistoryPage"));
 const UsagePage = React.lazy(() => import("../pages/account/UsagePage"));
-const FeaturesPage = React.lazy(() => import("../pages/admin/FeaturesPage"));
-const SystemConfigTab = React.lazy(() => import("../pages/admin/SystemConfigTab"));
 const AnalysisConfigPage = React.lazy(() => import("../pages/admin/AnalysisConfigPage"));
 const SemgrepRulesPage = React.lazy(() => import("../pages/admin/SemgrepRulesPage"));
 const AccessPage = React.lazy(() => import("../pages/admin/AccessPage"));
 const IdentityPage = React.lazy(() => import("../pages/admin/IdentityPage"));
+const PlatformPage = React.lazy(() => import("../pages/admin/PlatformPage"));
 const ScanDiagnosticsPage = React.lazy(() => import("../pages/analysis/ScanDiagnosticsPage"));
 const ProjectDetailPage = React.lazy(() => import("../pages/analysis/ProjectDetailPage"));
 const ProjectsPage = React.lazy(() => import("../pages/analysis/ProjectsPage"));
@@ -225,8 +224,9 @@ function AppContent() {
         </Route>
 
         <Route element={<RouteGuard requires="permission" anyPermission={["platform.config.manage"]} />}>
-          <Route path="/admin/system" element={routeContent(<SystemConfigTab />)} />
-          <Route path="/admin/features" element={routeContent(<FeaturesPage />)} />
+          <Route path="/admin/platform" element={routeContent(<PlatformPage />)} />
+          <Route path="/admin/system" element={<Navigate to="/admin/platform?tab=settings" replace />} />
+          <Route path="/admin/features" element={<Navigate to="/admin/platform?tab=features" replace />} />
           <Route path="/admin/appearance" element={routeContent(<AppearanceSettingsPage />)} />
           <Route path="/account/settings/llm" element={routeContent(<LLMSettingsPage />)} />
           <Route element={<FeatureRoute feature="email" />}>

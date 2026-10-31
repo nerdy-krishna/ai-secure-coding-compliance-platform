@@ -50,7 +50,7 @@ const emptyForm = {
 };
 type FormState = typeof emptyForm;
 
-const SystemConfigTab: React.FC = () => {
+const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const notif = useNotificationPermission();
@@ -446,12 +446,14 @@ const SystemConfigTab: React.FC = () => {
 
   return (
     <div className="fade-in" style={{ display: "grid", gap: 20 }}>
-      <div>
-        <h1 style={{ color: "var(--fg)" }}>Platform settings</h1>
-        <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
-          Core system behavior, LLM mode, CORS, and raw config key/values.
+      {!embedded && (
+        <div>
+          <h1 style={{ color: "var(--fg)" }}>Platform settings</h1>
+          <div style={{ color: "var(--fg-muted)", marginTop: 4 }}>
+            Core system behavior, LLM mode, CORS, and raw config key/values.
+          </div>
         </div>
-      </div>
+      )}
 
       <div
         className="settings-two-column"
