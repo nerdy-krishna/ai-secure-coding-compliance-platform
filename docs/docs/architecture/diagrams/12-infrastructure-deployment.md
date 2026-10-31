@@ -236,8 +236,6 @@ Persistence is the 9 named Docker volumes. There is no built-in cron backup — 
 | `scripts/bootstrap_env_secrets.py`    | Atomic fresh/upgrade secret repair; preserves valid values, applies POSIX `0600`, and emits no secret material |
 | `scripts/generate_secrets.py`         | Random / Fernet key generation                                           |
 | `scripts/create_superuser.py`         | Bootstrap a master admin if `/setup` UI is unavailable                   |
-| `scripts/reset_superuser.py`          | Rotate the master admin's password                                       |
-| `scripts/reset_app_state.py`          | Dev tool: truncate scans, findings, snapshots                            |
 
 ### CI / pre-commit
 

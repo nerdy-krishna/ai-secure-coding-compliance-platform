@@ -27,14 +27,6 @@ services:
       - EVIDENCE_S3_ENDPOINT=${EVIDENCE_S3_ENDPOINT:-http://cloudserver-front:8000}
       - EVIDENCE_S3_ACCESS_KEY_ID=${EVIDENCE_MINIO_ROOT_USER:-sccap-evidence-local}
       - EVIDENCE_S3_SECRET_ACCESS_KEY=${EVIDENCE_MINIO_ROOT_PASSWORD:-sccap-evidence-local-password}
-      - PENTEST_CAPABILITY5_ENABLED=${PENTEST_CAPABILITY5_ENABLED:-false}
-      - PENTEST_ADAPTER_REPORTER_TOKEN=${PENTEST_ADAPTER_REPORTER_TOKEN:-sccap-local-adapter-reporter}
-      - RABBITMQ_PENTEST_TOOL_QUEUE=${RABBITMQ_PENTEST_TOOL_QUEUE:-pentest_tool_queue_v1}
-      - PENTEST_TOOL_GATEWAY_TOKEN=${PENTEST_TOOL_GATEWAY_TOKEN:-}
-      - PENTEST_TOOL_WORKER_CAPABILITY_DIGEST=${PENTEST_TOOL_WORKER_CAPABILITY_DIGEST:-0000000000000000000000000000000000000000000000000000000000000000}
-      - PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS=${PENTEST_RUNNER_V3_RESOLVER_NAMESERVERS:-127.0.0.11}
-      - PENTEST_RUNNER_V3_RESOLVER_ID=${PENTEST_RUNNER_V3_RESOLVER_ID:-foundation3-approved-resolver}
-      - PENTEST_LOCAL_TARGET_HOST_ALIASES=${PENTEST_LOCAL_TARGET_HOST_ALIASES:-localhost=host.docker.internal,127.0.0.1=host.docker.internal}
     volumes:
       - ./src:/app/src
       - ./scripts:/app/scripts
@@ -123,14 +115,6 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
-      RABBITMQ_PENTEST_CONTROLLER_USER: ${RABBITMQ_PENTEST_CONTROLLER_USER:-pentest_controller}
-      RABBITMQ_PENTEST_CONTROLLER_PASS: ${RABBITMQ_PENTEST_CONTROLLER_PASS:-pentest-controller-local-only}
-      RABBITMQ_PENTEST_TOOL_USER: ${RABBITMQ_PENTEST_TOOL_USER:-pentest_tool_worker}
-      RABBITMQ_PENTEST_TOOL_PASS: ${RABBITMQ_PENTEST_TOOL_PASS:-pentest-tool-local-only}
-      RABBITMQ_PENTEST_RUNNER_USER: ${RABBITMQ_PENTEST_RUNNER_USER:-pentest_runner_v3}
-      RABBITMQ_PENTEST_RUNNER_PASS: ${RABBITMQ_PENTEST_RUNNER_PASS:-pentest-runner-local-only}
-      RABBITMQ_PENTEST_VERIFICATION_USER: ${RABBITMQ_PENTEST_VERIFICATION_USER:-pentest_verifier}
-      RABBITMQ_PENTEST_VERIFICATION_PASS: ${RABBITMQ_PENTEST_VERIFICATION_PASS:-pentest-verifier-local-only}
       RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: -setcookie ${RABBITMQ_ERLANG_COOKIE:?RABBITMQ_ERLANG_COOKIE must be set}
     ports:
@@ -278,11 +262,7 @@ services:
       - scpnetwork
     command: [ "python", "-m", "app.workers.consumer" ]
 
-  # Capability 4 cognition runtime. It is default-off, has no target network,
-  # result-signing key, evidence-store credential, browser/session credential,
-  # or ambient proxy. Local compose therefore blocks provider egress too; a
-  # configured production NetworkPolicy may allow only explicit model CIDRs.
-  # better-pentester engine. One image with every scanner (nmap, nuclei, ZAP,
+  # Pentest engine. One image with every scanner (nmap, nuclei, ZAP,
   # sqlmap, ffuf, hydra, whatweb, testssl, hashcat, Chromium) and the LLM loop.
   # It polls the shared database for queued runs and streams events/findings
   # straight into Postgres — no broker, no signing, no qualification, no limits.

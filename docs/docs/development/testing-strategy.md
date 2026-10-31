@@ -35,18 +35,10 @@ service hostnames.
 docker compose config
 docker compose build app worker
 docker compose exec app alembic upgrade head
-docker compose exec app python -m unittest discover -s /app/tests/auth -v
-docker compose exec app python -m unittest discover -s /app/tests/risk -v
-docker compose exec app python -m unittest discover -s /app/tests/scanners -v
-docker compose exec app python -m unittest discover -s /app/tests/workflows -v
 
-# Opt-in, real PostgreSQL + public FastAPI integration layer. The Compose API
-# and database must already be running; the environment flag prevents this
-# layer from being pulled accidentally into a fast unit run.
-docker compose exec \
-  -e SCCAP_RUN_INTEGRATION=1 \
-  -e SCCAP_INTEGRATION_BASE_URL=http://127.0.0.1:8000 \
-  app python -m unittest discover -s /app/tests/integration -v
+# The suite is pytest, rooted at /app/tests (tests/conftest.py puts src on the path).
+docker compose exec app python -m pytest tests -q
+docker compose exec app python -m pytest tests/test_ingest_manifest.py -v
 docker compose exec app python -m ruff check src tests
 docker compose exec app python -m black --check src tests
 

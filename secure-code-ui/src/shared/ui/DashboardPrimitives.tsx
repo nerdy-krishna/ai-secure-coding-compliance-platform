@@ -1,7 +1,7 @@
 // secure-code-ui/src/shared/ui/DashboardPrimitives.tsx
 //
 // Reusable dashboard atoms ported from the SCCAP design bundle.
-// Cross-imported by DevDashboard / EnterpriseDashboard / AdminSnapshot.
+// Shared by the dashboard tiles on the account and pentest pages.
 
 import React, { useMemo } from "react";
 

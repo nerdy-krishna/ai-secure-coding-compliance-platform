@@ -109,14 +109,13 @@ frameworks) must be re-ingested manually afterwards from
 **Admin → Frameworks → Ingest docs**, or it will be missing until
 re-ingested.
 
-To re-ingest manually (after editing a corpus, or to force a refresh):
+To re-ingest manually after editing a corpus, restart the API container: the bundled
+corpora are re-ingested on startup and re-ingestion is idempotent (it replaces a
+framework's documents rather than duplicating them).
 
 ```
-docker compose exec app python scripts/ingest_bundled_corpora.py
+docker compose restart app
 ```
-
-This is idempotent — it replaces a framework's documents rather than
-duplicating them.
 
 The corpus CSVs are **generated**, never hand-edited. All eight are
 rendered from hand-authored enriched YAML by the same harness,
