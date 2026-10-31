@@ -233,7 +233,7 @@ class ScanQueryService:
             project_name=scan.project.name if scan.project else "N/A",
             scan_type=scan.scan_type,
             selected_frameworks=scan.frameworks or [],
-            analysis_timestamp=scan.completed_at or scan.updated_at,
+            analysis_timestamp=scan.completed_at or scan.created_at,
             summary=api_models.SummaryResponse(
                 total_findings_count=len(scan.findings),
                 files_analyzed_count=len(files_analyzed),

@@ -38,7 +38,6 @@ def _scan_with(findings: list[db_models.Finding]) -> db_models.Scan:
         created_at=now,
     )
     scan.project = None
-    scan.updated_at = now
     scan.completed_at = None
     scan.findings = findings
     return scan
