@@ -13,7 +13,8 @@ from fastapi import UploadFile, HTTPException
 # Assuming get_language_from_filename can be imported from git_utils
 # If this causes circular dependency issues or feels misplaced,
 # it should be moved to a more general location.
-from app.shared.lib.files import get_language_from_filename, looks_binary  # UPDATED IMPORT
+from app.shared.lib import ingest_limits
+from app.shared.lib.files import get_language_from_filename, looks_binary
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,13 @@ def extract_archive_to_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                             )
                             continue  # Skip this file
 
+                        if len(content_bytes) > ingest_limits.MAX_FILE_BYTES:
+                            logger.info(
+                                "archive.oversize_skipped path=%s bytes=%d",
+                                _safe(member_info.filename),
+                                len(content_bytes),
+                            )
+                            continue
                         if looks_binary(content_bytes):
                             logger.info(
                                 "archive.binary_skipped path=%s",
@@ -329,6 +337,13 @@ def extract_archive_to_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                             )
                             continue  # Skip this file
 
+                        if len(content_bytes) > ingest_limits.MAX_FILE_BYTES:
+                            logger.info(
+                                "archive.oversize_skipped path=%s bytes=%d",
+                                _safe(member_info.name),
+                                len(content_bytes),
+                            )
+                            continue
                         if looks_binary(content_bytes):
                             logger.info(
                                 "archive.binary_skipped path=%s", _safe(member_info.name)

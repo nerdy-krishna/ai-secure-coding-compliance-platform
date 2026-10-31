@@ -51,6 +51,7 @@ from app.infrastructure.database.repositories.integration_repo import (
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.observability import record_metric, span
 from app.shared.lib.archive import extract_archive_to_files, is_archive_filename
+from app.shared.lib import ingest_limits
 from app.shared.lib.files import looks_binary
 from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.framework_validation import validate_framework_selection
@@ -63,8 +64,8 @@ logger = logging.getLogger(__name__)
 # Submission limits (V02.1.3 / V05.2.1)
 # ---------------------------------------------------------------------------
 MAX_FILES_PER_SCAN: int = 5_000
-MAX_TOTAL_BYTES: int = 200 * 1024 * 1024  # 200 MB aggregate
-MAX_FILE_BYTES: int = 10 * 1024 * 1024  # 10 MB per file
+MAX_TOTAL_BYTES: int = ingest_limits.MAX_TOTAL_BYTES
+MAX_FILE_BYTES: int = ingest_limits.MAX_FILE_BYTES
 MAX_PATH_LEN: int = 1_024
 
 # Canonical storage suffixes for the pasted-code language picker. The user can

@@ -56,7 +56,9 @@ from fastapi import HTTPException
 import git
 
 # Import the moved function
-from app.shared.lib.files import get_language_from_filename
+from app.shared.lib import ingest_limits
+from app.shared.lib.files import looks_binary
+from app.shared.lib.language_registry import language_for
 
 logger = logging.getLogger(__name__)
 
@@ -69,22 +71,16 @@ MAX_URL_LEN = 2048
 URL_PRINTABLE_RE = re.compile(r"^[A-Za-z0-9._:/?=&#%+\-]+$")
 
 # Resource caps
-MAX_FILES = 10_000
-MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 MB per file
-MAX_TOTAL_BYTES = 500 * 1024 * 1024  # 500 MB total tree
+# One set of limits for uploads, archives and clones (see ingest_limits).
+MAX_FILES = ingest_limits.MAX_FILES
+MAX_FILE_BYTES = ingest_limits.MAX_FILE_BYTES
+MAX_TOTAL_BYTES = ingest_limits.MAX_TOTAL_BYTES
 CLONE_TIMEOUT_SECONDS = 120
 GITHUB_API_TIMEOUT_SECONDS = 30
 
-# Executable magic bytes; binaries that match are skipped.
-_EXEC_MAGIC = (
-    b"MZ",  # PE / DOS
-    b"\x7fELF",  # ELF
-    b"\xfe\xed\xfa\xce",  # Mach-O 32 BE
-    b"\xce\xfa\xed\xfe",  # Mach-O 32 LE
-    b"\xfe\xed\xfa\xcf",  # Mach-O 64 BE
-    b"\xcf\xfa\xed\xfe",  # Mach-O 64 LE
-    b"\xca\xfe\xba\xbe",  # Mach-O fat
-)
+# Binary detection is shared with the upload and archive paths (see
+# `app.shared.lib.files.looks_binary`) so one file cannot be text in one path and
+# binary in another.
 
 
 def _redact_url(url: str) -> str:
@@ -185,21 +181,13 @@ def _validate_repo_url(repo_url: str) -> None:
 
 
 def _looks_like_executable(file_path: str) -> bool:
-    """Return True when the first bytes of ``file_path`` match a known binary magic."""
+    """Return True when the file is binary rather than text."""
     try:
         with open(file_path, "rb") as fh:
-            header = fh.read(1024)
+            sample = fh.read(8192)
     except OSError:
         return True  # if we cannot read it, treat as suspicious and skip
-    if not header:
-        return False
-    for magic in _EXEC_MAGIC:
-        if header.startswith(magic):
-            return True
-    # Heuristic: dense NULs in the first KB indicate non-text payload.
-    if header.count(b"\x00") > len(header) * 0.2:
-        return True
-    return False
+    return looks_binary(sample)
 
 
 def _github_auth_headers() -> Dict[str, str]:
@@ -292,8 +280,6 @@ def _is_processable_tree_entry(entry: Dict[str, Any]) -> bool:
         or "\\" in path
     ):
         return False
-    if get_language_from_filename(path) is None:
-        return False
     size = entry.get("size")
     if not isinstance(size, int) or size < 0 or size > MAX_FILE_BYTES:
         return False
@@ -309,7 +295,7 @@ def list_repo_files(repo_url: str) -> List[Dict[str, Any]]:
         # Non-GitHub: clone and list all files
         entries = []
         for f in clone_repo_and_get_files(repo_url):
-            language = get_language_from_filename(f["path"]) or "unknown"
+            language = language_for(f["path"]) or "unknown"
             entries.append(
                 {
                     "path": f["path"],
@@ -334,7 +320,7 @@ def list_repo_files(repo_url: str) -> List[Dict[str, Any]]:
             or "\\" in path
         ):
             continue
-        language = get_language_from_filename(path) or "unknown"
+        language = language_for(path) or "unknown"
         size = entry.get("size", 0)
         entries.append(
             {
@@ -428,7 +414,7 @@ def fetch_github_selected_files(
             {
                 "path": path,
                 "content": content,
-                "language": get_language_from_filename(path) or "unknown",
+                "language": language_for(path) or "unknown",
             }
         )
     return files_data
@@ -498,10 +484,11 @@ def clone_repo_and_get_files(repo_url: str) -> List[Dict[str, str]]:
                 if not real_path.startswith(real_temp_dir):
                     continue
 
-                # Extension allow-list via the language detector.
-                language = get_language_from_filename(filename)
-                if language is None:
-                    continue
+                # Language is resolved by the shared registry, which also knows
+                # files named `Dockerfile`, `Makefile`, `requirements.txt`. Unknown
+                # text files are still ingested: the prescan records why nothing
+                # could read them, instead of them vanishing here.
+                language = language_for(filename)
 
                 # File-count cap.
                 if len(files_data) >= MAX_FILES:

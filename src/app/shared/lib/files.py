@@ -69,9 +69,19 @@ LANGUAGE_EXTENSIONS = {
 
 
 def get_language_from_filename(filename: str) -> Optional[str]:
-    """Infers language from file extension."""
+    """Language for a path, from the shared registry.
+
+    The registry also knows name-only languages (`Dockerfile`, `Makefile`,
+    `requirements.txt`) and the wider language set the scanners support, which the
+    original extension table here did not.
+    """
     if not filename:
         return None
+    from app.shared.lib.language_registry import language_for
+
+    resolved = language_for(filename)
+    if resolved is not None:
+        return resolved
     ext = os.path.splitext(filename)[1].lower()
     return LANGUAGE_EXTENSIONS.get(ext)
 
