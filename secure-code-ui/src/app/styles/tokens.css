@@ -26,6 +26,13 @@
 
   /* motion */
   --ease: cubic-bezier(.2,.8,.2,1);
+
+  /* Form controls follow the app theme, not the operating system. */
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 /* ============ LIGHT — Variation A (indigo + warm risk) ============ */

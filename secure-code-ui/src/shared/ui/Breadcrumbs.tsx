@@ -70,7 +70,6 @@ const TRAILS: Record<string, Crumb[]> = {
   "/admin/frameworks": [ADMIN, { label: "Frameworks" }],
   "/admin/prompts": [ADMIN, { label: "Prompts" }],
   "/admin/rag": [ADMIN, { label: "Knowledge base" }],
-  "/admin/findings": [ADMIN, { label: "Findings" }],
   "/admin/sso/providers": [ADMIN, { label: "SSO providers" }],
   "/admin/sso/audit": [ADMIN, { label: "Auth audit" }],
   "/admin/scim/tokens": [ADMIN, { label: "SCIM tokens" }],

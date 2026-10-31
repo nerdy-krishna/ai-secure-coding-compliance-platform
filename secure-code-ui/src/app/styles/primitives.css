@@ -896,3 +896,80 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 .entity-card-link:hover { text-decoration: underline; }
+
+/* ============================ audit log table ============================ */
+/* Timestamps and users stay on one line; details wrap instead of truncating. */
+.audit-when {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.audit-user {
+  font-size: 12.5px;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+.audit-details { max-width: 520px; }
+.audit-details summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  list-style: none;
+}
+.audit-details summary::-webkit-details-marker { display: none; }
+.audit-details summary::before { content: "▸ "; color: var(--fg-subtle); }
+.audit-details[open] summary::before { content: "▾ "; }
+.audit-details pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--bg-soft);
+  border-radius: var(--r-xs);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+
+/* ============ bare form controls ============ */
+/* Unstyled <input>/<select>/<textarea> (a few admin forms use them) were rendered
+   with the browser's own colours — dark boxes on a light page. They now inherit the
+   theme, sit on a light surface, and stretch to their container so labels, fields
+   and buttons line up. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+select,
+textarea {
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.4;
+  box-sizing: border-box;
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 20%, transparent);
+}
+/* Inside a card the field fills its column, so stacked fields align edge to edge. */
+.sccap-card input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.sccap-card select,
+.sccap-card textarea { width: 100%; }
+.sccap-card label > span:first-child {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  margin-bottom: 4px;
+}
+option { background: var(--bg-elev); color: var(--fg); }

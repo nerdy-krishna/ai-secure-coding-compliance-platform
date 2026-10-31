@@ -32,7 +32,6 @@ const DashboardPage = React.lazy(() => import("../pages/account/DashboardPage"))
 const SecuritySettingsPage = React.lazy(() => import("../pages/account/SecuritySettingsPage"));
 const SubmissionHistoryPage = React.lazy(() => import("../pages/account/SubmissionHistoryPage"));
 const UsagePage = React.lazy(() => import("../pages/account/UsagePage"));
-const AdminFindingsPage = React.lazy(() => import("../pages/admin/AdminFindingsPage"));
 const FeaturesPage = React.lazy(() => import("../pages/admin/FeaturesPage"));
 const SystemConfigTab = React.lazy(() => import("../pages/admin/SystemConfigTab"));
 const UserManagementTab = React.lazy(() => import("../pages/admin/UserManagement"));
@@ -255,7 +254,6 @@ function AppContent() {
         </Route>
 
         <Route element={<RouteGuard requires="permission" anyPermission={["audit.read"]} />}>
-          <Route path="/admin/findings" element={routeContent(<AdminFindingsPage />)} />
           <Route element={<FeatureRoute feature="sso" />}>
             <Route path="/admin/sso/audit" element={routeContent(<SsoAuditPage />)} />
           </Route>
