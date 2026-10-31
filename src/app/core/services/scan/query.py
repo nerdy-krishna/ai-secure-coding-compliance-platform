@@ -98,8 +98,10 @@ class ScanQueryService:
         tenant_id: Optional[uuid.UUID] = None,
     ) -> db_models.Scan:
         """Retrieves the status and basic details of a scan."""
-        logger.info(
-            "Getting scan status.",
+        # Polled by the UI every few seconds while a scan runs; DEBUG keeps the
+        # request itself as the observable event.
+        logger.debug(
+            "scan-query.status",
             extra={"scan_id": str(scan_id), "actor_user_id": str(user.id)},
         )
         try:
@@ -375,8 +377,8 @@ class ScanQueryService:
         ``fixed_code_map``; omit it (the default) to return metadata +
         findings only without fetching source bodies.
         """
-        logger.info(
-            "scan-query: full result requested",
+        logger.debug(
+            "scan-query.result",
             extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
         )
         try:
@@ -978,8 +980,8 @@ class ScanQueryService:
         """Gets all LLM interactions for a given scan, ensuring user has
         access. Each interaction is enriched with the resolved LLM
         display name so the LLM-logs page can filter by model."""
-        logger.info(
-            "scan-query: LLM interactions requested",
+        logger.debug(
+            "scan-query.llm_interactions",
             extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
         )
         scan = await self.repo.get_scan(scan_id)

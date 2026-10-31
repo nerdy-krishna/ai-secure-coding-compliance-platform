@@ -29,6 +29,34 @@ array with a healthy Fluentd usually means the buffer directory is not writable.
 Grafana itself should report the datasource as healthy under
 *Connections → Data sources → Loki → Save & test*.
 
+### What the applications log
+
+One structured line per request, emitted by the application (not uvicorn, whose
+unstructured access log is disabled to avoid a second line per request):
+
+```json
+{"timestamp":"…","level":"INFO","message":"http.request","logger_name":"app.main",
+ "service_name":"app","correlation_id":"…","http_method":"GET",
+ "http_route":"/api/v1/scans/{scan_id}/result","http_status":200,
+ "duration_ms":12.4,"slow":false}
+```
+
+- **`http_route` is the route template**, not the URL — ids and search terms would
+  make the stream unbounded.
+- **Level follows the outcome**: 5xx is `ERROR`, 4xx and requests slower than
+  `SLOW_REQUEST_MS` (default 2500) are `WARNING`, health checks and asset probes
+  are `DEBUG` and are dropped by the collector.
+- **`correlation_id`** joins every line a request produced across the API, worker
+  and pentest engine.
+- **`logger_name` is a field, not a Loki label.** Labels are `service_name` and
+  `level` only; a label per logger multiplies streams and slows queries. Filter
+  with `{service_name="app"} | json | logger_name="app.core.services.scan.query"`.
+
+Verbosity is `LOG_LEVEL` (default `INFO`; `DEBUG` outside production), overridable
+at runtime from *Admin → Platform → system.log_level*. HTTP clients, provider SDKs,
+`watchfiles`, `filelock` and `asyncio` are pinned at `WARNING` so library chatter
+cannot drown the application's own events.
+
 ## Privacy boundary
 
 Only bounded identifiers and operational enums are allowlisted. Do not add

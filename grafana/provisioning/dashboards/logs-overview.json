@@ -225,7 +225,7 @@
       "gridPos": {
         "h": 4,
         "w": 6,
-        "x": 6,
+        "x": 12,
         "y": 8
       },
       "targets": [
@@ -257,17 +257,17 @@
     },
     {
       "type": "logs",
-      "title": "Errors and warnings",
-      "description": "Newest first. Use the log-browser filters to narrow by service or logger.",
+      "title": "All logs",
+      "description": "Every forwarded line, newest first.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
         "h": 10,
-        "w": 12,
-        "x": 12,
-        "y": 8
+        "w": 24,
+        "x": 0,
+        "y": 12
       },
       "targets": [
         {
@@ -275,7 +275,123 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service_name=~\"${service:regex}\", level=~\"ERROR|WARNING\"}",
+          "expr": "{service_name=~\"${service:regex}\", level=~\"${level:regex}\"}",
+          "legendFormat": "{{service_name}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Request latency p95",
+      "description": "p95 duration per route, taken from the http.request line's duration_ms.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.95, {service_name=~\"${service:regex}\", http_route=~\".+\"} | json | unwrap duration_ms [5m]) by (http_route)",
+          "legendFormat": "{{http_route}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by status class",
+      "description": "Requests per second, split by HTTP status code.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (http_status) (rate({service_name=~\"${service:regex}\", http_route=~\".+\"} | json | http_status=~\".+\" [5m]))",
+          "legendFormat": "{{http_status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Slow requests",
+      "description": "Requests over the slow threshold; also logged at WARNING by the app.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service_name=~\"${service:regex}\"} | json | duration_ms > 2500",
           "legendFormat": "{{service_name}}",
           "refId": "A"
         }
@@ -289,17 +405,17 @@
     },
     {
       "type": "logs",
-      "title": "All logs",
-      "description": "Every forwarded line, newest first.",
+      "title": "Errors and warnings by logger",
+      "description": "Same stream as above, but the logger name is promoted into the line so the component is visible at a glance.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
-        "h": 10,
+        "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 12
+        "x": 12,
+        "y": 30
       },
       "targets": [
         {
@@ -307,7 +423,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service_name=~\"${service:regex}\", level=~\"${level:regex}\"}",
+          "expr": "{service_name=~\"${service:regex}\", level=~\"ERROR|WARNING\"} | json | line_format \"{{.logger_name}} \u00b7 {{.message}}\"",
           "legendFormat": "{{service_name}}",
           "refId": "A"
         }

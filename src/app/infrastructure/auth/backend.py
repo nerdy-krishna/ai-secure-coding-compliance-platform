@@ -68,8 +68,10 @@ class CustomCookieJWTStrategy(
             "__Host-SCCAPSession" if self.cookie_secure else "SCCAPSessionDev"
         )
 
-        logger.info(
-            "CustomCookieJWTStrategy initialized.",
+        # Once per strategy construction — i.e. per request. It says the same
+        # thing every time, so it belongs at DEBUG.
+        logger.debug(
+            "auth.strategy.initialized",
             extra={
                 "cookie_name": self.cookie_name,
                 "cookie_path": self.cookie_path,
