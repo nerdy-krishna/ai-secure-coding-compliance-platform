@@ -93,12 +93,14 @@ function frameworkLabel(slug: string): string {
 const scanFacts = (
   data: ScanResultResponse,
   scanId?: string,
+  /** False for a pre-LLM stop: listing models implies they reviewed the code. */
+  includeModels = true,
 ): { label: string; value: React.ReactNode }[] => {
   const report = data.summary_report;
   const frameworks = report?.selected_frameworks ?? [];
   const temps = data.stage_temperatures;
   const stats = data.consolidation_stats;
-  const models = (data.llms_used ?? []).filter((m) =>
+  const models = (includeModels ? data.llms_used ?? [] : []).filter((m) =>
     ["reasoning llm", "utility llm", "secondary reasoning llm"].includes(
       m.category.toLowerCase(),
     ),
@@ -849,7 +851,7 @@ const ResultsPage: React.FC = () => {
               gap: "9px 32px",
             }}
           >
-            {scanFacts(data, scanId).map((fact) => (
+            {scanFacts(data, scanId, !isPrescanBlocked).map((fact) => (
               <div
                 key={fact.label}
                 style={{
