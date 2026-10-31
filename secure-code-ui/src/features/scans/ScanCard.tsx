@@ -66,10 +66,8 @@ export const ScanCard: React.FC<ScanCardProps> = ({
   // Live timer: counts only the time the scan actually worked. The server reports
   // wall clock minus approval-gate waits, and the ticker pauses while the scan is
   // parked at a gate or finished.
-  const elapsed = useActiveElapsed(
-    scan.active_processing_seconds,
-    isWorkingStatus(scan.status),
-  );
+  const working = isWorkingStatus(scan.status);
+  const elapsed = useActiveElapsed(scan.active_processing_seconds, working);
 
   // Status-coloured left accent so stacked scan items are easy to tell
   // apart at a glance.
@@ -142,12 +140,12 @@ export const ScanCard: React.FC<ScanCardProps> = ({
               }}
             >
               <span
-                className="pulse-dot"
+                className={working ? "pulse-dot" : "dot"}
                 style={{
                   width: 7,
                   height: 7,
                   borderRadius: "50%",
-                  background: "var(--primary)",
+                  background: working ? "var(--primary)" : "var(--medium)",
                   flexShrink: 0,
                 }}
               />
@@ -231,7 +229,9 @@ export const ScanCard: React.FC<ScanCardProps> = ({
                       />
                       <span
                         className={
-                          s.state === "running" ? "pulse-ring" : undefined
+                          s.state === "running" && working
+                            ? "pulse-ring"
+                            : undefined
                         }
                         style={{
                           width: 26,
