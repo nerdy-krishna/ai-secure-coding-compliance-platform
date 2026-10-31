@@ -606,35 +606,35 @@ const ResultsPage: React.FC = () => {
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("html")}
-              title="Download the findings report as HTML"
+              title="Rendered findings report (HTML) — the consolidated findings, ready to read or share"
             >
               <Icon.Download size={13} /> HTML
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("pdf")}
-              title="Download the findings report as PDF"
+              title="Rendered findings report (PDF) — the consolidated findings, ready to circulate"
             >
               <Icon.Download size={13} /> PDF
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("csv")}
-              title="Download the findings report as CSV"
+              title="One row per consolidated finding (CSV) — for spreadsheets, triage imports and diffs between scans"
             >
               <Icon.Download size={13} /> CSV
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={() => handleDownloadReport("sarif")}
-              title="Download the findings report as SARIF 2.1.0 for GitHub code scanning"
+              title="SARIF 2.1.0 (SARIF) — exact ranges and snippets for GitHub code scanning and CI annotations"
             >
               <Icon.Download size={13} /> SARIF
             </button>
             <button
               className="sccap-btn sccap-btn-sm"
               onClick={handleDownloadScannerReports}
-              title="Download the original JSON emitted by the deterministic scanners"
+              title="Raw scanner evidence (JSON) — the unmodified Bandit/Semgrep/Gitleaks/OSV output plus binary versions and SHA-256. Not the findings report."
             >
               <Icon.Download size={13} /> Scanner JSON
             </button>
