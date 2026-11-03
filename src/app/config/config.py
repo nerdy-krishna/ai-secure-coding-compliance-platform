@@ -319,6 +319,13 @@ class Settings(BaseSettings):
     # of submissions does not start several deterministic prescans at once.
     # Concurrency is still bounded inside a scan by CONCURRENT_LLM_LIMIT and by
     # each LLM configuration's RPM/TPM budget.
+    # After an assessment finishes, run the holistic review automatically: the model
+    # reads every finding and observation together and asks whether two or more of
+    # them chain into something neither proves alone. Manual chaining still works.
+    PENTEST_AUTO_CHAIN: bool = Field(
+        default=True,
+        description="Run the exploit-chain review automatically after an assessment.",
+    )
     # Assessment memory. The agent's conversation is persisted per turn and sent
     # whole until it passes this budget, at which point the older turns are
     # summarised into the run's transcript summary and the last few are kept
