@@ -321,3 +321,9 @@
 
 .asset-upload:hover { color: var(--fg); border-color: var(--fg-muted); }
 .asset-upload input { display: none; }
+.asset-yaml {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .74rem;
+  line-height: 1.5;
+  white-space: pre;
+}

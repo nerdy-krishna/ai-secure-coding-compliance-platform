@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.assets import models as am
 from app.assets import service
+from app.assets import verification
 from app.infrastructure.auth.core import current_active_user
 
 logger = logging.getLogger(__name__)
@@ -437,6 +438,66 @@ async def list_verdicts(
         tenant_id=user.tenant_id, asset_id=asset_id, cve_id=cve_id, verdict=verdict
     )
     return {"items": items, "total": len(items)}
+
+
+class TemplateRequest(BaseModel):
+    template: Optional[str] = Field(
+        default=None,
+        description=(
+            "A Nuclei-style YAML check to store for this CVE. Omit to have one designed "
+            "from the CVE and its references."
+        ),
+    )
+
+
+@cve_router.get("/{cve_id}/check")
+async def get_check(cve_id: str, user=Depends(current_active_user)) -> dict[str, Any]:
+    """The stored detection check for a CVE, if one exists."""
+    from app.assets import checks
+
+    row = await checks.load_template(cve_id.upper())
+    if row is None:
+        raise HTTPException(status_code=404, detail="no check stored for this CVE")
+    return {
+        "cve_id": row.cve_id,
+        "template": row.template,
+        "source": row.source,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@cve_router.post("/{cve_id}/check", status_code=201)
+async def put_check(
+    cve_id: str, body: TemplateRequest, user=Depends(current_active_user)
+) -> dict[str, Any]:
+    """Store a check for a CVE, or have one designed and validated."""
+    from app.assets import checks
+    from app.infrastructure.database.database import AsyncSessionLocal
+
+    cve_key = cve_id.upper()
+    async with AsyncSessionLocal() as db:
+        if await db.get(am.CveRecord, cve_key) is None:
+            raise HTTPException(
+                status_code=404,
+                detail="that CVE is not in the local corpus; import a feed first",
+            )
+
+    if body.template:
+        try:
+            await checks.store_template(cve_key, body.template, source="manual")
+        except checks.TemplateInvalid as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"cve_id": cve_key, "stored": True, "source": "manual"}
+
+    verdicts = await service.list_verdicts(tenant_id=user.tenant_id, cve_id=cve_key)
+    if not verdicts:
+        raise HTTPException(
+            status_code=400,
+            detail="run a check for this CVE first, then a template can be designed",
+        )
+    outcome = await verification.verify_verdict(uuid.UUID(verdicts[0]["id"]))
+    row = await checks.load_template(cve_key)
+    return {"cve_id": cve_key, "stored": row is not None, "verify": outcome}
 
 
 @cve_router.post("/verdicts/{verdict_id}/verify")

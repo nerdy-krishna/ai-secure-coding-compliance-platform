@@ -195,6 +195,24 @@ class CveAffected(Base):
     exact_versions: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
 
 
+class CveCheck(Base):
+    """A stored detection check for one CVE, in Nuclei-compatible YAML."""
+
+    __tablename__ = "cve_checks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    cve_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("cve_records.id", ondelete="CASCADE"), nullable=False
+    )
+    template: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="model")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AssetTechnology(Base):
     """A product an asset runs, with or without a network endpoint.
 

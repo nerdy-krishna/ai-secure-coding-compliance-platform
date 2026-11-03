@@ -287,3 +287,24 @@ export async function sweepInventory(input: {
   const { data } = await apiClient.post("/assets/sweep", input);
   return data;
 }
+
+/** The stored Nuclei-style detection check for a CVE. */
+export async function getCveCheck(
+  cveId: string,
+): Promise<{ cve_id: string; template: string; source: string; created_at: string | null } | null> {
+  try {
+    const { data } = await apiClient.get(`/cve/${cveId}/check`);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Store a check for a CVE, or have one designed and validated. */
+export async function putCveCheck(
+  cveId: string,
+  template?: string,
+): Promise<{ cve_id: string; stored: boolean; source?: string }> {
+  const { data } = await apiClient.post(`/cve/${cveId}/check`, { template: template ?? null });
+  return data;
+}

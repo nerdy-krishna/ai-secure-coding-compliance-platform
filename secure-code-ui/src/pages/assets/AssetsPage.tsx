@@ -20,6 +20,8 @@ import {
   probeInventory,
   checkCves,
   createAsset,
+  getCveCheck,
+  putCveCheck,
   deleteAsset,
   getAsset,
   importCorpus,
@@ -93,6 +95,9 @@ export default function AssetsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [cveQuery, setCveQuery] = useState("");
   const [verify, setVerify] = useState(false);
+  const [checkFor, setCheckFor] = useState<string | null>(null);
+  const [checkYaml, setCheckYaml] = useState<string>("");
+  const [checkBusy, setCheckBusy] = useState(false);
 
   const assetsQ = useQuery({ queryKey: ["assets"], queryFn: listAssets });
   const assets: Asset[] = assetsQ.data?.items ?? [];
@@ -173,6 +178,27 @@ export default function AssetsPage() {
     },
     onError: () => toast.error("Could not sweep the inventory"),
   });
+
+  const openCheck = async (cveId: string) => {
+    setCheckFor(cveId);
+    setCheckBusy(true);
+    setCheckYaml("");
+    try {
+      const existing = await getCveCheck(cveId);
+      if (existing) {
+        setCheckYaml(existing.template);
+      } else {
+        await putCveCheck(cveId);
+        const created = await getCveCheck(cveId);
+        setCheckYaml(created?.template ?? "");
+        if (!created) toast.error("A check could not be designed for this CVE yet");
+      }
+    } catch {
+      toast.error("Could not load the check");
+    } finally {
+      setCheckBusy(false);
+    }
+  };
 
   const verifyOne = useMutation({
     mutationFn: (verdictId: string) => verifyVerdict(verdictId),
@@ -423,6 +449,13 @@ export default function AssetsPage() {
                               <td>{verdict.confidence}</td>
                               <td className="asset-reason">{verdict.reason ?? "—"}</td>
                               <td>
+                                <button
+                                  className="sccap-btn sccap-btn-sm"
+                                  onClick={() => void openCheck(verdict.cve_id)}
+                                  title="The stored Nuclei-style check that decides this CVE"
+                                >
+                                  <Icon.Code size={12} /> Check
+                                </button>
                                 {verdict.verdict === "undetermined" && verdict.basis === "observed" && (
                                   <button
                                     className="sccap-btn sccap-btn-sm"
@@ -512,6 +545,48 @@ export default function AssetsPage() {
           </div>
         </section>
       )}
+
+      <Modal
+        open={checkFor !== null}
+        onClose={() => setCheckFor(null)}
+        title={`Detection check · ${checkFor ?? ""}`}
+        width={760}
+        footer={
+          <>
+            <button className="sccap-btn" onClick={() => setCheckFor(null)}>
+              Close
+            </button>
+            <button
+              className="sccap-btn"
+              disabled={!checkYaml.trim() || checkBusy}
+              onClick={async () => {
+                if (!checkFor) return;
+                try {
+                  await putCveCheck(checkFor, checkYaml);
+                  toast.success("Check saved; the next verification uses it");
+                } catch {
+                  toast.error("The check was rejected (read-only requests and matchers only)");
+                }
+              }}
+            >
+              Save check
+            </button>
+          </>
+        }
+      >
+        <p className="asset-muted">
+          One check per CVE, replayed against every asset. Read-only requests only
+          (GET/HEAD/OPTIONS), no request body, matchers over header or body — the same
+          shape Nuclei uses, so it can be exported and run by hand.
+        </p>
+        <textarea
+          className="asset-textarea asset-yaml"
+          rows={18}
+          value={checkBusy ? "Designing a check…" : checkYaml}
+          onChange={(event) => setCheckYaml(event.target.value)}
+          spellCheck={false}
+        />
+      </Modal>
 
       <CreateAssetModal
         open={createOpen}

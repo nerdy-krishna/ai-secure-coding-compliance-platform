@@ -32,6 +32,7 @@ import httpx
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from app.assets import checks
 from app.assets import models as am
 from app.infrastructure.database.database import AsyncSessionLocal
 from app.infrastructure.llm_client import LLMClient, LLMUsageContext, get_llm_client
@@ -45,6 +46,23 @@ MAX_CHECKS = 4
 CHECK_TIMEOUT_SECONDS = 15.0
 MAX_BODY_CHARS = 4000
 MAX_REDIRECTS = 0
+
+
+class CheckTemplateOut(BaseModel):
+    """A Nuclei-compatible detection check for one CVE."""
+
+    template: str = Field(
+        description=(
+            "A complete Nuclei-style YAML template. Detection only: GET/HEAD/OPTIONS, "
+            "no request body, matchers limited to status, word, regex and size over "
+            "header or body, {{BaseURL}} for the target. It must distinguish a "
+            "vulnerable build from a patched one, and must not attempt exploitation."
+        )
+    )
+    rationale: str = Field(
+        default="",
+        description="Why this check decides the question for this CVE.",
+    )
 
 
 class CveResearch(BaseModel):
@@ -224,6 +242,62 @@ def _render_cve(cve: am.CveRecord, ranges: list[am.CveAffected]) -> str:
                 f"versions {' '.join(bound) or '(all)'}"
             )
     return "\n".join(lines)
+
+
+async def design_template(
+    llm: LLMClient,
+    *,
+    cve: am.CveRecord,
+    ranges: list[am.CveAffected],
+    research: CveResearch | None,
+    asset: am.Asset,
+) -> Optional[str]:
+    """Write the reusable check for this CVE, once.
+
+    One template per CVE is the point: the same software is then tested identically on
+    every asset, and the check can be read, exported and re-run by a human.
+    """
+    prompt = (
+        f"{_render_cve(cve, ranges)}\n\n{_render_references(cve)}\n\n"
+        f"{_render_research(research)}\n\n"
+        f"Example of the shape expected:\n"
+        "id: CVE-2021-23017-version\n"
+        "info:\n"
+        "  name: nginx resolver off-by-one (version check)\n"
+        "  severity: high\n"
+        "http:\n"
+        "  - method: GET\n"
+        "    path: [\"{{BaseURL}}/\"]\n"
+        "    matchers-condition: and\n"
+        "    matchers:\n"
+        "      - type: word\n"
+        "        part: header\n"
+        "        words: [\"nginx\"]\n"
+        "      - type: regex\n"
+        "        part: header\n"
+        "        regex: [\"nginx/1\\.1[0-9]\\.\"]\n\n"
+        "Write the check for this CVE. Read-only requests only, no body, at most four "
+        "requests, matchers over header or body. It must be specific to this "
+        "vulnerability, not a generic fingerprint."
+    )
+    result = await llm.generate_structured_output(
+        prompt=prompt,
+        response_model=CheckTemplateOut,
+        system_prompt=(
+            "You write Nuclei-style detection templates for defensive verification. "
+            "Detection only: never a request that changes state, never an exploit payload."
+        ),
+        usage_context=_usage_context(cve.id, "cve.template", asset.id),
+    )
+    parsed = result.parsed_output
+    if parsed is None or not parsed.template.strip():
+        return None
+    try:
+        checks.parse_template(parsed.template)
+    except checks.TemplateInvalid as exc:
+        logger.warning("model produced an unusable template for %s: %s", cve.id, exc)
+        return None
+    return parsed.template
 
 
 async def research_cve(
@@ -557,10 +631,51 @@ async def verify_verdict(verdict_id: uuid.UUID, *, llm_config_id: Optional[uuid.
             return {"error": "could not initialise the LLM client"}
 
         research = await research_cve(llm, cve=cve, ranges=ranges, asset=asset)
+
+        # One check per CVE, stored and replayed: the same software is tested the same
+        # way on every asset, and a human can read the check that produced a verdict.
+        stored = await checks.load_template(cve.id)
+        template_source = "stored"
+        if stored is None:
+            generated = await design_template(
+                llm, cve=cve, ranges=ranges, research=research, asset=asset
+            )
+            if generated:
+                await checks.store_template(cve.id, generated)
+                stored = await checks.load_template(cve.id)
+                template_source = "generated"
+        template_text = stored.template if stored is not None else ""
+        template_observations: list[dict[str, Any]] = []
+        template_summary: dict[str, Any] = {}
+        if template_text:
+            try:
+                template_observations = await checks.run_template(
+                    template_text, services=services
+                )
+                template_summary = checks.summarise(template_observations)
+            except checks.TemplateInvalid as exc:
+                logger.warning("stored template for %s is unusable: %s", cve.id, exc)
+                template_summary = {"error": str(exc)}
+
         plan = await design_checks(
             llm, cve=cve, ranges=ranges, asset=asset, services=services, research=research
         )
         observations = await run_plan(plan, services=services)
+        # The template's findings are evidence too: show them to the judge.
+        if template_summary.get("matched"):
+            observations = observations + [
+                {
+                    "n": len(observations) + 1,
+                    "method": row.get("method"),
+                    "url": row.get("url"),
+                    "status": row.get("status"),
+                    "headers": row.get("headers"),
+                    "body": row.get("body"),
+                    "decides": "matched the stored detection template",
+                }
+                for row in template_observations
+                if row.get("matched")
+            ]
         decision = await judge(
             llm,
             cve=cve,
@@ -580,6 +695,11 @@ async def verify_verdict(verdict_id: uuid.UUID, *, llm_config_id: Optional[uuid.
             "plan": plan.model_dump(),
             "observations": observations,
             "deciding_check": decision.deciding_check,
+            "template": {
+                "source": template_source,
+                "yaml": template_text,
+                "summary": template_summary,
+            },
         }
         # A probe is a stronger basis than a banner, so the row moves to it rather
         # than keeping a stale observed row beside a tested one.
