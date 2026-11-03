@@ -656,6 +656,49 @@ EOF
     chmod 600 "$_SCCAP_DEPLOY_STATE" 2>/dev/null || true
 }
 
+_sccap_deploy_state_mark_deployed() {
+    # Record what is now running. Without this the next `--update` can only compare
+    # the checkout to origin, which says nothing about the images or the database.
+    local commit="$1"
+    [ -n "$commit" ] || return 0
+    mkdir -p "$(dirname "$_SCCAP_DEPLOY_STATE")" 2>/dev/null || true
+    python3 - "$_SCCAP_DEPLOY_STATE" "$commit" <<'PYEOF' 2>/dev/null || true
+import json, sys, datetime
+path, commit = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as handle:
+        state = json.load(handle)
+except Exception:
+    state = {}
+state["deployed_commit"] = commit
+state["deployed_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+with open(path, "w") as handle:
+    json.dump(state, handle)
+PYEOF
+    chmod 600 "$_SCCAP_DEPLOY_STATE" 2>/dev/null || true
+}
+
+_sccap_running_build_commit() {
+    # What the API container says it was built from. Compose passes the build args
+    # through to the image's environment (Dockerfile: SCCAP_BUILD_COMMIT), so this
+    # is evidence about the thing that is actually running.
+    docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' sccap_app 2>/dev/null \
+        | awk -F= '/^SCCAP_BUILD_COMMIT=/{print $2; exit}' \
+        | grep -oE '^[0-9a-f]{7,40}' || true
+}
+
+_sccap_deployed_commit() {
+    # Prefer the running container; fall back to the last recorded deployment.
+    local from_image from_state
+    from_image=$(_sccap_running_build_commit)
+    if [ -n "$from_image" ]; then
+        printf '%s' "$from_image"
+        return 0
+    fi
+    from_state=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("deployed_commit","") or "")' "$_SCCAP_DEPLOY_STATE" 2>/dev/null || true)
+    printf '%s' "${from_state:-}"
+}
+
 _sccap_project_images_lenient() {
     # Like _sccap_project_images, but also accepts images whose repository does
     # not carry the checkout directory's name (a renamed or copied checkout).
@@ -762,20 +805,43 @@ _sccap_run_update() {
         echo "[!] Current branch has no upstream; set one or update manually."; return 1
     }
 
-    local branch previous target backup
+    local branch checkout previous target backup deployed_note
     branch=$(git rev-parse --abbrev-ref HEAD)
-    previous=$(_sccap_git_sha)
-    echo "[*] Updating branch '$branch' (currently ${previous:0:8})"
+    checkout=$(_sccap_git_sha)
+    # `previous` is what is DEPLOYED (image + database), which is what a rollback
+    # must return to. `checkout` is what the working tree holds. They diverge the
+    # moment someone runs `git pull` by hand, and treating the checkout as the
+    # deployment is what made `--update` report success without deploying.
+    local deployed
+    deployed=$(_sccap_deployed_commit)
+    previous=${deployed:-$checkout}
+    echo "[*] Updating branch '$branch' (deployed: ${previous:0:8}, checkout: ${checkout:0:8})"
     git fetch --quiet origin || { echo "[!] git fetch failed."; return 1; }
     target=$(git rev-parse "origin/$branch")
-    if [ "$target" = "$previous" ]; then
-        echo "[+] Already up to date at ${previous:0:8}."
+    if [ "$target" = "$checkout" ] && [ -n "$deployed" ] && [ "$target" = "$deployed" ]; then
+        echo "[+] Checkout and running deployment are both at ${target:0:8}; nothing to do."
+        echo "    If the images look stale, rebuild explicitly:"
+        echo "      docker compose build app worker pentest-engine ui && docker compose up -d"
         return 0
     fi
-    echo "    ${previous:0:8} -> ${target:0:8}"
-    git log --oneline "${previous}..${target}" | head -10 | sed 's/^/      /'
+    if [ "$target" = "$checkout" ] && [ -z "$deployed" ]; then
+        deployed_note="the checkout is already at ${target:0:8} and there is no record of what is deployed"
+        echo "[*] ${deployed_note}"
+        echo "    Deploying so the images and schema are known to match the checkout."
+    elif [ "$target" = "$checkout" ]; then
+        # Someone pulled by hand: the code is current but the images and schema are
+        # not. Deploy what is on disk instead of pretending there is nothing to do.
+        deployed_note="the checkout is already at ${target:0:8}, but the running deployment is at ${previous:0:8}"
+        echo "[*] ${deployed_note}"
+        echo "    Rebuilding and migrating so the deployment matches the checkout."
+    else
+        echo "    ${checkout:0:8} -> ${target:0:8}"
+        git log --oneline "${checkout}..${target}" | head -10 | sed 's/^/      /'
+    fi
 
-    if ! _sccap_confirm "Apply this update? The stack restarts and the database is migrated." "update"; then
+    local confirm_msg="Apply this update? The stack restarts and the database is migrated."
+    [ -n "$deployed_note" ] && confirm_msg="Deploy the current checkout? The stack restarts and the database is migrated."
+    if ! _sccap_confirm "$confirm_msg" "update"; then
         echo "Aborted."
         return 1
     fi
@@ -845,6 +911,7 @@ _sccap_run_update() {
 
     _sccap_fix_ownership
     _sccap_install_update_units
+    _sccap_deploy_state_mark_deployed "$target"
     echo ""
     echo "[+] Update applied: ${previous:0:8} -> ${target:0:8}"
     echo "    Database backup: ${backup:-none}"
@@ -2177,6 +2244,9 @@ echo "   Setup Complete!"
 echo "=================================================="
 echo ""
 _sccap_stage done
+# Record what this install deployed, so the first `--update` compares against the
+# running images rather than only the checkout.
+_sccap_deploy_state_mark_deployed "$(_sccap_git_sha)"
 # Final ownership pass: everything setup.sh just wrote belongs to the operator
 # (config) or the container UIDs (certbot state, tool-worker key).
 _sccap_fix_ownership

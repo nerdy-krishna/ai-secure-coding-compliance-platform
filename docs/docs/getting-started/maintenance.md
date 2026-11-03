@@ -147,6 +147,34 @@ re-sync Semgrep rule sources after an upgrade that changes rule handling
 | `sh: tsc: not found` during the UI build | npm installed without devDependencies (an inherited `NODE_ENV=production` / `npm_config_omit=dev`), or a `node_modules` leaked into the build context | Remove `secure-code-ui/node_modules` and `dist`, `docker builder prune -f`, pull, rebuild. The build now clears those variables and verifies `tsc` itself |
 | `npm error Exit handler never called` | npm crashed — out-of-memory on a small VM, or a corrupt npm cache | `COMPOSE_PARALLEL_LIMIT=1 ./setup.sh` (one image at a time), or `docker compose build ui`; add swap if it repeats. The installer defaults to 2 concurrent builds |
 
+## Updating an existing installation
+
+```bash
+./setup.sh --update
+```
+
+It fetches the current branch, asks once, backs up the database, tags the running
+images for rollback, rebuilds, restarts, applies migrations and only reports success
+once the API answers.
+
+The decision to deploy is based on **what is deployed**, not on what the checkout
+contains: the running API reports the commit it was built from
+(`SCCAP_BUILD_COMMIT`), falling back to `.scratch/deploy-state.json`. That distinction
+matters — running `git pull` by hand makes the checkout current while the images and
+schema are still the old ones, and an update that compared only the checkout used to
+report "already up to date" and change nothing.
+
+| Checkout | Deployment | What `--update` does |
+|---|---|---|
+| target | target | prints "nothing to do" (no restart) |
+| target | older | rebuilds, restarts, migrates, and says why |
+| target | unknown | deploys, because an unproven match is not a match |
+| older | anything | normal update |
+
+`--rollback` returns code and images to the commit that was actually deployed. If you
+change tracked files by hand, use the explicit build (`docker compose build … &&
+docker compose up -d`), because `--update` hard-resets the checkout to origin.
+
 ## Throughput knobs
 
 | Setting | Default | Effect |
