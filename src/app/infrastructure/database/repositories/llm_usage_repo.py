@@ -31,7 +31,7 @@ _QUALITY_ORDER = {"exact": 0, "normalized": 1, "estimated": 2, "unknown": 3}
 
 def build_usage_idempotency_key(
     *,
-    operation_kind: Literal["scan", "chat", "rag", "pentest"],
+    operation_kind: Literal["scan", "chat", "rag", "pentest", "cve"],
     operation_id: str | uuid.UUID,
     stage: str,
     agent_name: str,
@@ -62,7 +62,7 @@ def build_usage_idempotency_key(
 
 @dataclass(frozen=True)
 class LLMUsageContext:
-    operation_kind: Literal["scan", "chat", "rag", "pentest"]
+    operation_kind: Literal["scan", "chat", "rag", "pentest", "cve"]
     operation_id: str
     stage: str
     agent_name: str
@@ -72,6 +72,8 @@ class LLMUsageContext:
     rag_job_id: uuid.UUID | None = None
     pentest_attempt_id: uuid.UUID | None = None
     scan_task_id: uuid.UUID | None = None
+    # CVE applicability work is attributed to the asset it is about.
+    asset_id: uuid.UUID | None = None
     actor_user_id: int | None = None
 
 

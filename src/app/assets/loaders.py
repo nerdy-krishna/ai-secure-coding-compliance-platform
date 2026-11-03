@@ -108,6 +108,27 @@ def _nvd_metrics(cve: dict[str, Any]) -> tuple[Optional[float], Optional[str], O
     return None, None, None, None
 
 
+def _nvd_references(cve: dict[str, Any]) -> list[dict[str, Any]]:
+    """Advisory, patch and exploit links, with their tags.
+
+    These are what a researcher reads next after the description: the vendor advisory
+    says which versions are fixed, an exploit link says how it is triggered.
+    """
+    references: list[dict[str, Any]] = []
+    for reference in cve.get("references") or []:
+        url = reference.get("url")
+        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
+            continue
+        references.append(
+            {
+                "url": url[:500],
+                "source": (reference.get("source") or "")[:120] or None,
+                "tags": [str(tag)[:40] for tag in (reference.get("tags") or [])][:8],
+            }
+        )
+    return references[:40]
+
+
 def _nvd_cwe(cve: dict[str, Any]) -> Optional[str]:
     for weakness in cve.get("weaknesses") or []:
         for description in weakness.get("description") or []:
@@ -140,6 +161,7 @@ def parse_nvd(payload: dict[str, Any]) -> list[tuple[am.CveRecord, list[am.CveAf
             cwe=_nvd_cwe(cve),
             published=_parse_dt(cve.get("published")),
             modified=_parse_dt(cve.get("lastModified")),
+            references=_nvd_references(cve) or None,
             source="nvd",
         )
         records.append((record, _nvd_ranges(cve)))
@@ -243,6 +265,15 @@ def parse_osv(payload: dict[str, Any]) -> list[tuple[am.CveRecord, list[am.CveAf
         database_specific = item.get("database_specific") or {}
         if isinstance(database_specific.get("severity"), str):
             severity = database_specific["severity"].lower()
+        references = [
+            {
+                "url": str(entry.get("url"))[:500],
+                "source": str(entry.get("type") or "").lower()[:120] or None,
+                "tags": [str(entry.get("type") or "advisory").lower()][:8],
+            }
+            for entry in (item.get("references") or [])
+            if isinstance(entry, dict) and str(entry.get("url", "")).startswith("http")
+        ]
         record = am.CveRecord(
             id=cve_id,
             description=(item.get("details") or item.get("summary") or None),
@@ -250,6 +281,7 @@ def parse_osv(payload: dict[str, Any]) -> list[tuple[am.CveRecord, list[am.CveAf
             severity=severity or _severity_from_score(score),
             published=_parse_dt(item.get("published")),
             modified=_parse_dt(item.get("modified")),
+            references=references[:40] or None,
             source="osv",
         )
         records.append((record, _osv_ranges(cve_id, item)))
@@ -294,6 +326,7 @@ async def upsert_records(
             existing.cwe = record.cwe or existing.cwe
             existing.published = record.published or existing.published
             existing.modified = record.modified or existing.modified
+            existing.references = record.references or existing.references
             updated += 1
         if affected:
             pending_ranges[record.id] = affected

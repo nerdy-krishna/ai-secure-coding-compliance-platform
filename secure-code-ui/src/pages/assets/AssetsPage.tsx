@@ -16,6 +16,8 @@ import { useToast } from "../../shared/ui/Toast";
 import {
   addDependencies,
   addService,
+  addTechnology,
+  probeInventory,
   checkCves,
   createAsset,
   deleteAsset,
@@ -36,9 +38,27 @@ const KIND_LABEL: Record<AssetKind, string> = {
   web_app: "Web app",
   api: "API",
   host: "Host",
-  repo: "Repository",
   service: "Service",
+  repo: "Repository",
+  vm: "VM / server",
+  container: "Container image",
+  k8s: "Kubernetes cluster",
+  database: "Database",
+  firewall: "Firewall / appliance",
+  network: "Network device",
+  cloud: "Cloud account / service",
 };
+
+const TECH_CATEGORIES = [
+  "os",
+  "database",
+  "web",
+  "container",
+  "orchestrator",
+  "network",
+  "library",
+  "other",
+] as const;
 
 const VERDICT_LABEL: Record<Verdict, string> = {
   applicable: "Applicable",
@@ -129,6 +149,19 @@ export default function AssetsPage() {
     onError: () => toast.error("Could not run the check"),
   });
 
+  const probe = useMutation({
+    mutationFn: (rescan: boolean) => probeInventory({ rescan }),
+    onSuccess: (result) => {
+      toast.success(
+        result.note ??
+          `${result.assets_probed} asset(s) probed · ${result.fingerprints_found} fingerprint(s)` +
+            (result.products.length ? ` · ${result.products.join(", ")}` : ""),
+      );
+      refresh();
+    },
+    onError: () => toast.error("Could not probe the inventory"),
+  });
+
   const sweep = useMutation({
     mutationFn: () => sweepInventory({ verify }),
     onSuccess: (result) => {
@@ -203,15 +236,26 @@ export default function AssetsPage() {
                 {corpus?.services ?? 0} endpoint(s) · {corpus?.dependencies ?? 0} package version(s)
               </span>
             </div>
-            <button
-              className="sccap-btn"
-              disabled={sweep.isPending || assets.length === 0}
-              onClick={() => sweep.mutate()}
-              title="Re-fingerprint every in-scope endpoint, then apply the CVE list"
-            >
-              <Icon.Refresh size={13} />
-              {sweep.isPending ? "Sweeping…" : "Sweep inventory"}
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="sccap-btn"
+                disabled={probe.isPending || assets.length === 0}
+                onClick={() => probe.mutate(true)}
+                title="Scan every asset and store the technology and version it runs"
+              >
+                <Icon.Shield size={13} />
+                {probe.isPending ? "Probing…" : "Probe inventory"}
+              </button>
+              <button
+                className="sccap-btn"
+                disabled={sweep.isPending || assets.length === 0}
+                onClick={() => sweep.mutate()}
+                title="Probe what is unknown, then apply the CVE list"
+              >
+                <Icon.Refresh size={13} />
+                {sweep.isPending ? "Sweeping…" : "Sweep inventory"}
+              </button>
+            </div>
           </div>
 
           {assets.length === 0 ? (
@@ -228,6 +272,7 @@ export default function AssetsPage() {
                     <th>Kind</th>
                     <th>Environment</th>
                     <th>Endpoints</th>
+                    <th>Technologies</th>
                     <th>Packages</th>
                     <th>Authorisation</th>
                     <th />
@@ -247,6 +292,7 @@ export default function AssetsPage() {
                       <td>{KIND_LABEL[asset.kind] ?? asset.kind}</td>
                       <td>{asset.environment ?? "—"}</td>
                       <td>{asset.services ?? 0}</td>
+                      <td>{asset.technologies ?? 0}</td>
                       <td>{asset.dependencies ?? 0}</td>
                       <td className="asset-muted">{asset.authorization_basis ?? "—"}</td>
                       <td>
@@ -293,6 +339,31 @@ export default function AssetsPage() {
               onChange={(event) => setCveQuery(event.target.value)}
               placeholder="CVE-2021-23017, CVE-2021-23337 …"
             />
+            <div className="asset-inline-form">
+              <label className="asset-upload">
+                <Icon.Download size={13} /> Upload a list (.txt / .csv)
+                <input
+                  type="file"
+                  accept=".txt,.csv,.json,text/plain"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    const text = await file.text();
+                    const ids = splitCves(text);
+                    if (!ids.length) {
+                      toast.error("No CVE ids found in that file");
+                    } else {
+                      setCveQuery(ids.join("\n"));
+                      toast.info(`${ids.length} CVE id(s) loaded from ${file.name}`);
+                    }
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <span className="asset-muted">
+                One per line, or comma separated; anything that is not a CVE id is ignored.
+              </span>
+            </div>
             <div className="asset-toolbar asset-toolbar-actions">
               <label className="asset-check">
                 <input
@@ -474,16 +545,43 @@ function AssetDetailPanel({
       confidence: string;
     }>;
     dependencies: Array<{ id: string; ecosystem: string; package: string; version: string | null }>;
+    technologies: Array<{
+      id: string;
+      product: string;
+      version: string | null;
+      category: string;
+      source: string;
+    }>;
   };
   onChanged: () => void;
   onDeleted: () => void;
 }) {
   const toast = useToast();
+  const [techProduct, setTechProduct] = useState("");
+  const [techVersion, setTechVersion] = useState("");
+  const [techCategory, setTechCategory] = useState<(typeof TECH_CATEGORIES)[number]>("other");
   const [host, setHost] = useState("");
   const [port, setPort] = useState("");
   const [product, setProduct] = useState("");
   const [version, setVersion] = useState("");
   const [packages, setPackages] = useState("");
+
+  const addTech = useMutation({
+    mutationFn: () =>
+      addTechnology(detail.id, {
+        product: techProduct.trim(),
+        version: techVersion.trim() || null,
+        category: techCategory,
+        confidence: techVersion.trim() ? "exact" : "heuristic",
+      }),
+    onSuccess: () => {
+      setTechProduct("");
+      setTechVersion("");
+      toast.success("Technology recorded");
+      onChanged();
+    },
+    onError: () => toast.error("Could not record the technology"),
+  });
 
   const add = useMutation({
     mutationFn: () =>
@@ -569,6 +667,58 @@ function AssetDetailPanel({
       </div>
 
       <div className="asset-detail-grid">
+        <div>
+          <h4>Technologies ({detail.technologies.length})</h4>
+          <p className="asset-muted">
+            What the asset runs. A database, appliance or cluster can be recorded here
+            without a URL — that is what makes it checkable against a CVE list.
+          </p>
+          {detail.technologies.length > 0 && (
+            <ul className="asset-list asset-list-compact">
+              {detail.technologies.map((technology) => (
+                <li key={technology.id}>
+                  <strong>{technology.product}</strong>
+                  <span>{technology.version ?? "version unknown"}</span>
+                  <span className="asset-muted">
+                    {technology.category} · {technology.source}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="asset-inline-form">
+            <input
+              placeholder="product (postgresql)"
+              value={techProduct}
+              onChange={(e) => setTechProduct(e.target.value)}
+              style={{ width: 150 }}
+            />
+            <input
+              placeholder="version"
+              value={techVersion}
+              onChange={(e) => setTechVersion(e.target.value)}
+              style={{ width: 90 }}
+            />
+            <select
+              value={techCategory}
+              onChange={(e) => setTechCategory(e.target.value as (typeof TECH_CATEGORIES)[number])}
+            >
+              {TECH_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+            <button
+              className="sccap-btn sccap-btn-sm"
+              disabled={!techProduct.trim() || addTech.isPending}
+              onClick={() => addTech.mutate()}
+            >
+              Add technology
+            </button>
+          </div>
+        </div>
+
         <div>
           <h4>Endpoints ({detail.services.length})</h4>
           {detail.services.length === 0 ? (

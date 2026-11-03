@@ -167,7 +167,7 @@ class UsageBudgetService:
         attribution = await self.repo.resolve_attribution(context)
         effective_windows = window_kinds or (
             ("request", "attempt", "day", "month")
-            if context.operation_kind == "pentest"
+            if context.operation_kind in ("pentest", "cve")
             else ("request", "scan", "day", "month")
         )
         amounts = _coerce_amounts(estimate)

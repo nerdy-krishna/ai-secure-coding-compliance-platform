@@ -47,6 +47,43 @@ MAX_BODY_CHARS = 4000
 MAX_REDIRECTS = 0
 
 
+class CveResearch(BaseModel):
+    """What the vulnerability is and what would prove it, before any probe exists."""
+
+    mechanism: str = Field(
+        description=(
+            "How the vulnerability works, in the terms of the affected product: which "
+            "input reaches which code path, and under what preconditions it is exploitable."
+        )
+    )
+    detection_signals: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Observable facts that distinguish a vulnerable build from a patched one — a "
+            "version, a feature that only exists in affected releases, an endpoint whose "
+            "behaviour changed, a header, a default credential."
+        ),
+    )
+    patched_version: Optional[str] = Field(
+        default=None,
+        description="First version that is fixed, if the advisory says so.",
+    )
+    reference_insights: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What the advisories and exploit write-ups add beyond the description — "
+            "affected configurations, prerequisites, or a known trigger pattern."
+        ),
+    )
+    testability_note: str = Field(
+        default="",
+        description=(
+            "Whether a read-only check can decide it, or whether confirming it would "
+            "require sending an exploit payload (which this step must not do)."
+        ),
+    )
+
+
 class ProbeCheck(BaseModel):
     method: Literal["GET", "HEAD", "OPTIONS"] = Field(
         default="GET", description="Read-only method. Use GET unless only headers matter."
@@ -96,10 +133,13 @@ class VerdictDecision(BaseModel):
     )
 
 
-def _usage_context(cve_id: str, stage: str) -> LLMUsageContext:
+def _usage_context(cve_id: str, stage: str, asset_id: Any = None) -> LLMUsageContext:
+    # Usage attribution requires a UUID, and a CVE id is not one. A name-based UUID
+    # keeps the attribution stable per CVE across runs.
     return LLMUsageContext(
-        operation_kind="cve_applicability",
-        operation_id=cve_id,
+        operation_kind="cve",
+        asset_id=asset_id,
+        operation_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"sccap:cve:{cve_id}")),
         stage=stage,
         agent_name="cve-verifier",
         idempotency_key=str(uuid.uuid4()),
@@ -127,6 +167,17 @@ def _render_asset(asset: am.Asset, services: list[am.AssetService]) -> str:
         )
         if service.banner:
             lines.append(f"  banner: {service.banner[:300]}")
+    return "\n".join(lines)
+
+
+def _render_references(cve: am.CveRecord, limit: int = 12) -> str:
+    references = cve.references or []
+    if not references:
+        return "No advisory or exploit references are stored for this CVE."
+    lines = ["References (advisories, patches, exploit write-ups):"]
+    for reference in references[:limit]:
+        tags = ", ".join(reference.get("tags") or []) or "reference"
+        lines.append(f"- [{tags}] {reference.get('url')}")
     return "\n".join(lines)
 
 
@@ -175,6 +226,56 @@ def _render_cve(cve: am.CveRecord, ranges: list[am.CveAffected]) -> str:
     return "\n".join(lines)
 
 
+async def research_cve(
+    llm: LLMClient, *, cve: am.CveRecord, ranges: list[am.CveAffected], asset: am.Asset
+) -> CveResearch:
+    """Read the CVE and its references and say how it would be detected.
+
+    Separate from designing the probe on purpose: understanding the vulnerability and
+    choosing a request are different acts, and the first one is what makes the second
+    specific to this CVE rather than generic version-checking.
+    """
+    prompt = (
+        f"{_render_cve(cve, ranges)}\n\n{_render_references(cve)}\n\n"
+        "Study this vulnerability as a researcher would. Explain the mechanism, then "
+        "state the observable signals that separate a vulnerable build from a patched "
+        "one, and what the references add. Say plainly whether a read-only check can "
+        "decide it or whether proof would need an exploit payload."
+    )
+    result = await llm.generate_structured_output(
+        prompt=prompt,
+        response_model=CveResearch,
+        system_prompt=(
+            "You research CVEs for defensive verification. You read advisories and exploit "
+            "write-ups and extract what is needed to tell a vulnerable system from a "
+            "patched one, without attempting exploitation."
+        ),
+        usage_context=_usage_context(cve.id, "cve.research", asset.id),
+    )
+    return result.parsed_output or CveResearch(
+        mechanism=result.error or "research unavailable",
+        detection_signals=[],
+        testability_note="",
+    )
+
+
+def _render_research(research: CveResearch | None) -> str:
+    if research is None:
+        return ""
+    lines = [f"Vulnerability mechanism: {research.mechanism}"]
+    if research.detection_signals:
+        lines.append("Detection signals:")
+        lines.extend(f"- {signal}" for signal in research.detection_signals[:8])
+    if research.patched_version:
+        lines.append(f"First patched version: {research.patched_version}")
+    if research.reference_insights:
+        lines.append("From the references:")
+        lines.extend(f"- {insight}" for insight in research.reference_insights[:8])
+    if research.testability_note:
+        lines.append(f"Testability: {research.testability_note}")
+    return "\n".join(lines)
+
+
 async def design_checks(
     llm: LLMClient,
     *,
@@ -182,11 +283,13 @@ async def design_checks(
     ranges: list[am.CveAffected],
     asset: am.Asset,
     services: list[am.AssetService],
+    research: CveResearch | None = None,
 ) -> DetectionPlan:
     """Ask the model for a read-only detection plan."""
     hosts = ", ".join(sorted({service.host for service in services})) or "(none recorded)"
     prompt = (
-        f"{_render_cve(cve, ranges)}\n\n{_render_asset(asset, services)}\n\n"
+        f"{_render_cve(cve, ranges)}\n\n{_render_references(cve)}\n\n"
+        f"{_render_research(research)}\n\n{_render_asset(asset, services)}\n\n"
         "Design the smallest set of read-only requests that would tell an affected build "
         "from a patched one on this asset. You may only use GET, HEAD or OPTIONS, only "
         f"these hosts ({hosts}), and no request body may change state. Prefer requests "
@@ -202,7 +305,7 @@ async def design_checks(
             "engineer, not an attacker: you design detection checks that are read-only and "
             "safe to run in production, and you never assume a version proves exploitability."
         ),
-        usage_context=_usage_context(cve.id, "cve.plan"),
+        usage_context=_usage_context(cve.id, "cve.plan", asset.id),
     )
     plan = result.parsed_output or DetectionPlan(reasoning=result.error or "no plan", checks=[])
     return plan
@@ -340,10 +443,12 @@ async def judge(
     services: list[am.AssetService],
     plan: DetectionPlan,
     observations: list[dict[str, Any]],
+    research: CveResearch | None = None,
 ) -> VerdictDecision:
     """Ask the model what the observations prove, then enforce the evidence rule."""
     prompt = (
-        f"{_render_cve(cve, ranges)}\n\n{_render_asset(asset, services)}\n\n"
+        f"{_render_cve(cve, ranges)}\n\n{_render_research(research)}\n\n"
+        f"{_render_asset(asset, services)}\n\n"
         f"Detection plan: {plan.reasoning}\n\n"
         f"Observations:\n{_render_observations(observations)}\n\n"
         "Decide whether this CVE affects this asset. Name the check that decided it. If the "
@@ -359,12 +464,39 @@ async def judge(
             "confirmed unless an observation showed it. For a patched-looking vendor build you "
             "say so plainly."
         ),
-        usage_context=_usage_context(cve.id, "cve.judge"),
+        usage_context=_usage_context(cve.id, "cve.judge", asset.id),
     )
     decision = result.parsed_output or VerdictDecision(
         verdict=am.UNDETERMINED, confidence="low", reason=result.error or "no decision"
     )
     return _enforce_evidence(decision, observations)
+
+
+async def _research_without_probe(
+    cve: am.CveRecord, ranges: list[am.CveAffected], technologies: list[am.AssetTechnology]
+) -> Optional[dict[str, Any]]:
+    """Research for an asset that cannot be reached, so the operator still learns why.
+
+    Uses the stored record and references only — no model call, because there is
+    nothing to design a check against until a host exists.
+    """
+    if not technologies and not (cve.references or cve.description):
+        return None
+    return {
+        "mechanism": (cve.description or "")[:1500],
+        "detection_signals": [
+            f"running {tech.product} {tech.version or '(version unknown)'}"
+            for tech in technologies[:6]
+        ],
+        "patched_version": None,
+        "reference_insights": [
+            reference.get("url") for reference in (cve.references or [])[:6] if reference.get("url")
+        ],
+        "testability_note": (
+            "recorded from the asset's technologies; no request was made because the "
+            "asset has no reachable endpoint"
+        ),
+    }
 
 
 async def verify_verdict(verdict_id: uuid.UUID, *, llm_config_id: Optional[uuid.UUID] = None) -> dict[str, Any]:
@@ -380,10 +512,37 @@ async def verify_verdict(verdict_id: uuid.UUID, *, llm_config_id: Optional[uuid.
         services = list(
             await db.scalars(select(am.AssetService).where(am.AssetService.asset_id == asset.id))
         )
+        technologies = list(
+            await db.scalars(
+                select(am.AssetTechnology).where(am.AssetTechnology.asset_id == asset.id)
+            )
+        )
         ranges = list(
             await db.scalars(select(am.CveAffected).where(am.CveAffected.cve_id == cve.id))
         )
         if not services:
+            # A database, firewall or Kubernetes cluster may have a version and no
+            # URL. Research still tells the operator what would prove it, and the
+            # verdict stays undetermined rather than pretending a test happened.
+            research_only = await _research_without_probe(cve, ranges, technologies)
+            if research_only is not None:
+                verdict.research = research_only
+                verdict.verdict = am.UNDETERMINED
+                verdict.confidence = "low"
+                verdict.reason = (
+                    "No reachable endpoint is recorded for this asset, so the CVE could "
+                    "not be tested. Record a host/port (or probe the asset) to verify it."
+                )
+                await db.commit()
+                return {
+                    "verdict_id": str(verdict.id),
+                    "cve_id": verdict.cve_id,
+                    "asset_id": str(verdict.asset_id),
+                    "verdict": verdict.verdict,
+                    "confidence": verdict.confidence,
+                    "reason": verdict.reason,
+                    "checks": 0,
+                }
             return {"error": "the asset has no services to test"}
 
         if llm_config_id is None:
@@ -397,7 +556,10 @@ async def verify_verdict(verdict_id: uuid.UUID, *, llm_config_id: Optional[uuid.
         if llm is None:
             return {"error": "could not initialise the LLM client"}
 
-        plan = await design_checks(llm, cve=cve, ranges=ranges, asset=asset, services=services)
+        research = await research_cve(llm, cve=cve, ranges=ranges, asset=asset)
+        plan = await design_checks(
+            llm, cve=cve, ranges=ranges, asset=asset, services=services, research=research
+        )
         observations = await run_plan(plan, services=services)
         decision = await judge(
             llm,
@@ -407,11 +569,13 @@ async def verify_verdict(verdict_id: uuid.UUID, *, llm_config_id: Optional[uuid.
             services=services,
             plan=plan,
             observations=observations,
+            research=research,
         )
 
         verdict.verdict = decision.verdict
         verdict.confidence = decision.confidence
         verdict.reason = decision.reason
+        verdict.research = research.model_dump()
         verdict.probe = {
             "plan": plan.model_dump(),
             "observations": observations,

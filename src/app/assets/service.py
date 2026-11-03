@@ -227,6 +227,73 @@ async def add_dependencies(
     return stored
 
 
+async def add_technology(
+    tenant_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    *,
+    product: str,
+    version: Optional[str] = None,
+    category: str = am.TECH_OTHER,
+    source: str = "manual",
+    confidence: str = "heuristic",
+    evidence: Optional[dict[str, Any]] = None,
+) -> am.AssetTechnology:
+    """Record a product an asset runs, with or without a network endpoint.
+
+    A managed database, a firewall image or a Kubernetes version has no URL to fetch
+    but is exactly what a CVE list needs to be checked against.
+    """
+    await get_asset(tenant_id, asset_id)
+    if category not in am.TECH_CATEGORIES:
+        category = am.TECH_OTHER
+    async with AsyncSessionLocal() as db:
+        existing = await db.scalar(
+            select(am.AssetTechnology).where(
+                am.AssetTechnology.asset_id == asset_id,
+                am.AssetTechnology.product == product[:120],
+                am.AssetTechnology.version.is_(version)
+                if version is None
+                else am.AssetTechnology.version == version,
+            )
+        )
+        if existing is not None:
+            existing.category = category
+            existing.source = source
+            existing.confidence = confidence
+            if evidence:
+                existing.evidence = evidence
+            existing.updated_at = func.now()
+            await db.commit()
+            await db.refresh(existing)
+            return existing
+        technology = am.AssetTechnology(
+            asset_id=asset_id,
+            product=product.strip()[:120],
+            version=(version or "").strip()[:80] or None,
+            category=category,
+            source=source,
+            confidence=confidence,
+            evidence=evidence,
+        )
+        db.add(technology)
+        await db.commit()
+        await db.refresh(technology)
+        return technology
+
+
+async def list_technologies(
+    tenant_id: uuid.UUID, asset_id: uuid.UUID
+) -> list[am.AssetTechnology]:
+    await get_asset(tenant_id, asset_id)
+    async with AsyncSessionLocal() as db:
+        rows = await db.scalars(
+            select(am.AssetTechnology)
+            .where(am.AssetTechnology.asset_id == asset_id)
+            .order_by(am.AssetTechnology.product)
+        )
+        return list(rows)
+
+
 async def list_dependencies(
     tenant_id: uuid.UUID, asset_id: uuid.UUID
 ) -> list[am.AssetDependency]:
@@ -276,6 +343,40 @@ async def _assets_needing_discovery(
     return unknown
 
 
+async def probe_inventory(
+    *, tenant_id: uuid.UUID, asset_ids: Optional[list[uuid.UUID]] = None, rescan: bool = False
+) -> dict[str, Any]:
+    """Probe assets and store what they are.
+
+    `rescan=False` probes only the assets the inventory knows nothing about, which is
+    what a check needs. `rescan=True` re-probes everything, which is what an operator
+    asks for after a change and what keeps the stored technology current.
+    """
+    from app.assets import discovery as discovery_mod
+
+    async with AsyncSessionLocal() as db:
+        if rescan:
+            query = select(am.Asset.id).where(
+                am.Asset.tenant_id == tenant_id, am.Asset.in_scope.is_(True)
+            )
+            if asset_ids:
+                query = query.where(am.Asset.id.in_(asset_ids))
+            targets = list(await db.scalars(query))
+        else:
+            targets = await _assets_needing_discovery(
+                db, tenant_id=tenant_id, asset_ids=asset_ids
+            )
+    if not targets:
+        return {
+            "assets_probed": 0,
+            "endpoints_probed": 0,
+            "fingerprints_found": 0,
+            "products": [],
+            "note": "every in-scope asset already has a fingerprint; use rescan to refresh",
+        }
+    return await discovery_mod.discover_assets(targets)
+
+
 async def check_cves(
     *,
     tenant_id: uuid.UUID,
@@ -306,10 +407,13 @@ async def check_cves(
         findings = await matcher.match_cves_for_tenant(
             db, tenant_id=tenant_id, cve_ids=cve_ids, asset_ids=asset_ids
         )
-        stored = await matcher.store_findings(db, tenant_id=tenant_id, findings=findings)
+        stored_findings = await matcher.store_findings(
+            db, tenant_id=tenant_id, findings=findings
+        )
+        stored = len(stored_findings)
 
         counts = {am.APPLICABLE: 0, am.NOT_APPLICABLE: 0, am.UNDETERMINED: 0}
-        for finding in findings:
+        for finding in stored_findings:
             counts[finding.verdict] = counts.get(finding.verdict, 0) + 1
 
         # A CVE id that is not in the local corpus cannot match anything. Saying so

@@ -19,7 +19,48 @@ ASSET_API = "api"
 ASSET_HOST = "host"
 ASSET_REPO = "repo"
 ASSET_SERVICE = "service"
-ASSET_KINDS = (ASSET_WEB_APP, ASSET_API, ASSET_HOST, ASSET_REPO, ASSET_SERVICE)
+ASSET_VM = "vm"
+ASSET_CONTAINER = "container"
+ASSET_K8S = "k8s"
+ASSET_DATABASE = "database"
+ASSET_FIREWALL = "firewall"
+ASSET_NETWORK = "network"
+ASSET_CLOUD = "cloud"
+ASSET_KINDS = (
+    ASSET_WEB_APP,
+    ASSET_API,
+    ASSET_HOST,
+    ASSET_SERVICE,
+    ASSET_REPO,
+    ASSET_VM,
+    ASSET_CONTAINER,
+    ASSET_K8S,
+    ASSET_DATABASE,
+    ASSET_FIREWALL,
+    ASSET_NETWORK,
+    ASSET_CLOUD,
+)
+
+# Technology categories: what kind of software a product is, so the prompt can say
+# "this is a PostgreSQL server" rather than just a name.
+TECH_OS = "os"
+TECH_DATABASE = "database"
+TECH_WEB = "web"
+TECH_CONTAINER = "container"
+TECH_ORCHESTRATOR = "orchestrator"
+TECH_NETWORK = "network"
+TECH_LIBRARY = "library"
+TECH_OTHER = "other"
+TECH_CATEGORIES = (
+    TECH_OS,
+    TECH_DATABASE,
+    TECH_WEB,
+    TECH_CONTAINER,
+    TECH_ORCHESTRATOR,
+    TECH_NETWORK,
+    TECH_LIBRARY,
+    TECH_OTHER,
+)
 
 APPLICABLE = "applicable"
 NOT_APPLICABLE = "not_applicable"
@@ -124,6 +165,9 @@ class CveRecord(Base):
     kev: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
     kev_due: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     epss: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Vendor advisories, patches and exploit write-ups: what the model researches
+    # the CVE from. Offline by design — imported with the feed, not fetched at runtime.
+    references: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(JSONB, nullable=True)
     source: Mapped[str] = mapped_column(String(24), nullable=False, default="nvd")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -151,6 +195,36 @@ class CveAffected(Base):
     exact_versions: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
 
 
+class AssetTechnology(Base):
+    """A product an asset runs, with or without a network endpoint.
+
+    A managed database, a firewall image, a Kubernetes version or a VM image has a
+    product and a version but no URL to fetch. Recording that here is what lets the
+    same matcher answer for them.
+    """
+
+    __tablename__ = "asset_technologies"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
+    )
+    product: Mapped[str] = mapped_column(String(120), nullable=False)
+    version: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    category: Mapped[str] = mapped_column(String(24), nullable=False, default=TECH_OTHER)
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")
+    confidence: Mapped[str] = mapped_column(String(16), nullable=False, default="heuristic")
+    evidence: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AssetCveVerdict(Base):
     """One answer to "does this CVE affect this asset", with its basis."""
 
@@ -173,6 +247,8 @@ class AssetCveVerdict(Base):
     basis: Mapped[str] = mapped_column(String(16), nullable=False)
     reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     evidence: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    # The model's research: mechanism, detection signals, patched versions.
+    research: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     probe: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     run_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     checked_at: Mapped[datetime] = mapped_column(

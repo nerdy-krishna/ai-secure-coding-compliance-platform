@@ -9,7 +9,29 @@
 
 import apiClient from "./apiClient";
 
-export type AssetKind = "web_app" | "api" | "host" | "repo" | "service";
+export type AssetKind =
+  | "web_app"
+  | "api"
+  | "host"
+  | "service"
+  | "repo"
+  | "vm"
+  | "container"
+  | "k8s"
+  | "database"
+  | "firewall"
+  | "network"
+  | "cloud";
+
+export type TechCategory =
+  | "os"
+  | "database"
+  | "web"
+  | "container"
+  | "orchestrator"
+  | "network"
+  | "library"
+  | "other";
 export type Verdict = "applicable" | "not_applicable" | "undetermined";
 export type Basis = "declared" | "observed" | "probe";
 
@@ -25,6 +47,7 @@ export interface Asset {
   created_at: string | null;
   services?: number;
   dependencies?: number;
+  technologies?: number;
 }
 
 export interface AssetService {
@@ -50,9 +73,19 @@ export interface AssetDependency {
   source: string;
 }
 
-export interface AssetDetail extends Omit<Asset, "services" | "dependencies"> {
+export interface AssetTechnology {
+  id: string;
+  product: string;
+  version: string | null;
+  category: TechCategory;
+  source: string;
+  confidence: string;
+}
+
+export interface AssetDetail extends Omit<Asset, "services" | "dependencies" | "technologies"> {
   services: AssetService[];
   dependencies: AssetDependency[];
+  technologies: AssetTechnology[];
 }
 
 export interface CorpusStats {
@@ -127,6 +160,32 @@ export async function addService(
   },
 ): Promise<AssetService> {
   const { data } = await apiClient.post<AssetService>(`/assets/${assetId}/services`, input);
+  return data;
+}
+
+export async function addTechnology(
+  assetId: string,
+  input: { product: string; version?: string | null; category?: TechCategory; confidence?: "exact" | "heuristic" },
+): Promise<AssetTechnology> {
+  const { data } = await apiClient.post<AssetTechnology>(
+    `/assets/${assetId}/technologies`,
+    input,
+  );
+  return data;
+}
+
+/** Probe the inventory and store what each asset is. `rescan` refreshes known ones. */
+export async function probeInventory(input: {
+  asset_ids?: string[] | null;
+  rescan?: boolean;
+}): Promise<{
+  assets_probed: number;
+  endpoints_probed: number;
+  fingerprints_found: number;
+  products: string[];
+  note?: string;
+}> {
+  const { data } = await apiClient.post("/assets/probe", input);
   return data;
 }
 

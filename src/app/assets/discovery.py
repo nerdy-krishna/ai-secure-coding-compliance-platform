@@ -51,11 +51,39 @@ BANNER_PORTS = (
     (22, "ssh", "openssh"),
     (21, "ftp", None),
     (25, "smtp", None),
+    (445, "smb", "samba"),
+    (1433, "mssql", "mssql"),
+    (2375, "docker", "docker"),
     (3306, "mysql", "mysql"),
+    (3389, "rdp", None),
     (5432, "postgresql", "postgresql"),
     (6379, "redis", "redis"),
+    (6443, "kubernetes", "kubernetes"),
     (9200, "elasticsearch", "elasticsearch"),
+    (27017, "mongodb", "mongodb"),
 )
+#: Ports whose service answers HTTP even though it is not a website.
+HTTP_API_PORTS = ((2375, "http"), (6443, "https"), (9200, "http"))
+#: Which category a discovered product belongs to, so the inventory reads sensibly.
+_PRODUCT_CATEGORY = {
+    "openssh": "network",
+    "mysql": "database",
+    "mariadb": "database",
+    "postgresql": "database",
+    "mssql": "database",
+    "mongodb": "database",
+    "redis": "database",
+    "elasticsearch": "database",
+    "kubernetes": "orchestrator",
+    "docker": "container",
+    "nginx": "web",
+    "apache": "web",
+    "iis": "web",
+    "tomcat": "web",
+    "jenkins": "web",
+    "wordpress": "web",
+    "samba": "network",
+}
 
 _VERSION_RE = re.compile(r"(\d+\.\d+(?:\.\d+)?(?:[A-Za-z0-9.+-]*)?)")
 _PAIR_SEGMENT = re.compile(
@@ -218,6 +246,14 @@ async def _probe_banner(host: str, port: int, label: str, hint: Optional[str]) -
     }
 
 
+def category_for(product: Optional[str], label: Optional[str] = None) -> str:
+    key = (product or label or "").strip().lower()
+    for name, category in _PRODUCT_CATEGORY.items():
+        if name in key:
+            return category
+    return "other"
+
+
 def candidate_targets(services: list[am.AssetService], *, scan_ports: bool) -> list[tuple[str, int, str]]:
     """The (host, port, scheme) combinations worth probing for one asset."""
     targets: list[tuple[str, int, str]] = []
@@ -236,7 +272,7 @@ def candidate_targets(services: list[am.AssetService], *, scan_ports: bool) -> l
                 targets.append(key)
         if not scan_ports:
             continue
-        for port, scheme in WEB_PORTS:
+        for port, scheme in (*WEB_PORTS, *HTTP_API_PORTS):
             key = (host, port, scheme)
             if key not in seen:
                 seen.add(key)
@@ -244,7 +280,7 @@ def candidate_targets(services: list[am.AssetService], *, scan_ports: bool) -> l
     if scan_ports:
         # An asset with no recorded endpoint still has a host worth looking at.
         for host in hosts:
-            for port, scheme in WEB_PORTS:
+            for port, scheme in (*WEB_PORTS, *HTTP_API_PORTS):
                 key = (host, port, scheme)
                 if key not in seen:
                     seen.add(key)
@@ -311,6 +347,17 @@ async def discover_asset(
             tenant_id = asset.tenant_id if asset else None
         if tenant_id is not None:
             for row in found:
+                await asset_service.add_technology(
+                    tenant_id,
+                    asset_id,
+                    product=str(row.get("product") or row.get("service") or "unknown")[:120],
+                    version=row.get("version"),
+                    category=category_for(row.get("product"), row.get("service")),
+                    source="probe",
+                    confidence="heuristic",
+                    evidence={"port": row.get("port"), "banner": (row.get("banner") or "")[:300]},
+                )
+            for row in found:
                 await asset_service.add_service(
                     tenant_id,
                     asset_id,
@@ -334,14 +381,18 @@ async def discover_asset(
     }
 
 
-async def discover_assets(asset_ids: list[Any], *, scan_ports: bool = True) -> dict[str, Any]:
+async def discover_assets(
+    asset_ids: list[Any], *, scan_ports: bool = True, banner_scan: bool = True
+) -> dict[str, Any]:
     """Fingerprint several assets; the summary the check reports back."""
     assets = 0
     endpoints = 0
     fingerprints = 0
     products: set[str] = set()
     for asset_id in asset_ids:
-        outcome = await discover_asset(asset_id, scan_ports=scan_ports)
+        outcome = await discover_asset(
+            asset_id, scan_ports=scan_ports, banner_scan=banner_scan
+        )
         if outcome.get("error"):
             continue
         assets += 1

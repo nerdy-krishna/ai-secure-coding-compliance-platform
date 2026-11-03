@@ -307,3 +307,17 @@
 .asset-import input[type="file"] {
   font-size: 0.75rem;
 }
+.asset-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .3rem .55rem;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: .76rem;
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+
+.asset-upload:hover { color: var(--fg); border-color: var(--fg-muted); }
+.asset-upload input { display: none; }

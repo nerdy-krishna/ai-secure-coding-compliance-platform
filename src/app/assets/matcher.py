@@ -198,6 +198,56 @@ def _observed_match(
     return None
 
 
+def _technology_match(
+    cve_id: str,
+    technology: am.AssetTechnology,
+    ranges: list[am.CveAffected],
+) -> Optional[Finding]:
+    for row in ranges:
+        if row.kind != "cpe" or not row.product:
+            continue
+        if not product_matches(row.product, technology.product):
+            continue
+        version_known = bool((technology.version or "").strip())
+        if version_known and not in_range(
+            technology.version,
+            start_incl=row.version_start_incl,
+            start_excl=row.version_start_excl,
+            end_incl=row.version_end_incl,
+            end_excl=row.version_end_excl,
+            exact=row.exact_versions,
+        ):
+            continue
+        return Finding(
+            asset_id=technology.asset_id,
+            cve_id=cve_id,
+            verdict=am.UNDETERMINED,
+            confidence="medium" if version_known else "low",
+            basis=am.BASIS_OBSERVED,
+            reason=(
+                f"the asset records {technology.product} "
+                f"{technology.version or '(version unknown)'}, which {cve_id} affects"
+                + ("" if version_known else "; obtain the version to decide")
+            ),
+            evidence={
+                "product": technology.product,
+                "version": technology.version,
+                "category": technology.category,
+                "source": technology.source,
+                "technology_confidence": technology.confidence,
+                "needs_version": not version_known,
+                "range": {
+                    "start_incl": row.version_start_incl,
+                    "start_excl": row.version_start_excl,
+                    "end_incl": row.version_end_incl,
+                    "end_excl": row.version_end_excl,
+                    "exact": row.exact_versions,
+                },
+            },
+        )
+    return None
+
+
 async def match_cve_for_asset(
     db: AsyncSession, *, asset_id: uuid.UUID, cve_id: str
 ) -> list[Finding]:
@@ -221,6 +271,14 @@ async def match_cve_for_asset(
     )
     for service in services:
         hit = _observed_match(cve_id, service, ranges)
+        if hit is not None:
+            findings.append(hit)
+
+    technologies = await db.scalars(
+        select(am.AssetTechnology).where(am.AssetTechnology.asset_id == asset_id)
+    )
+    for technology in technologies:
+        hit = _technology_match(cve_id, technology, ranges)
         if hit is not None:
             findings.append(hit)
 
@@ -261,10 +319,37 @@ async def match_cves_for_tenant(
     return findings
 
 
+_CONFIDENCE_RANK = {"low": 1, "medium": 2, "high": 3}
+_VERDICT_RANK = {am.NOT_APPLICABLE: 0, am.UNDETERMINED: 1, am.APPLICABLE: 2}
+
+
+def _better(left: Finding, right: Finding) -> Finding:
+    """Which of two candidate verdicts for the same pair is worth keeping.
+
+    The same (asset, CVE, basis) can now be reached twice — a product seen on an
+    endpoint and recorded again as a technology, for instance. Keeping the weaker one
+    would throw away the version that was actually observed.
+    """
+    left_version = bool((left.evidence or {}).get("version"))
+    right_version = bool((right.evidence or {}).get("version"))
+    if left_version != right_version:
+        return left if left_version else right
+    left_score = (_VERDICT_RANK.get(left.verdict, 0), _CONFIDENCE_RANK.get(left.confidence, 0))
+    right_score = (_VERDICT_RANK.get(right.verdict, 0), _CONFIDENCE_RANK.get(right.confidence, 0))
+    return left if left_score >= right_score else right
+
+
 async def store_findings(
     db: AsyncSession, *, tenant_id: uuid.UUID, findings: list[Finding]
-) -> int:
+) -> list[Finding]:
     """Upsert candidate verdicts, keyed by (asset, cve, basis)."""
+    unique: dict[tuple[uuid.UUID, str, str], Finding] = {}
+    for finding in findings:
+        key = (finding.asset_id, finding.cve_id, finding.basis)
+        existing = unique.get(key)
+        unique[key] = finding if existing is None else _better(existing, finding)
+    findings = list(unique.values())
+
     stored = 0
     for finding in findings:
         existing = await db.scalar(
@@ -294,7 +379,7 @@ async def store_findings(
             existing.evidence = finding.evidence
         stored += 1
     await db.commit()
-    return stored
+    return findings
 
 
 def needs_verification(verdict: am.AssetCveVerdict) -> bool:

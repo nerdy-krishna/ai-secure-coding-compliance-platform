@@ -78,6 +78,26 @@ class DependencyImport(BaseModel):
     scan_id: Optional[uuid.UUID] = None
 
 
+class ProbeRequest(BaseModel):
+    asset_ids: Optional[list[uuid.UUID]] = Field(
+        default=None, description="Limit to these assets. Omit for the whole inventory."
+    )
+    rescan: bool = Field(
+        default=False,
+        description=(
+            "Re-probe assets that already have a fingerprint. Without this, only assets "
+            "the inventory knows nothing about are probed."
+        ),
+    )
+
+
+class TechnologyCreate(BaseModel):
+    product: str = Field(min_length=1, max_length=120)
+    version: Optional[str] = Field(default=None, max_length=80)
+    category: str = Field(default="other")
+    confidence: str = Field(default="exact", pattern="^(exact|heuristic)$")
+
+
 class SweepRequest(BaseModel):
     asset_ids: Optional[list[uuid.UUID]] = Field(
         default=None, description="Limit the sweep to these assets. Omit for the whole inventory."
@@ -156,6 +176,7 @@ async def list_assets(user=Depends(current_active_user)) -> dict[str, Any]:
             counts[str(asset.id)] = {
                 "services": len(await service.list_services(user.tenant_id, asset.id)),
                 "dependencies": len(await service.list_dependencies(user.tenant_id, asset.id)),
+                "technologies": len(await service.list_technologies(user.tenant_id, asset.id)),
             }
         except service.AssetNotFound:
             counts[str(asset.id)] = {"services": 0, "dependencies": 0}
@@ -208,11 +229,23 @@ async def get_asset(asset_id: uuid.UUID, user=Depends(current_active_user)) -> d
         asset = await service.get_asset(user.tenant_id, asset_id)
         services = await service.list_services(user.tenant_id, asset_id)
         dependencies = await service.list_dependencies(user.tenant_id, asset_id)
+        technologies = await service.list_technologies(user.tenant_id, asset_id)
     except service.AssetNotFound as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
     return {
         **_asset_dict(asset),
         "services": [_service_dict(row) for row in services],
+        "technologies": [
+            {
+                "id": str(row.id),
+                "product": row.product,
+                "version": row.version,
+                "category": row.category,
+                "source": row.source,
+                "confidence": row.confidence,
+            }
+            for row in technologies
+        ],
         "dependencies": [
             {
                 "id": str(row.id),
@@ -269,6 +302,40 @@ async def add_service(
     except service.AssetNotFound as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
     return _service_dict(row)
+
+
+@router.post("/probe")
+async def probe(body: ProbeRequest, user=Depends(current_active_user)) -> dict[str, Any]:
+    """Scan the inventory and store what each asset is (technology, version)."""
+    return await service.probe_inventory(
+        tenant_id=user.tenant_id, asset_ids=body.asset_ids, rescan=body.rescan
+    )
+
+
+@router.post("/{asset_id}/technologies", status_code=201)
+async def add_technology(
+    asset_id: uuid.UUID, body: TechnologyCreate, user=Depends(current_active_user)
+) -> dict[str, Any]:
+    try:
+        row = await service.add_technology(
+            user.tenant_id,
+            asset_id,
+            product=body.product,
+            version=body.version,
+            category=body.category,
+            source="manual",
+            confidence=body.confidence,
+        )
+    except service.AssetNotFound as exc:
+        raise HTTPException(status_code=404, detail="asset not found") from exc
+    return {
+        "id": str(row.id),
+        "product": row.product,
+        "version": row.version,
+        "category": row.category,
+        "source": row.source,
+        "confidence": row.confidence,
+    }
 
 
 @router.post("/sweep")

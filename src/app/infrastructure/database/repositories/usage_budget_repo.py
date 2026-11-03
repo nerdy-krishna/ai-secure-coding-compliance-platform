@@ -64,7 +64,7 @@ class BudgetAttribution:
 class BudgetReservationRequest:
     tenant_id: uuid.UUID
     idempotency_key: str
-    operation_kind: Literal["scan", "chat", "rag", "pentest"]
+    operation_kind: Literal["scan", "chat", "rag", "pentest", "cve"]
     request_key: str
     stage: str
     estimate: BudgetAmounts
@@ -217,6 +217,19 @@ class UsageBudgetRepository:
                         db_models.User.id == db_models.RAGPreprocessingJob.user_id,
                     )
                     .where(db_models.RAGPreprocessingJob.id == rag_id)
+                )
+            ).one_or_none()
+            row = (*found, None) if found is not None else None
+        elif context.operation_kind == "cve":
+            if context.asset_id is None:
+                raise ValueError("cve usage context requires asset_id")
+            from app.assets.models import Asset
+
+            found = (
+                await self.db.execute(
+                    select(Asset.tenant_id, Asset.created_by).where(
+                        Asset.id == context.asset_id
+                    )
                 )
             ).one_or_none()
             row = (*found, None) if found is not None else None
