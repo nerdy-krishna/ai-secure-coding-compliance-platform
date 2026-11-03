@@ -319,6 +319,23 @@ class Settings(BaseSettings):
     # of submissions does not start several deterministic prescans at once.
     # Concurrency is still bounded inside a scan by CONCURRENT_LLM_LIMIT and by
     # each LLM configuration's RPM/TPM budget.
+    # Assessment memory. The agent's conversation is persisted per turn and sent
+    # whole until it passes this budget, at which point the older turns are
+    # summarised into the run's transcript summary and the last few are kept
+    # verbatim. Compaction is a rewrite of what the model is told, not a delete:
+    # nothing is lost from the audit trail.
+    PENTEST_TRANSCRIPT_COMPACT_TOKENS: int = Field(
+        default=120_000,
+        ge=4_000,
+        le=2_000_000,
+        description="Transcript tokens before older turns are summarised.",
+    )
+    PENTEST_TRANSCRIPT_KEEP_TURNS: int = Field(
+        default=10,
+        ge=2,
+        le=100,
+        description="Most recent transcript entries always kept verbatim.",
+    )
     WORKER_ANALYSIS_SLOTS: int = Field(
         default=3,
         ge=1,
