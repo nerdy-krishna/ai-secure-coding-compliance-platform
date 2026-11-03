@@ -60,6 +60,7 @@ const TRAILS: Record<string, Crumb[]> = {
   "/compliance": [ADMIN, { label: "Framework configuration" }, { label: "Security Standards" }],
   "/admin/analysis": [ADMIN, { label: "Framework configuration" }],
   "/admin/semgrep": [ADMIN, { label: "Semgrep configuration" }],
+  "/inventory": [{ label: "Asset inventory" }],
   "/usage": [ADMIN, { label: "Usage & Spend" }],
   "/account/settings/appearance": [ACCOUNT, { label: "Appearance" }],
   "/account/settings/security": [ACCOUNT, { label: "Security" }],

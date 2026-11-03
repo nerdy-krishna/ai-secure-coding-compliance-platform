@@ -240,6 +240,7 @@ export function SidebarNav() {
         pathname.startsWith("/account/history") ||
         pathname.startsWith("/advisor"),
     )}
+    {group("Inventory", Icon.Folder, [{ to: "/inventory", label: "Assets & CVEs", icon: Icon.Folder }], pathname.startsWith("/inventory"))}
     {group("Pentesting", Icon.Shield, pentesting, pathname.startsWith("/pentesting"))}
     {adminVisible ? group("Administration", Icon.Settings, adminItems, adminOpen) : null}
   </aside>;

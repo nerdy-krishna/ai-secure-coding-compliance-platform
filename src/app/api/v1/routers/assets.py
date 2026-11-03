@@ -78,6 +78,17 @@ class DependencyImport(BaseModel):
     scan_id: Optional[uuid.UUID] = None
 
 
+class SweepRequest(BaseModel):
+    asset_ids: Optional[list[uuid.UUID]] = Field(
+        default=None, description="Limit the sweep to these assets. Omit for the whole inventory."
+    )
+    cve_ids: Optional[list[str]] = Field(
+        default=None, description="CVEs to apply. Omit to apply the whole local corpus."
+    )
+    verify: bool = False
+    max_verifications: int = Field(default=25, ge=0, le=200)
+
+
 class CveCheckRequest(BaseModel):
     cve_ids: Optional[list[str]] = Field(
         default=None,
@@ -235,6 +246,24 @@ async def add_service(
     except service.AssetNotFound as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
     return _service_dict(row)
+
+
+@router.post("/sweep")
+async def sweep(body: SweepRequest, user=Depends(current_active_user)) -> dict[str, Any]:
+    """Refresh the inventory's fingerprints, then apply a CVE list to it.
+
+    Authorisation comes from the inventory: every swept asset is in scope by virtue
+    of having been added, and its recorded hosts are the only ones contacted.
+    """
+    from app.assets import sweep as sweep_mod
+
+    return await sweep_mod.run_sweep(
+        tenant_id=user.tenant_id,
+        asset_ids=body.asset_ids,
+        cve_ids=body.cve_ids,
+        verify=body.verify,
+        max_verifications=body.max_verifications,
+    )
 
 
 @router.post("/{asset_id}/dependencies", status_code=201)

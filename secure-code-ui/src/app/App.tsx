@@ -50,6 +50,7 @@ const SubmitPage = React.lazy(() => import("../pages/submission/SubmitPage"));
 const ScanRunningPage = React.lazy(() => import("../pages/submission/ScanRunningPage"));
 const PentestPage = React.lazy(() => import("../pages/pentesting/PentestPage"));
 const PentestNewPage = React.lazy(() => import("../pages/pentesting/PentestNewPage"));
+const AssetsPage = React.lazy(() => import("../pages/assets/AssetsPage"));
 const PentestScansPage = React.lazy(() => import("../pages/pentesting/PentestScansPage"));
 const PentestRunPage = React.lazy(() => import("../pages/pentesting/PentestRunPage"));
 
@@ -269,6 +270,7 @@ function AppContent() {
           <Route element={<FeatureRoute feature="pentesting" />}>
             <Route path="/pentesting" element={routeContent(<PentestPage />)} />
             <Route path="/pentesting/new" element={routeContent(<PentestNewPage />)} />
+            <Route path="/inventory" element={routeContent(<AssetsPage />)} />
             <Route path="/pentesting/history" element={routeContent(<PentestScansPage />)} />
             {/* Old path kept as a redirect so a bookmarked URL still resolves. */}
             <Route path="/pentesting/scans" element={<Navigate to="/pentesting/history" replace />} />
