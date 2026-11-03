@@ -24,6 +24,8 @@ from app.api.v1.routers.chat import router as chat_router
 from app.api.v1.routers.compliance import router as compliance_router
 from app.api.v1.routers.features import router as features_router
 from app.api.v1.routers.admin_features import router as admin_features_router
+from app.api.v1.routers.assets import cve_router as assets_cve_router
+from app.api.v1.routers.assets import router as assets_router
 from app.api.v1.routers.pentest import router as pentest_router
 from app.api.v1.routers.refresh import router as refresh_router
 from app.api.v1.routers.browser_session import router as browser_session_router
@@ -1168,6 +1170,8 @@ def _include_if_enabled(feature: str, *args, **kwargs) -> None:
 # Pentesting engine. Runtime assessment behavior is feature-gated; the engine
 # container executes runs and streams events through the shared database.
 _include_if_enabled("pentesting", pentest_router)
+app.include_router(assets_router, prefix="/api/v1")
+app.include_router(assets_cve_router, prefix="/api/v1")
 
 
 # Router for managing LLM Configurations
