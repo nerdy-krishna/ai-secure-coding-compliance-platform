@@ -368,14 +368,6 @@ COPY --from=base /usr/local /usr/local
 COPY --from=api-builder /app/.venv /app/.venv
 RUN install -d -o zap -g zap -m 0700 /work \
     && install -d -o root -g root -m 0755 /opt/sccap-tools /opt/sccap-tool-runtimes \
-    && find /zap/plugin -maxdepth 1 -type f \
-        ! -name 'Readme.txt' \
-        ! -name 'callhome-release-0.23.0.zap' \
-        ! -name 'network-beta-0.29.0.zap' \
-        ! -name 'commonlib-release-1.43.0.zap' \
-        ! -name 'pscan-alpha-0.6.0.zap' \
-        ! -name 'pscanrules-release-75.zap' \
-        -delete \
     && printf '%s\n' '#!/bin/sh' 'exec python -m app.infrastructure.pentesting.tool_adapters.runtime_helpers.zap "$@"' > /opt/sccap-tools/zap-passive-driver \
     && printf '%s\n' '#!/bin/sh' 'exec /app/.venv/bin/python -m app.infrastructure.pentesting.tool_worker.adapter_processes.zap_process "$@"' > /opt/sccap-tool-runtimes/zap-passive \
     && chmod 0555 /opt/sccap-tools/zap-passive-driver /opt/sccap-tool-runtimes/zap-passive
