@@ -97,14 +97,21 @@ export default function AssetsPage() {
   const check = useMutation({
     mutationFn: async () => {
       const ids = splitCves(cveQuery);
-      return checkCves({ cve_ids: ids.length ? ids : null, verify });
+      // `scan` is what makes a check mean something for an asset that has never
+      // been fingerprinted: it probes first, then matches.
+      return checkCves({ cve_ids: ids.length ? ids : null, verify, scan: true });
     },
     onSuccess: (result) => {
+      const probed = result.assets_probed
+        ? `${result.assets_probed} asset(s), ${result.endpoints_probed ?? 0} endpoint(s) probed, ` +
+          `${result.fingerprints_found ?? 0} fingerprinted`
+        : "";
       const parts = [
+        probed,
         `${result.matched} candidate${result.matched === 1 ? "" : "s"}`,
         `${result.undetermined} need a test`,
         `${result.applicable} applicable`,
-      ];
+      ].filter(Boolean);
       if (result.verified) parts.push(`${result.verified} tested`);
       toast.success(parts.join(" · "));
       refresh();

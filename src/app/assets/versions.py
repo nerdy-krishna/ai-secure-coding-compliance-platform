@@ -103,6 +103,37 @@ def in_range(
     return True
 
 
+_PAIR_RE = re.compile(
+    r"(?P<name>[A-Za-z][A-Za-z0-9_.+-]{1,40})\s*[/ ]\s*"
+    r"(?P<version>\d+(?:\.\d+)+(?:[A-Za-z0-9.+-]*)?)"
+)
+
+
+def pairs(text: Optional[str]) -> list[tuple[str, str]]:
+    """Every (product, version) pair in a banner.
+
+    Servers merge headers: `Server: BaseHTTP/0.6 Python/3.12.16, nginx/1.18.0` is one
+    string carrying two products. Collapsing that to one pair is how "nginx 1.18.0"
+    became "BaseHTTP 0.6" and a real match was missed.
+    """
+    if not text:
+        return []
+    found: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in _PAIR_RE.finditer(text):
+        name = match.group("name").strip()
+        version = match.group("version").strip()
+        # Skip a bare version and the "HTTP/1.1" of a status line.
+        if name.lower() in ("http", "https"):
+            continue
+        key = (name.lower(), version)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append((name, version))
+    return found
+
+
 def product_matches(candidate: Optional[str], observed: Optional[str]) -> bool:
     """Loose product/package name matching.
 

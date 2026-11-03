@@ -269,9 +269,18 @@ def parse_kev(payload: dict[str, Any]) -> list[dict[str, Any]]:
 async def upsert_records(
     db: AsyncSession, records: Iterable[tuple[am.CveRecord, list[am.CveAffected]]]
 ) -> dict[str, int]:
-    """Insert or update CVEs and replace their affected ranges."""
+    """Insert or update CVEs and replace their affected ranges.
+
+    Two passes on purpose: the parent records are flushed before child ranges are
+    added. `CveAffected` carries a plain foreign key with no ORM relationship, so
+    SQLAlchemy cannot order the inserts by dependency and would otherwise write a
+    range before the CVE it belongs to.
+    """
+    batch = list(records)
     created = updated = ranges = 0
-    for record, affected in records:
+    pending_ranges: dict[str, list[am.CveAffected]] = {}
+
+    for record, affected in batch:
         existing = await db.get(am.CveRecord, record.id)
         if existing is None:
             db.add(record)
@@ -287,13 +296,20 @@ async def upsert_records(
             existing.modified = record.modified or existing.modified
             updated += 1
         if affected:
-            for row in list(
-                await db.scalars(select(am.CveAffected).where(am.CveAffected.cve_id == record.id))
-            ):
-                await db.delete(row)
-            for row in affected:
-                db.add(row)
-                ranges += 1
+            pending_ranges[record.id] = affected
+
+    await db.flush()
+
+    for cve_id, affected in pending_ranges.items():
+        for row in list(
+            await db.scalars(select(am.CveAffected).where(am.CveAffected.cve_id == cve_id))
+        ):
+            await db.delete(row)
+        await db.flush()
+        for row in affected:
+            db.add(row)
+            ranges += 1
+
     await db.commit()
     return {"created": created, "updated": updated, "ranges": ranges}
 

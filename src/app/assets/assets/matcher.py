@@ -25,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets import models as am
-from app.assets.versions import in_range, product_matches
+from app.assets.versions import in_range, pairs, product_matches
 
 logger = logging.getLogger(__name__)
 
@@ -107,13 +107,27 @@ def _observed_match(
     service: am.AssetService,
     ranges: list[am.CveAffected],
 ) -> Optional[Finding]:
+    # A banner can name several products (proxy + origin). Consider every pair, so
+    # the version tested is the one belonging to the product the CVE is about.
+    candidates = pairs(" ".join(filter(None, [service.product, service.banner])))
+    if service.version:
+        candidates.append((service.product or "", service.version))
     for row in ranges:
         if row.kind != "cpe" or not row.product:
             continue
-        if not product_matches(row.product, service.product or service.banner):
+        matching = [
+            (name, version)
+            for name, version in candidates
+            if product_matches(row.product, name)
+        ]
+        if not matching and service.product and product_matches(row.product, service.product):
+            matching = [(service.product, service.version or "")]
+        if not matching:
             continue
-        if not in_range(
-            service.version,
+        named_product = matching[0][0] or service.product
+        known_version = next((version for _name, version in matching if version), None)
+        if known_version and not in_range(
+            known_version,
             start_incl=row.version_start_incl,
             start_excl=row.version_start_excl,
             end_incl=row.version_end_incl,
@@ -121,6 +135,36 @@ def _observed_match(
             exact=row.exact_versions,
         ):
             continue
+        if not known_version:
+            # The product is right and the version is missing: a probe can settle it.
+            # Saying nothing here is what made an un-fingerprinted IP look clean.
+            return Finding(
+                asset_id=service.asset_id,
+                cve_id=cve_id,
+                verdict=am.UNDETERMINED,
+                confidence="low",
+                basis=am.BASIS_OBSERVED,
+                reason=(
+                    f"{service.host}{':' + str(service.port) if service.port else ''} reports "
+                    f"{named_product}, which {cve_id} affects, but no version — obtain the "
+                    f"version to decide."
+                ),
+                evidence={
+                    "host": service.host,
+                    "port": service.port,
+                    "product": named_product,
+                    "version": None,
+                    "banner": (service.banner or "")[:500],
+                    "range": {
+                        "start_incl": row.version_start_incl,
+                        "start_excl": row.version_start_excl,
+                        "end_incl": row.version_end_incl,
+                        "end_excl": row.version_end_excl,
+                        "exact": row.exact_versions,
+                    },
+                    "needs_version": True,
+                },
+            )
         # A banner match is a hypothesis: the version may be backported-patched, or
         # the banner may be a deliberate lie. Only a test settles it.
         return Finding(
@@ -138,8 +182,8 @@ def _observed_match(
                 "host": service.host,
                 "port": service.port,
                 "path": service.path,
-                "product": service.product,
-                "version": service.version,
+                "product": named_product,
+                "version": known_version,
                 "banner": (service.banner or "")[:500],
                 "service_confidence": service.confidence,
                 "range": {

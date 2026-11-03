@@ -104,6 +104,13 @@ class CveCheckRequest(BaseModel):
             "that a version alone could not settle."
         ),
     )
+    scan: bool = Field(
+        default=True,
+        description=(
+            "Fingerprint assets that have no recorded product or version before matching "
+            "(read-only HTTP probes and service banners on the asset's own hosts)."
+        ),
+    )
     max_verifications: int = Field(default=25, ge=0, le=200)
 
 
@@ -176,6 +183,22 @@ async def create_asset(body: AssetCreate, user=Depends(current_active_user)) -> 
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    # An asset named after a host is an asset you can scan. Registering the host now
+    # means a CVE check has somewhere to look instead of reporting "nothing found".
+    from app.assets.discovery import looks_like_host
+
+    if looks_like_host(body.name):
+        try:
+            await service.add_service(
+                user.tenant_id,
+                asset.id,
+                host=body.name.strip(),
+                source="inventory",
+                confidence="heuristic",
+            )
+        except Exception:  # noqa: BLE001 — never fail asset creation for this
+            logger.warning("could not register host for asset %s", asset.id, exc_info=True)
     return _asset_dict(asset)
 
 
@@ -331,6 +354,7 @@ async def check_cves(
         cve_ids=body.cve_ids,
         asset_ids=body.asset_ids,
         verify=body.verify,
+        scan=body.scan,
         max_verifications=body.max_verifications,
     )
 

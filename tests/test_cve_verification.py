@@ -9,11 +9,7 @@ unearned verdict is worse than an honest "cannot tell".
 from __future__ import annotations
 
 import asyncio
-import uuid
 from types import SimpleNamespace
-from typing import Any
-
-import pytest
 
 from app.assets import models as am
 from app.assets import verification

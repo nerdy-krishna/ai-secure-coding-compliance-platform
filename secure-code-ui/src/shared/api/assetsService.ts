@@ -146,8 +146,15 @@ export async function checkCves(input: {
   cve_ids?: string[] | null;
   asset_ids?: string[] | null;
   verify: boolean;
+  /** Fingerprint assets that have no recorded product/version first. */
+  scan?: boolean;
   max_verifications?: number;
 }): Promise<{
+  scanned: boolean;
+  assets_probed?: number;
+  endpoints_probed?: number;
+  fingerprints_found?: number;
+  products?: string[];
   matched: number;
   applicable: number;
   undetermined: number;
