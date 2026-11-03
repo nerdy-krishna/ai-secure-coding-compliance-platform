@@ -12,6 +12,7 @@ import logging
 import uuid
 from typing import Any, Optional
 
+import sqlalchemy as sa
 from sqlalchemy import delete, func, select
 
 from app.assets import matcher
@@ -242,15 +243,65 @@ async def list_dependencies(
 # ── CVE applicability ────────────────────────────────────────────────────────
 
 
+async def _assets_needing_discovery(
+    db, *, tenant_id: uuid.UUID, asset_ids: Optional[list[uuid.UUID]]
+) -> list[uuid.UUID]:
+    """Assets with no product or version recorded anywhere.
+
+    These are the ones a check cannot say anything useful about yet, so they are the
+    ones worth touching the network for. An asset that is already fingerprinted is
+    matched from the inventory and not re-probed on every check.
+    """
+    query = select(am.Asset.id).where(
+        am.Asset.tenant_id == tenant_id, am.Asset.in_scope.is_(True)
+    )
+    if asset_ids:
+        query = query.where(am.Asset.id.in_(asset_ids))
+    rows = list(await db.scalars(query))
+    unknown: list[uuid.UUID] = []
+    for asset_id in rows:
+        known = await db.scalar(
+            select(func.count())
+            .select_from(am.AssetService)
+            .where(
+                am.AssetService.asset_id == asset_id,
+                sa.or_(
+                    am.AssetService.product.isnot(None),
+                    am.AssetService.version.isnot(None),
+                ),
+            )
+        )
+        if not known:
+            unknown.append(asset_id)
+    return unknown
+
+
 async def check_cves(
     *,
     tenant_id: uuid.UUID,
     cve_ids: Optional[list[str]] = None,
     asset_ids: Optional[list[uuid.UUID]] = None,
     verify: bool = False,
+    scan: bool = True,
     max_verifications: int = 25,
 ) -> dict[str, Any]:
-    """Match a CVE list against the inventory; optionally test the uncertain ones."""
+    """Fingerprint what is unknown, match the CVE list, and optionally test the rest.
+
+    `scan` is what turns "nothing found" into an answer: an asset with no recorded
+    product and version is probed first (read-only HTTP and banner checks against its
+    own hosts), so the matcher has something to work with.
+    """
+    discovery: dict[str, Any] = {}
+    if scan:
+        from app.assets import discovery as discovery_mod
+
+        async with AsyncSessionLocal() as db:
+            unknown = await _assets_needing_discovery(
+                db, tenant_id=tenant_id, asset_ids=asset_ids
+            )
+        if unknown:
+            discovery = await discovery_mod.discover_assets(unknown)
+
     async with AsyncSessionLocal() as db:
         findings = await matcher.match_cves_for_tenant(
             db, tenant_id=tenant_id, cve_ids=cve_ids, asset_ids=asset_ids
@@ -262,6 +313,8 @@ async def check_cves(
             counts[finding.verdict] = counts.get(finding.verdict, 0) + 1
 
         result: dict[str, Any] = {
+            "scanned": bool(discovery),
+            **(discovery or {}),
             "matched": stored,
             "applicable": counts[am.APPLICABLE],
             "undetermined": counts[am.UNDETERMINED],

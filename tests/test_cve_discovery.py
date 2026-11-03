@@ -103,3 +103,18 @@ def test_unreachable_host_is_recorded_not_raised(monkeypatch):
     outcome = __import__("asyncio").run(discovery._probe_http("10.255.255.1", 80, "http"))
     assert outcome is not None
     assert outcome.get("error")
+
+
+def test_unknown_cve_is_reported_not_silently_zero():
+    """`check_cves` must distinguish "not in the corpus" from "nothing matched".
+
+    The distinction is the whole point of the report: three IPs, one CVE that was
+    never imported, and a zero that reads like a clean result.
+    """
+    import inspect
+
+    from app.assets import service
+
+    source = inspect.getsource(service.check_cves)
+    assert "unknown_cves" in source
+    assert "am.CveRecord.id.in_(cve_ids)" in source

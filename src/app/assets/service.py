@@ -312,8 +312,21 @@ async def check_cves(
         for finding in findings:
             counts[finding.verdict] = counts.get(finding.verdict, 0) + 1
 
+        # A CVE id that is not in the local corpus cannot match anything. Saying so
+        # is the difference between "no such CVE here" and "we looked and found
+        # nothing", which read the same way in a count of zero.
+        unknown_cves: list[str] = []
+        if cve_ids:
+            known = set(
+                await db.scalars(
+                    select(am.CveRecord.id).where(am.CveRecord.id.in_(cve_ids))
+                )
+            )
+            unknown_cves = [cve_id for cve_id in cve_ids if cve_id not in known]
+
         result: dict[str, Any] = {
             "scanned": bool(discovery),
+            "unknown_cves": unknown_cves,
             **(discovery or {}),
             "matched": stored,
             "applicable": counts[am.APPLICABLE],

@@ -155,6 +155,8 @@ export async function checkCves(input: {
   endpoints_probed?: number;
   fingerprints_found?: number;
   products?: string[];
+  /** CVE ids that are not in the local corpus, so nothing could match them. */
+  unknown_cves?: string[];
   matched: number;
   applicable: number;
   undetermined: number;

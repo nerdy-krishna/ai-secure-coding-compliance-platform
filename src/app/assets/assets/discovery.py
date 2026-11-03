@@ -39,9 +39,13 @@ logger = logging.getLogger(__name__)
 
 #: Web ports worth a look when the inventory does not say.
 WEB_PORTS = ((443, "https"), (80, "http"), (8443, "https"), (8080, "http"), (8000, "http"))
-#: Hosts are probed with a short timeout: an unreachable IP must not stall a check.
-CONNECT_TIMEOUT = 6.0
-HTTP_TIMEOUT = 8.0
+#: Hosts are probed with short timeouts: an unreachable IP must not stall a check.
+CONNECT_TIMEOUT = 3.0
+HTTP_TIMEOUT = 6.0
+#: Total wall clock for one asset, so a filtered host cannot hold the request open.
+ASSET_SCAN_BUDGET = 25.0
+#: Simultaneous probes per asset.
+PROBE_CONCURRENCY = 6
 #: Banner services: port → (label, product guess). The banner carries the version.
 BANNER_PORTS = (
     (22, "ssh", "openssh"),
@@ -123,9 +127,32 @@ def _fingerprint_from_http(response: httpx.Response) -> tuple[Optional[str], Opt
     return product, version, banner
 
 
+async def _port_open(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Cheap reachability check before spending an HTTP timeout on a closed port.
+
+    A refused connection returns in microseconds; a filtered one hangs. Checking
+    first is the difference between probing five ports on a dead host in two
+    seconds and waiting forty.
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:  # noqa: BLE001
+            pass
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def _probe_http(host: str, port: int, scheme: str) -> Optional[dict[str, Any]]:
     default_port = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
     url = f"{scheme}://{host}" + ("" if default_port else f":{port}")
+    if not await _port_open(host, port):
+        return {"host": host, "port": port, "protocol": scheme, "error": "unreachable"}
     try:
         async with httpx.AsyncClient(
             timeout=HTTP_TIMEOUT, follow_redirects=True, verify=False, max_redirects=3
@@ -249,22 +276,31 @@ async def discover_asset(
             "note": "the asset has no host recorded; add one to make it scannable",
         }
 
-    results: list[dict[str, Any]] = []
-    for host, port, scheme in targets:
-        outcome = await _probe_http(host, port, scheme)
-        if outcome:
-            results.append(outcome)
+    semaphore = asyncio.Semaphore(PROBE_CONCURRENCY)
 
+    async def guarded(coro):
+        async with semaphore:
+            return await coro
+
+    jobs = [guarded(_probe_http(host, port, scheme)) for host, port, scheme in targets]
     if banner_scan:
-        banner_jobs = [
-            _probe_banner(host, port, label, hint)
+        jobs.extend(
+            guarded(_probe_banner(host, port, label, hint))
             for host in hosts
             for port, label, hint in BANNER_PORTS
-        ]
-        for coro in asyncio.as_completed(banner_jobs):
-            outcome = await coro
-            if outcome:
+        )
+
+    results: list[dict[str, Any]] = []
+    try:
+        # The budget is the whole asset: a filtered host fails the check quickly
+        # instead of holding an HTTP request open until the proxy times out.
+        for outcome in await asyncio.wait_for(
+            asyncio.gather(*jobs, return_exceptions=True), timeout=ASSET_SCAN_BUDGET
+        ):
+            if isinstance(outcome, dict):
                 results.append(outcome)
+    except asyncio.TimeoutError:
+        logger.info("discovery budget reached for asset %s", asset_id)
 
     found = [row for row in results if row.get("product") or row.get("version")]
     if found:

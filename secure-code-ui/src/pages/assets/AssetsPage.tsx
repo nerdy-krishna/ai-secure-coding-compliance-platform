@@ -113,6 +113,15 @@ export default function AssetsPage() {
         `${result.applicable} applicable`,
       ].filter(Boolean);
       if (result.verified) parts.push(`${result.verified} tested`);
+      if (result.unknown_cves?.length) {
+        // The corpus has no record of these, so a zero here means "unknown", not
+        // "unaffected" — say it plainly instead of reporting a clean result.
+        toast.error(
+          `Not in the local corpus, nothing could be checked: ${result.unknown_cves.join(", ")}. ` +
+            "Import an NVD or OSV feed first.",
+        );
+        return;
+      }
       toast.success(parts.join(" · "));
       refresh();
       queryClient.invalidateQueries({ queryKey: ["assets", "verdicts"] });
