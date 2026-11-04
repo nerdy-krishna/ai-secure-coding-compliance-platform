@@ -38,6 +38,7 @@ marked superseded. ADR-029 is the authoritative description of the current engin
 - [ADR-026: Pentesting threat model, business invariants, and workflow state machines](026-pentesting-threat-model-business-invariants-workflow.md) _(superseded by ADR-029)_
 - [ADR-027: Pentesting Capability 12 private-network execution runner](027-pentesting-capability12-private-network-runner.md) _(superseded by ADR-029)_
 - [ADR-028: Operator-authorized destructive testing](028-pentesting-operator-authorized-destructive-testing.md) _(superseded by ADR-029)_
+- [ADR-029: Autonomous pentesting engine](029-pentesting-autonomous-engine.md)
 - [ADR-030: Assessment memory — durable transcript with compaction](030-assessment-memory.md)
 - [ADR-031: Asset inventory and CVE applicability verdicts](031-cve-applicability.md)
 - [ADR-032: Plan-first assessment loop with stored evidence](032-plan-first-assessment-loop.md)

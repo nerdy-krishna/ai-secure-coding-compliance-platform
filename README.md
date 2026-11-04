@@ -9,10 +9,14 @@ Two independent engines share a tenant, a user model and a reporting layer:
 - **Code scanning** — deterministic SAST first (Bandit · Semgrep · Gitleaks · OSV), then
   LLM agents over the files that matter. Findings are consolidated to one root cause,
   scored with CVSS 3.1, replayed for proof, and exported as HTML, PDF, CSV or SARIF.
-- **Pentesting** — an autonomous, scope-bounded engine that reconnoiters the attack
-  surface, drives real tools (nmap, nuclei, ZAP, sqlmap, ffuf, a Playwright browser,
-  whatweb, gobuster, hydra, hashcat) through a model-in-the-loop, chains findings into
-  exploit paths, and reports what it proved.
+- **Pentesting** — an autonomous, scope-bounded agent that reads reconnaissance, writes a
+  plan of hypotheses, drives real tools (nmap, nuclei, ZAP, sqlmap, ffuf, a Playwright
+  browser, whatweb, gobuster, hydra, hashcat) one action at a time, remembers what it has
+  done, and can inspect and repair the box it runs on. A scope ledger stops it repeating
+  work, findings are chained into exploit paths, and an operator can steer it while it runs.
+- **Asset inventory and CVE applicability** — the systems you own, what they run, and which
+  CVEs *actually* affect them: on-demand corpus lookups, LLM-designed detection checks
+  replayed across the estate, and a verdict with evidence rather than a guess.
 
 The design rule throughout: **nothing is claimed that was not observed**. A clean report
 says what was scanned and what was skipped; a finding says which scanner or agent
@@ -23,6 +27,7 @@ produced it, at which line, verified how.
 - [What it looks like](#what-it-looks-like)
 - [Code scanning](#code-scanning)
 - [Pentesting](#pentesting)
+- [Asset inventory and CVE applicability](#asset-inventory-and-cve-applicability)
 - [Findings, evidence and reports](#findings-evidence-and-reports)
 - [Administration, tenancy and identity](#administration-tenancy-and-identity)
 - [Integrations and observability](#integrations-and-observability)
@@ -98,34 +103,96 @@ Feature-gated (off by default; enabled during setup or with the `pentesting-v5` 
 profile). Authorised black-box, grey-box and white-box assessment that never mutates the
 code-scan aggregate.
 
+- **Plan first, then act** — reconnaissance runs every discovery tool and stores each full
+  payload. The model then reads it and writes a plan: hypotheses of endpoint × vulnerability
+  class × the evidence that justifies them. The loop works that plan; `done` is deferred
+  while hypotheses or leads are open.
 - **Attack-surface discovery** — six passive subdomain indexes with retries and per-source
   timeouts, DNS brute-forcing, dangling-CNAME takeover checks, OpenAPI/Swagger/GraphQL
   discovery, and JavaScript bundle mining for endpoints, parameters, source maps and
   secrets.
 - **Scope is the only limit** — the operator's origin plus the in-scope estate beneath its
   registrable domain. Private and loopback destinations are refused, for raw-TCP tools by
-  resolving and refusing non-public addresses. There are no intensity, budget,
-  qualification or duration gates.
-- **Model-in-the-loop tools** — nmap, nuclei (full template library), ZAP active scan,
-  sqlmap, ffuf, whatweb, gobuster, a real Playwright browser, hydra and hashcat, driven one
-  turn at a time against de-duplicated probes.
+  resolving and refusing non-public addresses.
+- **Model-in-the-loop tools** — 26 tools: nmap, nuclei (full template library), ZAP active
+  scan, sqlmap, ffuf, whatweb, gobuster, a real Playwright browser, hydra, hashcat, plus the
+  harness tools below.
+- **A scope ledger, not a hope** — every tool call declares what it covers (host, parameter,
+  template set, auth state) and what justifies a re-run. A repeat inside a covered scope is
+  answered from the stored output instead of hitting the target: the agent gets the digest,
+  the artefact holding the full payload, and can `read` it or send a declarative `queries`
+  filter for the rows it needs. Escalating `--level` is a repeat, not progress.
+- **Memory that survives a restart** — every turn is persisted; past a token budget older
+  turns are compacted into a running summary while the rows stay for audit. The agent sees
+  its own calls and arguments, not just their results.
+- **Operator steering, live** — a brief at launch, directives during the run (with the
+  agent's reply), pause-and-instruct, operator-authored targets that join the lead queue,
+  and a tool policy that can disable or pin a tool mid-run.
+- **Harness tools** — `check_environment`, `diagnose_tool` and `run_diagnostic` let the agent
+  inspect the runtime (binaries, disk, memory, egress, a stale ZAP port) and repair it from an
+  allowlist while it runs. `run_shell` adds arbitrary commands, off unless the operator ticks
+  *Allow shell commands (expert)* for that run.
 - **Persistent lead ledger** — every observation becomes a lead with a priority band,
   claimed as it is tested. The ledger, not the conversation, decides when a run is done, so
   pause/resume/restart never loses work.
 - **Observations are findings** — ports, technologies, endpoints, parameters and leaked
-  secrets are retained for chaining; a follow-up pass chains findings into exploit paths,
-  and a chain is only `confirmed` when a step demonstrated impact.
+  secrets are retained for chaining. The holistic review reads every finding and observation
+  together and asks whether they chain into something neither proves alone; a chain is only
+  `confirmed` when a step demonstrated impact.
+- **Severity that means something** — every finding carries a CVSS 3.1 vector derived from
+  the weakness. An unrecognised CWE is capped at `PENTEST_UNKNOWN_CWE_CEILING` (default
+  medium) instead of defaulting to critical, and repeated scanner alerts collapse into one
+  finding with an instance count.
+- **Terminal-style activity console** — every tool call with its exact arguments and scope,
+  a live elapsed counter while it runs, expandable raw output, level filters, pause and
+  download. `--full` output on demand.
+- **Export for review** — the whole run as JSON or ZIP: event stream, agent transcript with
+  arguments, plan and verdicts, lead queue, probe ledger, directives, findings, chains and
+  every stored tool payload, with a README that says how to read it.
+- **Troubleshoot after the fact** — a finished run can be diagnosed: the run's own failures
+  are joined with a live environment check, and the model separates "the target was clean"
+  from "the box could not run the tools", with allowlisted fixes that can be applied.
 - **Secret vault** — discovered credentials and keys are stored encrypted, masked
   everywhere else, revealed only on explicit audited action, and reports are masked by
   default (`&secrets=unmasked` for the full variant).
-- **Live cockpit** — event stream including prompts and tool actions, live browser frame,
-  findings as they land, pause/resume/stop, and Markdown/JSON/HTML/PDF reports.
+- **Per-run model choice** — pick the model on the new-assessment page; the run records it,
+  and the run page shows the model, tokens and cost as they accumulate.
 - **Recovery and schedules** — a heartbeat marks stale runs `interrupted` and can re-queue
   them without losing findings; a run can be cloned on an interval (1 hour to 30 days) and
   each clone reports what is new, resolved and still present versus its predecessor.
 
 Documents: [pentesting engine](docs/docs/operations/pentesting-engine.md) and
-[ADR-029](docs/adr/029-pentesting-autonomous-engine.md).
+[ADR-029](docs/adr/029-pentesting-autonomous-engine.md),
+[ADR-030](docs/adr/030-assessment-memory.md),
+[ADR-032](docs/adr/032-plan-first-assessment-loop.md).
+
+## Asset inventory and CVE applicability
+
+Answering "do these CVEs affect us?" needs an inventory, a corpus, and a rule about what
+counts as proof.
+
+- **Inventory is the authorisation** — assets of any kind (web app, API, host, service,
+  repository, VM, container, Kubernetes cluster, database, firewall, network device, cloud
+  account), each with endpoints, technologies and declared package versions. Adding an asset
+  authorises testing its recorded hosts, and the basis is recorded.
+- **Corpus offline-first** — NVD, OSV and CISA KEV imported from files, so a verdict is
+  reproducible without a live API. Advisory references are stored and used.
+- **A CVE that is not in the corpus is fetched, not refused** — NVD, then OSV, then the model
+  (marked unverified). `unknown_cves` means nothing could resolve it.
+- **Research, then a check, then a verdict** — the model reads the CVE and its references and
+  states the mechanism and the detection signals; the check is a **Nuclei-compatible YAML
+  template** stored once per CVE and replayed across the estate; the verdict must name the
+  observation that decided it, and an unevidenced verdict is downgraded to `undetermined`.
+- **Probing uses the real scanners** — a probe is queued for the pentest engine, which runs
+  `nmap -sV`, `whatweb` and `nuclei` with the bundled templates, then writes the results into
+  the inventory. HTTP/TLS/banner probes remain as the fallback when no engine is running,
+  including a Host/SNI second pass for sites behind a CDN.
+- **One verdict table** — a declared dependency version and an observed banner produce the
+  same kind of row, differing in basis and confidence; a bare banner never yields
+  `applicable`.
+
+Documents: [CVE applicability](docs/docs/operations/cve-applicability.md) and
+[ADR-031](docs/adr/031-cve-applicability.md).
 
 ## Findings, evidence and reports
 
@@ -218,12 +285,17 @@ you to type the action; `-y` skips the prompts.
 
 | Command | Effect |
 |---|---|
-| `./setup.sh --update` | Pull the current branch, back up the database, rebuild, migrate and health-check in place. Keeps the previous images for rollback. |
+| `./setup.sh --update` | Pull the current branch and rebuild **only the images whose content changed** — a backend fix is seconds, not minutes. Migrates, health-checks and keeps the previous images for rollback. The database dump is skipped when no migration changed. |
+| `./setup.sh --update --full` | Rebuild every image. For a changed base image, or a cache you do not trust. |
 | `./setup.sh --rollback` | Return code **and** images to the state before the last `--update`. |
 | `./setup.sh --uninstall` | Stop and remove the stack. Volumes (database), `.env`, `.secrets/` and certificates are **kept** — re-running `./setup.sh` brings it back. |
 | `./setup.sh --purge` | Also drop the data volumes and the images built here. A `pg_dumpall` backup is written to `.purge-backups/` first. `.env`, `.secrets/` and `certbot/` survive. |
 | `./setup.sh --factory-reset` | Purge plus delete `.env`, `.secrets/` and `certbot/` state — a genuinely clean install, with a fresh certificate next time. |
 | `./setup.sh --repair-tls` | Re-create TLS material from `.env` when the UI reports `tls_cert_missing` or "connection closed". |
+
+The profile menu shows the running version (`0.2.0+7d7f49af` — release plus build commit) and
+whether the deployment matches the checkout; it changes on every successful update, which is
+how you tell a deploy landed.
 
 Teardown is verified rather than assumed: it force-removes containers left by an older
 profile generation and the networks they keep busy, and exits non-zero if anything of the
@@ -234,12 +306,15 @@ stack from the preserved configuration, keeping every non-placeholder secret.
 
 1. Open the URL the installer printed and sign in with the administrator account it
    created.
-2. **Enable Semgrep rules** — Semgrep runs only on ingested rules, so a fresh install
-   yields zero Semgrep findings until you open *Admin → Semgrep Config*, click **Load
-   built-in sources**, enable one or more sources and **Sync Now**.
+2. **Semgrep rules load themselves** — opening *Admin → Semgrep Config* seeds the built-in
+   library, enables the sources and starts the first sync. (Semgrep runs only on ingested
+   rules, so there is no bundled fallback pack.)
 3. Optional: add SMTP, extra LLM configurations, SSO/SCIM, or create user groups.
 4. Submit a scan and approve the estimates as they appear.
-5. For pentesting, open *Pentesting → New engagement*, add the target scope and launch.
+5. For pentesting, open *Pentesting → New Pentest*, choose the model, set the scope and any
+   brief, and launch. Steering is available on the run page while it works.
+6. For CVE work, open *Inventory → Assets & CVEs*, add the assets, import an NVD/OSV feed in
+   the Corpus tab, then check a CVE list.
 
 ## Stack
 

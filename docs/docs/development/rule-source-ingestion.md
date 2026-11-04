@@ -7,10 +7,17 @@ SCCAP runs Semgrep exclusively on rules stored in Postgres. There is no bundled 
 ## Quick start
 
 1. Log in as superuser and go to **Admin → Semgrep Config** (`/admin/semgrep`).
-2. Click **Load built-in sources** — this upserts 16 curated community sources (all disabled by default).
-3. Toggle **Enabled** on the sources you want. Use the **select-all checkbox** and the **bulk action bar** to Enable, Disable, Auto-sync, or Sync multiple sources at once.
-4. Click **Sync Now** on each enabled source (or use **Sync selected** in the bulk bar) and wait for the status to turn green.
-5. Submit a scan — Semgrep will now run against the ingested rules.
+2. The first visit does the bootstrap itself: it upserts the built-in community sources,
+   **enables** them and starts the first sync. The page shows the phase it is in
+   (loading → enabling → syncing) and a toast reports the result.
+3. Adjust from there: toggle **Enabled** on the sources you want, and use the select-all
+   checkbox and the bulk action bar to Enable, Disable, Auto-sync or sync several at once.
+   Disable what you do not scan — an enabled source costs a sync and adds rules.
+4. If a sync failed (egress, rate limit), **Sync Now** on that source retries it.
+5. Submit a scan — Semgrep now runs against the ingested rules.
+
+Re-enabling and re-syncing stays manual: the automatic load happens once, when the source
+table is empty.
 
 ---
 

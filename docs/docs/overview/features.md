@@ -15,6 +15,10 @@ work plus that of peers in a shared group; admins see everything.
 
 ## Dashboard
 
+The header carries a **resource monitor** (CPU, memory and disk with a detail panel:
+load average, cores, host and container memory, free space, uptime, running scans and
+pentests) and the **running version** in the profile menu.
+
 Two sections, code scanning first, then pentesting. Shared tiles — projects, scans or
 assessments, findings, tokens in and out, estimated cost — are followed by the
 product-specific ones.
@@ -150,33 +154,83 @@ The diagnostics page for a scan:
 
 ## Pentesting
 
-Enabled during setup, or with the `pentesting-v5` Compose profile. Three pages: launch an
-engagement, browse projects and assessments, review history.
+Enabled during setup, or with the `pentesting-v5` Compose profile. Launch an assessment,
+browse projects and history, and watch or steer a run while it works.
 
+- **Plan first** — reconnaissance runs every discovery tool and stores each full payload.
+  The model reads it and writes **hypotheses** (endpoint × vulnerability class × the evidence
+  that justifies it). The loop works that plan; `done` is deferred while hypotheses or leads
+  are open, and a hypothesis closes only with a verdict: confirmed, ruled out with the
+  evidence, or blocked with the reason.
+- **Scope ledger** — each tool declares what a call covers and what justifies a re-run.
+  A repeat inside a covered scope is answered from the stored output, not executed again; the
+  agent is given the digest, the artefact id and two ways to get detail: `read` the whole
+  payload, or `queries` for a declarative filter (`path`, `contains`, `regex`, `limit`). Effort
+  knobs (`--level`, threads, severity filters) do not count as new work.
+- **Memory** — every turn is persisted with the calls and arguments; past a token budget older
+  turns are compacted into a summary and the rows are kept for audit. A restart resumes with
+  the transcript instead of a blank page.
+- **Steering** — a brief at launch; directives mid-run (each shows the agent's reply);
+  pause-and-instruct; operator-authored targets that join the lead queue; and a tool policy
+  that disables or pins a tool for the run.
+- **Harness tools** — `check_environment`, `diagnose_tool`, `run_diagnostic` let the agent
+  inspect the runtime and repair it from an allowlist. `run_shell` adds arbitrary commands,
+  only when the operator enables *Allow shell commands (expert)* for that run.
 - **Attack-surface discovery** — six passive subdomain indexes with per-source timeouts and
   retries, DNS brute-force, dangling-CNAME takeover detection, OpenAPI/Swagger and GraphQL
-  discovery, and JavaScript bundle mining for endpoints, parameters, source maps and secrets.
+  discovery, and JavaScript bundle mining.
 - **Scope guard** — the operator's origin plus the in-scope estate beneath its registrable
-  domain. Private and loopback destinations are refused, and raw-TCP tools resolve and
-  refuse non-public addresses. No intensity, budget, qualification or duration gates.
-- **Model-in-the-loop tools** — nmap, nuclei (full template library), ZAP active scan,
-  sqlmap, ffuf, whatweb, gobuster, a real Playwright browser, hydra and hashcat, driven one
-  turn at a time against de-duplicated probes.
-- **Persistent lead ledger** — observations become leads with priority bands, claimed as
-  they are tested; the ledger decides when a run is finished.
-- **Chaining** — findings are chained into exploit paths; a chain is confirmed only when a
-  step demonstrated impact.
-- **Secret vault** — discovered credentials are stored encrypted, masked everywhere else,
-  revealed on explicit audited action, and masked in reports unless unmasked is requested.
-- **Live cockpit** — event stream with prompts and tool actions, live browser frame, findings
-  as they land, pause/resume/stop.
-- **Recovery and schedules** — a heartbeat marks stale runs interrupted and can re-queue
-  them without losing findings; a run can be cloned on an interval and each clone reports
-  what is new, resolved and still present.
-- **Reports** — Markdown, JSON, HTML and PDF, with masked and unmasked variants.
+  domain; private and loopback destinations are refused.
+- **Tools** — 26 in total: nmap, nuclei (full template library), ZAP active scan, sqlmap, ffuf,
+  whatweb, gobuster, a real Playwright browser, hydra, hashcat and the harness tools.
+- **Severity** — the CVSS 3.1 vector is derived from the weakness; an unrecognised CWE is
+  capped (`PENTEST_UNKNOWN_CWE_CEILING`, default `medium`), and repeated scanner alerts
+  collapse into one finding with an instance count.
+- **Chaining** — an index of findings and observations, detail on request, and premises that
+  must reference real findings. The holistic review runs automatically when a run finishes
+  with findings; a chain is confirmed only when a step demonstrated impact.
+- **Activity console** — terminal-style: every call with its exact arguments and scope, a live
+  elapsed counter, an expand toggle for full output, level filters, pause, copy and download.
+- **Export** — the whole run as JSON or ZIP (events, transcript with arguments, plan, leads,
+  probe ledger, directives, findings, chains, stored payloads) with a README explaining how to
+  read it.
+- **Troubleshoot** — a finished run can be diagnosed against the live environment; the model
+  separates "target was clean" from "box could not run the tools", and allowlisted fixes can
+  be applied.
+- **Model choice and cost** — pick the model on the new-assessment page; the run page shows
+  the model, tokens in/out and cost as they accumulate.
+- **Reports** — Markdown, JSON, HTML and PDF, masked by default.
 
-See [the pentesting engine](../operations/pentesting-engine.md) and
-[ADR-029](https://github.com/nerdy-krishna/ai-secure-coding-compliance-platform/blob/main/docs/adr/029-pentesting-autonomous-engine.md).
+See [the pentesting engine](../operations/pentesting-engine.md).
+
+## Asset inventory and CVE applicability
+
+*Inventory → Assets & CVEs* (`/inventory`). The question is "do these CVEs affect us?", and
+the answer is a verdict with a basis, never a bare yes.
+
+| Tab | What it does |
+|---|---|
+| **Assets** | assets of any kind (web app, API, host, service, repo, VM, container, Kubernetes, database, firewall, network device, cloud), their endpoints, technologies and declared packages; **Probe inventory** and **Sweep inventory** |
+| **CVE checks** | paste or upload a CVE list, choose whether to test the uncertain candidates, read verdicts by outcome with basis and confidence, and **Test** a single candidate |
+| **Corpus** | NVD / OSV / KEV imports and corpus counts |
+
+- **Inventory is the authorisation** — adding an asset authorises testing its recorded hosts,
+  and the basis is recorded on the asset.
+- **Probing uses the real scanners** — a probe is queued for the pentest engine, which runs
+  `nmap -sV`, `whatweb` and `nuclei` (bundled templates) and writes the results into the
+  inventory. Without an engine, HTTP/TLS/banner probes run in-process, including a Host/SNI
+  second pass for sites behind a CDN.
+- **A CVE outside the corpus is fetched** — NVD, then OSV, then the model (marked unverified).
+- **Research → check → verdict** — the model states the mechanism and the detection signals,
+  the check is a Nuclei-compatible template stored once per CVE and replayed across the
+  estate, and the verdict must name the deciding observation.
+- **One verdict table** — declared dependency versions and observed banners produce the same
+  kind of row; a bare banner never yields `applicable`, and "no version recorded" means
+  unknown rather than unaffected.
+- **Activity console** — the same terminal view: probing, fingerprints, CVE fetches, matches,
+  tests and verdicts as they happen.
+
+See [CVE applicability](../operations/cve-applicability.md).
 
 ## Administration
 
@@ -224,6 +278,10 @@ double-drive it, but running more than one engine buys nothing until that loop i
 parallelised. Pentests read and write their own tables and never touch the scan
 queues, so a pentest and several code scans can run together — they share the host
 (CPU/RAM), Postgres, and the LLM provider's rate limits.
+
+**Inventory probes** ride the same engine: a probe is queued as a row and the engine runs
+nmap/whatweb/nuclei for it between assessments. With no engine running, the API probes
+in-process instead — the console says which path ran.
 
 ## Operational features
 

@@ -16,7 +16,7 @@ disagree with each other. A SAST report says "this pattern is unsafe"; a pentest
 "this endpoint is exploitable". SCCAP keeps both in one place, on one data model, with the
 same evidence discipline: everything it claims, it can point at.
 
-## Two engines, one platform
+## Three surfaces, one platform
 
 **Code scanning** answers *what is wrong in the code and how do we fix it*. Deterministic
 scanners run first — Bandit, Semgrep, Gitleaks and OSV — because they are cheap, fast and
@@ -24,11 +24,19 @@ reproducible. Then LLM agents analyse the files that deserve it, per file, again
 frameworks you selected. Every finding is consolidated to one root cause, scored with
 CVSS 3.1, and attached to the exact source it refers to.
 
-**Pentesting** answers *what can actually be reached and exploited*. An autonomous engine
-discovers the attack surface beneath the origin you authorise, then drives real tools —
-nmap, nuclei, ZAP, sqlmap, ffuf, a Playwright browser, whatweb, gobuster, hydra, hashcat —
-one turn at a time through a model that sees every result and adapts. Findings are chained
-into exploit paths, and a chain is only confirmed when a step demonstrated impact.
+**Pentesting** answers *what can actually be reached and exploited*. An autonomous agent
+discovers the attack surface beneath the origin you authorise, reads that reconnaissance and
+writes a plan of hypotheses, then drives real tools — nmap, nuclei, ZAP, sqlmap, ffuf, a
+Playwright browser, whatweb, gobuster, hydra, hashcat — one action at a time. It remembers
+what it has done across restarts, will not repeat a scope it has already covered, can inspect
+and repair the box it runs on, and accepts your instructions while it works. Findings are
+chained into exploit paths, and a chain is only confirmed when a step demonstrated impact.
+
+**Asset inventory** answers *do these CVEs affect us*. It records what you own and what each
+asset runs, keeps an offline CVE corpus (NVD, OSV, KEV), and produces a verdict per asset and
+CVE with a basis: a declared dependency version, an observed banner, or a detection check the
+model designed and replayed. A version alone never becomes `applicable`, and an
+unrecognised weakness is capped instead of being called critical.
 
 Both share the tenant model, the user and group visibility rules, encrypted credential
 storage, the audit trail and the reporting layer.
@@ -89,8 +97,9 @@ keeps everything the scanners already found.
   they add judgement.
 - **Evidence over assertion.** Coverage, provenance, replay, lineage — the platform is built
   to be argued with.
-- **Operator control.** Gates before spend, an explicit scope for pentesting, and a
-  lifecycle you can reverse.
+- **Operator control.** Gates before spend, an explicit scope for pentesting, steering while
+  a run is in flight, and a lifecycle you can reverse. Destructive power — arbitrary shell,
+  exploitation — is opt-in per run, never a default.
 - **Open source, Apache 2.0.** Read it, run it, change it.
 
 ## Start here
@@ -99,4 +108,5 @@ keeps everything the scanners already found.
 - Running it day to day? [Maintenance and uninstallation](./getting-started/maintenance.md).
 - Want the feature tour? [Platform features](./overview/features.md).
 - Pentesting in detail? [Pentesting engine](./operations/pentesting-engine.md).
+- CVE work? [CVE applicability](./operations/cve-applicability.md).
 - Contributing? [Development guide](./development/contributing.md).

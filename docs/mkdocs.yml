@@ -193,6 +193,7 @@ nav:
       - Observability and SLOs: operations/observability-slos.md
       - Dependency Degradation: operations/dependency-degradation.md
       - Pentesting Engine: operations/pentesting-engine.md
+      - CVE Applicability: operations/cve-applicability.md
   - API Reference:
       - api-reference/index.md
       - Python API Reference: api-reference/python-api.md

@@ -234,6 +234,16 @@ report "already up to date" and change nothing.
 change tracked files by hand, use the explicit build (`docker compose build … &&
 docker compose up -d`), because `--update` hard-resets the checkout to origin.
 
+## The asset inventory worker
+
+Inventory probing runs in the pentest engine, which is the container with nmap, whatweb and
+nuclei. Keep the `pentesting-v5` profile running if you want tool-backed probing; without it
+the API falls back to its own HTTP/TLS/banner probes and says so in the console.
+
+```bash
+docker compose --profile pentesting-v5 ps pentest-engine   # should be Up
+```
+
 ## Throughput knobs
 
 | Setting | Default | Effect |
