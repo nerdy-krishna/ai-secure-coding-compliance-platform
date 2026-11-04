@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from app.assets import models as am
@@ -222,6 +222,56 @@ async def create_asset(body: AssetCreate, user=Depends(current_active_user)) -> 
         except Exception:  # noqa: BLE001 — never fail asset creation for this
             logger.warning("could not register host for asset %s", asset.id, exc_info=True)
     return _asset_dict(asset)
+
+
+@router.get("/import/template")
+async def import_template(user=Depends(current_active_user)) -> Response:
+    """A blank CSV with the exact columns the importer reads."""
+    from app.assets import importer
+
+    return Response(
+        content=importer.template_csv(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="sccap-assets-template.csv"'
+        },
+    )
+
+
+@router.post("/import")
+async def import_assets(
+    file: UploadFile = File(...),
+    user=Depends(current_active_user),
+) -> dict[str, Any]:
+    """Create assets from a CSV file, reporting what was created, skipped and rejected."""
+    from app.assets import events as events_mod
+    from app.assets import importer
+
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="the file is larger than 5 MB")
+
+    await events_mod.emit(
+        user.tenant_id,
+        f"asset import started: {file.filename or 'upload'}",
+        kind="start",
+    )
+    result = await importer.import_csv(user.tenant_id, content, created_by=user.id)
+    if "error" in result:
+        await events_mod.emit(
+            user.tenant_id, f"asset import failed: {result['error']}", level="error", kind="error"
+        )
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    await events_mod.emit(
+        user.tenant_id,
+        f"asset import finished: {result['created']} created, {result['duplicates']} duplicate(s) "
+        f"skipped, {result['rejected']} rejected of {result['total']} row(s)",
+        level="success" if result["created"] else "warning",
+        kind="done",
+        payload=result,
+    )
+    return result
 
 
 @router.get("/events")

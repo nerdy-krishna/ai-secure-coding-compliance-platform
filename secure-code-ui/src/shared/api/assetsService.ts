@@ -335,3 +335,28 @@ export async function listAssetEvents(afterId = 0): Promise<{ items: AssetEvent[
 export async function clearAssetEvents(): Promise<void> {
   await apiClient.delete("/assets/events");
 }
+
+export interface AssetImportSummary {
+  total: number;
+  created: number;
+  duplicates: number;
+  rejected: number;
+  created_assets: Array<{ id: string; name: string; kind: string; host: string | null }>;
+  duplicate_names: string[];
+  rejected_rows: Array<{ line: number; name: string | null; reason: string }>;
+}
+
+/** A blank CSV with the columns the importer reads. */
+export function assetsTemplateUrl(): string {
+  return `${apiClient.defaults.baseURL}/assets/import/template`;
+}
+
+/** Create assets from a CSV file; the response says what happened to every row. */
+export async function importAssets(file: File): Promise<AssetImportSummary> {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await apiClient.post<AssetImportSummary>("/assets/import", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}

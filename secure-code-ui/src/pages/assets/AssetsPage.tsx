@@ -20,9 +20,10 @@ import {
   addTechnology,
   probeInventory,
   checkCves,
-  clearAssetEvents,
   createAsset,
+  assetsTemplateUrl,
   getCveCheck,
+  importAssets,
   listAssetEvents,
   putCveCheck,
   deleteAsset,
@@ -33,6 +34,7 @@ import {
   sweepInventory,
   verifyVerdict,
   type Asset,
+  type AssetImportSummary,
   type AssetKind,
   type CveVerdict,
   type Verdict,
@@ -96,6 +98,8 @@ export default function AssetsPage() {
   const [tab, setTab] = useState<Tab>("assets");
   const [openAssetId, setOpenAssetId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importSummary, setImportSummary] = useState<AssetImportSummary | null>(null);
+  const [importing, setImporting] = useState(false);
   const [cveQuery, setCveQuery] = useState("");
   const [verify, setVerify] = useState(false);
   const [checkFor, setCheckFor] = useState<string | null>(null);
@@ -355,15 +359,9 @@ export default function AssetsPage() {
           emptyHint="Run a CVE check or probe the inventory: probing, fingerprinting, CVE lookups, matches and tests appear here as they happen."
           downloadName="inventory-activity"
           maxHeight={320}
-          onClear={async () => {
-            setEvents([]);
-            setLastEventId(0);
-            try {
-              await clearAssetEvents();
-            } catch {
-              toast.error("Could not clear the activity log");
-            }
-          }}
+          // Clears what is on screen. The events stay in the database as the log;
+          // keeping the cursor means they do not reappear on the next poll.
+          onClear={() => setEvents([])}
         />
       </section>
 
@@ -376,7 +374,36 @@ export default function AssetsPage() {
                 {corpus?.services ?? 0} endpoint(s) · {corpus?.dependencies ?? 0} package version(s)
               </span>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <label className="asset-upload" title="Create many assets from a CSV file">
+                <Icon.Download size={13} />
+                {importing ? "Importing…" : "Import CSV"}
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  disabled={importing}
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!file) return;
+                    setImporting(true);
+                    try {
+                      const summary = await importAssets(file);
+                      setImportSummary(summary);
+                      refresh();
+                    } catch (err) {
+                      const detail = (err as { response?: { data?: { detail?: string } } })
+                        ?.response?.data?.detail;
+                      toast.error(detail || "Could not import the file");
+                    } finally {
+                      setImporting(false);
+                    }
+                  }}
+                />
+              </label>
+              <a className="sccap-btn" href={assetsTemplateUrl()} download>
+                <Icon.Download size={13} /> Template
+              </a>
               <button
                 className="sccap-btn"
                 disabled={probe.isPending || assets.length === 0}
@@ -700,6 +727,67 @@ export default function AssetsPage() {
           onChange={(event) => setCheckYaml(event.target.value)}
           spellCheck={false}
         />
+      </Modal>
+
+      <Modal
+        open={importSummary !== null}
+        onClose={() => setImportSummary(null)}
+        title="Import summary"
+        width={720}
+        footer={
+          <button className="sccap-btn" onClick={() => setImportSummary(null)}>
+            Close
+          </button>
+        }
+      >
+        {importSummary && (
+          <div className="asset-import-summary">
+            <p className="asset-muted">
+              {importSummary.total} row(s) read: <strong>{importSummary.created} created</strong>,{" "}
+              {importSummary.duplicates} duplicate(s) skipped, {importSummary.rejected} rejected.
+            </p>
+
+            {importSummary.created_assets.length > 0 && (
+              <div>
+                <h4>Created</h4>
+                <ul className="asset-list asset-list-compact">
+                  {importSummary.created_assets.map((asset) => (
+                    <li key={asset.id}>
+                      <strong>{asset.name}</strong>
+                      <span>{asset.kind}</span>
+                      {asset.host && <span className="asset-muted">{asset.host}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {importSummary.duplicate_names.length > 0 && (
+              <div>
+                <h4>Already in the inventory (skipped)</h4>
+                <p className="asset-muted">
+                  {importSummary.duplicate_names.join(", ")} — existing assets are never
+                  overwritten by an import.
+                </p>
+              </div>
+            )}
+
+            {importSummary.rejected_rows.length > 0 && (
+              <div>
+                <h4>Rejected</h4>
+                <ul className="asset-list asset-list-compact">
+                  {importSummary.rejected_rows.map((row) => (
+                    <li key={`${row.line}-${row.name}`}>
+                      <span>line {row.line}</span>
+                      <strong>{row.name ?? "(no name)"}</strong>
+                      <span className="asset-muted">{row.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <CreateAssetModal

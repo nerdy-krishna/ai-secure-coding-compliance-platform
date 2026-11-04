@@ -210,7 +210,7 @@ the answer is a verdict with a basis, never a bare yes.
 
 | Tab | What it does |
 |---|---|
-| **Assets** | assets of any kind (web app, API, host, service, repo, VM, container, Kubernetes, database, firewall, network device, cloud), their endpoints, technologies and declared packages; **Probe inventory** and **Sweep inventory** |
+| **Assets** | bulk **Import CSV** with a downloadable template and a per-row summary; assets of any kind (web app, API, host, service, repo, VM, container, Kubernetes, database, firewall, network device, cloud), their endpoints, technologies and declared packages; **Probe inventory** and **Sweep inventory** |
 | **CVE checks** | paste or upload a CVE list, choose whether to test the uncertain candidates, read verdicts by outcome with basis and confidence, and **Test** a single candidate |
 | **Corpus** | NVD / OSV / KEV imports and corpus counts |
 
