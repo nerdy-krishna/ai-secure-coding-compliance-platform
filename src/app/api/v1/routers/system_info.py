@@ -63,12 +63,32 @@ _BUILD_VERSION = os.environ.get("SCCAP_BUILD_VERSION", "").strip()
 def running_version() -> str:
     if _BUILD_VERSION:
         return _BUILD_VERSION
-    try:  # pyproject declares the distribution version
+    try:  # the release number lives in the package itself
+        from app import __version__ as code_version
+
+        if code_version:
+            return code_version
+    except Exception:  # noqa: BLE001 - never fail a version read
+        pass
+    try:  # a pip-installed distribution may know better
         from importlib.metadata import version as _dist_version
 
         return _dist_version("app")
     except Exception:  # pragma: no cover - metadata not installed
         return "unknown"
+
+
+def build_label(version: str, commit: str) -> str:
+    """The string an operator quotes in a bug report.
+
+    `0.2.0+131113cf` identifies the release *and* the exact build, which a bare
+    semantic version cannot: two builds of 0.2.0 differ. A build with no baked-in
+    commit says so instead of implying it has one.
+    """
+    short = (commit or "")[:8]
+    if not short:
+        return f"{version} (unversioned build)"
+    return f"{version}+{short}"
 
 
 def running_commit() -> str:
@@ -109,9 +129,17 @@ async def get_version(
 ) -> dict[str, Any]:
     """Report the running build so the UI and support can identify it."""
 
+    commit = running_commit()
+    version = running_version()
     return {
-        "version": running_version(),
-        "commit": running_commit(),
+        "version": version,
+        "commit": commit,
+        "commit_short": commit[:8],
+        # What the UI shows. It changes on every successful update because the
+        # commit changes, so "did the update actually deploy?" is answerable from
+        # the browser.
+        "display": build_label(version, commit),
+        "versioned": bool(commit),
         "built_at": _BUILD_TIME or None,
         "environment": str(settings.ENVIRONMENT),
         "migration_head": await _migration_head(db),

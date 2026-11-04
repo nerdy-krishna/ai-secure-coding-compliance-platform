@@ -1232,3 +1232,34 @@ option { background: var(--bg-elev); color: var(--fg); }
 .swimlane-shell:fullscreen .swimlane-scroll svg {
   max-width: none;
 }
+
+/* Running version, in the profile menu details dialog. */
+.version-facts {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: .45rem .9rem;
+  margin: 0;
+  font-size: .82rem;
+}
+
+.version-facts dt {
+  color: var(--fg-muted);
+}
+
+.version-facts dd {
+  margin: 0;
+  color: var(--fg);
+  word-break: break-all;
+}
+
+.version-facts code {
+  font-size: .76rem;
+}
+
+.version-hint {
+  grid-column: 1 / -1;
+  margin: .5rem 0 0;
+  font-size: .76rem;
+  line-height: 1.55;
+  color: var(--fg-muted);
+}

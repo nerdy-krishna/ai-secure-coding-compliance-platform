@@ -5,6 +5,7 @@
 // the invoker so every consumer gets the same keyboard contract.
 
 import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "./Icon";
 
 export interface ModalProps {
@@ -67,7 +68,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   if (!open) return null;
 
-  return (
+  const dialog = (
     <div
       role="dialog"
       aria-modal="true"
@@ -138,6 +139,11 @@ export const Modal: React.FC<ModalProps> = ({
       </div>
     </div>
   );
+
+  // Rendered at the document root: a nav with `backdrop-filter` creates a
+  // containing block, so a fixed-position dialog inside it gets clipped to the nav.
+  if (typeof document === "undefined") return dialog;
+  return createPortal(dialog, document.body);
 };
 
 export default Modal;

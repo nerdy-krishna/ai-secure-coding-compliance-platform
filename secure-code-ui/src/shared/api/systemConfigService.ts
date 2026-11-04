@@ -175,3 +175,23 @@ export const systemConfigService = {
         _getAllCache = null;
     }
 };
+
+/**
+ * The running build. `display` changes on every successful update because the
+ * commit changes, which is how an operator confirms a deploy actually landed.
+ */
+export interface BuildVersion {
+  version: string;
+  commit: string;
+  commit_short: string;
+  display: string;
+  versioned: boolean;
+  built_at: string | null;
+  environment: string;
+  migration_head: string | null;
+}
+
+export async function getBuildVersion(): Promise<BuildVersion> {
+  const { data } = await apiClient.get<BuildVersion>("/system/version");
+  return data;
+}

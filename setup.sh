@@ -403,6 +403,26 @@ _sccap_align_fluentd_ownership() {
 }
 
 
+_sccap_build_version() {
+    # The release version declared by the project, so the image says which release
+    # it is even when the checkout has no tags (this repository does not tag).
+    python3 - <<'PYEOF' 2>/dev/null || echo "0.0.0"
+import re, pathlib
+text = pathlib.Path("pyproject.toml").read_text()
+match = re.search(r'^version\s*=\s*"([^"]+)"', text, re.M)
+print(match.group(1) if match else "0.0.0")
+PYEOF
+}
+
+_sccap_build_args() {
+    # Passed to every image. The API reports them at GET /system/version, which is
+    # how an operator tells whether an update actually reached the running build.
+    printf '%s\n' \
+        "--build-arg" "SCCAP_BUILD_COMMIT=$(_sccap_git_sha)" \
+        "--build-arg" "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "--build-arg" "SCCAP_BUILD_VERSION=$(_sccap_build_version)"
+}
+
 _sccap_build_parallel_limit() {
     # Concurrent image builds are the difference between a clean install and an
     # OOM kill on a 4 GB VM: npm crashes with "Exit handler never called" and the
@@ -662,15 +682,18 @@ _sccap_deploy_state_mark_deployed() {
     local commit="$1"
     [ -n "$commit" ] || return 0
     mkdir -p "$(dirname "$_SCCAP_DEPLOY_STATE")" 2>/dev/null || true
-    python3 - "$_SCCAP_DEPLOY_STATE" "$commit" <<'PYEOF' 2>/dev/null || true
+    local version
+    version=$(_sccap_build_version)
+    python3 - "$_SCCAP_DEPLOY_STATE" "$commit" "$version" <<'PYEOF' 2>/dev/null || true
 import json, sys, datetime
-path, commit = sys.argv[1], sys.argv[2]
+path, commit, version = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
     with open(path) as handle:
         state = json.load(handle)
 except Exception:
     state = {}
 state["deployed_commit"] = commit
+state["deployed_version"] = version
 state["deployed_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 with open(path, "w") as handle:
     json.dump(state, handle)
@@ -868,7 +891,8 @@ _sccap_run_update() {
     local build_log=".build-${target:0:8}.log"
     if ! COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
         --build-arg "SCCAP_BUILD_COMMIT=$target" \
-        --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>&1 | tee "$build_log"; then
+        --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --build-arg "SCCAP_BUILD_VERSION=$(_sccap_build_version)" 2>&1 | tee "$build_log"; then
         _sccap_explain_build_failure "$build_log"
         echo "[!] Build failed; full log: $build_log"
         echo "    Roll back with ./setup.sh --rollback"
@@ -2180,7 +2204,10 @@ _sccap_stage build
 echo "[*] Launching Docker containers (this may take a few minutes)..."
 # We need to ensure the VITE variables are available to the build context
 # Sourcing .env is one way, but docker compose reads .env automatically
-COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build
+# Build args are passed on the command line because `docker compose build` does not
+# forward them from .env; without them the image cannot say what it is.
+# shellcheck disable=SC2046
+COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build $(_sccap_build_args)
 _sccap_align_certbot_ownership
 _sccap_align_fluentd_ownership
 docker compose up -d

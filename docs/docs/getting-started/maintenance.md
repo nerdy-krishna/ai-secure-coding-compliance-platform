@@ -147,6 +147,31 @@ re-sync Semgrep rule sources after an upgrade that changes rule handling
 | `sh: tsc: not found` during the UI build | npm installed without devDependencies (an inherited `NODE_ENV=production` / `npm_config_omit=dev`), or a `node_modules` leaked into the build context | Remove `secure-code-ui/node_modules` and `dist`, `docker builder prune -f`, pull, rebuild. The build now clears those variables and verifies `tsc` itself |
 | `npm error Exit handler never called` | npm crashed — out-of-memory on a small VM, or a corrupt npm cache | `COMPOSE_PARALLEL_LIMIT=1 ./setup.sh` (one image at a time), or `docker compose build ui`; add swap if it repeats. The installer defaults to 2 concurrent builds |
 
+## Which version is running
+
+The profile menu (top right) shows the running build under your email, and **Version**
+in the menu opens the details:
+
+| Field | Meaning |
+|---|---|
+| `0.2.0+5c7d44c6` | release + the commit the image was built from |
+| Release | `pyproject.toml` (`app.__version__`) |
+| Commit | full SHA, copyable |
+| Built at | build time recorded when the image was created |
+| Database schema | current alembic revision, so a skipped migration is visible |
+| Environment | deployment environment |
+
+The commit changes on **every successful `./setup.sh --update`**, which is the point:
+if it has not changed, the update did not reach the running containers. `setup.sh`
+passes `SCCAP_BUILD_COMMIT`, `SCCAP_BUILD_TIME` and `SCCAP_BUILD_VERSION` to the image
+build on both a fresh install and an update, and records the same values in
+`.scratch/deploy-state.json`.
+
+A build made by hand (`docker compose build` with no arguments) shows
+`0.2.0 (unversioned build)` — it cannot know its commit, and saying so is better than
+inventing one. `--rollback` restores the previous images, so the version reverts with
+them.
+
 ## Updating an existing installation
 
 ```bash

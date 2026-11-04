@@ -6,7 +6,11 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../../shared/hooks/useAuth";
+import { getBuildVersion } from "../../shared/api/systemConfigService";
+import { Modal } from "../../shared/ui/Modal";
+import { CopyButton } from "../../shared/ui/CopyButton";
 import { useTheme } from "../../app/providers/ThemeProvider";
 import { Icon } from "../../shared/ui/Icon";
 import { NotificationCenter } from "../../shared/ui/NotificationCenter";
@@ -154,6 +158,7 @@ const UserMenu: React.FC<UserMenuProps> = ({
   activeTenantName,
 }) => {
   const [open, setOpen] = useState(false);
+  const [versionOpen, setVersionOpen] = useState(false);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [tenantsLoading, setTenantsLoading] = useState(false);
   const [switchingTenant, setSwitchingTenant] = useState(false);
@@ -236,6 +241,16 @@ const UserMenu: React.FC<UserMenuProps> = ({
     navigate("/account/settings/security");
   };
 
+  // The running build, shown in the menu and in a details dialog. Cached for the
+  // session: it cannot change without the API restarting.
+  const versionQ = useQuery({
+    queryKey: ["system", "version"],
+    queryFn: getBuildVersion,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const build = versionQ.data;
+
   const label = isSuperuser ? "Admin" : "User";
   const initials = isSuperuser ? "AD" : "US";
 
@@ -272,6 +287,14 @@ const UserMenu: React.FC<UserMenuProps> = ({
           <div style={{ fontSize: 11, color: "var(--fg-subtle)" }}>
             {email ?? ""}
           </div>
+          {build && (
+            <div
+              style={{ fontSize: 10, color: "var(--fg-subtle)", letterSpacing: 0.2 }}
+              title={`Running build ${build.display}${build.built_at ? `, built ${build.built_at}` : ""}`}
+            >
+              {build.display}
+            </div>
+          )}
         </div>
         <Icon.ChevronD size={12} />
       </button>
@@ -380,6 +403,31 @@ const UserMenu: React.FC<UserMenuProps> = ({
           />
           <button
             role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setVersionOpen(true);
+            }}
+            style={{
+              display: "flex",
+              width: "100%",
+              alignItems: "center",
+              gap: 10,
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "none",
+              background: "transparent",
+              color: "var(--fg-muted)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontSize: 13,
+              textAlign: "left",
+            }}
+          >
+            <Icon.Clock size={14} />
+            <span>Version {build ? build.display : "…"}</span>
+          </button>
+          <button
+            role="menuitem"
             onClick={handleSignOut}
             style={{
               display: "flex",
@@ -401,6 +449,51 @@ const UserMenu: React.FC<UserMenuProps> = ({
           </button>
         </div>
       )}
+
+      <Modal
+        open={versionOpen}
+        onClose={() => setVersionOpen(false)}
+        title="Running version"
+        footer={
+          <button className="sccap-btn" onClick={() => setVersionOpen(false)}>
+            Close
+          </button>
+        }
+      >
+        {build ? (
+          <dl className="version-facts">
+            <dt>Version</dt>
+            <dd>
+              <strong>{build.display}</strong>
+            </dd>
+            <dt>Release</dt>
+            <dd>{build.version}</dd>
+            <dt>Commit</dt>
+            <dd>
+              {build.commit ? (
+                <>
+                  <code>{build.commit}</code> <CopyButton value={build.commit} title="Copy commit" />
+                </>
+              ) : (
+                "not recorded — this image was built without provenance"
+              )}
+            </dd>
+            <dt>Built at</dt>
+            <dd>{build.built_at ?? "unknown"}</dd>
+            <dt>Database schema</dt>
+            <dd>{build.migration_head ?? "not migrated"}</dd>
+            <dt>Environment</dt>
+            <dd>{build.environment}</dd>
+            <p className="version-hint">
+              The commit changes on every successful <code>./setup.sh --update</code>. If
+              it did not change, the update did not reach the running containers — check
+              <code> docker compose ps</code> before anything else.
+            </p>
+          </dl>
+        ) : (
+          <p className="version-hint">The build version could not be read from the API.</p>
+        )}
+      </Modal>
     </div>
   );
 };
