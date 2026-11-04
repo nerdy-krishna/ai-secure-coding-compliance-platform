@@ -38,7 +38,22 @@ from app.infrastructure.database.database import AsyncSessionLocal
 logger = logging.getLogger(__name__)
 
 #: Web ports worth a look when the inventory does not say.
-WEB_PORTS = ((443, "https"), (80, "http"), (8443, "https"), (8080, "http"), (8000, "http"))
+#: Web ports worth a look when the inventory does not say. A CDN, an appliance UI or a
+#: management console rarely lives on 80/443 alone.
+WEB_PORTS = (
+    (443, "https"),
+    (80, "http"),
+    (8443, "https"),
+    (8080, "http"),
+    (8000, "http"),
+    (3000, "http"),
+    (5000, "http"),
+    (8888, "http"),
+    (9000, "http"),
+    (9090, "http"),
+    (9443, "https"),
+    (10443, "https"),
+)
 #: Hosts are probed with short timeouts: an unreachable IP must not stall a check.
 CONNECT_TIMEOUT = 3.0
 HTTP_TIMEOUT = 6.0
@@ -176,16 +191,104 @@ async def _port_open(host: str, port: int, timeout: float = 2.0) -> bool:
         return False
 
 
-async def _probe_http(host: str, port: int, scheme: str) -> Optional[dict[str, Any]]:
+def tls_names(host: str, port: int) -> list[str]:
+    """Certificate names for a TLS endpoint.
+
+    Many hosts answer only for the name on their certificate. Reading it is the
+    standard way to find that name without guessing: connect to the address, look at
+    the CN and the SANs, then ask again with the name the host expects.
+    """
+    import ssl
+
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((host, port), timeout=CONNECT_TIMEOUT) as raw:
+            with context.wrap_socket(raw, server_hostname=host) as tls:
+                der = tls.getpeercert(binary_form=True)
+    except Exception:  # noqa: BLE001 — no TLS, or no certificate to read
+        return []
+    if not der:
+        return []
+    try:
+        import ssl as _ssl
+
+        from cryptography import x509
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.x509.oid import NameOID
+
+        certificate = x509.load_der_x509_certificate(der, default_backend())
+        names: list[str] = []
+        for attribute in certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME):
+            names.append(str(attribute.value))
+        try:
+            san = certificate.extensions.get_extension_for_class(
+                x509.SubjectAlternativeName
+            )
+            names.extend(san.value.get_values_for_type(x509.DNSName))
+        except Exception:  # noqa: BLE001
+            pass
+        return _dedupe([name for name in names if name and "*" not in name])
+    except Exception:  # noqa: BLE001 — cryptography absent or cert unparsable
+        pass
+    try:
+        certificate = _ssl._ssl._test_decode_cert  # type: ignore[attr-defined]
+        return []
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: list[str] = []
+    for value in values:
+        cleaned = value.strip().lower().rstrip(".")
+        if cleaned and cleaned not in seen:
+            seen.append(cleaned)
+    return seen
+
+
+def _reverse_dns(host: str) -> list[str]:
+    try:
+        return _dedupe(list(socket.gethostbyaddr(host)[0:1]))
+    except (OSError, socket.herror):
+        return []
+
+
+def host_header_candidates(
+    host: str, *, asset_name: Optional[str] = None, extra: Optional[list[str]] = None
+) -> list[str]:
+    """Names to try in the Host header for a bare address.
+
+    A CDN or virtual host answers the address, not the name it knows: sending
+    `Host: 125.21.247.160` gets a reset, while `Host: quoquo.tvsmotor.com` gets the site.
+    The candidates come from the asset's own name, reverse DNS and the TLS certificate —
+    never from guessing unrelated domains.
+    """
+    candidates: list[str] = []
+    if asset_name and looks_like_host(asset_name) and not asset_name.replace(".", "").isdigit():
+        candidates.append(asset_name.lower())
+    candidates.extend(_reverse_dns(host))
+    candidates.extend(extra or [])
+    return [name for name in _dedupe(candidates) if name != host.lower()]
+
+
+async def _probe_http(
+    host: str, port: int, scheme: str, *, host_header: Optional[str] = None
+) -> Optional[dict[str, Any]]:
     default_port = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
     url = f"{scheme}://{host}" + ("" if default_port else f":{port}")
     if not await _port_open(host, port):
         return {"host": host, "port": port, "protocol": scheme, "error": "unreachable"}
+    headers = {"Host": host_header} if host_header else None
+    extensions = (
+        {"sni_hostname": host_header} if host_header and scheme == "https" else None
+    )
     try:
         async with httpx.AsyncClient(
             timeout=HTTP_TIMEOUT, follow_redirects=True, verify=False, max_redirects=3
         ) as client:
-            response = await client.get(url)
+            response = await client.get(url, headers=headers, extensions=extensions)
     except Exception as exc:  # noqa: BLE001 — unreachable is data, not an error to raise
         return {"host": host, "port": port, "protocol": scheme, "error": f"{type(exc).__name__}"}
     product, version, banner = _fingerprint_from_http(response)
@@ -198,11 +301,15 @@ async def _probe_http(host: str, port: int, scheme: str) -> Optional[dict[str, A
         "port": port,
         "protocol": scheme,
         "url": url,
+        "host_header": host_header,
         "status": response.status_code,
         "product": product,
         "version": version,
         "banner": banner,
         "title": title,
+        # A CDN edge answers for the name it fronts; the length of the body tells the
+        # difference between a real site and an error page served by the edge.
+        "length": len(response.text or ""),
     }
 
 
@@ -244,6 +351,43 @@ async def _probe_banner(host: str, port: int, label: str, hint: Optional[str]) -
         "version": _parse_version(greeting),
         "banner": greeting[:400],
     }
+
+
+def command_line(probe: dict[str, Any]) -> str:
+    """The probe as the command a human would have typed."""
+    if probe.get("service"):
+        # A banner grab is a TCP connection, not an HTTP request; showing it as curl
+        # would be a lie about what ran.
+        return f"nc -w 3 {probe.get('host')} {probe.get('port')}"
+    scheme = probe.get("protocol") or "https"
+    host = probe.get("host")
+    port = probe.get("port")
+    default = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
+    url = f"{scheme}://{host}" + ("" if default else f":{port}")
+    parts = ["curl", "-sk", "--max-time", str(int(HTTP_TIMEOUT))]
+    if probe.get("host_header"):
+        parts += ["-H", f"'Host: {probe['host_header']}'"]
+    parts.append(url)
+    return " ".join(parts)
+
+
+def response_line(probe: dict[str, Any]) -> str:
+    """What came back, in the shape a terminal prints it."""
+    if probe.get("error"):
+        return f"    ! {probe['error']}"
+    if probe.get("service"):
+        return f"    {probe.get('banner') or '(connected, no greeting)'}"
+    status = probe.get("status")
+    detail = []
+    if probe.get("banner"):
+        detail.append(str(probe["banner"])[:120])
+    if probe.get("title"):
+        detail.append(f"title={probe['title'][:80]!r}")
+    if probe.get("product"):
+        detail.append(f"product={probe['product']} {probe.get('version') or ''}".strip())
+    if probe.get("length"):
+        detail.append(f"{probe['length']} bytes")
+    return f"    HTTP {status}" + ("  " + "  ".join(detail) if detail else "")
 
 
 def category_for(product: Optional[str], label: Optional[str] = None) -> str:
@@ -308,6 +452,7 @@ async def discover_asset(
         services = list(
             await db.scalars(select(am.AssetService).where(am.AssetService.asset_id == asset_id))
         )
+        asset_name = asset.name
         hosts = {(service.host or "").strip().lower() for service in services if service.host}
         if not hosts and looks_like_host(asset.name):
             hosts = {asset.name.strip().lower()}
@@ -327,25 +472,55 @@ async def discover_asset(
         async with semaphore:
             return await coro
 
-    jobs = [guarded(_probe_http(host, port, scheme)) for host, port, scheme in targets]
+    # Names this asset may answer for: its own name, reverse DNS, and the certificate.
+    names_by_host: dict[str, list[str]] = {}
+    for host in hosts:
+        extra: list[str] = []
+        for port, scheme in WEB_PORTS:
+            if scheme == "https":
+                extra.extend(tls_names(host, port))
+        names_by_host[host] = host_header_candidates(host, asset_name=asset_name, extra=extra)
+
+    bare_jobs = [guarded(_probe_http(host, port, scheme)) for host, port, scheme in targets]
+    banner_jobs: list[Any] = []
     if banner_scan:
-        jobs.extend(
+        banner_jobs = [
             guarded(_probe_banner(host, port, label, hint))
             for host in hosts
             for port, label, hint in BANNER_PORTS
-        )
+        ]
 
     results: list[dict[str, Any]] = []
-    try:
-        # The budget is the whole asset: a filtered host fails the check quickly
-        # instead of holding an HTTP request open until the proxy times out.
-        for outcome in await asyncio.wait_for(
-            asyncio.gather(*jobs, return_exceptions=True), timeout=ASSET_SCAN_BUDGET
-        ):
-            if isinstance(outcome, dict):
-                results.append(outcome)
-    except asyncio.TimeoutError:
-        logger.info("discovery budget reached for asset %s", asset_id)
+
+    async def collect(coros: list[Any]) -> None:
+        try:
+            # The budget is the whole asset: a filtered host fails quickly instead of
+            # holding an HTTP request open until the proxy times out.
+            for outcome in await asyncio.wait_for(
+                asyncio.gather(*coros, return_exceptions=True), timeout=ASSET_SCAN_BUDGET
+            ):
+                if isinstance(outcome, dict):
+                    results.append(outcome)
+        except asyncio.TimeoutError:
+            logger.info("discovery budget reached for asset %s", asset_id)
+
+    await collect(bare_jobs + banner_jobs)
+    # Second pass, only where the bare address told us nothing: the same endpoints,
+    # asked with the name the host actually serves. A CDN answers its own name, not the
+    # address — that is why a bare-IP probe returns a reset or an edge error page.
+    http_rows = [row for row in results if not row.get("service")]
+    answered_hosts = {
+        row.get("host") for row in http_rows if not row.get("error") and row.get("status")
+    }
+    unanswered_hosts = {row.get("host") for row in http_rows} - answered_hosts
+    variant_jobs = [
+        guarded(_probe_http(host, port, scheme, host_header=candidate))
+        for host, port, scheme in targets
+        if host in unanswered_hosts
+        for candidate in names_by_host.get(host, [])[:3]
+    ]
+    if variant_jobs:
+        await collect(variant_jobs)
 
     # An endpoint that answered at all is inventory, even when it names no product:
     # "443 open, HTTP 404" tells the operator the host is alive and what it said.
@@ -408,9 +583,17 @@ async def discover_asset(
                     # the verification step decides whether it is trustworthy.
                     confidence="heuristic",
                 )
+    transcript: list[str] = []
+    for row in sorted(
+        results, key=lambda item: (str(item.get("host")), item.get("port") or 0)
+    ):
+        transcript.append(command_line(row))
+        transcript.append(response_line(row))
+
     outcomes = [
         {
-            "endpoint": f"{row.get('host')}:{row.get('port')}",
+            "endpoint": f"{row.get('host')}:{row.get('port')}"
+            + (f" (Host: {row['host_header']})" if row.get("host_header") else ""),
             "protocol": row.get("protocol"),
             "status": row.get("status"),
             "product": row.get("product"),
@@ -427,6 +610,7 @@ async def discover_asset(
         "products": sorted({row.get("product") for row in found if row.get("product")}),
         "errors": sum(1 for row in results if row.get("error")),
         "outcomes": outcomes,
+        "transcript": transcript,
     }
 
 
@@ -442,6 +626,7 @@ async def discover_assets(
     """Fingerprint several assets; the summary the check reports back."""
     assets = 0
     endpoints = 0
+    opened = 0
     fingerprints = 0
     products: set[str] = set()
     labels = labels or {}
@@ -476,6 +661,11 @@ async def discover_assets(
                 "info" if outcome.get("endpoints_open") else "warning",
                 {"outcomes": (outcome.get("outcomes") or [])[:24]},
             )
+        if on_event is not None:
+            # The transcript, the way a terminal would show it: the command and the
+            # response line per probe.
+            for line in (outcome.get("transcript") or [])[:60]:
+                await _safe_event(on_event, line, "detail", {"raw": True})
         if on_event is not None and outcome.get("products"):
             await _safe_event(
                 on_event,
@@ -485,11 +675,13 @@ async def discover_assets(
             )
         assets += 1
         endpoints += int(outcome.get("endpoints_probed") or 0)
+        opened += int(outcome.get("endpoints_open") or 0)
         fingerprints += int(outcome.get("fingerprints") or 0)
         products.update(outcome.get("products") or [])
     return {
         "assets_probed": assets,
         "endpoints_probed": endpoints,
+        "endpoints_open": opened,
         "fingerprints_found": fingerprints,
         "products": sorted(products),
     }

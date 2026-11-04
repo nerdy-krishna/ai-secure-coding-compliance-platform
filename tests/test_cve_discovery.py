@@ -120,3 +120,72 @@ def test_unknown_cve_is_reported_not_silently_zero():
     # Enrichment runs before matching, so a fetched CVE has ranges to match against.
     assert "ensure_cves" in source
     assert source.index("ensure_cves") < source.index("match_cves_for_tenant")
+
+
+def test_the_asset_name_is_offered_as_a_host_header(monkeypatch):
+    """A CDN answers its own name, not the address: that is the whole point."""
+    monkeypatch.setattr(discovery, "_reverse_dns", lambda host: [])
+
+    candidates = discovery.host_header_candidates(
+        "125.21.247.160", asset_name="quoquo.tvsmotor.com"
+    )
+
+    assert "quoquo.tvsmotor.com" in candidates
+    assert "125.21.247.160" not in candidates, "the bare address is already the default"
+
+
+def test_a_label_that_is_not_a_hostname_is_not_offered(monkeypatch):
+    monkeypatch.setattr(discovery, "_reverse_dns", lambda host: [])
+
+    assert discovery.host_header_candidates("10.0.0.5", asset_name="billing v2") == []
+
+
+def test_certificate_names_and_reverse_dns_are_offered(monkeypatch):
+    monkeypatch.setattr(discovery, "_reverse_dns", lambda host: ["edge.example.net"])
+
+    candidates = discovery.host_header_candidates(
+        "10.0.0.5", extra=["www.example.net", "edge.example.net"]
+    )
+
+    assert candidates == ["edge.example.net", "www.example.net"]
+
+
+def test_the_transcript_shows_the_command_that_ran():
+    http_probe = {
+        "host": "125.21.247.160",
+        "port": 443,
+        "protocol": "https",
+        "host_header": "quoquo.tvsmotor.com",
+        "status": 200,
+        "banner": "nginx/1.18.0",
+        "product": "nginx",
+        "version": "1.18.0",
+        "length": 1554,
+        "title": "Home",
+    }
+
+    command = discovery.command_line(http_probe)
+    response = discovery.response_line(http_probe)
+
+    assert command.startswith("curl")
+    assert "-H 'Host: quoquo.tvsmotor.com'" in command
+    assert "https://125.21.247.160" in command
+    assert "HTTP 200" in response and "nginx" in response
+
+
+def test_a_banner_probe_is_shown_as_a_tcp_connection():
+    probe = {"host": "10.0.0.5", "port": 22, "service": "ssh", "banner": "SSH-2.0-OpenSSH_9.3"}
+
+    assert discovery.command_line(probe) == "nc -w 3 10.0.0.5 22"
+    assert "OpenSSH" in discovery.response_line(probe)
+
+
+def test_a_failed_probe_says_why():
+    assert discovery.response_line({"host": "h", "port": 1, "error": "TimeoutError"}) == "    ! TimeoutError"
+
+
+def test_web_ports_cover_more_than_the_usual_two():
+    ports = {port for port, _ in discovery.WEB_PORTS}
+
+    assert {80, 443, 8080, 8443} <= ports
+    assert len(ports) >= 10, "a management console rarely lives on 80/443 alone"
