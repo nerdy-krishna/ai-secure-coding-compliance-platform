@@ -146,6 +146,49 @@ async def get_version(
     }
 
 
+@router.get("/resources")
+async def get_resources(
+    db: AsyncSession = Depends(get_db),
+    user: db_models.User = Depends(current_active_user),
+) -> dict[str, Any]:
+    """Current usage of the host and this deployment, for the header monitor.
+
+    Cheap on purpose — the header polls it — and honest about what it cannot read:
+    a value that is unavailable is null, never zero.
+    """
+    from sqlalchemy import func, select
+
+    from app.pentest import models as pentest_models
+    from app.shared.lib import resource_usage
+
+    snapshot = resource_usage.snapshot()
+
+    active_scans = await db.scalar(
+        select(func.count())
+        .select_from(db_models.Scan)
+        .where(
+            db_models.Scan.tenant_id == user.tenant_id,
+            db_models.Scan.status.in_(("QUEUED", "RUNNING", "ANALYZING", "PENDING")),
+        )
+    )
+    running_pentests = await db.scalar(
+        select(func.count())
+        .select_from(pentest_models.PentestRun)
+        .where(
+            pentest_models.PentestRun.tenant_id == user.tenant_id,
+            pentest_models.PentestRun.status.in_(("queued", "running")),
+        )
+    )
+
+    snapshot["work"] = {
+        "active_scans": int(active_scans or 0),
+        "running_pentests": int(running_pentests or 0),
+    }
+    snapshot["environment"] = str(settings.ENVIRONMENT)
+    snapshot["version"] = build_label(running_version(), running_commit())
+    return snapshot
+
+
 def _is_newer(latest_tag: str, current_version: str) -> bool:
     """True when ``latest_tag`` (e.g. v1.4.0) is ahead of the running version."""
 

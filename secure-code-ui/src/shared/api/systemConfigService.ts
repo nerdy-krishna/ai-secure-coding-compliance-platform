@@ -195,3 +195,28 @@ export async function getBuildVersion(): Promise<BuildVersion> {
   const { data } = await apiClient.get<BuildVersion>("/system/version");
   return data;
 }
+
+export interface ResourceUsage {
+  cpu: {
+    percent: number | null;
+    load: { "1m": number; "5m": number; "15m": number };
+    cores: number;
+    host_cores: number;
+  };
+  memory: {
+    host: { total_mb: number | null; used_mb: number | null; percent: number | null };
+    container: { used_mb: number | null; limit_mb: number | null; percent: number | null };
+  };
+  disk: { total_gb: number | null; used_gb: number | null; free_gb: number | null; percent: number | null };
+  uptime_seconds: number | null;
+  collected_ms: number | null;
+  work: { active_scans: number; running_pentests: number };
+  environment: string;
+  version: string;
+}
+
+/** Live host/container usage, sampled server-side. Cheap enough for the header. */
+export async function getResourceUsage(): Promise<ResourceUsage> {
+  const { data } = await apiClient.get<ResourceUsage>("/system/resources");
+  return data;
+}

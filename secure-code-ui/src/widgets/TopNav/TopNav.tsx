@@ -9,6 +9,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../../shared/hooks/useAuth";
 import { getBuildVersion } from "../../shared/api/systemConfigService";
+import ResourceMonitor from "./ResourceMonitor";
 import { Modal } from "../../shared/ui/Modal";
 import { CopyButton } from "../../shared/ui/CopyButton";
 import { useTheme } from "../../app/providers/ThemeProvider";
@@ -66,6 +67,7 @@ export const TopNav: React.FC = () => {
           }}
         >
           <SearchCombobox />
+          <ResourceMonitor />
           <NotificationCenter />
           <button
             className="sccap-btn sccap-btn-icon sccap-btn-ghost"

@@ -21,6 +21,8 @@ export interface ConsoleLine {
   /** Short label for the column after the timestamp, e.g. "tool", "match". */
   kind?: string;
   message: string;
+  /** The same message without the length cap, shown in expanded view. */
+  fullMessage?: string;
   /** Anything worth expanding: the raw payload, a request, a verdict. */
   detail?: unknown;
 }
@@ -67,6 +69,9 @@ const TerminalConsole: React.FC<Props> = ({
   const [paused, setPaused] = useState(false);
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
   const [expanded, setExpanded] = useState<Set<string | number>>(new Set());
+  // Expanded view shows every line in full — message and payload — with no clicking.
+  // Per-line `detail` still works for a single entry when this is off.
+  const [expandedView, setExpandedView] = useState(false);
   const [levels, setLevels] = useState<Set<ConsoleLevel>>(new Set());
 
   const visible = useMemo(
@@ -177,6 +182,14 @@ const TerminalConsole: React.FC<Props> = ({
             </button>
           ))}
           <button
+            className={`console-tool${expandedView ? " is-on" : ""}`}
+            onClick={() => setExpandedView((value) => !value)}
+            title={expandedView ? "Collapse to one line per entry" : "Expand every entry in full"}
+            aria-pressed={expandedView}
+          >
+            <Icon.PanelLeft size={12} />
+          </button>
+          <button
             className={`console-tool${paused ? " is-on" : ""}`}
             onClick={() => setPaused((value) => !value)}
             title={paused ? "Resume following" : "Pause following"}
@@ -194,12 +207,18 @@ const TerminalConsole: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="console-body" ref={bodyRef} onScroll={onScroll} style={{ maxHeight }}>
+      <div
+        className="console-body"
+        ref={bodyRef}
+        onScroll={onScroll}
+        style={{ maxHeight: expandedView ? Math.max(maxHeight, 560) : maxHeight }}
+      >
         {visible.length === 0 ? (
           <div className="console-empty">{emptyHint}</div>
         ) : (
           visible.map((line) => {
-            const isOpen = expanded.has(line.id);
+            const isOpen = expandedView || expanded.has(line.id);
+            const text = expandedView ? line.fullMessage ?? line.message : line.message;
             return (
               <div key={line.id} className={`console-line is-${line.level}`}>
                 <span className="console-time">{timeOfDay(line.at)}</span>
@@ -207,9 +226,9 @@ const TerminalConsole: React.FC<Props> = ({
                   {LEVEL_GLYPH[line.level]}
                 </span>
                 {line.kind && <span className="console-kind">{line.kind}</span>}
-                <span className="console-message">
-                  {line.message}
-                  {line.detail !== undefined && line.detail !== null && (
+                <span className={`console-message${expandedView ? " is-expanded" : ""}`}>
+                  {text}
+                  {line.detail !== undefined && line.detail !== null && !expandedView && (
                     <button
                       className="console-expand"
                       onClick={() => toggleExpanded(line.id)}
@@ -218,7 +237,7 @@ const TerminalConsole: React.FC<Props> = ({
                       {isOpen ? "hide" : "detail"}
                     </button>
                   )}
-                  {isOpen && (
+                  {isOpen && line.detail !== undefined && line.detail !== null && (
                     <pre className="console-detail">
                       {typeof line.detail === "string"
                         ? line.detail

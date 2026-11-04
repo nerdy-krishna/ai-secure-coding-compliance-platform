@@ -400,7 +400,7 @@ async def check_cves(
         f"check started: {len(cve_ids) if cve_ids else 'all corpus CVE(s)'}"
         + (f" across {len(asset_ids)} asset(s)" if asset_ids else " across the inventory"),
         kind="start",
-        payload={"cve_ids": cve_ids, "scan": scan, "verify": verify},
+        payload={"cve_count": len(cve_ids or []), "scan": scan, "verify": verify},
         check_id=check_id,
     )
 
@@ -538,7 +538,11 @@ async def check_cves(
                 f"{result['undetermined']} needing a test",
                 level="success" if result["matched"] else "warning",
                 kind="done",
-                payload=result,
+                payload={
+                    "matched": result["matched"],
+                    "applicable": result["applicable"],
+                    "undetermined": result["undetermined"],
+                },
                 check_id=check_id,
             )
             return result
@@ -594,7 +598,12 @@ async def check_cves(
         f"{result['undetermined']} needing a test, {result['verified']} tested",
         level="success",
         kind="done",
-        payload=result,
+        payload={
+            "matched": result["matched"],
+            "applicable": result["applicable"],
+            "undetermined": result["undetermined"],
+            "verified": result["verified"],
+        },
         check_id=check_id,
     )
     return result
