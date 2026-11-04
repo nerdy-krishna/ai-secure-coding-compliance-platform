@@ -13,10 +13,18 @@ import { Icon } from "./Icon";
 
 export type ConsoleLevel = "info" | "success" | "warning" | "error" | "detail";
 
+export type ConsoleStatus = "running" | "done" | "failed";
+
 export interface ConsoleLine {
   id: string | number;
   /** ISO timestamp; rendered as local time-of-day. */
   at: string | null;
+  /** Set for work that is still in flight, so the row can tick. */
+  status?: ConsoleStatus;
+  /** When the work started; drives the live elapsed counter. */
+  startedAt?: string | null;
+  /** Seconds the work took, once it has finished. */
+  durationSeconds?: number | null;
   level: ConsoleLevel;
   /** Short label for the column after the timestamp, e.g. "tool", "match". */
   kind?: string;
@@ -54,6 +62,33 @@ function timeOfDay(iso: string | null): string {
   if (Number.isNaN(date.getTime())) return "--:--:--";
   return date.toLocaleTimeString([], { hour12: false });
 }
+
+/** A ticking clock for a row that is still running. */
+const Elapsed: React.FC<{ startedAt: string | null | undefined; finished?: boolean }> = ({
+  startedAt,
+  finished,
+}) => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (finished || !startedAt) return;
+    const timer = window.setInterval(() => setTick((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [finished, startedAt]);
+
+  if (!startedAt) return null;
+  const started = new Date(startedAt).getTime();
+  if (Number.isNaN(started)) return null;
+  const seconds = Math.max(0, Math.round((Date.now() - started) / 1000));
+  const text = seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
+  // ZAP and nuclei legitimately run for minutes; past that, say so rather than
+  // leaving the operator to guess whether it is working or wedged.
+  const tone = finished ? "is-done" : seconds >= 300 ? " is-slow" : "";
+  return (
+    <span className={`console-elapsed${tone}`} title={seconds >= 300 ? "Still running" : undefined}>
+      {text}
+    </span>
+  );
+};
 
 const TerminalConsole: React.FC<Props> = ({
   title,
@@ -220,12 +255,16 @@ const TerminalConsole: React.FC<Props> = ({
             const isOpen = expandedView || expanded.has(line.id);
             const text = expandedView ? line.fullMessage ?? line.message : line.message;
             return (
-              <div key={line.id} className={`console-line is-${line.level}`}>
+              <div
+                key={line.id}
+                className={`console-line is-${line.level}${line.status ? ` is-${line.status}` : ""}`}
+              >
                 <span className="console-time">{timeOfDay(line.at)}</span>
                 <span className="console-glyph" aria-hidden="true">
                   {LEVEL_GLYPH[line.level]}
                 </span>
                 {line.kind && <span className="console-kind">{line.kind}</span>}
+                {line.status === "running" && <span className="console-running" aria-label="running" />}
                 <span className={`console-message${expandedView ? " is-expanded" : ""}`}>
                   {text}
                   {line.detail !== undefined && line.detail !== null && !expandedView && (
@@ -245,6 +284,15 @@ const TerminalConsole: React.FC<Props> = ({
                     </pre>
                   )}
                 </span>
+                {line.status ? (
+                  line.status === "running" ? (
+                    <Elapsed startedAt={line.startedAt} />
+                  ) : (
+                    <span className={`console-elapsed is-done${line.status === "failed" ? " is-failed" : ""}`}>
+                      {line.durationSeconds != null ? `${line.durationSeconds}s` : "done"}
+                    </span>
+                  )
+                ) : null}
                 <button
                   className="console-copy"
                   onClick={() => void copyLine(line)}

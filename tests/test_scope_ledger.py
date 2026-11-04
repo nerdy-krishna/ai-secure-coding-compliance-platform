@@ -164,3 +164,149 @@ def test_the_catalogue_tells_the_model_the_scope_contract():
 
     assert entry["scope"] == ["host", "target", "tags", "templates"]
     assert "authenticated" in entry["rerun_on"]
+
+
+def test_the_agent_announces_each_call_with_its_arguments_and_call_id(monkeypatch):
+    """The monitor needs the exact arguments and a live status, not "tool start X"."""
+    import asyncio
+    import uuid as uuid_mod
+    from types import SimpleNamespace
+
+    from app.pentest import agent as agent_mod
+    from app.pentest import artifacts as artifacts_mod
+    from app.pentest import memory as memory_mod
+    from app.pentest import plan as plan_mod
+    from app.pentest import steering as steering_mod
+    from app.pentest.tools.base import RunContext, ToolResult
+
+    emitted: list[tuple[str, dict]] = []
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def empty_list(*args, **kwargs):
+        return []
+
+    async def empty_text(*args, **kwargs):
+        return ""
+
+    async def empty_counts(*args, **kwargs):
+        return {}
+
+    async def zero(*args, **kwargs):
+        return 0
+
+    async def directives(*args, **kwargs):
+        return "", []
+
+    async def read_artifact(*args, **kwargs):
+        return None
+
+    async def collect(kind, payload):
+        emitted.append((kind, payload))
+
+    monkeypatch.setattr(steering_mod, "render_for_prompt", directives)
+    for name in ("mark_applied", "clear_pinned_tool", "apply_tool_policy", "note_probe"):
+        monkeypatch.setattr(steering_mod, name, noop)
+    monkeypatch.setattr(steering_mod, "looping_tools", empty_counts)
+    monkeypatch.setattr(memory_mod, "load", lambda *a, **k: _await(("", [])))
+    monkeypatch.setattr(memory_mod, "record", zero)
+    monkeypatch.setattr(memory_mod, "total_tokens", zero)
+    monkeypatch.setattr(memory_mod, "split_for_compaction", lambda *a, **k: _await(([], 0)))
+    monkeypatch.setattr(memory_mod, "apply_compaction", zero)
+    monkeypatch.setattr(memory_mod, "recent_probes", empty_list)
+    monkeypatch.setattr(plan_mod, "counts", empty_counts)
+    monkeypatch.setattr(plan_mod, "open_items", empty_list)
+    monkeypatch.setattr(plan_mod, "replace_plan", zero)
+    monkeypatch.setattr(plan_mod, "update_items", zero)
+    monkeypatch.setattr(plan_mod, "render_for_prompt", empty_text)
+    monkeypatch.setattr(artifacts_mod, "save", lambda *a, **k: _await(None))
+    monkeypatch.setattr(artifacts_mod, "read", read_artifact)
+    monkeypatch.setattr(artifacts_mod, "recent", empty_list)
+    monkeypatch.setattr(led, "lookup", lambda *a, **k: _await(None))
+    monkeypatch.setattr(led, "record", noop)
+    monkeypatch.setattr(led, "covered_scopes", empty_list)
+    monkeypatch.setattr(led, "render_ledger", lambda *a, **k: "")
+    # The lead queue also renders from the database; this test is about the call events.
+    monkeypatch.setattr(agent_mod.lead_queue, "render_for_prompt", lambda db, run_id: _await(""))
+    monkeypatch.setattr(agent_mod.PentestAgent, "_refresh_policy", noop)
+    monkeypatch.setattr(agent_mod.PentestAgent, "_open_lead_count", zero)
+    monkeypatch.setattr(agent_mod.PentestAgent, "_claim_leads", noop)
+    monkeypatch.setattr(agent_mod.PentestAgent, "_queue_tool_leads", zero)
+    monkeypatch.setattr(agent_mod, "record_findings", zero)
+
+    class Recorder:
+        def has(self, name):
+            return True
+
+        def spec(self, name):
+            return registry.spec(name)
+
+        def catalog(self, disabled):
+            return registry.catalog(disabled)
+
+        async def invoke(self, name, ctx, args):
+            return ToolResult(ok=True, output={"matches": []}, raw="")
+
+    class LLM:
+        def __init__(self):
+            self.turn = 0
+
+        async def generate_structured_output(
+            self, *, prompt, response_model, system_prompt, usage_context
+        ):
+            if response_model is agent_mod.PentestPlan:
+                return SimpleNamespace(
+                    parsed_output=agent_mod.PentestPlan(
+                        assessment="x", hypotheses=[], first_actions=[]
+                    ),
+                    error=None,
+                )
+            self.turn += 1
+            if self.turn == 1:
+                return SimpleNamespace(
+                    parsed_output=agent_mod.NextAction.model_validate(
+                        {
+                            "reasoning": "sweep",
+                            "calls": [
+                                {
+                                    "tool": "nuclei_scan",
+                                    "arguments": {"target": "/", "tags": ["cve"]},
+                                }
+                            ],
+                        }
+                    ),
+                    error=None,
+                )
+            return SimpleNamespace(
+                parsed_output=agent_mod.NextAction.model_validate(
+                    {"reasoning": "done", "done": True, "summary": "ok"}
+                ),
+                error=None,
+            )
+
+    ctx = RunContext(
+        run_id=uuid_mod.uuid4(),
+        target=SimpleNamespace(url="https://example.com", host="example.com"),
+        box_type="black",
+        emit=collect,
+    )
+
+    asyncio.run(agent_mod.PentestAgent(ctx, Recorder(), LLM(), recon_summary={}).run())
+
+    starts = [payload for kind, payload in emitted if kind == "tool_start"]
+    results = [payload for kind, payload in emitted if kind == "tool_result"]
+    assert starts, "every tool call must be announced, whatever the tool does itself"
+    assert starts[0]["arguments"] == {"target": "/", "tags": ["cve"]}
+    assert starts[0]["scope"]["target"] == "/"
+    assert starts[0]["call_id"]
+    assert results and results[0]["call_id"] == starts[0]["call_id"], (
+        "the result must pair with its call, so the row can show a finish time"
+    )
+
+
+def _await(value):
+    async def inner():
+        return value
+
+    return inner()

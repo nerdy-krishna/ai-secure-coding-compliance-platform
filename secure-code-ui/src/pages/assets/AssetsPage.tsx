@@ -105,6 +105,7 @@ export default function AssetsPage() {
   const [events, setEvents] = useState<ConsoleLine[]>([]);
   const [lastEventId, setLastEventId] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [busySince, setBusySince] = useState<string | null>(null);
 
   const eventsQ = useQuery({
     queryKey: ["assets", "events", lastEventId],
@@ -154,8 +155,14 @@ export default function AssetsPage() {
   };
 
   const check = useMutation({
-    onMutate: () => setBusy(true),
-    onSettled: () => setBusy(false),
+    onMutate: () => {
+      setBusy(true);
+      setBusySince(new Date().toISOString());
+    },
+    onSettled: () => {
+      setBusy(false);
+      setBusySince(null);
+    },
     mutationFn: async () => {
       const ids = splitCves(cveQuery);
       // `scan` is what makes a check mean something for an asset that has never
@@ -211,8 +218,14 @@ export default function AssetsPage() {
   });
 
   const probe = useMutation({
-    onMutate: () => setBusy(true),
-    onSettled: () => setBusy(false),
+    onMutate: () => {
+      setBusy(true);
+      setBusySince(new Date().toISOString());
+    },
+    onSettled: () => {
+      setBusy(false);
+      setBusySince(null);
+    },
     mutationFn: (rescan: boolean) => probeInventory({ rescan }),
     onSuccess: (result) => {
       toast.success(
@@ -226,8 +239,14 @@ export default function AssetsPage() {
   });
 
   const sweep = useMutation({
-    onMutate: () => setBusy(true),
-    onSettled: () => setBusy(false),
+    onMutate: () => {
+      setBusy(true);
+      setBusySince(new Date().toISOString());
+    },
+    onSettled: () => {
+      setBusy(false);
+      setBusySince(null);
+    },
     mutationFn: () => sweepInventory({ verify }),
     onSuccess: (result) => {
       toast.success(
@@ -316,7 +335,22 @@ export default function AssetsPage() {
       <section className="sccap-card asset-card">
         <TerminalConsole
           title="inventory activity"
-          lines={events}
+          lines={
+            busy && busySince
+              ? [
+                  ...events,
+                  {
+                    id: "live",
+                    at: busySince,
+                    level: "info",
+                    kind: "running",
+                    message: "working — probing, matching and testing; entries appear below as each step finishes",
+                    status: "running",
+                    startedAt: busySince,
+                  },
+                ]
+              : events
+          }
           live={busy}
           emptyHint="Run a CVE check or probe the inventory: probing, fingerprinting, CVE lookups, matches and tests appear here as they happen."
           downloadName="inventory-activity"

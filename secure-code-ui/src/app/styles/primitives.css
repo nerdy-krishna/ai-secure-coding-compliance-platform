@@ -1344,7 +1344,8 @@ option { background: var(--bg-elev); color: var(--fg); }
 
 .console-line {
   display: grid;
-  grid-template-columns: 62px 14px auto 1fr auto;
+  /* time · glyph · kind · message · elapsed · copy */
+  grid-template-columns: 62px 14px auto 1fr auto auto;
   align-items: baseline;
   gap: .45rem;
   padding: .1rem .6rem;
@@ -1399,7 +1400,7 @@ option { background: var(--bg-elev); color: var(--fg); }
   cursor: pointer;
   text-decoration: underline dotted;
 }
-.console-copy { opacity: 0; }
+.console-copy { opacity: 0; width: 2.4em; text-align: right; }
 .console-line:hover .console-copy { opacity: 1; }
 .console-expand:hover,
 .console-copy:hover { color: #9fb0c3; }
@@ -1427,6 +1428,30 @@ option { background: var(--bg-elev); color: var(--fg); }
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.console-line.is-running { background: #0f1620; }
+.console-line.is-running .console-message { color: #dbe6f2; }
+.console-line.is-failed .console-glyph { color: #ff6b6b; }
+
+.console-running {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5aa9e6;
+  box-shadow: 0 0 0 0 rgba(90, 169, 230, .6);
+  animation: console-pulse 1.6s infinite;
+}
+
+.console-elapsed {
+  font-size: .66rem;
+  color: #7f93a8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.console-elapsed.is-done { color: #4c5f73; }
+.console-elapsed.is-slow { color: #febc2e; }
 
 .console-jump {
   position: absolute;
