@@ -175,12 +175,46 @@ them.
 ## Updating an existing installation
 
 ```bash
-./setup.sh --update
+./setup.sh --update          # rebuild only what changed
+./setup.sh --update --full   # rebuild every image (slow)
 ```
 
-It fetches the current branch, asks once, backs up the database, tags the running
-images for rollback, rebuilds, restarts, applies migrations and only reports success
-once the API answers.
+`--update` fetches the branch, asks once, tags the running images for rollback,
+rebuilds **only the images whose content changed**, restarts, applies migrations and
+only reports success once the API answers.
+
+| What changed | What is rebuilt |
+|---|---|
+| `src/`, `alembic/`, `pyproject.toml`, `poetry.lock`, `Dockerfile`, `docker/`, `scripts/` | `app`, `worker`, and the pentest/patch images when they are part of the deployment |
+| `secure-code-ui/` | `ui` only |
+| `docker-compose.yml`, `.env`, nginx config | nothing — containers are recreated so the new settings apply |
+
+The database dump is also skipped when no migration file changed *and* the database is
+already at head: on a large install `pg_dump` was minutes of the update for nothing.
+
+Timings measured on a 4 GB VM after the cache fixes below:
+
+| Update | Before | Now |
+|---|---|---|
+| backend code change | 3 m 32 s (app + worker) | **2.5 s** |
+| UI change | full rebuild | UI image only |
+| compose/env change | full rebuild | no build |
+
+Two causes of the old slowness, both fixed:
+
+- the provenance build args (`SCCAP_BUILD_COMMIT`, …) sat at the top of the base stage,
+  so every update changed a layer above the dependency install and invalidated the
+  entire build. They are now declared at the **end** of each stage: a changing commit
+  costs one small layer;
+- the fastembed model warm-up ran *after* the source copy, so touching one Python file
+  re-downloaded the model for every image. It now runs above the copy, where it only
+  depends on the virtualenv.
+
+The first update after these changes is still a full rebuild — the layers genuinely
+changed once. Every update after that is incremental.
+
+`--full` exists for the cases the path mapping cannot see: a changed base image, or a
+build whose cache you do not trust.
 
 The decision to deploy is based on **what is deployed**, not on what the checkout
 contains: the running API reports the commit it was built from

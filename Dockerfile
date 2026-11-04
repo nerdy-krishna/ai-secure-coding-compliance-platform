@@ -29,17 +29,14 @@
 # ---------- base ---------------------------------------------------------
 FROM python:3.12-slim-bookworm AS base
 
-# Build provenance, surfaced by GET /api/v1/system/version so an operator (and
-# the admin "update available" banner) can identify exactly what is running.
-# setup.sh passes these; a plain `docker build` leaves them empty and the API
-# falls back to the version declared in pyproject.toml.
-ARG SCCAP_BUILD_COMMIT=""
-ARG SCCAP_BUILD_TIME=""
-ARG SCCAP_BUILD_VERSION=""
-ENV SCCAP_BUILD_COMMIT=${SCCAP_BUILD_COMMIT} \
-    SCCAP_BUILD_TIME=${SCCAP_BUILD_TIME} \
-    SCCAP_BUILD_VERSION=${SCCAP_BUILD_VERSION}
-
+# Build provenance is deliberately *not* a build argument.
+#
+# `GET /system/version` reports what is running, and getting that from a build arg
+# meant every update changed a layer at the top of this stage — invalidating the
+# dependency install and the whole downstream build, so an update that touched one
+# Python file rebuilt every image from scratch. `setup.sh` writes these into `.env`
+# instead, and compose injects them at container start: same information, no cache
+# invalidation, incremental rebuilds.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -171,10 +168,6 @@ RUN set -eux; \
 USER appuser
 
 COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
-COPY --chown=appuser:appuser ./src /app/src
-COPY --chown=appuser:appuser ./alembic /app/alembic
-COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
-COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 
 # Pre-warm the fastembed model cache so air-gapped / restricted-egress
 # deployments don't reach out to HuggingFace on first scan. Cache lives
@@ -182,9 +175,24 @@ COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 # mitigation 7.
 RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
 
+COPY --chown=appuser:appuser ./src /app/src
+COPY --chown=appuser:appuser ./alembic /app/alembic
+COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
+COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
+
 RUN chmod +x /app/app-entrypoint.sh
 ENV SCCAP_MIGRATION_ROLE=wait
 EXPOSE 8000
+
+# Build provenance, at the *end* of the stage on purpose: `GET /system/version`
+# reports what is running, and a build arg that changes on every commit must not sit
+# above the dependency layers or every update rebuilds from the base image.
+ARG SCCAP_BUILD_COMMIT=""
+ARG SCCAP_BUILD_TIME=""
+ARG SCCAP_BUILD_VERSION=""
+ENV SCCAP_BUILD_COMMIT=${SCCAP_BUILD_COMMIT} \
+    SCCAP_BUILD_TIME=${SCCAP_BUILD_TIME} \
+    SCCAP_BUILD_VERSION=${SCCAP_BUILD_VERSION}
 ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
@@ -282,15 +290,16 @@ RUN set -eux; \
 USER appuser
 
 COPY --chown=appuser:appuser --from=worker-builder /app/.venv /app/.venv
-COPY --chown=appuser:appuser ./src /app/src
-COPY --chown=appuser:appuser ./alembic /app/alembic
-COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
-COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 
 # Pre-warm the fastembed model cache (same as the api stage). Worker
 # performs the bulk of the embedder work during scans; baking the
 # cache here keeps first-scan latency consistent.
 RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
+
+COPY --chown=appuser:appuser ./src /app/src
+COPY --chown=appuser:appuser ./alembic /app/alembic
+COPY --chown=appuser:appuser alembic.ini /app/alembic.ini
+COPY --chown=appuser:appuser docker/app-entrypoint.sh /app/app-entrypoint.sh
 
 # OSV vulnerability matching currently uses the live OSV API. We do not claim
 # an offline snapshot: the earlier empty-directory "warm-up" created no
@@ -300,6 +309,16 @@ RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(Te
 
 RUN chmod +x /app/app-entrypoint.sh
 ENV SCCAP_MIGRATION_ROLE=wait
+
+# Build provenance, at the *end* of the stage on purpose: `GET /system/version`
+# reports what is running, and a build arg that changes on every commit must not sit
+# above the dependency layers or every update rebuilds from the base image.
+ARG SCCAP_BUILD_COMMIT=""
+ARG SCCAP_BUILD_TIME=""
+ARG SCCAP_BUILD_VERSION=""
+ENV SCCAP_BUILD_COMMIT=${SCCAP_BUILD_COMMIT} \
+    SCCAP_BUILD_TIME=${SCCAP_BUILD_TIME} \
+    SCCAP_BUILD_VERSION=${SCCAP_BUILD_VERSION}
 ENTRYPOINT ["/app/app-entrypoint.sh"]
 CMD ["python", "-m", "app.workers.consumer"]
 
@@ -311,6 +330,13 @@ CMD ["python", "-m", "app.workers.consumer"]
 FROM base AS tool-supervisor
 
 COPY --chown=appuser:appuser --from=api-builder /app/.venv /app/.venv
+
+# Pre-warm the fastembed model cache so air-gapped / restricted-egress
+# deployments don't reach out to HuggingFace on first scan. Cache lives
+# under FASTEMBED_CACHE_PATH (set in base stage). Threat-model G7 +
+# mitigation 7.
+RUN python -c "from fastembed import TextEmbedding, SparseTextEmbedding; list(TextEmbedding('sentence-transformers/all-MiniLM-L6-v2').embed(['warmup'])); list(SparseTextEmbedding('Qdrant/bm25').embed(['warmup']))"
+
 COPY --chown=appuser:appuser ./src /app/src
 
 USER root
@@ -395,6 +421,16 @@ RUN install -d -o appuser -g appuser -m 0700 /work \
     && chmod 0555 /opt/sccap-tools/nuclei /opt/sccap-tool-runtimes/nuclei-observe
 WORKDIR /work
 USER appuser
+
+# Build provenance, at the *end* of the stage on purpose: `GET /system/version`
+# reports what is running, and a build arg that changes on every commit must not sit
+# above the dependency layers or every update rebuilds from the base image.
+ARG SCCAP_BUILD_COMMIT=""
+ARG SCCAP_BUILD_TIME=""
+ARG SCCAP_BUILD_VERSION=""
+ENV SCCAP_BUILD_COMMIT=${SCCAP_BUILD_COMMIT} \
+    SCCAP_BUILD_TIME=${SCCAP_BUILD_TIME} \
+    SCCAP_BUILD_VERSION=${SCCAP_BUILD_VERSION}
 ENTRYPOINT ["/opt/sccap-tool-runtimes/nuclei-observe"]
 CMD ["--kubernetes-attach-v1"]
 
@@ -419,6 +455,16 @@ RUN install -d -o appuser -g appuser -m 0700 /work \
     && chmod 0555 /opt/sccap-tool-runtimes/nmap-connect
 WORKDIR /work
 USER appuser
+
+# Build provenance, at the *end* of the stage on purpose: `GET /system/version`
+# reports what is running, and a build arg that changes on every commit must not sit
+# above the dependency layers or every update rebuilds from the base image.
+ARG SCCAP_BUILD_COMMIT=""
+ARG SCCAP_BUILD_TIME=""
+ARG SCCAP_BUILD_VERSION=""
+ENV SCCAP_BUILD_COMMIT=${SCCAP_BUILD_COMMIT} \
+    SCCAP_BUILD_TIME=${SCCAP_BUILD_TIME} \
+    SCCAP_BUILD_VERSION=${SCCAP_BUILD_VERSION}
 ENTRYPOINT ["/opt/sccap-tool-runtimes/nmap-connect"]
 CMD ["--kubernetes-attach-v1"]
 

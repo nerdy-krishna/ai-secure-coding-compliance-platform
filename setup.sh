@@ -415,12 +415,57 @@ PYEOF
 }
 
 _sccap_build_args() {
-    # Passed to every image. The API reports them at GET /system/version, which is
-    # how an operator tells whether an update actually reached the running build.
+    # Kept for callers that want them, but nothing passes them to docker any more:
+    # a changing build arg invalidates the dependency layers and turns a one-file
+    # update into a full rebuild. The values go into .env instead.
     printf '%s\n' \
         "--build-arg" "SCCAP_BUILD_COMMIT=$(_sccap_git_sha)" \
         "--build-arg" "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         "--build-arg" "SCCAP_BUILD_VERSION=$(_sccap_build_version)"
+}
+
+_sccap_stamp_build_env() {
+    # Provenance is a build arg again, but the Dockerfile declares it at the *end* of
+    # each stage: changing it costs one small layer, not the dependency install. A
+    # manual `docker compose build` (no args) therefore reports itself as unversioned
+    # instead of inheriting a stale stamp from .env.
+    return 0
+}
+
+_sccap_changed_paths() {
+    # Files that differ between what is deployed and what is checked out.
+    local from="$1" to="$2"
+    git diff --name-only "$from" "$to" 2>/dev/null | head -2000
+}
+
+_sccap_services_for_changes() {
+    # Map changed paths onto the images they affect. Empty output means "nothing to
+    # rebuild" — a compose, nginx or .env change only needs the containers recreated.
+    local changed="$1" backend=0 frontend=0
+    while IFS= read -r path; do
+        case "$path" in
+            src/*|alembic/*|alembic.ini|pyproject.toml|poetry.lock|Dockerfile|docker/*|scripts/*)
+                backend=1 ;;
+            secure-code-ui/*)
+                frontend=1 ;;
+            *) ;;
+        esac
+    done <<< "$changed"
+    local services=""
+    if [ "$backend" = "1" ]; then
+        services="app worker"
+        # Only rebuild the tools image when it is actually part of this deployment.
+        if docker compose ps -a --services 2>/dev/null | grep -qx "pentest-engine"; then
+            services="$services pentest-engine"
+        fi
+        if docker compose ps -a --services 2>/dev/null | grep -qx "patch-validator"; then
+            services="$services patch-validator"
+        fi
+    fi
+    if [ "$frontend" = "1" ]; then
+        services="$services ui"
+    fi
+    printf '%s' "$services" | xargs
 }
 
 _sccap_build_parallel_limit() {
@@ -662,6 +707,8 @@ _sccap_prepare_tls_material() {
 }
 
 _SCCAP_DEPLOY_STATE=".scratch/deploy-state.json"
+#: `--update` rebuilds only the images whose content changed; `--full` rebuilds all.
+_SCCAP_UPDATE_SCOPE="auto"
 
 _sccap_git_sha() { git rev-parse HEAD 2>/dev/null || echo ""; }
 
@@ -869,12 +916,26 @@ _sccap_run_update() {
         return 1
     fi
 
-    # 1. database backup before anything changes
+    local changed
+    changed=$(_sccap_changed_paths "$previous" "$target")
+
+    # 1. database backup before anything changes. Skip the dump when this update
+    #    cannot alter the schema and the database is already at head: on a large
+    #    install pg_dump is minutes of the update's time for nothing.
     _PURGE_BACKUP_DIR="${SCCAP_BACKUP_DIR:-.deploy-backups}"
-    echo "[*] Backing up the database..."
-    _sccap_backup_database
-    backup=$(ls -1t "$_PURGE_BACKUP_DIR"/pre-purge-*.sql 2>/dev/null | head -1)
-    [ -n "$backup" ] && echo "    $backup"
+    local schema_changed=0
+    if printf '%s' "$changed" | grep -qE '^(alembic/|alembic\.ini)'; then
+        schema_changed=1
+    fi
+    if [ "$schema_changed" = "0" ] && docker compose exec -T app alembic current --check-heads >/dev/null 2>&1; then
+        echo "[*] No schema change and the database is at head; skipping the dump."
+        backup=""
+    else
+        echo "[*] Backing up the database..."
+        _sccap_backup_database
+        backup=$(ls -1t "$_PURGE_BACKUP_DIR"/pre-purge-*.sql 2>/dev/null | head -1)
+        [ -n "$backup" ] && echo "    $backup"
+    fi
 
     # 2. keep the outgoing images so --rollback needs no rebuild
     echo "[*] Tagging the current images for rollback..."
@@ -887,16 +948,38 @@ _sccap_run_update() {
     _sccap_prepare_tls_material || return 1
     _sccap_fix_evidence_endpoint
     _sccap_fix_ownership
-    echo "[*] Building images at ${target:0:8}..."
-    local build_log=".build-${target:0:8}.log"
-    if ! COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
-        --build-arg "SCCAP_BUILD_COMMIT=$target" \
-        --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --build-arg "SCCAP_BUILD_VERSION=$(_sccap_build_version)" 2>&1 | tee "$build_log"; then
-        _sccap_explain_build_failure "$build_log"
-        echo "[!] Build failed; full log: $build_log"
-        echo "    Roll back with ./setup.sh --rollback"
-        return 1
+    # Only rebuild the images whose content actually changed. `docker compose build`
+    # with no arguments rebuilds every target; for a one-file backend fix that means
+    # re-running the dependency install for the API, the worker and the tool image.
+    local services build_log
+    local -a build_targets=()
+    if [ "$_SCCAP_UPDATE_SCOPE" = "full" ]; then
+        echo "[*] Full rebuild requested: every image will be rebuilt."
+    else
+        services=$(_sccap_services_for_changes "$changed")
+        if [ -n "$services" ]; then
+            echo "[*] Rebuilding: $services"
+            # shellcheck disable=SC2206
+            build_targets=($services)
+        else
+            echo "[+] No image content changed — no rebuild needed."
+            echo "    Recreating containers so the new .env and compose settings apply."
+        fi
+    fi
+
+    _sccap_stamp_build_env
+    build_log=".build-${target:0:8}.log"
+    if [ "$_SCCAP_UPDATE_SCOPE" = "full" ] || [ ${#build_targets[@]} -gt 0 ]; then
+        if ! COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
+            --build-arg "SCCAP_BUILD_COMMIT=$target" \
+            --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg "SCCAP_BUILD_VERSION=$(_sccap_build_version)" \
+            "${build_targets[@]}" 2>&1 | tee "$build_log"; then
+            _sccap_explain_build_failure "$build_log"
+            echo "[!] Build failed; full log: $build_log"
+            echo "    Roll back with ./setup.sh --rollback"
+            return 1
+        fi
     fi
     _sccap_align_certbot_ownership
     _sccap_align_fluentd_ownership
@@ -1162,8 +1245,9 @@ SCCAP setup
                                  A pg_dumpall backup is written first.
   ./setup.sh --factory-reset     Purge plus delete .env, .secrets and certbot
                                  state. This is a clean install.
-  ./setup.sh --update            Pull the current branch, back up the database,
+  ./setup.sh --update            Pull the current branch, rebuild only what changed,
                                  rebuild, migrate and health-check in place.
+  ./setup.sh --update --full     Rebuild every image (slow; for base-image changes)
   ./setup.sh --rollback          Return code + images to the previous --update.
   ./setup.sh --repair-tls        Re-create the TLS material from .env and exit.
                                  Use when the UI container reports
@@ -1183,6 +1267,7 @@ _sccap_parse_args() {
             --factory-reset) _SCCAP_MODE="uninstall"; _SCCAP_PURGE=1; _SCCAP_FACTORY_RESET=1 ;;
             --repair-tls)    _SCCAP_MODE="repair-tls" ;;
             --update)        _SCCAP_MODE="update" ;;
+            --full|--rebuild-all) _SCCAP_UPDATE_SCOPE="full" ;;
             --rollback)      _SCCAP_MODE="rollback" ;;
             -y|--yes)        _SCCAP_ASSUME_YES=1 ;;
             -h|--help)       _sccap_usage; exit 0 ;;
@@ -2204,10 +2289,12 @@ _sccap_stage build
 echo "[*] Launching Docker containers (this may take a few minutes)..."
 # We need to ensure the VITE variables are available to the build context
 # Sourcing .env is one way, but docker compose reads .env automatically
-# Build args are passed on the command line because `docker compose build` does not
-# forward them from .env; without them the image cannot say what it is.
-# shellcheck disable=SC2046
-COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build $(_sccap_build_args)
+# The Dockerfile declares the provenance build args at the end of each stage, so they
+# are passed as usual: cache stays intact, and the stamp cannot go stale.
+COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
+    --build-arg "SCCAP_BUILD_COMMIT=$(_sccap_git_sha)" \
+    --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --build-arg "SCCAP_BUILD_VERSION=$(_sccap_build_version)"
 _sccap_align_certbot_ownership
 _sccap_align_fluentd_ownership
 docker compose up -d
