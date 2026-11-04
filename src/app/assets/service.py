@@ -366,6 +366,8 @@ async def probe_inventory(
             targets = await _assets_needing_discovery(
                 db, tenant_id=tenant_id, asset_ids=asset_ids
             )
+    from app.assets import events as events_mod
+
     if not targets:
         return {
             "assets_probed": 0,
@@ -374,7 +376,97 @@ async def probe_inventory(
             "products": [],
             "note": "every in-scope asset already has a fingerprint; use rescan to refresh",
         }
-    return await discovery_mod.discover_assets(targets)
+
+    async with AsyncSessionLocal() as db:
+        asset_names = {
+            str(asset_id): name
+            for asset_id, name in (
+                await db.execute(
+                    select(am.Asset.id, am.Asset.name).where(am.Asset.tenant_id == tenant_id)
+                )
+            ).all()
+        }
+    probe_id = uuid.uuid4()
+    await events_mod.emit(
+        tenant_id,
+        f"probe started: {len(targets)} asset(s) — "
+        + ", ".join(asset_names.get(str(a), str(a)) for a in targets[:5])
+        + (" …" if len(targets) > 5 else ""),
+        kind="start",
+        check_id=probe_id,
+    )
+    # Without events here, clicking "Probe inventory" produced no console output at
+    # all — the operator could not tell whether it ran.
+    outcome = await discovery_mod.discover_assets(
+        targets,
+        labels=asset_names,
+        on_event=lambda message, level="info", payload=None: events_mod.emit(
+            tenant_id,
+            message,
+            level=level,
+            kind="fingerprint",
+            payload=payload,
+            check_id=probe_id,
+        ),
+    )
+    await events_mod.emit(
+        tenant_id,
+        f"probe finished: {outcome.get('endpoints_probed', 0)} endpoint(s), "
+        f"{outcome.get('fingerprints_found', 0)} fingerprint(s)"
+        + (
+            " — " + ", ".join(outcome["products"])
+            if outcome.get("products")
+            else " — no product identified"
+        ),
+        level="success" if outcome.get("fingerprints_found") else "warning",
+        kind="done",
+        payload=outcome,
+        check_id=probe_id,
+    )
+    return outcome
+
+
+async def _explain_no_candidates(
+    tenant_id: uuid.UUID, *, cve_ids: list[str] | None, check_id: uuid.UUID
+) -> None:
+    """Say *why* nothing matched: which product was expected, which is reported.
+
+    "0 candidates" on its own is indistinguishable from a broken check.
+    """
+    from app.assets import events as events_mod
+
+    if not cve_ids:
+        return
+    async with AsyncSessionLocal() as db:
+        wanted: set[str] = set()
+        for cve_id in cve_ids:
+            for row in await db.scalars(
+                select(am.CveAffected).where(am.CveAffected.cve_id == cve_id)
+            ):
+                if row.product:
+                    wanted.add(row.product.lower())
+        reported: set[str] = set()
+        for service_row in await db.scalars(
+            select(am.AssetService).where(am.AssetService.product.isnot(None))
+        ):
+            reported.add((service_row.product or "").lower())
+        for tech in await db.scalars(
+            select(am.AssetTechnology).where(am.AssetTechnology.product.isnot(None))
+        ):
+            reported.add((tech.product or "").lower())
+    if not wanted or (wanted & reported):
+        return
+    await events_mod.emit(
+        tenant_id,
+        "no candidate: this CVE affects "
+        + ", ".join(sorted(wanted))
+        + ", and the inventory reports "
+        + (", ".join(sorted(reported)) if reported else "no product at all")
+        + ". Record the technology (or open the port it runs on), then check again.",
+        level="warning",
+        kind="match",
+        check_id=check_id,
+    )
 
 
 async def check_cves(
@@ -487,6 +579,56 @@ async def check_cves(
                 kind="enrich",
                 check_id=check_id,
             )
+            # Say what was fetched: an operator who cannot see the CVE has no way to
+            # judge whether the check that follows is the right one.
+            async with AsyncSessionLocal() as detail_db:
+                record = await detail_db.get(am.CveRecord, item["cve_id"])
+                ranges = list(
+                    await detail_db.scalars(
+                        select(am.CveAffected).where(
+                            am.CveAffected.cve_id == item["cve_id"]
+                        )
+                    )
+                )
+                template = await detail_db.scalar(
+                    select(am.CveCheck).where(am.CveCheck.cve_id == item["cve_id"])
+                )
+            if record is not None:
+                products = sorted({row.product for row in ranges if row.product})
+                await events_mod.emit(
+                    tenant_id,
+                    f"{item['cve_id']}: {record.severity or 'unrated'}"
+                    + (f" · CVSS {record.cvss_score}" if record.cvss_score else "")
+                    + f" · affects {', '.join(products) or 'an unidentified product'}"
+                    + f" · {(record.description or '')[:160]}",
+                    kind="enrich",
+                    payload={
+                        "description": record.description,
+                        "products": products,
+                        "ranges": [
+                            {
+                                "product": row.product,
+                                "start_incl": row.version_start_incl,
+                                "end_excl": row.version_end_excl,
+                            }
+                            for row in ranges
+                        ],
+                        "references": len(record.references or []),
+                    },
+                    check_id=check_id,
+                )
+                await events_mod.emit(
+                    tenant_id,
+                    (
+                        f"{item['cve_id']}: a detection check is already stored (reused for every asset)"
+                        if template is not None
+                        else f"{item['cve_id']}: no detection check yet — one is written when an asset "
+                        "reports the affected product and the candidate is tested"
+                    ),
+                    kind="template",
+                    payload={"present": template is not None},
+                    check_id=check_id,
+                )
         for missing in unknown_cves:
             await events_mod.emit(
                 tenant_id,
@@ -532,6 +674,8 @@ async def check_cves(
             "verification_errors": 0,
         }
         if not verify or not stored:
+            if not result["matched"]:
+                await _explain_no_candidates(tenant_id, cve_ids=cve_ids, check_id=check_id)
             await events_mod.emit(
                 tenant_id,
                 f"check finished: {result['matched']} candidate(s), {result['applicable']} applicable, "
@@ -592,6 +736,8 @@ async def check_cves(
                 payload=outcome,
                 check_id=check_id,
             )
+    if not result["matched"]:
+        await _explain_no_candidates(tenant_id, cve_ids=cve_ids, check_id=check_id)
     await events_mod.emit(
         tenant_id,
         f"check finished: {result['matched']} candidate(s), {result['applicable']} applicable, "

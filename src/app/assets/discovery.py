@@ -347,7 +347,34 @@ async def discover_asset(
     except asyncio.TimeoutError:
         logger.info("discovery budget reached for asset %s", asset_id)
 
+    # An endpoint that answered at all is inventory, even when it names no product:
+    # "443 open, HTTP 404" tells the operator the host is alive and what it said.
+    answered = [
+        row
+        for row in results
+        if not row.get("error") and (row.get("status") or row.get("banner") or row.get("product"))
+    ]
     found = [row for row in results if row.get("product") or row.get("version")]
+    if answered:
+        from app.assets import service as asset_service
+
+        async with AsyncSessionLocal() as db:
+            asset = await db.get(am.Asset, asset_id)
+            tenant_id = asset.tenant_id if asset else None
+        if tenant_id is not None:
+            for row in answered:
+                await asset_service.add_service(
+                    tenant_id,
+                    asset_id,
+                    host=row["host"],
+                    port=int(row["port"]) if row.get("port") else None,
+                    protocol=str(row.get("protocol") or "https"),
+                    product=row.get("product"),
+                    version=row.get("version"),
+                    banner=(row.get("banner") or row.get("title") or "")[:500] or None,
+                    source="probe",
+                    confidence="heuristic",
+                )
     if found:
         from app.assets import service as asset_service
 
@@ -381,12 +408,25 @@ async def discover_asset(
                     # the verification step decides whether it is trustworthy.
                     confidence="heuristic",
                 )
+    outcomes = [
+        {
+            "endpoint": f"{row.get('host')}:{row.get('port')}",
+            "protocol": row.get("protocol"),
+            "status": row.get("status"),
+            "product": row.get("product"),
+            "version": row.get("version"),
+            "error": row.get("error"),
+        }
+        for row in sorted(results, key=lambda item: (str(item.get("host")), item.get("port") or 0))
+    ]
     return {
         "asset_id": str(asset_id),
         "endpoints_probed": len(results),
+        "endpoints_open": len(answered),
         "fingerprints": len(found),
         "products": sorted({row.get("product") for row in found if row.get("product")}),
         "errors": sum(1 for row in results if row.get("error")),
+        "outcomes": outcomes,
     }
 
 
@@ -416,6 +456,26 @@ async def discover_assets(
             if on_event is not None:
                 await _safe_event(on_event, f"{label}: {outcome['error']}", "warning")
             continue
+        if on_event is not None and not outcome.get("endpoints_probed"):
+            await _safe_event(
+                on_event,
+                f"{label}: nothing to probe — {outcome.get('note') or 'no host recorded'}",
+                "warning",
+            )
+            continue
+        if on_event is not None and outcome.get("endpoints_probed"):
+            open_ports = [row["endpoint"] for row in outcome.get("outcomes") or [] if not row.get("error")]
+            summary = (
+                f"{label}: {outcome.get('endpoints_open', 0)} of "
+                f"{outcome.get('endpoints_probed', 0)} probed endpoint(s) answered"
+                + (f" ({', '.join(open_ports[:6])})" if open_ports else "")
+            )
+            await _safe_event(
+                on_event,
+                summary,
+                "info" if outcome.get("endpoints_open") else "warning",
+                {"outcomes": (outcome.get("outcomes") or [])[:24]},
+            )
         if on_event is not None and outcome.get("products"):
             await _safe_event(
                 on_event,
