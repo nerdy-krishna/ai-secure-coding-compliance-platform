@@ -213,6 +213,48 @@ class CveCheck(Base):
     )
 
 
+class AssetProbeJob(Base):
+    """A probe the pentest engine executes, because the API has no scanners."""
+
+    __tablename__ = "asset_probe_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
+    )
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    ports: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    tools: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class WorkerHeartbeat(Base):
+    """Which long-running workers are alive, so the API does not queue into the void."""
+
+    __tablename__ = "worker_heartbeats"
+
+    service: Mapped[str] = mapped_column(String(32), primary_key=True)
+    beat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    detail: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
+
 class AssetEvent(Base):
     """One line of the inventory activity stream."""
 

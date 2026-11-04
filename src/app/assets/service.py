@@ -386,6 +386,48 @@ async def probe_inventory(
                 )
             ).all()
         }
+    # If the pentest engine is alive, queue the probe for it: that container carries
+    # nmap, whatweb and nuclei, which is a far better answer than a Python GET.
+    from app.pentest import inventory_probe
+
+    if await inventory_probe.engine_alive():
+        async with AsyncSessionLocal() as db:
+            for asset_id in targets:
+                rows = list(
+                    await db.scalars(
+                        select(am.AssetService).where(am.AssetService.asset_id == asset_id)
+                    )
+                )
+                asset = await db.get(am.Asset, asset_id)
+                host = next(
+                    (row.host for row in rows if row.host), None
+                ) or (asset.name if asset is not None else None)
+                if host:
+                    db.add(
+                        am.AssetProbeJob(
+                            tenant_id=tenant_id,
+                            asset_id=asset_id,
+                            host=host,
+                            tools=["nmap", "whatweb", "nuclei"],
+                        )
+                    )
+            await db.commit()
+        await events_mod.emit(
+            tenant_id,
+            f"probe queued for the pentest engine: {len(targets)} asset(s) "
+            "(nmap -sV, whatweb, nuclei with the bundled templates)",
+            kind="start",
+        )
+        return {
+            "assets_probed": 0,
+            "endpoints_probed": 0,
+            "fingerprints_found": 0,
+            "products": [],
+            "queued": len(targets),
+            "engine": True,
+            "note": "queued for the pentest engine — progress appears in this console",
+        }
+
     probe_id = uuid.uuid4()
     await events_mod.emit(
         tenant_id,
