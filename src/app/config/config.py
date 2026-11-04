@@ -319,6 +319,13 @@ class Settings(BaseSettings):
     # of submissions does not start several deterministic prescans at once.
     # Concurrency is still bounded inside a scan by CONCURRENT_LLM_LIMIT and by
     # each LLM configuration's RPM/TPM budget.
+    # The highest severity a finding may carry when its CWE has no impact model. An
+    # unrecognised weakness has no evidence of critical impact, and defaulting it to
+    # critical is how a missing CSP header ranked alongside SQL injection.
+    PENTEST_UNKNOWN_CWE_CEILING: Literal["info", "low", "medium", "high", "critical"] = Field(
+        default="medium",
+        description="Severity ceiling for findings whose CWE has no impact model.",
+    )
     # After an assessment finishes, run the holistic review automatically: the model
     # reads every finding and observation together and asks whether two or more of
     # them chain into something neither proves alone. Manual chaining still works.
