@@ -392,6 +392,28 @@ async def check_cves(
     product and version is probed first (read-only HTTP and banner checks against its
     own hosts), so the matcher has something to work with.
     """
+    from app.assets import events as events_mod
+
+    check_id = uuid.uuid4()
+    await events_mod.emit(
+        tenant_id,
+        f"check started: {len(cve_ids) if cve_ids else 'all corpus CVE(s)'}"
+        + (f" across {len(asset_ids)} asset(s)" if asset_ids else " across the inventory"),
+        kind="start",
+        payload={"cve_ids": cve_ids, "scan": scan, "verify": verify},
+        check_id=check_id,
+    )
+
+    async with AsyncSessionLocal() as db:
+        asset_names: dict[str, str] = {
+            str(asset_id): name
+            for asset_id, name in (
+                await db.execute(
+                    select(am.Asset.id, am.Asset.name).where(am.Asset.tenant_id == tenant_id)
+                )
+            ).all()
+        }
+
     discovery: dict[str, Any] = {}
     if scan:
         from app.assets import discovery as discovery_mod
@@ -401,7 +423,78 @@ async def check_cves(
                 db, tenant_id=tenant_id, asset_ids=asset_ids
             )
         if unknown:
-            discovery = await discovery_mod.discover_assets(unknown)
+            await events_mod.emit(
+                tenant_id,
+                "probing "
+                + ", ".join(asset_names.get(str(a), str(a)) for a in unknown[:5])
+                + (" …" if len(unknown) > 5 else "")
+                + " (no recorded technology)",
+                kind="discovery",
+                check_id=check_id,
+            )
+            discovery = await discovery_mod.discover_assets(
+                unknown,
+                labels=asset_names,
+                on_event=lambda message, level="info", payload=None: events_mod.emit(
+                    tenant_id,
+                    message,
+                    level=level,
+                    kind="fingerprint",
+                    payload=payload,
+                    check_id=check_id,
+                ),
+            )
+            await events_mod.emit(
+                tenant_id,
+                f"probing done: {discovery.get('endpoints_probed', 0)} endpoint(s), "
+                f"{discovery.get('fingerprints_found', 0)} fingerprint(s)",
+                level="success" if discovery.get("fingerprints_found") else "warning",
+                kind="fingerprint",
+                payload=discovery,
+                check_id=check_id,
+            )
+
+    # A CVE that is not in the corpus is fetched, not refused: the corpus is a cache
+    # of public data, and an operator pasting an id expects it to be looked up. This
+    # has to happen *before* matching, or a freshly fetched CVE has no ranges in the
+    # match set and the check reports zero candidates.
+    unknown_cves: list[str] = []
+    enrichment: dict[str, Any] = {}
+    if cve_ids:
+        from app.assets import enrichment as enrichment_mod
+
+        llm = None
+        if verify:
+            try:
+                from app.infrastructure.llm_client import get_llm_client
+                from app.pentest.engine import resolve_default_llm_config_id
+
+                config_id = await resolve_default_llm_config_id()
+                if config_id is not None:
+                    llm = await get_llm_client(config_id)
+            except Exception:  # noqa: BLE001 — enrichment must not break a check
+                logger.warning("no LLM available to describe a missing CVE", exc_info=True)
+
+        enrichment = await enrichment_mod.ensure_cves(cve_ids, llm=llm)
+        unknown_cves = enrichment.get("missing", [])
+        for item in enrichment.get("fetched", []):
+            unverified = item["cve_id"] in enrichment.get("unverified", [])
+            await events_mod.emit(
+                tenant_id,
+                f"{item['cve_id']} was not in the corpus — fetched from {item['source']}"
+                + (" (reconstructed by the model; treat as unverified)" if unverified else ""),
+                level="warning" if unverified else "info",
+                kind="enrich",
+                check_id=check_id,
+            )
+        for missing in unknown_cves:
+            await events_mod.emit(
+                tenant_id,
+                f"{missing} could not be found in NVD, OSV or from the model",
+                level="error",
+                kind="enrich",
+                check_id=check_id,
+            )
 
     async with AsyncSessionLocal() as db:
         findings = await matcher.match_cves_for_tenant(
@@ -415,22 +508,21 @@ async def check_cves(
         counts = {am.APPLICABLE: 0, am.NOT_APPLICABLE: 0, am.UNDETERMINED: 0}
         for finding in stored_findings:
             counts[finding.verdict] = counts.get(finding.verdict, 0) + 1
-
-        # A CVE id that is not in the local corpus cannot match anything. Saying so
-        # is the difference between "no such CVE here" and "we looked and found
-        # nothing", which read the same way in a count of zero.
-        unknown_cves: list[str] = []
-        if cve_ids:
-            known = set(
-                await db.scalars(
-                    select(am.CveRecord.id).where(am.CveRecord.id.in_(cve_ids))
-                )
+            await events_mod.emit(
+                tenant_id,
+                f"{finding.cve_id} → {asset_names.get(str(finding.asset_id), str(finding.asset_id))}: "
+                f"{finding.verdict} ({finding.basis})",
+                level="warning" if finding.verdict == am.UNDETERMINED else "info",
+                kind="match",
+                payload={"reason": finding.reason, "evidence": finding.evidence},
+                check_id=check_id,
             )
-            unknown_cves = [cve_id for cve_id in cve_ids if cve_id not in known]
 
         result: dict[str, Any] = {
             "scanned": bool(discovery),
             "unknown_cves": unknown_cves,
+            "enriched": enrichment.get("fetched", []),
+            "unverified_cves": enrichment.get("unverified", []),
             **(discovery or {}),
             "matched": stored,
             "applicable": counts[am.APPLICABLE],
@@ -440,6 +532,15 @@ async def check_cves(
             "verification_errors": 0,
         }
         if not verify or not stored:
+            await events_mod.emit(
+                tenant_id,
+                f"check finished: {result['matched']} candidate(s), {result['applicable']} applicable, "
+                f"{result['undetermined']} needing a test",
+                level="success" if result["matched"] else "warning",
+                kind="done",
+                payload=result,
+                check_id=check_id,
+            )
             return result
 
         # Only version-only observations are worth a test: a declared match is
@@ -460,11 +561,42 @@ async def check_cves(
     from app.assets import verification
 
     for candidate in candidates:
+        await events_mod.emit(
+            tenant_id,
+            f"testing {candidate.cve_id} on {asset_names.get(str(candidate.asset_id), str(candidate.asset_id))}",
+            kind="verify",
+            check_id=check_id,
+        )
         outcome = await verification.verify_verdict(candidate.id)
         if "error" in outcome:
             result["verification_errors"] += 1
+            await events_mod.emit(
+                tenant_id,
+                f"verification failed for {candidate.cve_id}: {outcome['error']}",
+                level="error",
+                kind="verify",
+                check_id=check_id,
+            )
         else:
             result["verified"] += 1
+            await events_mod.emit(
+                tenant_id,
+                f"{candidate.cve_id}: {outcome.get('verdict')} ({outcome.get('confidence')}) "
+                f"after {outcome.get('checks', 0)} check(s)",
+                level="success" if outcome.get("verdict") == am.APPLICABLE else "info",
+                kind="verify",
+                payload=outcome,
+                check_id=check_id,
+            )
+    await events_mod.emit(
+        tenant_id,
+        f"check finished: {result['matched']} candidate(s), {result['applicable']} applicable, "
+        f"{result['undetermined']} needing a test, {result['verified']} tested",
+        level="success",
+        kind="done",
+        payload=result,
+        check_id=check_id,
+    )
     return result
 
 

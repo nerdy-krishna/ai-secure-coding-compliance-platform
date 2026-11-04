@@ -117,4 +117,6 @@ def test_unknown_cve_is_reported_not_silently_zero():
 
     source = inspect.getsource(service.check_cves)
     assert "unknown_cves" in source
-    assert "am.CveRecord.id.in_(cve_ids)" in source
+    # Enrichment runs before matching, so a fetched CVE has ranges to match against.
+    assert "ensure_cves" in source
+    assert source.index("ensure_cves") < source.index("match_cves_for_tenant")

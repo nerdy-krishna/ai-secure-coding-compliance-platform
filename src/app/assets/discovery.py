@@ -288,6 +288,15 @@ def candidate_targets(services: list[am.AssetService], *, scan_ports: bool) -> l
     return targets
 
 
+async def _safe_event(on_event: Any, message: str, level: str, payload: Any = None) -> None:
+    try:
+        result = on_event(message, level, payload)
+        if asyncio.iscoroutine(result):
+            await result
+    except Exception:  # noqa: BLE001 — reporting must not stop a probe
+        logger.debug("event callback failed", exc_info=True)
+
+
 async def discover_asset(
     asset_id: Any, *, scan_ports: bool = True, banner_scan: bool = True
 ) -> dict[str, Any]:
@@ -382,19 +391,38 @@ async def discover_asset(
 
 
 async def discover_assets(
-    asset_ids: list[Any], *, scan_ports: bool = True, banner_scan: bool = True
+    asset_ids: list[Any],
+    *,
+    scan_ports: bool = True,
+    banner_scan: bool = True,
+    on_event: Optional[Any] = None,
+    labels: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
+    """Probe several assets; `on_event(message, level, payload)` reports progress."""
     """Fingerprint several assets; the summary the check reports back."""
     assets = 0
     endpoints = 0
     fingerprints = 0
     products: set[str] = set()
+    labels = labels or {}
     for asset_id in asset_ids:
+        label = labels.get(str(asset_id), str(asset_id))
+        if on_event is not None:
+            await _safe_event(on_event, f"probing {label}", "detail")
         outcome = await discover_asset(
             asset_id, scan_ports=scan_ports, banner_scan=banner_scan
         )
         if outcome.get("error"):
+            if on_event is not None:
+                await _safe_event(on_event, f"{label}: {outcome['error']}", "warning")
             continue
+        if on_event is not None and outcome.get("products"):
+            await _safe_event(
+                on_event,
+                f"{label}: found {', '.join(outcome['products'])}",
+                "info",
+                {"products": outcome["products"], "endpoints": outcome.get("endpoints_probed")},
+            )
         assets += 1
         endpoints += int(outcome.get("endpoints_probed") or 0)
         fingerprints += int(outcome.get("fingerprints") or 0)

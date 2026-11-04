@@ -224,6 +224,29 @@ async def create_asset(body: AssetCreate, user=Depends(current_active_user)) -> 
     return _asset_dict(asset)
 
 
+@router.get("/events")
+async def list_events(
+    after_id: int = Query(default=0, ge=0),
+    limit: int = Query(default=200, ge=1, le=500),
+    user=Depends(current_active_user),
+) -> dict[str, Any]:
+    """The inventory activity stream, oldest first, for a live console."""
+    from app.assets import events as events_mod
+
+    rows = await events_mod.recent(user.tenant_id, after_id=after_id, limit=limit)
+    return {
+        "items": [events_mod.serialise(row) for row in rows],
+        "last_id": rows[-1].id if rows else after_id,
+    }
+
+
+@router.delete("/events", status_code=204)
+async def clear_events(user=Depends(current_active_user)) -> None:
+    from app.assets import events as events_mod
+
+    await events_mod.clear(user.tenant_id)
+
+
 @router.get("/{asset_id}")
 async def get_asset(asset_id: uuid.UUID, user=Depends(current_active_user)) -> dict[str, Any]:
     try:

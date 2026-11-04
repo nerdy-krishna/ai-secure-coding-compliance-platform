@@ -7,10 +7,11 @@
 // observed banner, or a probe that was actually run) and its confidence, and an
 // unverified candidate says so.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { Modal } from "../../shared/ui/Modal";
+import TerminalConsole, { type ConsoleLine } from "../../shared/ui/TerminalConsole";
 import { Icon } from "../../shared/ui/Icon";
 import { useToast } from "../../shared/ui/Toast";
 import {
@@ -19,8 +20,10 @@ import {
   addTechnology,
   probeInventory,
   checkCves,
+  clearAssetEvents,
   createAsset,
   getCveCheck,
+  listAssetEvents,
   putCveCheck,
   deleteAsset,
   getAsset,
@@ -99,6 +102,37 @@ export default function AssetsPage() {
   const [checkYaml, setCheckYaml] = useState<string>("");
   const [checkBusy, setCheckBusy] = useState(false);
 
+  const [events, setEvents] = useState<ConsoleLine[]>([]);
+  const [lastEventId, setLastEventId] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  const eventsQ = useQuery({
+    queryKey: ["assets", "events", lastEventId],
+    queryFn: () => listAssetEvents(lastEventId),
+    // Fast while work is running, relaxed otherwise: this is a live console, not a
+    // status page.
+    refetchInterval: busy ? 1200 : 6000,
+  });
+
+  useEffect(() => {
+    const batch = eventsQ.data;
+    if (!batch?.items?.length) return;
+    setEvents((current) =>
+      [
+        ...current,
+        ...batch.items.map((event) => ({
+          id: event.id,
+          at: event.at,
+          level: event.level,
+          kind: event.kind,
+          message: event.message,
+          detail: event.payload ?? undefined,
+        })),
+      ].slice(-600),
+    );
+    setLastEventId(batch.last_id);
+  }, [eventsQ.data]);
+
   const assetsQ = useQuery({ queryKey: ["assets"], queryFn: listAssets });
   const assets: Asset[] = assetsQ.data?.items ?? [];
   const corpus = assetsQ.data?.corpus;
@@ -120,6 +154,8 @@ export default function AssetsPage() {
   };
 
   const check = useMutation({
+    onMutate: () => setBusy(true),
+    onSettled: () => setBusy(false),
     mutationFn: async () => {
       const ids = splitCves(cveQuery);
       // `scan` is what makes a check mean something for an asset that has never
@@ -138,12 +174,32 @@ export default function AssetsPage() {
         `${result.applicable} applicable`,
       ].filter(Boolean);
       if (result.verified) parts.push(`${result.verified} tested`);
+      const fetched = result.enriched ?? [];
+      if (fetched.length) {
+        const unverified = result.unverified_cves ?? [];
+        const trusted = fetched.filter(
+          (item: { cve_id: string; source: string }) => !unverified.includes(item.cve_id),
+        );
+        if (trusted.length) {
+          toast.info(
+            `Fetched ${trusted.length} CVE(s) not in the corpus: ` +
+              trusted
+                .map((item: { cve_id: string; source: string }) => `${item.cve_id} (${item.source})`)
+                .join(", "),
+          );
+        }
+        if (unverified.length) {
+          toast.error(
+            `No advisory feed was reachable, so ${unverified.join(", ")} was reconstructed ` +
+              "by the model — treat the verdict as unverified.",
+          );
+        }
+      }
       if (result.unknown_cves?.length) {
-        // The corpus has no record of these, so a zero here means "unknown", not
-        // "unaffected" — say it plainly instead of reporting a clean result.
+        // Nothing anywhere could resolve these: that is genuinely unknown, not clean.
         toast.error(
-          `Not in the local corpus, nothing could be checked: ${result.unknown_cves.join(", ")}. ` +
-            "Import an NVD or OSV feed first.",
+          `Could not resolve ${result.unknown_cves.join(", ")} — not in the corpus, and ` +
+            "no NVD/OSV fetch succeeded. Import a feed or check egress from the app container.",
         );
         return;
       }
@@ -155,6 +211,8 @@ export default function AssetsPage() {
   });
 
   const probe = useMutation({
+    onMutate: () => setBusy(true),
+    onSettled: () => setBusy(false),
     mutationFn: (rescan: boolean) => probeInventory({ rescan }),
     onSuccess: (result) => {
       toast.success(
@@ -168,6 +226,8 @@ export default function AssetsPage() {
   });
 
   const sweep = useMutation({
+    onMutate: () => setBusy(true),
+    onSettled: () => setBusy(false),
     mutationFn: () => sweepInventory({ verify }),
     onSuccess: (result) => {
       toast.success(
@@ -252,6 +312,26 @@ export default function AssetsPage() {
           </button>
         ))}
       </div>
+
+      <section className="sccap-card asset-card">
+        <TerminalConsole
+          title="inventory activity"
+          lines={events}
+          live={busy}
+          emptyHint="Run a CVE check or probe the inventory: probing, fingerprinting, CVE lookups, matches and tests appear here as they happen."
+          downloadName="inventory-activity"
+          maxHeight={320}
+          onClear={async () => {
+            setEvents([]);
+            setLastEventId(0);
+            try {
+              await clearAssetEvents();
+            } catch {
+              toast.error("Could not clear the activity log");
+            }
+          }}
+        />
+      </section>
 
       {tab === "assets" && (
         <section className="sccap-card asset-card">

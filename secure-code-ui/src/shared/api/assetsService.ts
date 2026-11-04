@@ -214,7 +214,11 @@ export async function checkCves(input: {
   endpoints_probed?: number;
   fingerprints_found?: number;
   products?: string[];
-  /** CVE ids that are not in the local corpus, so nothing could match them. */
+  /** CVEs fetched on demand because the corpus did not have them. */
+  enriched?: Array<{ cve_id: string; source: string }>;
+  /** Of those, ones the model reconstructed because no feed was reachable. */
+  unverified_cves?: string[];
+  /** CVE ids that could not be resolved anywhere. */
   unknown_cves?: string[];
   matched: number;
   applicable: number;
@@ -307,4 +311,27 @@ export async function putCveCheck(
 ): Promise<{ cve_id: string; stored: boolean; source?: string }> {
   const { data } = await apiClient.post(`/cve/${cveId}/check`, { template: template ?? null });
   return data;
+}
+
+export interface AssetEvent {
+  id: number;
+  check_id: string | null;
+  level: "info" | "success" | "warning" | "error" | "detail";
+  kind: string;
+  message: string;
+  payload: Record<string, unknown> | null;
+  at: string | null;
+}
+
+/** The inventory activity stream (a live console tails this). */
+export async function listAssetEvents(afterId = 0): Promise<{ items: AssetEvent[]; last_id: number }> {
+  const { data } = await apiClient.get<{ items: AssetEvent[]; last_id: number }>(
+    "/assets/events",
+    { params: { after_id: afterId } },
+  );
+  return data;
+}
+
+export async function clearAssetEvents(): Promise<void> {
+  await apiClient.delete("/assets/events");
 }

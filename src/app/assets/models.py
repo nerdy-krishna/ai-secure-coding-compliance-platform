@@ -213,6 +213,25 @@ class CveCheck(Base):
     )
 
 
+class AssetEvent(Base):
+    """One line of the inventory activity stream."""
+
+    __tablename__ = "asset_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    check_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    level: Mapped[str] = mapped_column(String(16), nullable=False, default="info")
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, default="info")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AssetTechnology(Base):
     """A product an asset runs, with or without a network endpoint.
 
