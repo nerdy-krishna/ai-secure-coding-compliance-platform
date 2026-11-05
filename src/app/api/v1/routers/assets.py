@@ -90,6 +90,13 @@ class ProbeRequest(BaseModel):
             "the inventory knows nothing about are probed."
         ),
     )
+    tools: list[str] = Field(
+        default_factory=lambda: ["nmap", "whatweb"],
+        description=(
+            "Which stages to run. nmap and whatweb identify what the asset is; nuclei adds "
+            "a template sweep and is much slower, so it is opt-in."
+        ),
+    )
 
 
 class TechnologyCreate(BaseModel):
@@ -389,11 +396,20 @@ async def probe_status(user=Depends(current_active_user)) -> dict[str, Any]:
     return await service.probe_status(user.tenant_id)
 
 
+@router.post("/probe/cancel")
+async def cancel_probes(user=Depends(current_active_user)) -> dict[str, Any]:
+    """Stop inventory probing: queued jobs are cancelled, a running one aborts."""
+    return await service.cancel_probes(user.tenant_id)
+
+
 @router.post("/probe")
 async def probe(body: ProbeRequest, user=Depends(current_active_user)) -> dict[str, Any]:
     """Scan the inventory and store what each asset is (technology, version)."""
     return await service.probe_inventory(
-        tenant_id=user.tenant_id, asset_ids=body.asset_ids, rescan=body.rescan
+        tenant_id=user.tenant_id,
+        asset_ids=body.asset_ids,
+        rescan=body.rescan,
+        tools=body.tools,
     )
 
 

@@ -344,7 +344,11 @@ async def _assets_needing_discovery(
 
 
 async def probe_inventory(
-    *, tenant_id: uuid.UUID, asset_ids: Optional[list[uuid.UUID]] = None, rescan: bool = False
+    *,
+    tenant_id: uuid.UUID,
+    asset_ids: Optional[list[uuid.UUID]] = None,
+    rescan: bool = False,
+    tools: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Probe assets and store what they are.
 
@@ -408,14 +412,14 @@ async def probe_inventory(
                             tenant_id=tenant_id,
                             asset_id=asset_id,
                             host=host,
-                            tools=["nmap", "whatweb", "nuclei"],
+                            tools=tools or ["nmap", "whatweb"],
                         )
                     )
             await db.commit()
         await events_mod.emit(
             tenant_id,
-            f"probe queued for the pentest engine: {len(targets)} asset(s) "
-            "(nmap -sV, whatweb, nuclei with the bundled templates)",
+            f"probe queued for the pentest engine: {len(targets)} asset(s) — "
+            + ", ".join(tools or ["nmap", "whatweb"]),
             kind="start",
         )
         return {
@@ -558,6 +562,41 @@ async def probe_status(tenant_id: uuid.UUID) -> dict[str, Any]:
         "engine": engine,
         "last_event_at": last.isoformat() if last else None,
     }
+
+
+async def cancel_probes(tenant_id: uuid.UUID) -> dict[str, Any]:
+    """Stop inventory probing: cancel what is queued, ask the engine to abort the rest."""
+    from app.assets import events as events_mod
+    from sqlalchemy import update as sa_update
+
+    async with AsyncSessionLocal() as db:
+        queued = await db.execute(
+            sa_update(am.AssetProbeJob)
+            .where(
+                am.AssetProbeJob.tenant_id == tenant_id,
+                am.AssetProbeJob.status == "queued",
+            )
+            .values(status="cancelled", error="stopped by the operator")
+        )
+        running = await db.execute(
+            sa_update(am.AssetProbeJob)
+            .where(
+                am.AssetProbeJob.tenant_id == tenant_id,
+                am.AssetProbeJob.status == "running",
+            )
+            .values(cancel_requested=True)
+        )
+        await db.commit()
+    cancelled = int(queued.rowcount or 0)
+    asked = int(running.rowcount or 0)
+    await events_mod.emit(
+        tenant_id,
+        f"probe stop requested: {cancelled} queued job(s) cancelled, "
+        f"{asked} running job(s) will stop at the next stage boundary",
+        level="warning",
+        kind="done",
+    )
+    return {"cancelled": cancelled, "stopping": asked}
 
 
 async def check_cves(

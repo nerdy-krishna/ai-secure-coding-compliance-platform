@@ -22,6 +22,7 @@ import {
   checkCves,
   createAsset,
   assetsTemplateUrl,
+  cancelProbe,
   getCveCheck,
   getProbeStatus,
   importAssets,
@@ -106,6 +107,9 @@ export default function AssetsPage() {
   const [envFilter, setEnvFilter] = useState("");
   const [techFilter, setTechFilter] = useState("");
   const [pageSize, setPageSize] = useState(20);
+  // Selection is shared by "probe these" and "check CVEs against these".
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [limitToSelected, setLimitToSelected] = useState(false);
   const [page, setPage] = useState(1);
   const [importing, setImporting] = useState(false);
   const [cveQuery, setCveQuery] = useState("");
@@ -217,7 +221,12 @@ export default function AssetsPage() {
       const ids = splitCves(cveQuery);
       // `scan` is what makes a check mean something for an asset that has never
       // been fingerprinted: it probes first, then matches.
-      return checkCves({ cve_ids: ids.length ? ids : null, verify, scan: true });
+      return checkCves({
+        cve_ids: ids.length ? ids : null,
+        verify,
+        scan: true,
+        asset_ids: limitToSelected && selectedIds.size ? [...selectedIds] : null,
+      });
     },
     onSuccess: (result) => {
       const probed = result.assets_probed
@@ -276,7 +285,12 @@ export default function AssetsPage() {
       setBusy(false);
       setBusySince(null);
     },
-    mutationFn: (rescan: boolean) => probeInventory({ rescan }),
+    mutationFn: (input: { rescan: boolean; withNuclei?: boolean }) =>
+      probeInventory({
+        asset_ids: selectedIds.size ? [...selectedIds] : null,
+        rescan: input.rescan,
+        tools: input.withNuclei ? ["nmap", "whatweb", "nuclei"] : ["nmap", "whatweb"],
+      }),
     onSuccess: (result) => {
       toast.success(
         result.note ??
@@ -430,10 +444,28 @@ export default function AssetsPage() {
               <a className="sccap-btn" href={assetsTemplateUrl()} download>
                 <Icon.Download size={13} /> Template
               </a>
+              {probeStatus?.active && (
+                <button
+                  className="sccap-btn"
+                  onClick={async () => {
+                    try {
+                      const result = await cancelProbe();
+                      toast.info(
+                        `Probe stop requested: ${result.cancelled} cancelled, ${result.stopping} stopping`,
+                      );
+                      statusQ.refetch();
+                    } catch {
+                      toast.error("Could not stop the probe");
+                    }
+                  }}
+                >
+                  <Icon.X size={13} /> Stop probe
+                </button>
+              )}
               <button
                 className={`sccap-btn${probeStatus?.active ? " is-busy" : ""}`}
                 disabled={probe.isPending || probeStatus?.active || assets.length === 0}
-                onClick={() => probe.mutate(true)}
+                onClick={() => probe.mutate({ rescan: true })}
                 title="Scan every asset and store the technology and version it runs"
               >
                 {probeStatus?.active ? (
@@ -519,6 +551,32 @@ export default function AssetsPage() {
                   Clear filters
                 </button>
               )}
+              {selectedIds.size > 0 && (
+                <>
+                  <span className="asset-chip">{selectedIds.size} selected</span>
+                  <button
+                    className="sccap-btn sccap-btn-sm"
+                    disabled={probe.isPending || probeStatus?.active}
+                    onClick={() => probe.mutate({ rescan: true })}
+                  >
+                    Probe selected
+                  </button>
+                  <button
+                    className="sccap-btn sccap-btn-sm"
+                    onClick={() => setSelectedIds(new Set())}
+                  >
+                    Clear selection
+                  </button>
+                  <label className="asset-check-inline">
+                    <input
+                      type="checkbox"
+                      checked={limitToSelected}
+                      onChange={(e) => setLimitToSelected(e.target.checked)}
+                    />
+                    also limit CVE checks to these
+                  </label>
+                </>
+              )}
               <span className="asset-muted" style={{ marginLeft: "auto" }}>
                 {filtered.length} of {assets.length} asset(s)
               </span>
@@ -538,6 +596,23 @@ export default function AssetsPage() {
                 <table className="asset-table">
                   <thead>
                     <tr>
+                      <th style={{ width: 32 }}>
+                        <input
+                          type="checkbox"
+                          checked={visible.length > 0 && visible.every((a) => selectedIds.has(a.id))}
+                          onChange={(e) => {
+                            setSelectedIds((current) => {
+                              const next = new Set(current);
+                              for (const asset of visible) {
+                                if (e.target.checked) next.add(asset.id);
+                                else next.delete(asset.id);
+                              }
+                              return next;
+                            });
+                          }}
+                          title="Select every asset on this page"
+                        />
+                      </th>
                       <th>Asset</th>
                       <th>Kind</th>
                       <th>Environment</th>
@@ -555,6 +630,20 @@ export default function AssetsPage() {
                           className={openAssetId === asset.id ? "is-open" : ""}
                           onClick={() => setOpenAssetId(asset.id === openAssetId ? null : asset.id)}
                         >
+                          <td onClick={(event) => event.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(asset.id)}
+                              onChange={(e) => {
+                                setSelectedIds((current) => {
+                                  const next = new Set(current);
+                                  if (e.target.checked) next.add(asset.id);
+                                  else next.delete(asset.id);
+                                  return next;
+                                });
+                              }}
+                            />
+                          </td>
                           <td>
                             <strong>{asset.name}</strong>
                             {asset.owner && <span className="asset-muted">{asset.owner}</span>}
@@ -573,7 +662,7 @@ export default function AssetsPage() {
                         </tr>
                         {openAssetId === asset.id && (
                           <tr className="asset-row-detail">
-                            <td colSpan={8}>
+                            <td colSpan={9}>
                               {detailQ.isLoading ? (
                                 <p className="asset-muted">Loading details…</p>
                               ) : detailQ.data ? (

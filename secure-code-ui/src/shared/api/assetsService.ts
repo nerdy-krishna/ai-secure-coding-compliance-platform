@@ -159,6 +159,14 @@ export async function updateAsset(
   return data;
 }
 
+/** Stop probing: queued jobs are cancelled, a running one aborts at the next stage. */
+export async function cancelProbe(): Promise<{ cancelled: number; stopping: number }> {
+  const { data } = await apiClient.post<{ cancelled: number; stopping: number }>(
+    "/assets/probe/cancel",
+  );
+  return data;
+}
+
 export interface ProbeStatus {
   active: boolean;
   queued: number;
@@ -211,6 +219,8 @@ export async function addTechnology(
 export async function probeInventory(input: {
   asset_ids?: string[] | null;
   rescan?: boolean;
+  /** nmap and whatweb identify; nuclei adds a slow template sweep. */
+  tools?: string[];
 }): Promise<{
   assets_probed: number;
   endpoints_probed: number;

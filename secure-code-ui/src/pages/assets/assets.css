@@ -422,3 +422,12 @@
   70% { box-shadow: 0 0 0 7px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
+
+.asset-check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .76rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}

@@ -231,6 +231,11 @@ class AssetProbeJob(Base):
     ports: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     tools: Mapped[Optional[list[str]]] = mapped_column(JSONB, nullable=True)
+    # Set by the operator to stop a probe; the engine aborts between stages and kills a
+    # running scanner rather than waiting it out.
+    cancel_requested: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default="false"
+    )
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
