@@ -584,15 +584,20 @@ async def cancel_probes(tenant_id: uuid.UUID) -> dict[str, Any]:
                 am.AssetProbeJob.tenant_id == tenant_id,
                 am.AssetProbeJob.status == "running",
             )
-            .values(cancel_requested=True)
+            .values(
+                cancel_requested=True,
+                status="cancelled",
+                error="stopped by the operator",
+                finished_at=func.now(),
+            )
         )
         await db.commit()
     cancelled = int(queued.rowcount or 0)
     asked = int(running.rowcount or 0)
     await events_mod.emit(
         tenant_id,
-        f"probe stop requested: {cancelled} queued job(s) cancelled, "
-        f"{asked} running job(s) will stop at the next stage boundary",
+        f"probe stopped: {cancelled} queued job(s) cancelled, "
+        f"{asked} running job(s) killed",
         level="warning",
         kind="done",
     )

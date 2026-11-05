@@ -23,6 +23,7 @@ import {
   createAsset,
   assetsTemplateUrl,
   cancelProbe,
+  clearAssetEvents,
   getCveCheck,
   getProbeStatus,
   importAssets,
@@ -81,7 +82,7 @@ const BASIS_HINT: Record<string, string> = {
   probe: "A check was designed and run against the asset.",
 };
 
-type Tab = "assets" | "cves" | "corpus";
+type Tab = "assets" | "corpus";
 
 function splitCves(value: string): string[] {
   return value
@@ -195,7 +196,7 @@ export default function AssetsPage() {
   const verdictsQ = useQuery({
     queryKey: ["assets", "verdicts"],
     queryFn: () => listVerdicts({}),
-    enabled: tab === "cves",
+    enabled: tab === "assets",
   });
 
   const detailQ = useQuery({
@@ -359,8 +360,7 @@ export default function AssetsPage() {
       <div className="asset-tabs" role="tablist">
         {(
           [
-            ["assets", `Assets (${assets.length})`],
-            ["cves", `CVE checks (${verdicts.length})`],
+            ["assets", `Assets & CVE checks (${assets.length})`],
             ["corpus", `Corpus (${corpus?.cves ?? 0})`],
           ] as Array<[Tab, string]>
         ).map(([key, label]) => (
@@ -399,13 +399,153 @@ export default function AssetsPage() {
           emptyHint="Run a CVE check or probe the inventory: probing, fingerprinting, CVE lookups, matches and tests appear here as they happen."
           downloadName="inventory-activity"
           maxHeight={320}
-          // Clears what is on screen. The events stay in the database as the log;
-          // keeping the cursor means they do not reappear on the next poll.
-          onClear={() => setEvents([])}
+          // Hides the log from the view and records where it was hidden, so a reload
+          // does not bring it back. The events stay in the database.
+          onClear={async () => {
+            setEvents([]);
+            try {
+              await clearAssetEvents();
+              setLastEventId(0);
+            } catch {
+              toast.error("Could not clear the activity view");
+            }
+          }}
         />
       </section>
 
       {tab === "assets" && (
+        <>
+                <section className="sccap-card asset-card">
+                  <div className="asset-toolbar">
+                    <div>
+                      <strong>Check a CVE list</strong>
+                      <span className="asset-muted">
+                        Paste CVEs, or leave empty to apply the whole local corpus.
+                        {selectedIds.size
+                          ? ` Checking ${selectedIds.size} selected asset(s).`
+                          : " Checking the whole inventory — tick assets below to narrow it."}
+                      </span>
+                    </div>
+                  </div>
+                  <textarea
+                    className="asset-textarea"
+                    rows={3}
+                    value={cveQuery}
+                    onChange={(event) => setCveQuery(event.target.value)}
+                    placeholder="CVE-2021-23017, CVE-2021-23337 …"
+                  />
+                  <div className="asset-inline-form">
+                    <label className="asset-upload">
+                      <Icon.Download size={13} /> Upload a list (.txt / .csv)
+                      <input
+                        type="file"
+                        accept=".txt,.csv,.json,text/plain"
+                        onChange={async (event) => {
+                          const file = event.target.files?.[0];
+                          if (!file) return;
+                          const text = await file.text();
+                          const ids = splitCves(text);
+                          if (!ids.length) {
+                            toast.error("No CVE ids found in that file");
+                          } else {
+                            setCveQuery(ids.join("\n"));
+                            toast.info(`${ids.length} CVE id(s) loaded from ${file.name}`);
+                          }
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                    <span className="asset-muted">
+                      One per line, or comma separated; anything that is not a CVE id is ignored.
+                    </span>
+                  </div>
+                  <div className="asset-toolbar asset-toolbar-actions">
+                    <label className="asset-check">
+                      <input
+                        type="checkbox"
+                        checked={verify}
+                        onChange={(event) => setVerify(event.target.checked)}
+                      />
+                      Test the uncertain candidates
+                      <span className="asset-muted">
+                        The model designs a read-only check, runs it, and a verdict without
+                        evidence is downgraded to “needs a test”.
+                      </span>
+                    </label>
+                    <button className="sccap-btn sccap-btn-primary" disabled={check.isPending} onClick={() => check.mutate()}>
+                      <Icon.Play size={13} /> {check.isPending ? "Checking…" : "Check"}
+                    </button>
+                  </div>
+                </section>
+
+                <section className="sccap-card asset-card">
+                  {verdicts.length === 0 ? (
+                    <p className="asset-empty">No verdicts yet. Run a check to see what applies.</p>
+                  ) : (
+                    (["applicable", "undetermined", "not_applicable"] as Verdict[]).map((key) =>
+                      grouped[key].length === 0 ? null : (
+                        <div key={key} className="asset-verdict-group">
+                          <h3>
+                            <VerdictChip verdict={key} /> {grouped[key].length}
+                          </h3>
+                          <div className="asset-table-wrap">
+                            <table className="asset-table">
+                              <thead>
+                                <tr>
+                                  <th>CVE</th>
+                                  <th>Asset</th>
+                                  <th>Severity</th>
+                                  <th>Basis</th>
+                                  <th>Confidence</th>
+                                  <th>Why</th>
+                                  <th />
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {grouped[key].map((verdict) => (
+                                  <tr key={verdict.id}>
+                                    <td>
+                                      <strong>{verdict.cve_id}</strong>
+                                      {verdict.kev && <span className="asset-chip is-kev">KEV</span>}
+                                      <span className="asset-muted">{verdict.title}</span>
+                                    </td>
+                                    <td>{verdict.asset_name}</td>
+                                    <td>
+                                      {verdict.severity ?? "—"}
+                                      {verdict.cvss_score != null ? ` · ${verdict.cvss_score.toFixed(1)}` : ""}
+                                    </td>
+                                    <td title={BASIS_HINT[verdict.basis]}>{verdict.basis}</td>
+                                    <td>{verdict.confidence}</td>
+                                    <td className="asset-reason">{verdict.reason ?? "—"}</td>
+                                    <td>
+                                      <button
+                                        className="sccap-btn sccap-btn-sm"
+                                        onClick={() => void openCheck(verdict.cve_id)}
+                                        title="The stored Nuclei-style check that decides this CVE"
+                                      >
+                                        <Icon.Code size={12} /> Check
+                                      </button>
+                                      {verdict.verdict === "undetermined" && verdict.basis === "observed" && (
+                                        <button
+                                          className="sccap-btn sccap-btn-sm"
+                                          disabled={verifyOne.isPending}
+                                          onClick={() => verifyOne.mutate(verdict.id)}
+                                        >
+                                          <Icon.Shield size={12} /> Test
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ),
+                    )
+                  )}
+                </section>
+
         <section className="sccap-card asset-card">
           <div className="asset-toolbar">
             <div>
@@ -732,139 +872,7 @@ export default function AssetsPage() {
               </div>
             </>
           )}
-
         </section>
-      )}
-
-      {tab === "cves" && (
-        <>
-          <section className="sccap-card asset-card">
-            <div className="asset-toolbar">
-              <div>
-                <strong>Check a CVE list</strong>
-                <span className="asset-muted">
-                  Paste CVEs, or leave empty to apply the whole local corpus.
-                </span>
-              </div>
-            </div>
-            <textarea
-              className="asset-textarea"
-              rows={3}
-              value={cveQuery}
-              onChange={(event) => setCveQuery(event.target.value)}
-              placeholder="CVE-2021-23017, CVE-2021-23337 …"
-            />
-            <div className="asset-inline-form">
-              <label className="asset-upload">
-                <Icon.Download size={13} /> Upload a list (.txt / .csv)
-                <input
-                  type="file"
-                  accept=".txt,.csv,.json,text/plain"
-                  onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    if (!file) return;
-                    const text = await file.text();
-                    const ids = splitCves(text);
-                    if (!ids.length) {
-                      toast.error("No CVE ids found in that file");
-                    } else {
-                      setCveQuery(ids.join("\n"));
-                      toast.info(`${ids.length} CVE id(s) loaded from ${file.name}`);
-                    }
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-              <span className="asset-muted">
-                One per line, or comma separated; anything that is not a CVE id is ignored.
-              </span>
-            </div>
-            <div className="asset-toolbar asset-toolbar-actions">
-              <label className="asset-check">
-                <input
-                  type="checkbox"
-                  checked={verify}
-                  onChange={(event) => setVerify(event.target.checked)}
-                />
-                Test the uncertain candidates
-                <span className="asset-muted">
-                  The model designs a read-only check, runs it, and a verdict without
-                  evidence is downgraded to “needs a test”.
-                </span>
-              </label>
-              <button className="sccap-btn sccap-btn-primary" disabled={check.isPending} onClick={() => check.mutate()}>
-                <Icon.Play size={13} /> {check.isPending ? "Checking…" : "Check"}
-              </button>
-            </div>
-          </section>
-
-          <section className="sccap-card asset-card">
-            {verdicts.length === 0 ? (
-              <p className="asset-empty">No verdicts yet. Run a check to see what applies.</p>
-            ) : (
-              (["applicable", "undetermined", "not_applicable"] as Verdict[]).map((key) =>
-                grouped[key].length === 0 ? null : (
-                  <div key={key} className="asset-verdict-group">
-                    <h3>
-                      <VerdictChip verdict={key} /> {grouped[key].length}
-                    </h3>
-                    <div className="asset-table-wrap">
-                      <table className="asset-table">
-                        <thead>
-                          <tr>
-                            <th>CVE</th>
-                            <th>Asset</th>
-                            <th>Severity</th>
-                            <th>Basis</th>
-                            <th>Confidence</th>
-                            <th>Why</th>
-                            <th />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {grouped[key].map((verdict) => (
-                            <tr key={verdict.id}>
-                              <td>
-                                <strong>{verdict.cve_id}</strong>
-                                {verdict.kev && <span className="asset-chip is-kev">KEV</span>}
-                                <span className="asset-muted">{verdict.title}</span>
-                              </td>
-                              <td>{verdict.asset_name}</td>
-                              <td>
-                                {verdict.severity ?? "—"}
-                                {verdict.cvss_score != null ? ` · ${verdict.cvss_score.toFixed(1)}` : ""}
-                              </td>
-                              <td title={BASIS_HINT[verdict.basis]}>{verdict.basis}</td>
-                              <td>{verdict.confidence}</td>
-                              <td className="asset-reason">{verdict.reason ?? "—"}</td>
-                              <td>
-                                <button
-                                  className="sccap-btn sccap-btn-sm"
-                                  onClick={() => void openCheck(verdict.cve_id)}
-                                  title="The stored Nuclei-style check that decides this CVE"
-                                >
-                                  <Icon.Code size={12} /> Check
-                                </button>
-                                {verdict.verdict === "undetermined" && verdict.basis === "observed" && (
-                                  <button
-                                    className="sccap-btn sccap-btn-sm"
-                                    disabled={verifyOne.isPending}
-                                    onClick={() => verifyOne.mutate(verdict.id)}
-                                  >
-                                    <Icon.Shield size={12} /> Test
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ),
-              )
-            )}
-          </section>
         </>
       )}
 

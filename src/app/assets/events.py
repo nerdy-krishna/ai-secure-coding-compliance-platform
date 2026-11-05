@@ -15,7 +15,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import func, select
 
 from app.assets import models as am
 from app.infrastructure.database.database import AsyncSessionLocal
@@ -51,13 +51,26 @@ async def emit(
         logger.warning("could not record an asset event", exc_info=True)
 
 
+async def cursor(tenant_id: UUID) -> int:
+    """Where the operator last cleared the view."""
+    async with AsyncSessionLocal() as db:
+        value = await db.scalar(
+            select(am.AssetEventCursor.cleared_before).where(
+                am.AssetEventCursor.tenant_id == tenant_id
+            )
+        )
+    return int(value or 0)
+
+
 async def recent(
     tenant_id: UUID, *, after_id: int = 0, limit: int = 300
 ) -> list[am.AssetEvent]:
+    # The view starts where the operator left it, so clearing survives a reload.
+    effective_after = max(after_id, await cursor(tenant_id))
     async with AsyncSessionLocal() as db:
         rows = await db.scalars(
             select(am.AssetEvent)
-            .where(am.AssetEvent.tenant_id == tenant_id, am.AssetEvent.id > after_id)
+            .where(am.AssetEvent.tenant_id == tenant_id, am.AssetEvent.id > effective_after)
             .order_by(am.AssetEvent.id)
             .limit(limit)
         )
@@ -65,12 +78,20 @@ async def recent(
 
 
 async def clear(tenant_id: UUID) -> int:
+    """Hide the current log from the view. Nothing is deleted."""
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            delete(am.AssetEvent).where(am.AssetEvent.tenant_id == tenant_id)
+        highest = await db.scalar(
+            select(func.max(am.AssetEvent.id)).where(am.AssetEvent.tenant_id == tenant_id)
         )
+        mark = int(highest or 0)
+        existing = await db.get(am.AssetEventCursor, tenant_id)
+        if existing is None:
+            db.add(am.AssetEventCursor(tenant_id=tenant_id, cleared_before=mark))
+        else:
+            existing.cleared_before = mark
+            existing.updated_at = func.now()
         await db.commit()
-        return int(result.rowcount or 0)
+        return mark
 
 
 def serialise(row: am.AssetEvent) -> dict[str, Any]:

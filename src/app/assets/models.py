@@ -248,6 +248,20 @@ class AssetProbeJob(Base):
     )
 
 
+class AssetEventCursor(Base):
+    """Where an operator cleared the activity view; the events themselves stay."""
+
+    __tablename__ = "asset_event_cursors"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    cleared_before: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class WorkerHeartbeat(Base):
     """Which long-running workers are alive, so the API does not queue into the void."""
 
