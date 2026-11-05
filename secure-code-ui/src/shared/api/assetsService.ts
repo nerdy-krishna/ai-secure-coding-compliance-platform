@@ -48,6 +48,8 @@ export interface Asset {
   services?: number;
   dependencies?: number;
   technologies?: number;
+  /** Product names, for filtering the list by technology. */
+  technology_names?: string[];
 }
 
 export interface AssetService {
@@ -138,6 +140,37 @@ export async function createAsset(input: {
 
 export async function getAsset(assetId: string): Promise<AssetDetail> {
   const { data } = await apiClient.get<AssetDetail>(`/assets/${assetId}`);
+  return data;
+}
+
+export async function updateAsset(
+  assetId: string,
+  input: Partial<{
+    name: string;
+    kind: AssetKind;
+    owner: string | null;
+    environment: string | null;
+    description: string | null;
+    in_scope: boolean;
+    authorization_basis: string | null;
+  }>,
+): Promise<Asset> {
+  const { data } = await apiClient.patch<Asset>(`/assets/${assetId}`, input);
+  return data;
+}
+
+export interface ProbeStatus {
+  active: boolean;
+  queued: number;
+  running: number;
+  host: string | null;
+  engine: boolean;
+  last_event_at: string | null;
+}
+
+/** Whether a probe is in flight right now. */
+export async function getProbeStatus(): Promise<ProbeStatus> {
+  const { data } = await apiClient.get<ProbeStatus>("/assets/probe/status");
   return data;
 }
 

@@ -327,3 +327,98 @@
   line-height: 1.5;
   white-space: pre;
 }
+
+/* Filters, paging, inline row detail, and the running indicator. */
+.asset-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+
+.sccap-card .asset-filters select {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 150px;
+}
+
+.asset-filter-input {
+  flex: 1 1 240px;
+  min-width: 200px;
+  font: inherit;
+  font-size: .8rem;
+  padding: .35rem .55rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.asset-filters select,
+.asset-pager select {
+  font: inherit;
+  font-size: .78rem;
+  padding: .3rem .45rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.asset-row-detail > td {
+  padding: 0;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.asset-row-detail .asset-detail {
+  border-top: none;
+  padding: .85rem 1rem 1rem;
+}
+
+.asset-edit-form { margin-bottom: .5rem; }
+
+.asset-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  font-size: .78rem;
+}
+
+.asset-pager label {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  white-space: nowrap;
+}
+
+.sccap-card .asset-pager select {
+  width: auto;
+  min-width: 68px;
+}
+
+.asset-pager-buttons {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* A pulse on the probe button while the server reports work in flight. */
+.asset-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 60%, transparent);
+  animation: asset-pulse 1.8s infinite;
+  display: inline-block;
+  margin-right: .35rem;
+}
+
+@keyframes asset-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 55%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}

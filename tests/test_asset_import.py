@@ -106,3 +106,40 @@ def test_summary_counts_add_up():
 
     assert payload["total"] == 5
     assert payload["created"] == 2 and payload["duplicates"] == 1 and payload["rejected"] == 1
+
+
+def test_a_sweep_is_a_probe_then_a_check(monkeypatch):
+    """One implementation of "find out what this asset is", used by both paths."""
+    import asyncio
+    import inspect
+    import uuid
+
+    from app.assets import sweep
+    from app.assets import service
+
+    source = inspect.getsource(sweep.run_sweep)
+    assert "probe_inventory" in source and "rescan=True" in source
+    assert "check_cves" in source
+    # The divergent fingerprinter is gone: the sweep no longer carries its own.
+    assert not hasattr(sweep, "fingerprint_services")
+
+    calls: list[str] = []
+
+    async def fake_probe(**kwargs):
+        calls.append("probe")
+        assert kwargs["rescan"] is True
+        return {"endpoints_probed": 3, "fingerprints_found": 1, "queued": 0}
+
+    async def fake_check(**kwargs):
+        calls.append("check")
+        return {"matched": 2, "applicable": 0, "undetermined": 2, "verified": 0,
+                "verification_errors": 0, "not_applicable": 0}
+
+    monkeypatch.setattr(service, "probe_inventory", fake_probe)
+    monkeypatch.setattr(service, "check_cves", fake_check)
+
+    outcome = asyncio.run(sweep.run_sweep(tenant_id=uuid.uuid4()))
+
+    assert calls == ["probe", "check"], "a sweep probes first, then checks"
+    assert outcome["fingerprints_found"] == 1
+    assert outcome["matched"] == 2

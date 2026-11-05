@@ -7,7 +7,7 @@
 // observed banner, or a probe that was actually run) and its confidence, and an
 // unverified candidate says so.
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { Modal } from "../../shared/ui/Modal";
@@ -23,7 +23,9 @@ import {
   createAsset,
   assetsTemplateUrl,
   getCveCheck,
+  getProbeStatus,
   importAssets,
+  updateAsset,
   listAssetEvents,
   putCveCheck,
   deleteAsset,
@@ -31,7 +33,6 @@ import {
   importCorpus,
   listAssets,
   listVerdicts,
-  sweepInventory,
   verifyVerdict,
   type Asset,
   type AssetImportSummary,
@@ -99,6 +100,13 @@ export default function AssetsPage() {
   const [openAssetId, setOpenAssetId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importSummary, setImportSummary] = useState<AssetImportSummary | null>(null);
+  // Filters and paging: an inventory is read, not scrolled.
+  const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState("");
+  const [envFilter, setEnvFilter] = useState("");
+  const [techFilter, setTechFilter] = useState("");
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(1);
   const [importing, setImporting] = useState(false);
   const [cveQuery, setCveQuery] = useState("");
   const [verify, setVerify] = useState(false);
@@ -138,8 +146,46 @@ export default function AssetsPage() {
     setLastEventId(batch.last_id);
   }, [eventsQ.data]);
 
+  const statusQ = useQuery({
+    queryKey: ["assets", "probe-status"],
+    queryFn: getProbeStatus,
+    refetchInterval: (q) => (q.state.data?.active ? 3000 : 15000),
+  });
+  const probeStatus = statusQ.data;
+
   const assetsQ = useQuery({ queryKey: ["assets"], queryFn: listAssets });
   const assets: Asset[] = assetsQ.data?.items ?? [];
+
+  const environments = useMemo(
+    () =>
+      [...new Set(assets.map((asset) => asset.environment).filter(Boolean))].sort() as string[],
+    [assets],
+  );
+  const technologies = useMemo(
+    () =>
+      [...new Set(assets.flatMap((asset) => asset.technology_names ?? []))].sort() as string[],
+    [assets],
+  );
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return assets.filter((asset) => {
+      if (kindFilter && asset.kind !== kindFilter) return false;
+      if (envFilter && (asset.environment ?? "") !== envFilter) return false;
+      if (techFilter && !(asset.technology_names ?? []).includes(techFilter)) return false;
+      if (!needle) return true;
+      return (
+        asset.name.toLowerCase().includes(needle) ||
+        (asset.owner ?? "").toLowerCase().includes(needle) ||
+        (asset.authorization_basis ?? "").toLowerCase().includes(needle)
+      );
+    });
+  }, [assets, query, kindFilter, envFilter, techFilter]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visible = useMemo(
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filtered, currentPage, pageSize],
+  );
   const corpus = assetsQ.data?.corpus;
 
   const verdictsQ = useQuery({
@@ -240,26 +286,6 @@ export default function AssetsPage() {
       refresh();
     },
     onError: () => toast.error("Could not probe the inventory"),
-  });
-
-  const sweep = useMutation({
-    onMutate: () => {
-      setBusy(true);
-      setBusySince(new Date().toISOString());
-    },
-    onSettled: () => {
-      setBusy(false);
-      setBusySince(null);
-    },
-    mutationFn: () => sweepInventory({ verify }),
-    onSuccess: (result) => {
-      toast.success(
-        `${result.endpoints_fingerprinted} endpoint(s) refreshed · ${result.matched} candidate(s) · ` +
-          `${result.applicable} applicable`,
-      );
-      refresh();
-    },
-    onError: () => toast.error("Could not sweep the inventory"),
   });
 
   const openCheck = async (cveId: string) => {
@@ -405,86 +431,219 @@ export default function AssetsPage() {
                 <Icon.Download size={13} /> Template
               </a>
               <button
-                className="sccap-btn"
-                disabled={probe.isPending || assets.length === 0}
+                className={`sccap-btn${probeStatus?.active ? " is-busy" : ""}`}
+                disabled={probe.isPending || probeStatus?.active || assets.length === 0}
                 onClick={() => probe.mutate(true)}
                 title="Scan every asset and store the technology and version it runs"
               >
-                <Icon.Shield size={13} />
-                {probe.isPending ? "Probing…" : "Probe inventory"}
-              </button>
-              <button
-                className="sccap-btn"
-                disabled={sweep.isPending || assets.length === 0}
-                onClick={() => sweep.mutate()}
-                title="Probe what is unknown, then apply the CVE list"
-              >
-                <Icon.Refresh size={13} />
-                {sweep.isPending ? "Sweeping…" : "Sweep inventory"}
+                {probeStatus?.active ? (
+                  <>
+                    <span className="asset-pulse" /> Probing
+                    {probeStatus.host ? ` ${probeStatus.host}` : ""}
+                    {probeStatus.queued ? ` (+${probeStatus.queued} queued)` : ""}
+                  </>
+                ) : (
+                  <>
+                    <Icon.Shield size={13} />
+                    {probe.isPending ? "Probing…" : "Probe inventory"}
+                  </>
+                )}
               </button>
             </div>
           </div>
+
+          {assets.length > 0 && (
+            <div className="asset-filters">
+              <input
+                className="asset-filter-input"
+                placeholder="Filter by name, host or owner"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setPage(1);
+                }}
+              />
+              <select
+                value={kindFilter}
+                onChange={(e) => {
+                  setKindFilter(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All kinds</option>
+                {Object.entries(KIND_LABEL).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={envFilter}
+                onChange={(e) => {
+                  setEnvFilter(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All environments</option>
+                {environments.map((env) => (
+                  <option key={env} value={env}>
+                    {env}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={techFilter}
+                onChange={(e) => {
+                  setTechFilter(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All technologies</option>
+                {technologies.map((tech) => (
+                  <option key={tech} value={tech}>
+                    {tech}
+                  </option>
+                ))}
+              </select>
+              {(query || kindFilter || envFilter || techFilter) && (
+                <button
+                  className="sccap-btn sccap-btn-sm"
+                  onClick={() => {
+                    setQuery("");
+                    setKindFilter("");
+                    setEnvFilter("");
+                    setTechFilter("");
+                    setPage(1);
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
+              <span className="asset-muted" style={{ marginLeft: "auto" }}>
+                {filtered.length} of {assets.length} asset(s)
+              </span>
+            </div>
+          )}
 
           {assets.length === 0 ? (
             <p className="asset-empty">
               No assets yet. Add the systems you are responsible for — that is what makes a
               CVE list answerable.
             </p>
+          ) : filtered.length === 0 ? (
+            <p className="asset-empty">No asset matches these filters.</p>
           ) : (
-            <div className="asset-table-wrap">
-              <table className="asset-table">
-                <thead>
-                  <tr>
-                    <th>Asset</th>
-                    <th>Kind</th>
-                    <th>Environment</th>
-                    <th>Endpoints</th>
-                    <th>Technologies</th>
-                    <th>Packages</th>
-                    <th>Authorisation</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {assets.map((asset) => (
-                    <tr
-                      key={asset.id}
-                      className={openAssetId === asset.id ? "is-open" : ""}
-                      onClick={() => setOpenAssetId(asset.id === openAssetId ? null : asset.id)}
-                    >
-                      <td>
-                        <strong>{asset.name}</strong>
-                        {asset.owner && <span className="asset-muted">{asset.owner}</span>}
-                      </td>
-                      <td>{KIND_LABEL[asset.kind] ?? asset.kind}</td>
-                      <td>{asset.environment ?? "—"}</td>
-                      <td>{asset.services ?? 0}</td>
-                      <td>{asset.technologies ?? 0}</td>
-                      <td>{asset.dependencies ?? 0}</td>
-                      <td className="asset-muted">{asset.authorization_basis ?? "—"}</td>
-                      <td>
-                        {!asset.in_scope && <span className="asset-chip">out of scope</span>}
-                      </td>
+            <>
+              <div className="asset-table-wrap">
+                <table className="asset-table">
+                  <thead>
+                    <tr>
+                      <th>Asset</th>
+                      <th>Kind</th>
+                      <th>Environment</th>
+                      <th>Endpoints</th>
+                      <th>Technologies</th>
+                      <th>Packages</th>
+                      <th>Authorisation</th>
+                      <th />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {visible.map((asset) => (
+                      <Fragment key={asset.id}>
+                        <tr
+                          className={openAssetId === asset.id ? "is-open" : ""}
+                          onClick={() => setOpenAssetId(asset.id === openAssetId ? null : asset.id)}
+                        >
+                          <td>
+                            <strong>{asset.name}</strong>
+                            {asset.owner && <span className="asset-muted">{asset.owner}</span>}
+                          </td>
+                          <td>{KIND_LABEL[asset.kind] ?? asset.kind}</td>
+                          <td>{asset.environment ?? "—"}</td>
+                          <td>{asset.services ?? 0}</td>
+                          <td title={(asset.technology_names ?? []).join(", ")}>
+                            {asset.technologies ?? 0}
+                          </td>
+                          <td>{asset.dependencies ?? 0}</td>
+                          <td className="asset-muted">{asset.authorization_basis ?? "—"}</td>
+                          <td>
+                            {!asset.in_scope && <span className="asset-chip">out of scope</span>}
+                          </td>
+                        </tr>
+                        {openAssetId === asset.id && (
+                          <tr className="asset-row-detail">
+                            <td colSpan={8}>
+                              {detailQ.isLoading ? (
+                                <p className="asset-muted">Loading details…</p>
+                              ) : detailQ.data ? (
+                                <AssetDetailPanel
+                                  detail={detailQ.data}
+                                  onChanged={() => {
+                                    queryClient.invalidateQueries({ queryKey: ["assets"] });
+                                    queryClient.invalidateQueries({
+                                      queryKey: ["assets", openAssetId],
+                                    });
+                                  }}
+                                  onDeleted={() => {
+                                    setOpenAssetId(null);
+                                    refresh();
+                                  }}
+                                />
+                              ) : null}
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="asset-pager">
+                <span className="asset-muted">
+                  Showing {(page - 1) * pageSize + 1}–
+                  {Math.min(page * pageSize, filtered.length)} of {filtered.length}
+                </span>
+                <label className="asset-muted">
+                  Rows
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                  >
+                    {[20, 50, 100].map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="asset-pager-buttons">
+                  <button
+                    className="sccap-btn sccap-btn-sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                  >
+                    Previous
+                  </button>
+                  <span className="asset-muted">
+                    Page {page} of {totalPages}
+                  </span>
+                  <button
+                    className="sccap-btn sccap-btn-sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            </>
           )}
 
-          {openAssetId && detailQ.data && (
-            <AssetDetailPanel
-              detail={detailQ.data}
-              onChanged={() => {
-                queryClient.invalidateQueries({ queryKey: ["assets"] });
-                queryClient.invalidateQueries({ queryKey: ["assets", openAssetId] });
-              }}
-              onDeleted={() => {
-                setOpenAssetId(null);
-                refresh();
-              }}
-            />
-          )}
         </section>
       )}
 
@@ -920,6 +1079,32 @@ function AssetDetailPanel({
     onError: () => toast.error("Could not import the packages"),
   });
 
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    name: detail.name,
+    kind: (detail as { kind?: string }).kind ?? "web_app",
+    owner: (detail as { owner?: string | null }).owner ?? "",
+    environment: (detail as { environment?: string | null }).environment ?? "",
+    authorization_basis: (detail as { authorization_basis?: string | null }).authorization_basis ?? "",
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateAsset(detail.id, {
+        name: draft.name.trim(),
+        kind: draft.kind as never,
+        owner: draft.owner.trim() || null,
+        environment: draft.environment.trim() || null,
+        authorization_basis: draft.authorization_basis.trim() || null,
+      }),
+    onSuccess: () => {
+      setEditing(false);
+      toast.success("Asset updated");
+      onChanged();
+    },
+    onError: () => toast.error("Could not update the asset"),
+  });
+
   const remove = useMutation({
     mutationFn: () => deleteAsset(detail.id),
     onSuccess: () => {
@@ -938,10 +1123,58 @@ function AssetDetailPanel({
             Authorisation: {detail.authorization_basis ?? "not recorded"}
           </span>
         </div>
-        <button className="sccap-btn sccap-btn-ghost" onClick={() => remove.mutate()}>
-          <Icon.X size={13} /> Remove asset
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="sccap-btn sccap-btn-sm" onClick={() => setEditing((v) => !v)}>
+            <Icon.Settings size={12} /> {editing ? "Cancel" : "Edit asset"}
+          </button>
+          <button className="sccap-btn sccap-btn-ghost" onClick={() => remove.mutate()}>
+            <Icon.X size={13} /> Remove asset
+          </button>
+        </div>
       </div>
+
+      {editing && (
+        <div className="asset-inline-form asset-edit-form">
+          <input
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            placeholder="name"
+          />
+          <select
+            value={draft.kind}
+            onChange={(e) => setDraft({ ...draft, kind: e.target.value })}
+          >
+            {Object.entries(KIND_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <input
+            value={draft.owner}
+            onChange={(e) => setDraft({ ...draft, owner: e.target.value })}
+            placeholder="owner"
+          />
+          <input
+            value={draft.environment}
+            onChange={(e) => setDraft({ ...draft, environment: e.target.value })}
+            placeholder="environment"
+          />
+          <input
+            value={draft.authorization_basis}
+            onChange={(e) => setDraft({ ...draft, authorization_basis: e.target.value })}
+            placeholder="authorisation basis"
+            style={{ minWidth: 220 }}
+          />
+          <button
+            className="sccap-btn sccap-btn-sm sccap-btn-primary"
+            disabled={!draft.name.trim() || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            {save.isPending ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
 
       <div className="asset-detail-grid">
         <div>

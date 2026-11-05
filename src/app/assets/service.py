@@ -511,6 +511,55 @@ async def _explain_no_candidates(
     )
 
 
+async def probe_status(tenant_id: uuid.UUID) -> dict[str, Any]:
+    """Is a probe running right now, and how much is queued?
+
+    The probe can take minutes; without this an operator has only the activity console to
+    tell a slow probe from a dead button.
+    """
+    from app.pentest import inventory_probe
+
+    async with AsyncSessionLocal() as db:
+        queued = await db.scalar(
+            select(func.count())
+            .select_from(am.AssetProbeJob)
+            .where(
+                am.AssetProbeJob.tenant_id == tenant_id,
+                am.AssetProbeJob.status == "queued",
+            )
+        )
+        running = await db.scalar(
+            select(func.count())
+            .select_from(am.AssetProbeJob)
+            .where(
+                am.AssetProbeJob.tenant_id == tenant_id,
+                am.AssetProbeJob.status == "running",
+            )
+        )
+        current = await db.scalar(
+            select(am.AssetProbeJob.host)
+            .where(
+                am.AssetProbeJob.tenant_id == tenant_id,
+                am.AssetProbeJob.status == "running",
+            )
+            .limit(1)
+        )
+        last = await db.scalar(
+            select(func.max(am.AssetEvent.created_at)).where(
+                am.AssetEvent.tenant_id == tenant_id
+            )
+        )
+    engine = await inventory_probe.engine_alive()
+    return {
+        "active": bool(queued or running) or not engine,
+        "queued": int(queued or 0),
+        "running": int(running or 0),
+        "host": current,
+        "engine": engine,
+        "last_event_at": last.isoformat() if last else None,
+    }
+
+
 async def check_cves(
     *,
     tenant_id: uuid.UUID,

@@ -174,10 +174,15 @@ async def list_assets(user=Depends(current_active_user)) -> dict[str, Any]:
     counts: dict[str, dict[str, int]] = {}
     for asset in assets:
         try:
+            technologies = await service.list_technologies(user.tenant_id, asset.id)
             counts[str(asset.id)] = {
                 "services": len(await service.list_services(user.tenant_id, asset.id)),
                 "dependencies": len(await service.list_dependencies(user.tenant_id, asset.id)),
-                "technologies": len(await service.list_technologies(user.tenant_id, asset.id)),
+                "technologies": len(technologies),
+                # Names, not just the count: the list is filtered by technology.
+                "technology_names": sorted(
+                    {row.product for row in technologies if row.product}
+                )[:12],
             }
         except service.AssetNotFound:
             counts[str(asset.id)] = {"services": 0, "dependencies": 0}
@@ -376,6 +381,12 @@ async def add_service(
     except service.AssetNotFound as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
     return _service_dict(row)
+
+
+@router.get("/probe/status")
+async def probe_status(user=Depends(current_active_user)) -> dict[str, Any]:
+    """Whether a probe is in flight, so the page can say so without the console."""
+    return await service.probe_status(user.tenant_id)
 
 
 @router.post("/probe")
