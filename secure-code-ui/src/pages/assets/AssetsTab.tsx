@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   assetsTemplateUrl,
+  checkReachability,
   createAsset,
   getAsset,
   importAssets,
@@ -112,6 +113,17 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
   const currentPage = Math.min(page, totalPages);
   const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+  const reach = useMutation({
+    mutationFn: (assetIds: string[] | null) => checkReachability(assetIds),
+    onSuccess: (result) => {
+      toast.success(
+        `${result.up} up · ${result.filtered} filtered · ${result.down} down`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+    },
+    onError: () => toast.error("Could not check reachability"),
+  });
+
   const probe = useMutation({
     mutationFn: (assetIds: string[] | null) =>
       probeInventory({ asset_ids: assetIds, rescan: true, tools: ["nmap", "whatweb"] }),
@@ -136,11 +148,30 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
               {assets.length} asset{assets.length === 1 ? "" : "s"}
             </strong>
             <span className="asset-muted">
-              {assets.filter((a) => a.reachable === false).length} unreachable on last check ·{" "}
-              {assets.filter((a) => a.reachable == null).length} never checked
+              {assets.filter((a) => a.reachable === true).length} up ·{" "}
+              {
+                assets.filter(
+                  (a) => a.reachable === false && a.unreachable_reason === "filtered",
+                ).length
+              }{" "}
+              filtered ·{" "}
+              {
+                assets.filter(
+                  (a) => a.reachable === false && a.unreachable_reason !== "filtered",
+                ).length
+              }{" "}
+              down · {assets.filter((a) => a.reachable == null).length} never checked
             </span>
           </div>
           <div className="asset-inline-form">
+            <button
+              className="sccap-btn"
+              disabled={!assets.length || reach.isPending}
+              title="Climb the reachability ladder only — no fingerprinting"
+              onClick={() => reach.mutate(selected.size ? [...selected] : null)}
+            >
+              <Icon.Search size={13} /> {reach.isPending ? "Checking…" : "Check reachability"}
+            </button>
             <button className="sccap-btn" disabled={!assets.length || probeActive} onClick={() => setScanOpen(true)}>
               <Icon.Shield size={13} /> Scan assets
             </button>
@@ -299,17 +330,28 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
                             className={`asset-reach is-${
                               asset.reachable === true
                                 ? "ok"
-                                : asset.reachable === false
-                                  ? "bad"
-                                  : "unknown"
+                                : asset.unreachable_reason === "filtered"
+                                  ? "unknown"
+                                  : asset.reachable === false
+                                    ? "bad"
+                                    : "unknown"
                             }`}
+                            title={asset.last_probe_evidence ?? undefined}
                           >
                             {asset.reachable === true
-                              ? "reachable"
-                              : asset.reachable === false
-                                ? `unreachable (${asset.unreachable_reason ?? "?"})`
-                                : "unknown"}
+                              ? "up"
+                              : asset.unreachable_reason === "filtered"
+                                ? "filtered"
+                                : asset.reachable === false
+                                  ? `down (${asset.unreachable_reason ?? "?"})`
+                                  : "unknown"}
+                            {asset.last_probe_level ? ` · L${asset.last_probe_level}` : ""}
                           </span>
+                          {asset.last_probe_evidence && (
+                            <span className="asset-muted asset-evidence">
+                              {asset.last_probe_evidence}
+                            </span>
+                          )}
                         </td>
                         <td>{asset.services ?? 0}</td>
                         <td title={(asset.technology_names ?? []).join(", ")}>

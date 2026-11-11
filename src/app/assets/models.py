@@ -99,6 +99,11 @@ class Asset(Base):
     reachable: Mapped[Optional[bool]] = mapped_column(sa.Boolean, nullable=True)
     unreachable_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     last_probe_seconds: Mapped[Optional[float]] = mapped_column(sa.Float, nullable=True)
+    # Which rung of the reachability ladder answered, and what it saw. "up (port 5432
+    # refused)" and "filtered (nmap saw no host)" are different facts and must not be
+    # flattened into one boolean.
+    last_probe_level: Mapped[Optional[int]] = mapped_column(sa.Integer, nullable=True)
+    last_probe_evidence: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

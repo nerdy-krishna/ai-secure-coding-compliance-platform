@@ -19,14 +19,15 @@ def test_a_host_that_resolves_and_answers_is_reachable(monkeypatch):
         return True, None
 
     async def opens(host, port):
-        return port == 443
+        return reachability.OPEN if port == 443 else reachability.FILTERED
 
     monkeypatch.setattr(reachability, "_resolve", resolves)
-    monkeypatch.setattr(reachability, "_tcp_open", opens)
+    monkeypatch.setattr(reachability, "_connect", opens)
 
     outcome = asyncio.run(reachability.check_host("example.com", [443, 80]))
 
     assert outcome["reachable"] is True
+    assert outcome["state"] == reachability.UP
     assert outcome["port"] == 443
     assert outcome["reason"] is None
 
@@ -43,29 +44,36 @@ def test_dns_failure_is_named(monkeypatch):
     assert outcome["reason"] == "dns_failed"
 
 
-def test_no_open_port_is_unreachable_not_unknown(monkeypatch):
+def test_no_open_port_is_filtered_rather_than_declared_absent(monkeypatch):
+    """Silence is not absence: a firewall that drops packets looks like an empty address."""
+
     async def resolves(host):
         return True, None
 
-    async def closed(host, port):
-        return False
+    async def drops(host, port):
+        return reachability.FILTERED
+
+    async def nmap(host, udp=False):
+        return {"alive": None, "mechanism": "host seems down", "seconds": 3.0}
 
     monkeypatch.setattr(reachability, "_resolve", resolves)
-    monkeypatch.setattr(reachability, "_tcp_open", closed)
+    monkeypatch.setattr(reachability, "_connect", drops)
+    monkeypatch.setattr(reachability, "_nmap", nmap)
 
     outcome = asyncio.run(reachability.check_host("10.0.0.9", [443]))
 
     assert outcome["reachable"] is False
-    assert outcome["reason"] == "no_open_port"
+    assert outcome["state"] == reachability.UNKNOWN
+    assert outcome["reason"] == "filtered"
 
 
 def test_the_engine_probe_asks_reachability_before_scanning():
     """The whole point: a dead host must not consume nmap/whatweb/nuclei time."""
     source = inspect.getsource(inventory_probe.run_job)
 
-    assert "reachability.check_host" in source
-    assert "unreachable" in source
-    assert source.index("check_host") < source.index("_run_nmap"), (
+    assert "reachability.check_asset" in source
+    assert "SCAN_SKIP" in source
+    assert source.index("check_asset") < source.index("_run_nmap"), (
         "reachability must be decided before the first scanner runs"
     )
 

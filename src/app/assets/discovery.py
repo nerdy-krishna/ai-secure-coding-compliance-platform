@@ -462,21 +462,31 @@ async def discover_asset(
         from app.assets import reachability as reach_mod
 
         probe_host = sorted(hosts)[0]
-        ports = [port for host, port, _scheme in targets if host == probe_host and port]
-        reach = await reach_mod.check_host(probe_host, ports)
+        reach = await reach_mod.check_asset(asset_id)
+        probe_host = reach.get("host") or probe_host
         await reach_mod.remember(asset_id, reach)
-        if not reach["reachable"]:
+        policy = reach_mod.scan_policy(reach)
+        if policy == reach_mod.SCAN_SKIP:
             return {
                 "asset_id": str(asset_id),
                 "endpoints_probed": 0,
                 "endpoints_open": 0,
                 "fingerprints": 0,
                 "outcomes": [],
-                "transcript": [f"# {probe_host} unreachable ({reach['reason']}) — scanners skipped"],
+                "transcript": [
+                    f"# {probe_host}: {reach['state']} at level {reach['level']} "
+                    f"({reach_mod.level_name(reach['level'])}) — {reach['evidence']}; "
+                    "scanners skipped"
+                ],
                 "note": f"{probe_host} is unreachable ({reach['reason']})",
                 "reachable": False,
+                "state": reach["state"],
+                "level": reach["level"],
                 "reason": reach["reason"],
             }
+        # Filtered: nothing answered, but nothing proved the host absent either. Fingerprint
+        # only what the port sweep can reach — no template scanning of a host we cannot see.
+        reduced = policy == reach_mod.SCAN_REDUCED
 
     if not targets and not hosts:
         return {
@@ -503,7 +513,7 @@ async def discover_asset(
 
     bare_jobs = [guarded(_probe_http(host, port, scheme)) for host, port, scheme in targets]
     banner_jobs: list[Any] = []
-    if banner_scan:
+    if banner_scan and not reduced:
         banner_jobs = [
             guarded(_probe_banner(host, port, label, hint))
             for host in hosts
@@ -622,6 +632,12 @@ async def discover_asset(
         }
         for row in sorted(results, key=lambda item: (str(item.get("host")), item.get("port") or 0))
     ]
+    if reduced:
+        transcript.insert(
+            0,
+            f"# {probe_host}: filtered at level {reach['level']} "
+            f"({reach_mod.level_name(reach['level'])}) — reduced scan, banners skipped",
+        )
     return {
         "asset_id": str(asset_id),
         "endpoints_probed": len(results),
@@ -631,6 +647,10 @@ async def discover_asset(
         "errors": sum(1 for row in results if row.get("error")),
         "outcomes": outcomes,
         "transcript": transcript,
+        "reachable": reach.get("reachable"),
+        "state": reach.get("state"),
+        "level": reach.get("level"),
+        "policy": policy,
     }
 
 

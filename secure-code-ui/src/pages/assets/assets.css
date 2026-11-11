@@ -431,3 +431,14 @@
   color: var(--fg-muted);
   white-space: nowrap;
 }
+
+/* Reachability cell: the state, the rung that decided it, and the evidence underneath. */
+.asset-evidence {
+  display: block;
+  font-size: 10.5px;
+  line-height: 1.35;
+  margin-top: 2px;
+  max-width: 190px;
+  white-space: normal;
+}
+.asset-reach.is-unknown { color: var(--sccap-amber-700, #a16207); }

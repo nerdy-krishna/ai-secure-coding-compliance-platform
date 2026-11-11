@@ -159,6 +159,10 @@ def _asset_dict(asset: am.Asset) -> dict[str, Any]:
         "reachable": asset.reachable,
         "unreachable_reason": asset.unreachable_reason,
         "last_probe_seconds": asset.last_probe_seconds,
+        # Which rung of the ladder answered, and what it saw. "up (port 5432 refused)" and
+        # "filtered (nmap saw no host)" are different facts.
+        "last_probe_level": asset.last_probe_level,
+        "last_probe_evidence": asset.last_probe_evidence,
     }
 
 
@@ -406,6 +410,64 @@ async def probe_status(user=Depends(current_active_user)) -> dict[str, Any]:
 async def cancel_probes(user=Depends(current_active_user)) -> dict[str, Any]:
     """Stop inventory probing: queued jobs are cancelled, a running one aborts."""
     return await service.cancel_probes(user.tenant_id)
+
+
+class ReachabilityRequest(BaseModel):
+    asset_ids: Optional[list[uuid.UUID]] = None
+    max_level: int = Field(default=4, ge=1, le=4)
+
+
+@router.post("/reachability")
+async def check_reachability(
+    body: ReachabilityRequest, user=Depends(current_active_user)
+) -> dict[str, Any]:
+    """Climb the reachability ladder for these assets, without running a scan.
+
+    This is the cheap question on its own: useful before a scan, and after a scan that
+    returned nothing, to say whether the asset was silent or filtered.
+    """
+    from app.assets import reachability
+    import asyncio
+
+    assets = await service.list_assets(user.tenant_id)
+    if body.asset_ids:
+        wanted = {str(asset_id) for asset_id in body.asset_ids}
+        assets = [asset for asset in assets if str(asset.id) in wanted]
+    results: list[dict[str, Any]] = []
+
+    async def one(asset: Any) -> None:
+        outcome = await reachability.check_asset(asset.id, max_level=body.max_level)
+        if outcome.get("reason") == "no_host":
+            results.append(
+                {
+                    "asset_id": str(asset.id),
+                    "name": asset.name,
+                    "state": "unknown",
+                    "reason": "no_host",
+                    "evidence": "no host recorded",
+                    "level": 0,
+                    "seconds": 0.0,
+                }
+            )
+            return
+        await reachability.remember(asset.id, outcome)
+        results.append(
+            {
+                "asset_id": str(asset.id),
+                "name": asset.name,
+                **outcome,
+                "level_name": reachability.level_name(outcome["level"]),
+                "policy": reachability.scan_policy(outcome),
+            }
+        )
+
+    await asyncio.gather(*(one(asset) for asset in assets))
+    return {
+        "results": sorted(results, key=lambda item: item.get("name") or ""),
+        "up": sum(1 for item in results if item.get("state") == "up"),
+        "filtered": sum(1 for item in results if item.get("state") == "unknown"),
+        "down": sum(1 for item in results if item.get("state") == "down"),
+    }
 
 
 @router.post("/probe")

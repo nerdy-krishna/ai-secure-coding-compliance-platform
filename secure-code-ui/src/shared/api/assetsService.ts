@@ -49,6 +49,8 @@ export interface Asset {
   reachable?: boolean | null;
   unreachable_reason?: string | null;
   last_probe_seconds?: number | null;
+  last_probe_level?: number | null;
+  last_probe_evidence?: string | null;
   services?: number;
   dependencies?: number;
   technologies?: number;
@@ -470,4 +472,30 @@ export async function researchCves(cveIds: string[]): Promise<CveResearchItem[]>
     cve_ids: cveIds,
   });
   return data.items;
+}
+
+export interface ReachabilityResult {
+  asset_id: string;
+  name: string;
+  host?: string;
+  reachable: boolean;
+  state: "up" | "unknown" | "down";
+  reason: string | null;
+  evidence: string;
+  level: number;
+  level_name?: string;
+  policy?: "full" | "reduced" | "skip";
+  port?: number | null;
+  seconds: number;
+}
+
+/** The cheap question on its own: climb the ladder, run no scan. */
+export async function checkReachability(assetIds: string[] | null, maxLevel = 4) {
+  const { data } = await apiClient.post<{
+    results: ReachabilityResult[];
+    up: number;
+    filtered: number;
+    down: number;
+  }>("/assets/reachability", { asset_ids: assetIds, max_level: maxLevel });
+  return data;
 }
