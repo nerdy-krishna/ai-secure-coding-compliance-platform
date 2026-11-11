@@ -221,18 +221,32 @@ class UsageBudgetRepository:
             ).one_or_none()
             row = (*found, None) if found is not None else None
         elif context.operation_kind == "cve":
-            if context.asset_id is None:
-                raise ValueError("cve usage context requires asset_id")
             from app.assets.models import Asset
 
-            found = (
-                await self.db.execute(
-                    select(Asset.tenant_id, Asset.created_by).where(
-                        Asset.id == context.asset_id
+            if context.asset_id is not None:
+                found = (
+                    await self.db.execute(
+                        select(Asset.tenant_id, Asset.created_by).where(
+                            Asset.id == context.asset_id
+                        )
                     )
-                )
-            ).one_or_none()
-            row = (*found, None) if found is not None else None
+                ).one_or_none()
+                row = (*found, None) if found is not None else None
+            elif context.actor_user_id is not None:
+                # CVE research can happen before any asset is involved: attribute it to
+                # the operator who asked.
+                from app.infrastructure.database.models import User
+
+                found = (
+                    await self.db.execute(
+                        select(User.tenant_id, User.id).where(
+                            User.id == context.actor_user_id
+                        )
+                    )
+                ).one_or_none()
+                row = (*found, None) if found is not None else None
+            else:
+                raise ValueError("cve usage context requires asset_id or actor_user_id")
         elif context.operation_kind == "pentest":
             if context.pentest_attempt_id is None:
                 raise ValueError("pentest usage context requires pentest_attempt_id")

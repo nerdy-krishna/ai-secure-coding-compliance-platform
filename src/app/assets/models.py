@@ -92,6 +92,13 @@ class Asset(Base):
     in_scope: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
     authorization_basis: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("user.id"), nullable=True)
+    # Reachability: the cheapest question worth answering before scanning anything.
+    last_probe_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reachable: Mapped[Optional[bool]] = mapped_column(sa.Boolean, nullable=True)
+    unreachable_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_probe_seconds: Mapped[Optional[float]] = mapped_column(sa.Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -206,7 +213,10 @@ class CveCheck(Base):
     cve_id: Mapped[str] = mapped_column(
         String(32), ForeignKey("cve_records.id", ondelete="CASCADE"), nullable=False
     )
-    template: Mapped[str] = mapped_column(Text, nullable=False)
+    # Present once a template has been designed; research can arrive first.
+    template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # What the model established about the vulnerability, shown before any test runs.
+    research: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
     source: Mapped[str] = mapped_column(String(24), nullable=False, default="model")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

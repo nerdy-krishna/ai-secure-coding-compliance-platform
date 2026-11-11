@@ -45,6 +45,10 @@ export interface Asset {
   in_scope: boolean;
   authorization_basis: string | null;
   created_at: string | null;
+  last_probe_at?: string | null;
+  reachable?: boolean | null;
+  unreachable_reason?: string | null;
+  last_probe_seconds?: number | null;
   services?: number;
   dependencies?: number;
   technologies?: number;
@@ -226,6 +230,9 @@ export async function probeInventory(input: {
   endpoints_probed: number;
   fingerprints_found: number;
   products: string[];
+  /** Present when the probe was queued for the pentest engine. */
+  queued?: number;
+  engine?: boolean;
   note?: string;
 }> {
   const { data } = await apiClient.post("/assets/probe", input);
@@ -402,4 +409,65 @@ export async function importAssets(file: File): Promise<AssetImportSummary> {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return data;
+}
+
+export interface CveBrowseItem {
+  cve_id: string;
+  description: string;
+  severity: string | null;
+  cvss_score: number | null;
+  kev: boolean;
+  published: string | null;
+}
+
+/** Search the local corpus, so a CVE can be chosen instead of typed. */
+export async function browseCves(params: {
+  query?: string;
+  severity?: string;
+  kev?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<{ total: number; items: CveBrowseItem[] }> {
+  const { data } = await apiClient.get<{ total: number; items: CveBrowseItem[] }>(
+    "/cve/browse",
+    { params },
+  );
+  return data;
+}
+
+export interface CveResearchItem {
+  cve_id: string;
+  source?: string;
+  description?: string | null;
+  severity?: string | null;
+  cvss_score?: number | null;
+  cvss_vector?: string | null;
+  cwe?: string | null;
+  kev?: boolean;
+  published?: string | null;
+  affected_products: string[];
+  affected_packages: string[];
+  references: Array<{ url?: string; tags?: string[] }>;
+  exploit_references: Array<{ url?: string; tags?: string[] }>;
+  research?: {
+    mechanism: string;
+    detection_signals: string[];
+    patched_version: string | null;
+    reference_insights: string[];
+    testability_note: string;
+  } | null;
+  template?: string | null;
+  template_present: boolean;
+  ranges_known?: boolean;
+  /** Set when the model could not be reached, so the research is unavailable. */
+  research_error?: string | null;
+  error?: string;
+}
+
+/** What these CVEs are, and what check would run — before any asset is touched. */
+export async function researchCves(cveIds: string[]): Promise<CveResearchItem[]> {
+  const { data } = await apiClient.post<{ items: CveResearchItem[] }>("/cve/research", {
+    cve_ids: cveIds,
+  });
+  return data.items;
 }

@@ -153,6 +153,12 @@ def _asset_dict(asset: am.Asset) -> dict[str, Any]:
         "in_scope": asset.in_scope,
         "authorization_basis": asset.authorization_basis,
         "created_at": asset.created_at.isoformat() if asset.created_at else None,
+        # Reachability is what tells an operator "this was scanned and did not answer"
+        # rather than leaving a blank column.
+        "last_probe_at": asset.last_probe_at.isoformat() if asset.last_probe_at else None,
+        "reachable": asset.reachable,
+        "unreachable_reason": asset.unreachable_reason,
+        "last_probe_seconds": asset.last_probe_seconds,
     }
 
 
@@ -478,6 +484,49 @@ async def import_dependencies(
 
 
 cve_router = APIRouter(prefix="/cve", tags=["Assets"])
+
+
+class ResearchRequest(BaseModel):
+    cve_ids: list[str] = Field(min_length=1, max_length=20)
+    design_check: bool = True
+
+
+@cve_router.post("/research")
+async def research(
+    body: ResearchRequest, user=Depends(current_active_user)
+) -> dict[str, Any]:
+    """What these CVEs are, what they affect, and what check would run.
+
+    The pause between "check these" and "test them": the operator reads this before any
+    asset is touched.
+    """
+    from app.assets import cve_workflow
+
+    items = []
+    for cve_id in body.cve_ids:
+        items.append(
+            await cve_workflow.research_cve(
+                cve_id, design_check=body.design_check, actor_user_id=user.id
+            )
+        )
+    return {"items": items}
+
+
+@cve_router.get("/browse")
+async def browse(
+    query: Optional[str] = Query(default=None),
+    severity: Optional[str] = Query(default=None),
+    kev: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    user=Depends(current_active_user),
+) -> dict[str, Any]:
+    """Search the local corpus, so a CVE can be chosen rather than typed."""
+    from app.assets import cve_workflow
+
+    return await cve_workflow.browse(
+        query=query, severity=severity, kev_only=kev, limit=limit, offset=offset
+    )
 
 
 @cve_router.get("/corpus")

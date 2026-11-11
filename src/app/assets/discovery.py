@@ -458,6 +458,26 @@ async def discover_asset(
             hosts = {asset.name.strip().lower()}
         targets = candidate_targets(services, scan_ports=scan_ports)
 
+    if hosts:
+        from app.assets import reachability as reach_mod
+
+        probe_host = sorted(hosts)[0]
+        ports = [port for host, port, _scheme in targets if host == probe_host and port]
+        reach = await reach_mod.check_host(probe_host, ports)
+        await reach_mod.remember(asset_id, reach)
+        if not reach["reachable"]:
+            return {
+                "asset_id": str(asset_id),
+                "endpoints_probed": 0,
+                "endpoints_open": 0,
+                "fingerprints": 0,
+                "outcomes": [],
+                "transcript": [f"# {probe_host} unreachable ({reach['reason']}) — scanners skipped"],
+                "note": f"{probe_host} is unreachable ({reach['reason']})",
+                "reachable": False,
+                "reason": reach["reason"],
+            }
+
     if not targets and not hosts:
         return {
             "asset_id": str(asset_id),

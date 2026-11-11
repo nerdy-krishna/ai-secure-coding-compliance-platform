@@ -151,12 +151,15 @@ class VerdictDecision(BaseModel):
     )
 
 
-def _usage_context(cve_id: str, stage: str, asset_id: Any = None) -> LLMUsageContext:
+def _usage_context(
+    cve_id: str, stage: str, asset_id: Any = None, actor_user_id: Any = None
+) -> LLMUsageContext:
     # Usage attribution requires a UUID, and a CVE id is not one. A name-based UUID
     # keeps the attribution stable per CVE across runs.
     return LLMUsageContext(
         operation_kind="cve",
         asset_id=asset_id,
+        actor_user_id=actor_user_id,
         operation_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"sccap:cve:{cve_id}")),
         stage=stage,
         agent_name="cve-verifier",
@@ -250,7 +253,8 @@ async def design_template(
     cve: am.CveRecord,
     ranges: list[am.CveAffected],
     research: CveResearch | None,
-    asset: am.Asset,
+    asset: Optional[am.Asset] = None,
+    actor_user_id: Optional[int] = None,
 ) -> Optional[str]:
     """Write the reusable check for this CVE, once.
 
@@ -287,7 +291,9 @@ async def design_template(
             "You write Nuclei-style detection templates for defensive verification. "
             "Detection only: never a request that changes state, never an exploit payload."
         ),
-        usage_context=_usage_context(cve.id, "cve.template", asset.id),
+        usage_context=_usage_context(
+            cve.id, "cve.template", asset.id if asset else None, actor_user_id
+        ),
     )
     parsed = result.parsed_output
     if parsed is None or not parsed.template.strip():
@@ -301,7 +307,12 @@ async def design_template(
 
 
 async def research_cve(
-    llm: LLMClient, *, cve: am.CveRecord, ranges: list[am.CveAffected], asset: am.Asset
+    llm: LLMClient,
+    *,
+    cve: am.CveRecord,
+    ranges: list[am.CveAffected],
+    asset: Optional[am.Asset] = None,
+    actor_user_id: Optional[int] = None,
 ) -> CveResearch:
     """Read the CVE and its references and say how it would be detected.
 
@@ -324,7 +335,9 @@ async def research_cve(
             "write-ups and extract what is needed to tell a vulnerable system from a "
             "patched one, without attempting exploitation."
         ),
-        usage_context=_usage_context(cve.id, "cve.research", asset.id),
+        usage_context=_usage_context(
+            cve.id, "cve.research", asset.id if asset else None, actor_user_id
+        ),
     )
     return result.parsed_output or CveResearch(
         mechanism=result.error or "research unavailable",
