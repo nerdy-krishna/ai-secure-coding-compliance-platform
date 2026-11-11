@@ -77,6 +77,18 @@ async def recent(
         return list(rows)
 
 
+async def latest_id(tenant_id: UUID) -> int:
+    """The newest event id, so a page can say "show me only what happens from here".
+
+    A per-scan console needs a starting point without replaying history; this is it.
+    """
+    async with AsyncSessionLocal() as db:
+        highest = await db.scalar(
+            select(func.max(am.AssetEvent.id)).where(am.AssetEvent.tenant_id == tenant_id)
+        )
+        return int(highest or 0)
+
+
 async def clear(tenant_id: UUID) -> int:
     """Hide the current log from the view. Nothing is deleted."""
     async with AsyncSessionLocal() as db:

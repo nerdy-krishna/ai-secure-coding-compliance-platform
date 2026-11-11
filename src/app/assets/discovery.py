@@ -661,9 +661,14 @@ async def discover_assets(
     banner_scan: bool = True,
     on_event: Optional[Any] = None,
     labels: Optional[dict[str, str]] = None,
+    should_stop: Optional[Any] = None,
 ) -> dict[str, Any]:
-    """Probe several assets; `on_event(message, level, payload)` reports progress."""
-    """Fingerprint several assets; the summary the check reports back."""
+    """Probe several assets; `on_event(message, level, payload)` reports progress.
+
+    `should_stop()` is asked between assets, not inside one: a single asset's probe is
+    bounded by its own timeouts, so stopping between them is prompt enough and never leaves
+    a half-written result.
+    """
     assets = 0
     endpoints = 0
     opened = 0
@@ -671,6 +676,10 @@ async def discover_assets(
     products: set[str] = set()
     labels = labels or {}
     for asset_id in asset_ids:
+        if should_stop is not None and should_stop():
+            if on_event is not None:
+                await _safe_event(on_event, "stopped by the operator; remaining assets skipped", "warning")
+            break
         label = labels.get(str(asset_id), str(asset_id))
         if on_event is not None:
             await _safe_event(on_event, f"probing {label}", "detail")

@@ -619,8 +619,10 @@ async def check_cves(
     product and version is probed first (read-only HTTP and banner checks against its
     own hosts), so the matcher has something to work with.
     """
+    from app.assets import cancel as cancel_mod
     from app.assets import events as events_mod
 
+    cancel_mod.clear(tenant_id)
     check_id = uuid.uuid4()
     await events_mod.emit(
         tenant_id,
@@ -662,6 +664,7 @@ async def check_cves(
             discovery = await discovery_mod.discover_assets(
                 unknown,
                 labels=asset_names,
+                should_stop=lambda: cancel_mod.requested(tenant_id),
                 on_event=lambda message, level="info", payload=None: events_mod.emit(
                     tenant_id,
                     message,
@@ -680,6 +683,23 @@ async def check_cves(
                 payload=discovery,
                 check_id=check_id,
             )
+
+    if cancel_mod.requested(tenant_id):
+        await events_mod.emit(
+            tenant_id,
+            "check stopped by the operator before matching",
+            level="warning",
+            kind="done",
+            check_id=check_id,
+        )
+        return {
+            "check_id": str(check_id),
+            "stopped": True,
+            "matched": 0,
+            "applicable": 0,
+            "undetermined": 0,
+            "candidates": [],
+        }
 
     # A CVE that is not in the corpus is fetched, not refused: the corpus is a cache
     # of public data, and an operator pasting an id expects it to be looked up. This

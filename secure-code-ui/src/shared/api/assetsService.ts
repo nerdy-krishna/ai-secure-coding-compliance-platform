@@ -50,6 +50,9 @@ export interface Asset {
   unreachable_reason?: string | null;
   last_probe_seconds?: number | null;
   last_probe_level?: number | null;
+  /** The addresses and ports the asset has recorded, from the list endpoint. */
+  hosts?: string[];
+  ports?: number[];
   last_probe_evidence?: string | null;
   services?: number;
   dependencies?: number;
@@ -261,6 +264,8 @@ export async function checkCves(input: {
   scan?: boolean;
   max_verifications?: number;
 }): Promise<{
+  /** Set when the operator stopped the check before it finished. */
+  stopped?: boolean;
   scanned: boolean;
   assets_probed?: number;
   endpoints_probed?: number;
@@ -373,6 +378,18 @@ export interface AssetEvent {
   message: string;
   payload: Record<string, unknown> | null;
   at: string | null;
+}
+
+/** Where the stream is right now: a console starts here, not at the beginning. */
+/** Ask a running CVE check to stop at its next safe boundary. */
+export async function stopCveCheck(): Promise<{ stopping: boolean }> {
+  const { data } = await apiClient.post<{ stopping: boolean }>("/assets/check/stop");
+  return data;
+}
+
+export async function eventsCursor(): Promise<number> {
+  const { data } = await apiClient.get<{ last_id: number }>("/assets/events/cursor");
+  return data.last_id;
 }
 
 /** The inventory activity stream (a live console tails this). */

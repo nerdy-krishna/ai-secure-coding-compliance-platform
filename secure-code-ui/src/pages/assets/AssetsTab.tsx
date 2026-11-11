@@ -2,17 +2,23 @@
 //
 // Page 2: the inventory itself.
 //
-// Every row says when it was last scanned and whether it answered, because "0 services
-// found" means something different on a host that never responded. Scanning is started from
-// here, over all assets or a chosen few.
+// Every row says when it was last scanned and whether it answered, because "0 services found"
+// means something different on a host that never responded.
+//
+// The scan controls and the activity window sit at the top, and a scan starts where it is
+// pressed: selecting rows and pressing "Scan selected" scans those rows. There is no dialog
+// between the button and the work — that dialog was the thing that made a selection look
+// ignored.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   assetsTemplateUrl,
+  cancelProbe,
   checkReachability,
   createAsset,
   getAsset,
+  getProbeStatus,
   importAssets,
   listAssets,
   probeInventory,
@@ -22,8 +28,18 @@ import {
 } from "../../shared/api/assetsService";
 import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
+import TerminalConsole from "../../shared/ui/TerminalConsole";
 import { useToast } from "../../shared/ui/Toast";
 import AssetDetailPanel from "./AssetDetailPanel";
+import {
+  AssetFiltersBar,
+  AssetStatus,
+  EMPTY_FILTERS,
+  applyFilters,
+  when,
+  type AssetFilters,
+} from "./AssetTableWindow";
+import useScanActivity from "./useScanActivity";
 
 const KIND_LABEL: Record<string, string> = {
   web_app: "Web app",
@@ -40,104 +56,101 @@ const KIND_LABEL: Record<string, string> = {
   cloud: "Cloud account / service",
 };
 
-function when(value: string | null | undefined): string {
-  if (!value) return "never";
-  const then = new Date(value).getTime();
-  const minutes = Math.round((Date.now() - then) / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
-type SortKey = "name" | "kind" | "environment" | "reachable" | "last_probe_at";
-
-export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
+export default function AssetsTab() {
   const toast = useToast();
   const queryClient = useQueryClient();
+  const activity = useScanActivity();
 
-  const [query, setQuery] = useState("");
-  const [kindFilter, setKindFilter] = useState("");
-  const [envFilter, setEnvFilter] = useState("");
-  const [reachFilter, setReachFilter] = useState("");
-  const [sortBy, setSortBy] = useState<SortKey>("name");
+  const [filters, setFilters] = useState<AssetFilters>(EMPTY_FILTERS);
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [scanOpen, setScanOpen] = useState(false);
   const [importSummary, setImportSummary] = useState<AssetImportSummary | null>(null);
   const [importing, setImporting] = useState(false);
+  // Which kind of work is running: only an engine scan is watched by probe status, so a
+  // reachability check must not be declared "complete" while it is still going.
+  const engineScan = useRef(false);
 
   const assetsQ = useQuery({ queryKey: ["assets"], queryFn: listAssets });
   const assets: Asset[] = assetsQ.data?.items ?? [];
-
   const detailQ = useQuery({
     queryKey: ["assets", openId],
     queryFn: () => getAsset(openId as string),
     enabled: Boolean(openId),
   });
 
-  const environments = useMemo(
-    () => [...new Set(assets.map((a) => a.environment).filter(Boolean))].sort() as string[],
-    [assets],
-  );
-
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const rows = assets.filter((asset) => {
-      if (kindFilter && asset.kind !== kindFilter) return false;
-      if (envFilter && (asset.environment ?? "") !== envFilter) return false;
-      if (reachFilter === "up" && asset.reachable !== true) return false;
-      if (reachFilter === "down" && asset.reachable !== false) return false;
-      if (reachFilter === "never" && asset.reachable != null) return false;
-      if (!needle) return true;
-      return (
-        asset.name.toLowerCase().includes(needle) ||
-        (asset.owner ?? "").toLowerCase().includes(needle) ||
-        (asset.technology_names ?? []).some((tech) => tech.toLowerCase().includes(needle))
-      );
-    });
-    return [...rows].sort((a, b) => {
-      if (sortBy === "reachable") return Number(b.reachable ?? -1) - Number(a.reachable ?? -1);
-      if (sortBy === "last_probe_at") {
-        return (b.last_probe_at ?? "").localeCompare(a.last_probe_at ?? "");
-      }
-      return String(a[sortBy] ?? "").localeCompare(String(b[sortBy] ?? ""));
-    });
-  }, [assets, query, kindFilter, envFilter, reachFilter, sortBy]);
-
+  const filtered = useMemo(() => applyFilters(assets, filters), [assets, filters]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
-  const reach = useMutation({
-    mutationFn: (assetIds: string[] | null) => checkReachability(assetIds),
-    onSuccess: (result) => {
-      toast.success(
-        `${result.up} up · ${result.filtered} filtered · ${result.down} down`,
-      );
-      queryClient.invalidateQueries({ queryKey: ["assets"] });
-    },
-    onError: () => toast.error("Could not check reachability"),
+  // The engine reports the truth about whether anything is still running.
+  const statusQ = useQuery({
+    queryKey: ["assets", "probe-status"],
+    queryFn: getProbeStatus,
+    refetchInterval: activity.phase === "running" ? 2500 : 20000,
   });
+  const probing = Boolean(statusQ.data?.active);
+
+  // A scan that started is finished when the engine says nothing is active any more.
+  // Depend on the phase, not on the hook object: that object is new every render, so an
+  // effect keyed on it would clear its own timer forever and the badge would stay "running".
+  const { phase: activityPhase, hasRun, finish: finishActivity } = activity;
+  useEffect(() => {
+    if (activityPhase !== "running" || !hasRun || !engineScan.current || probing) return undefined;
+    const timer = window.setTimeout(() => {
+      finishActivity("completed", "Scan complete");
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [activityPhase, hasRun, probing, finishActivity, queryClient]);
 
   const probe = useMutation({
     mutationFn: (assetIds: string[] | null) =>
       probeInventory({ asset_ids: assetIds, rescan: true, tools: ["nmap", "whatweb"] }),
     onSuccess: (result) => {
-      setScanOpen(false);
       toast.success(
         result.queued
           ? `Queued ${result.queued} asset(s) for the pentest engine`
           : `${result.fingerprints_found} fingerprint(s) from ${result.endpoints_probed} endpoint(s)`,
       );
+      statusQ.refetch();
       queryClient.invalidateQueries({ queryKey: ["assets"] });
     },
-    onError: () => toast.error("Could not start the scan"),
+    onError: () => {
+      activity.finish("error", "Scan failed");
+      toast.error("Could not start the scan");
+    },
   });
+
+  const reach = useMutation({
+    mutationFn: (assetIds: string[] | null) => checkReachability(assetIds),
+    onSuccess: (result) => {
+      activity.finish("completed", "Reachability checked");
+      toast.success(`${result.up} up · ${result.filtered} filtered · ${result.down} down`);
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+    },
+    onError: () => {
+      activity.finish("error", "Reachability check failed");
+      toast.error("Could not check reachability");
+    },
+  });
+
+  const startScan = async (assetIds: string[] | null, count: number) => {
+    engineScan.current = true;
+    await activity.start(`Scanning ${count} asset(s)`);
+    probe.mutate(assetIds);
+  };
+
+  const startReachability = async () => {
+    engineScan.current = false;
+    await activity.start(`Checking reachability of ${selected.size || assets.length} asset(s)`);
+    reach.mutate(selected.size ? [...selected] : null);
+  };
+
+  const busy = activity.phase === "running" || probing;
 
   return (
     <>
@@ -148,7 +161,7 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
               {assets.length} asset{assets.length === 1 ? "" : "s"}
             </strong>
             <span className="asset-muted">
-              {assets.filter((a) => a.reachable === true).length} up ·{" "}
+              {assets.filter((a) => a.reachable === true).length} reachable ·{" "}
               {
                 assets.filter(
                   (a) => a.reachable === false && a.unreachable_reason === "filtered",
@@ -160,101 +173,109 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
                   (a) => a.reachable === false && a.unreachable_reason !== "filtered",
                 ).length
               }{" "}
-              down · {assets.filter((a) => a.reachable == null).length} never checked
+              unreachable · {assets.filter((a) => a.reachable == null).length} not checked
             </span>
-          </div>
-          <div className="asset-inline-form">
-            <button
-              className="sccap-btn"
-              disabled={!assets.length || reach.isPending}
-              title="Climb the reachability ladder only — no fingerprinting"
-              onClick={() => reach.mutate(selected.size ? [...selected] : null)}
-            >
-              <Icon.Search size={13} /> {reach.isPending ? "Checking…" : "Check reachability"}
-            </button>
-            <button className="sccap-btn" disabled={!assets.length || probeActive} onClick={() => setScanOpen(true)}>
-              <Icon.Shield size={13} /> Scan assets
-            </button>
-            <label className="asset-upload" title="Create many assets from a CSV file">
-              <Icon.Download size={13} />
-              {importing ? "Importing…" : "Import CSV"}
-              <input
-                type="file"
-                accept=".csv,text/csv"
-                disabled={importing}
-                onChange={async (event) => {
-                  const file = event.target.files?.[0];
-                  event.target.value = "";
-                  if (!file) return;
-                  setImporting(true);
-                  try {
-                    const summary = await importAssets(file);
-                    setImportSummary(summary);
-                    queryClient.invalidateQueries({ queryKey: ["assets"] });
-                  } catch (err) {
-                    const detail = (err as { response?: { data?: { detail?: string } } })?.response
-                      ?.data?.detail;
-                    toast.error(detail || "Could not import the file");
-                  } finally {
-                    setImporting(false);
-                  }
-                }}
-              />
-            </label>
-            <a className="sccap-btn" href={assetsTemplateUrl()} download>
-              <Icon.Download size={13} /> Template
-            </a>
-            <button className="sccap-btn sccap-btn-primary" onClick={() => setCreateOpen(true)}>
-              <Icon.Plus size={14} /> Add asset
-            </button>
           </div>
         </div>
 
-        {assets.length > 0 && (
-          <div className="asset-filters">
+        <TerminalConsole
+          title="asset scan"
+          order="newest-first"
+          lines={activity.lines}
+          phase={{ phase: activity.phase, label: activity.label, detail: `${activity.elapsed}s` }}
+          live={busy}
+          maxHeight={300}
+          emptyHint="Press Scan: reachability, fingerprints, CVE lookups and matches appear here, newest first."
+          downloadName="asset-scan"
+          onClear={activity.clear}
+          actions={
+            <>
+              <button
+                className="is-primary"
+                disabled={!assets.length || busy}
+                onClick={() => void startScan(selected.size ? [...selected] : null, selected.size || assets.length)}
+              >
+                <Icon.Play size={11} /> Scan {selected.size ? `selected (${selected.size})` : `all (${assets.length})`}
+              </button>
+              <button
+                disabled={!assets.length || busy}
+                title="Climb the reachability ladder only — no fingerprinting"
+                onClick={() => void startReachability()}
+              >
+                <Icon.Search size={11} /> Reachability
+              </button>
+              <button
+                className="is-danger"
+                disabled={!busy}
+                onClick={async () => {
+                  activity.finish("cancelled", "Cancelled by operator");
+                  try {
+                    const result = await cancelProbe();
+                    toast.info(
+                      `Stopped: ${result.cancelled} cancelled, ${result.stopping} stopping`,
+                    );
+                    statusQ.refetch();
+                  } catch {
+                    toast.error("Could not stop the scan");
+                  }
+                }}
+              >
+                <Icon.X size={11} /> Stop
+              </button>
+              <button onClick={activity.clear}>Clear</button>
+            </>
+          }
+        />
+
+        <div className="asset-inline-form" style={{ marginTop: 10 }}>
+          <label className="asset-upload" title="Create many assets from a CSV file">
+            <Icon.Download size={13} />
+            {importing ? "Importing…" : "Import CSV"}
             <input
-              className="asset-filter-input"
-              placeholder="Filter by name, owner or technology"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(1);
+              type="file"
+              accept=".csv,text/csv"
+              disabled={importing}
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                setImporting(true);
+                try {
+                  const summary = await importAssets(file);
+                  setImportSummary(summary);
+                  queryClient.invalidateQueries({ queryKey: ["assets"] });
+                } catch (err) {
+                  const detail = (err as { response?: { data?: { detail?: string } } })?.response
+                    ?.data?.detail;
+                  toast.error(detail || "Could not import the file");
+                } finally {
+                  setImporting(false);
+                }
               }}
             />
-            <select value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
-              <option value="">All kinds</option>
-              {[...new Set(assets.map((a) => a.kind))].sort().map((kind) => (
-                <option key={kind} value={kind}>
-                  {KIND_LABEL[kind] ?? kind}
-                </option>
-              ))}
-            </select>
-            <select value={envFilter} onChange={(event) => setEnvFilter(event.target.value)}>
-              <option value="">All environments</option>
-              {environments.map((env) => (
-                <option key={env} value={env}>
-                  {env}
-                </option>
-              ))}
-            </select>
-            <select value={reachFilter} onChange={(event) => setReachFilter(event.target.value)}>
-              <option value="">Any reachability</option>
-              <option value="up">Reachable</option>
-              <option value="down">Unreachable</option>
-              <option value="never">Never checked</option>
-            </select>
-            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as SortKey)}>
-              <option value="name">Sort: name</option>
-              <option value="kind">Sort: kind</option>
-              <option value="environment">Sort: environment</option>
-              <option value="reachable">Sort: reachable first</option>
-              <option value="last_probe_at">Sort: recently scanned</option>
-            </select>
-            <span className="asset-muted" style={{ marginLeft: "auto" }}>
-              {filtered.length} of {assets.length}
-            </span>
-          </div>
-        )}
+          </label>
+          <a className="sccap-btn" href={assetsTemplateUrl()} download>
+            <Icon.Download size={13} /> Template
+          </a>
+          <button className="sccap-btn sccap-btn-primary" onClick={() => setCreateOpen(true)}>
+            <Icon.Plus size={14} /> Add asset
+          </button>
+          <span className="asset-muted" style={{ marginLeft: "auto" }}>
+            {selected.size ? `${selected.size} selected` : "select rows to scan a subset"}
+          </span>
+        </div>
+      </section>
+
+      <section className="sccap-card asset-card">
+        <AssetFiltersBar
+          assets={assets}
+          filters={filters}
+          onChange={(next) => {
+            setFilters(next);
+            setPage(1);
+          }}
+          count={filtered.length}
+        />
 
         {assets.length === 0 ? (
           <p className="asset-empty">
@@ -267,10 +288,11 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
               <table className="asset-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 32 }}>
+                    <th style={{ width: 34 }}>
                       <input
                         type="checkbox"
                         checked={visible.length > 0 && visible.every((a) => selected.has(a.id))}
+                        title="Select this page"
                         onChange={(event) =>
                           setSelected((current) => {
                             const next = new Set(current);
@@ -281,17 +303,15 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
                             return next;
                           })
                         }
-                        title="Select this page"
                       />
                     </th>
                     <th>Asset</th>
                     <th>Kind</th>
                     <th>Environment</th>
-                    <th>Last scanned</th>
-                    <th>Reachability</th>
-                    <th>Endpoints</th>
+                    <th>Hosts / ports</th>
                     <th>Technologies</th>
-                    <th>Packages</th>
+                    <th>Last scanned</th>
+                    <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -322,46 +342,35 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
                         </td>
                         <td>{KIND_LABEL[asset.kind] ?? asset.kind}</td>
                         <td>{asset.environment ?? "—"}</td>
+                        <td>
+                          {(asset.hosts ?? []).length > 0 ? (
+                            <>
+                              <div>{(asset.hosts ?? []).slice(0, 2).join(", ")}</div>
+                              <div className="asset-muted">
+                                {(asset.ports ?? []).length
+                                  ? `ports ${(asset.ports ?? []).join(", ")}`
+                                  : "no port recorded"}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="asset-muted">no host recorded</span>
+                          )}
+                        </td>
+                        <td title={(asset.technology_names ?? []).join(", ")}>
+                          {(asset.technology_names ?? []).length
+                            ? (asset.technology_names ?? []).slice(0, 3).join(", ")
+                            : "—"}
+                        </td>
                         <td title={asset.last_probe_at ?? "never scanned"}>
                           {when(asset.last_probe_at)}
                         </td>
                         <td>
-                          <span
-                            className={`asset-reach is-${
-                              asset.reachable === true
-                                ? "ok"
-                                : asset.unreachable_reason === "filtered"
-                                  ? "unknown"
-                                  : asset.reachable === false
-                                    ? "bad"
-                                    : "unknown"
-                            }`}
-                            title={asset.last_probe_evidence ?? undefined}
-                          >
-                            {asset.reachable === true
-                              ? "up"
-                              : asset.unreachable_reason === "filtered"
-                                ? "filtered"
-                                : asset.reachable === false
-                                  ? `down (${asset.unreachable_reason ?? "?"})`
-                                  : "unknown"}
-                            {asset.last_probe_level ? ` · L${asset.last_probe_level}` : ""}
-                          </span>
-                          {asset.last_probe_evidence && (
-                            <span className="asset-muted asset-evidence">
-                              {asset.last_probe_evidence}
-                            </span>
-                          )}
+                          <AssetStatus asset={asset} />
                         </td>
-                        <td>{asset.services ?? 0}</td>
-                        <td title={(asset.technology_names ?? []).join(", ")}>
-                          {asset.technologies ?? 0}
-                        </td>
-                        <td>{asset.dependencies ?? 0}</td>
                       </tr>
                       {openId === asset.id && (
                         <tr key={`${asset.id}-detail`} className="asset-row-detail">
-                          <td colSpan={9}>
+                          <td colSpan={8}>
                             {detailQ.isLoading ? (
                               <p className="asset-muted">Loading details…</p>
                             ) : detailQ.data ? (
@@ -388,8 +397,8 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
 
             <div className="asset-pager">
               <span className="asset-muted">
-                Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)}{" "}
-                of {filtered.length}
+                Showing {(currentPage - 1) * pageSize + 1}–
+                {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
               </span>
               <label className="asset-muted">
                 Rows
@@ -430,78 +439,6 @@ export default function AssetsTab({ probeActive }: { probeActive: boolean }) {
           </>
         )}
       </section>
-
-      <Modal
-        open={scanOpen}
-        onClose={() => setScanOpen(false)}
-        title="Scan asset information"
-        width={640}
-        footer={
-          <>
-            <button className="sccap-btn" onClick={() => setScanOpen(false)}>
-              Cancel
-            </button>
-            <button
-              className="sccap-btn sccap-btn-primary"
-              disabled={probe.isPending}
-              onClick={() => probe.mutate(selected.size ? [...selected] : null)}
-            >
-              {probe.isPending
-                ? "Starting…"
-                : `Scan ${selected.size || assets.length} asset(s)`}
-            </button>
-          </>
-        }
-      >
-        <p className="asset-muted">
-          Each asset is checked for reachability first — a host that will not answer is marked
-          and skipped, so the scan is not spent on it — then nmap and whatweb identify what it
-          runs.
-        </p>
-        <div className="asset-inline-form" style={{ marginBottom: 8 }}>
-          <button
-            className="sccap-btn sccap-btn-sm"
-            onClick={() => setSelected(new Set(assets.map((a) => a.id)))}
-          >
-            Select all
-          </button>
-          <button className="sccap-btn sccap-btn-sm" onClick={() => setSelected(new Set())}>
-            Select none
-          </button>
-          <span className="asset-muted">{selected.size} selected</span>
-        </div>
-        <div className="asset-pick-list">
-          {assets.map((asset) => (
-            <label key={asset.id} className="asset-pick-row">
-              <input
-                type="checkbox"
-                checked={selected.has(asset.id)}
-                onChange={(event) =>
-                  setSelected((current) => {
-                    const next = new Set(current);
-                    if (event.target.checked) next.add(asset.id);
-                    else next.delete(asset.id);
-                    return next;
-                  })
-                }
-              />
-              <strong>{asset.name}</strong>
-              <span className="asset-muted">{KIND_LABEL[asset.kind] ?? asset.kind}</span>
-              <span
-                className={`asset-reach is-${
-                  asset.reachable === true ? "ok" : asset.reachable === false ? "bad" : "unknown"
-                }`}
-              >
-                {asset.reachable === true
-                  ? "reachable"
-                  : asset.reachable === false
-                    ? "unreachable"
-                    : "never checked"}
-              </span>
-            </label>
-          ))}
-        </div>
-      </Modal>
 
       <Modal
         open={importSummary !== null}
@@ -656,5 +593,3 @@ function CreateAssetModal({
     </Modal>
   );
 }
-
-

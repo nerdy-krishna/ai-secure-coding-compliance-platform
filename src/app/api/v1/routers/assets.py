@@ -188,12 +188,19 @@ def _service_dict(service_row: am.AssetService) -> dict[str, Any]:
 @router.get("")
 async def list_assets(user=Depends(current_active_user)) -> dict[str, Any]:
     assets = await service.list_assets(user.tenant_id)
-    counts: dict[str, dict[str, int]] = {}
+    counts: dict[str, dict[str, Any]] = {}
     for asset in assets:
         try:
             technologies = await service.list_technologies(user.tenant_id, asset.id)
+            service_rows = await service.list_services(user.tenant_id, asset.id)
             counts[str(asset.id)] = {
-                "services": len(await service.list_services(user.tenant_id, asset.id)),
+                "services": len(service_rows),
+                # The addresses themselves, not just how many there are: an asset named
+                # "customer portal" is only actionable if the list says where it lives.
+                "hosts": sorted(
+                    {row.host for row in service_rows if row.host}
+                )[:6],
+                "ports": sorted({row.port for row in service_rows if row.port})[:12],
                 "dependencies": len(await service.list_dependencies(user.tenant_id, asset.id)),
                 "technologies": len(technologies),
                 # Names, not just the count: the list is filtered by technology.
@@ -312,6 +319,14 @@ async def list_events(
     }
 
 
+@router.get("/events/cursor")
+async def events_cursor(user=Depends(current_active_user)) -> dict[str, int]:
+    """Where the stream is right now: a console starts from here, not from the beginning."""
+    from app.assets import events as events_mod
+
+    return {"last_id": await events_mod.latest_id(user.tenant_id)}
+
+
 @router.delete("/events", status_code=204)
 async def clear_events(user=Depends(current_active_user)) -> None:
     from app.assets import events as events_mod
@@ -404,6 +419,19 @@ async def add_service(
 async def probe_status(user=Depends(current_active_user)) -> dict[str, Any]:
     """Whether a probe is in flight, so the page can say so without the console."""
     return await service.probe_status(user.tenant_id)
+
+
+@router.post("/check/stop")
+async def stop_check(user=Depends(current_active_user)) -> dict[str, Any]:
+    """Ask a running CVE check to stop at its next safe boundary.
+
+    A check runs inside the request that started it, so this is cooperative: the flag is
+    read between assets and between phases, and the check reports what it had finished.
+    """
+    from app.assets import cancel as cancel_mod
+
+    cancel_mod.request(user.tenant_id)
+    return {"stopping": True}
 
 
 @router.post("/probe/cancel")
@@ -568,7 +596,10 @@ async def research(
     for cve_id in body.cve_ids:
         items.append(
             await cve_workflow.research_cve(
-                cve_id, design_check=body.design_check, actor_user_id=user.id
+                cve_id,
+                design_check=body.design_check,
+                actor_user_id=user.id,
+                tenant_id=user.tenant_id,
             )
         )
     return {"items": items}

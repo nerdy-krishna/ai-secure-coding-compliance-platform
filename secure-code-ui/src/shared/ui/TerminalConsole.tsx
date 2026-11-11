@@ -35,8 +35,24 @@ export interface ConsoleLine {
   detail?: unknown;
 }
 
+export type ConsolePhase = "idle" | "running" | "completed" | "cancelled" | "error";
+
+export interface ConsolePhaseInfo {
+  phase: ConsolePhase;
+  /** Overrides the default label, e.g. "Researching". */
+  label?: string;
+  /** Shown next to the badge, e.g. "3 of 12 assets". */
+  detail?: string;
+}
+
 interface Props {
   title: string;
+  /** Newest entry first — the newest line is where the eye lands. */
+  order?: "oldest-first" | "newest-first";
+  /** The scan's own state, shown as a badge in the bar. */
+  phase?: ConsolePhaseInfo;
+  /** Buttons that belong to the scan, not the console (Start, Stop, ...). */
+  actions?: React.ReactNode;
   lines: ConsoleLine[];
   /** Shown when there is nothing yet. */
   emptyHint?: string;
@@ -90,8 +106,19 @@ const Elapsed: React.FC<{ startedAt: string | null | undefined; finished?: boole
   );
 };
 
+const PHASE_LABEL: Record<ConsolePhase, string> = {
+  idle: "Idle",
+  running: "In progress",
+  completed: "Completed",
+  cancelled: "Cancelled",
+  error: "Error",
+};
+
 const TerminalConsole: React.FC<Props> = ({
   title,
+  order = "oldest-first",
+  phase,
+  actions,
   lines,
   emptyHint = "No activity yet.",
   live = false,
@@ -109,23 +136,32 @@ const TerminalConsole: React.FC<Props> = ({
   const [expandedView, setExpandedView] = useState(false);
   const [levels, setLevels] = useState<Set<ConsoleLevel>>(new Set());
 
-  const visible = useMemo(
+  const filtered = useMemo(
     () => (levels.size === 0 ? lines : lines.filter((line) => levels.has(line.level))),
     [lines, levels],
+  );
+  // Newest first: the newest entry is at the top and the reader scrolls down for history.
+  const visible = useMemo(
+    () => (order === "newest-first" ? [...filtered].reverse() : filtered),
+    [filtered, order],
   );
 
   // Freeze the view while paused: the stream keeps arriving, the scroll does not move.
   useEffect(() => {
     if (!pinned || paused) return;
     const body = bodyRef.current;
-    if (body) body.scrollTop = body.scrollHeight;
-  }, [visible.length, pinned, paused]);
+    if (!body) return;
+    body.scrollTop = order === "newest-first" ? 0 : body.scrollHeight;
+  }, [visible.length, pinned, paused, order]);
 
   const onScroll = () => {
     const body = bodyRef.current;
     if (!body) return;
-    const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
-    setPinned(atBottom);
+    const atEdge =
+      order === "newest-first"
+        ? body.scrollTop < 24
+        : body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+    setPinned(atEdge);
   };
 
   const toggleLevel = (level: ConsoleLevel) => {
@@ -199,12 +235,22 @@ const TerminalConsole: React.FC<Props> = ({
           <i /> <i /> <i />
         </span>
         <span className="console-title">{title}</span>
-        {live && !paused && <span className="console-live" title="Receiving events" />}
+        {phase && (
+          <span
+            className={`console-phase is-${phase.phase}`}
+            title={phase.detail ?? PHASE_LABEL[phase.phase]}
+          >
+            {phase.phase === "running" && <span className="console-phase-dot" />}
+            {phase.label ?? PHASE_LABEL[phase.phase]}
+          </span>
+        )}
+        {live && !paused && !phase && <span className="console-live" title="Receiving events" />}
         <span className="console-count">
           {visible.length} line{visible.length === 1 ? "" : "s"}
           {counts.error ? ` · ${counts.error} error${counts.error === 1 ? "" : "s"}` : ""}
           {counts.warning ? ` · ${counts.warning} warning${counts.warning === 1 ? "" : "s"}` : ""}
         </span>
+        {actions && <div className="console-actions">{actions}</div>}
         <div className="console-tools">
           {(["error", "warning", "success", "info", "detail"] as ConsoleLevel[]).map((level) => (
             <button
@@ -313,7 +359,7 @@ const TerminalConsole: React.FC<Props> = ({
             setPinned(true);
             setPaused(false);
             const body = bodyRef.current;
-            if (body) body.scrollTop = body.scrollHeight;
+            if (body) body.scrollTop = order === "newest-first" ? 0 : body.scrollHeight;
           }}
         >
           <Icon.ChevronD size={12} /> {live ? "Jump to latest" : "Jump to end"}

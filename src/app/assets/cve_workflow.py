@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+from uuid import UUID
 
 from sqlalchemy import select
 
@@ -48,9 +49,24 @@ async def _store(cve_id: str, research: dict[str, Any], template: Optional[str])
 
 
 async def research_cve(
-    cve_id: str, *, design_check: bool = True, actor_user_id: Optional[int] = None
+    cve_id: str,
+    *,
+    design_check: bool = True,
+    actor_user_id: Optional[int] = None,
+    tenant_id: Optional[UUID] = None,
 ) -> dict[str, Any]:
-    """Everything an operator needs to decide whether to test this CVE."""
+    """Everything an operator needs to decide whether to test this CVE.
+
+    ``tenant_id`` is what makes the work visible: research narrates itself into the asset
+    event stream, so the operator's console says what is happening instead of going quiet
+    until the answer appears.
+    """
+    from app.assets import events as events_mod
+
+    async def note(message: str, *, level: str = "info", payload: Any = None) -> None:
+        if tenant_id is not None:
+            await events_mod.emit(tenant_id, message, level=level, kind="research", payload=payload)
+
     from app.assets import enrichment
     from app.pentest.engine import resolve_default_llm_config_id
     from app.infrastructure.llm_client import get_llm_client
@@ -59,6 +75,7 @@ async def research_cve(
     llm_config_id = await resolve_default_llm_config_id()
     llm = await get_llm_client(llm_config_id) if llm_config_id else None
 
+    await note(f"{key}: reading the corpus (and the sources, if it is missing)")
     lookup = await enrichment.ensure_cve(key, llm=llm)
     if not lookup.get("present"):
         return {
@@ -80,6 +97,13 @@ async def research_cve(
     packages = sorted(
         {f"{row.ecosystem}/{row.package}" for row in ranges if row.package}
     )
+    await note(
+        f"{key}: {record.severity or 'unrated'}"
+        + (f" · CVSS {record.cvss_score}" if record.cvss_score is not None else "")
+        + f" · {len(ranges)} affected range(s) · {len(_exploit_references(record))} exploit "
+        "reference(s)"
+    )
+
     summary: dict[str, Any] = {
         "cve_id": key,
         "source": record.source,
@@ -110,17 +134,29 @@ async def research_cve(
                            "api key", "rate limit", "timeout")
         )
 
+    # A stored research row can carry an old model failure: an HTTP error is not an
+    # explanation of a vulnerability, so it is treated as "no research yet".
+    if summary["research"] and _looks_like_error(summary["research"].get("mechanism")):
+        summary["research_error"] = summary["research"].get("mechanism")
+        summary["research"] = None
+
     if not summary["research"] and llm is not None:
         from app.assets import verification
 
         researched = await verification.research_cve(
             llm, cve=record, ranges=ranges, actor_user_id=actor_user_id
         )
+        await note(f"{key}: asking the model what the flaw actually is")
         if _looks_like_error(researched.mechanism):
             # The model could not be reached; say so instead of dressing the error up as
             # an explanation of the vulnerability.
             summary["research_error"] = researched.mechanism
             summary["research"] = None
+            await note(
+                f"{key}: research unavailable — the model could not be reached "
+                f"({researched.mechanism[:80]})",
+                level="warning",
+            )
         else:
             summary["research"] = researched.model_dump()
         summary["template"] = summary["template"] or None
@@ -140,11 +176,21 @@ async def research_cve(
             asset=None,  # no asset matched yet: the check is designed for the CVE
             actor_user_id=actor_user_id,
         )
+        await note(f"{key}: designing the detection check")
         if generated:
             summary["template"] = generated
             summary["template_present"] = True
+            await note(f"{key}: detection check designed", level="success")
+
+    elif design_check and not ranges:
+        await note(
+            f"{key}: no affected range stored, so no check can be designed — the verdict will "
+            "come from the inventory",
+            level="warning",
+        )
 
     await _store(key, summary["research"] or {}, summary["template"])
+    await note(f"{key}: research complete", level="success")
     return summary
 
 
