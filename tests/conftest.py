@@ -45,3 +45,26 @@ def _coverage_does_not_touch_the_database(monkeypatch):
 
     monkeypatch.setattr(coverage_mod, "rows", _no_rows)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _goals_do_not_touch_the_database_or_the_model(monkeypatch):
+    """Goals are read into every prompt and decomposed once per run — neither belongs in a unit
+    test of the loop. Tests that exercise the goals role call `goals.render` / `goals.decompose`
+    directly with their own fakes.
+    """
+    from app.pentest import goals as goals_mod
+
+    async def _no_rows(_run_id):
+        return []
+
+    async def _no_block(_run_id):
+        return ""
+
+    async def _no_decompose(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(goals_mod, "rows", _no_rows)
+    monkeypatch.setattr(goals_mod, "render_for_prompt", _no_block)
+    monkeypatch.setattr(goals_mod, "decompose", _no_decompose)
+    yield

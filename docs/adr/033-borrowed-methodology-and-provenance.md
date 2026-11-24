@@ -64,6 +64,9 @@ its own. This is the same rule we already apply to CVE verdicts, generalised to 
 | Deferred tool schemas, on-demand discovery | **Norma (Apache-2.0)** | reimplemented over our registry — P8 |
 | Skills as `SKILL.md` packages injected on demand | **Norma (Apache-2.0)** | reimplemented — P8 |
 | Evidence-gated lessons, withdrawn on disposition reversal | ARTEX `docs/rsi-lessons.md` (behaviour) | reimplemented — P7 |
+| Role separation: goals / planner / worker / re-tester, cheap model for planning | ARTEX architecture docs (behaviour) | reimplemented — `pentest/roles.py`, `pentest/goals.py` |
+| Adversarial gate on five axes, machine-answered where the machine knows | ARTEX prompts (behaviour) | reimplemented — `pentest/gate.py` |
+| Re-test by replaying the captured request; the responses decide | ARTEX `retester` (behaviour) | reimplemented — `pentest/retester.py` |
 
 ### 5. What we deliberately keep from our own engine
 
@@ -71,6 +74,26 @@ The scope ledger with `rerun_reason` (a better answer to "never re-scan a covere
 anything in either project), the harness/diagnose allowlist, the three approval gates, severity
 normalisation with the unknown-CWE ceiling, and plan-first assessment (ADR-032). Borrowing must
 not regress these.
+
+## Roles
+
+The loop is split by job, not by process:
+
+| Role | Does | Model |
+|---|---|---|
+| `goals` | deliverables and constraints, before any plan | cheapest priced config |
+| `planner` | hypotheses and first actions, from recon + goals | cheapest priced config |
+| `worker` | executes, records facts, records coverage | the run's model |
+| `judge` | argues against each finding on three axes | cheapest priced config |
+| `retester` | replays the captured request and compares | no model at all |
+
+The cheap model is chosen deterministically: an operator pin (`PENTEST_*_LLM_CONFIG_ID`), else
+the lowest resolved input price among configured models, else the run's model. A model with no
+known price is never assumed cheap. Every choice is emitted on the run's event stream, so spend
+per role is attributable rather than one anonymous number.
+
+The judge is capped at 12 findings per run, because a scanner can report dozens and arguing each
+one costs more than the assessment.
 
 ## Consequences
 
