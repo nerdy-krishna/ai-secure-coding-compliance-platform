@@ -242,7 +242,7 @@ def test_the_agent_announces_each_call_with_its_arguments_and_call_id(monkeypatc
         def spec(self, name):
             return registry.spec(name)
 
-        def catalog(self, disabled):
+        def catalog(self, disabled, *, expanded=None):
             return registry.catalog(disabled)
 
         async def invoke(self, name, ctx, args):

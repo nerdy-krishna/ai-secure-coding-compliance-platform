@@ -57,7 +57,8 @@ its own. This is the same rule we already apply to CVE verdicts, generalised to 
 | Adversarial gate on five axes; measured impact; dedupe by root cause | ARTEX prompts (behaviour) | reimplemented — P3 |
 | Evidence bound to captured traffic | ARTEX `docs/vulnerability-traffic-evidence.md` | reimplemented over a mitmproxy sidecar — P6 |
 | Nonce-framed untrusted tool output | ARTEX ADR-001 (idea) | reimplemented — `pentest/untrusted.py` |
-| Deferred tool schemas, on-demand discovery | Norma (Apache-2.0) | pending (P8) |
+| Deferred tool schemas, on-demand discovery | Norma (Apache-2.0) | reimplemented — `ToolRegistry.catalog(expanded=…)` |
+| Skills as `SKILL.md` packages injected on demand | Norma (Apache-2.0) | reimplemented as playbooks — `pentest/playbooks/` |
 | Dial-time DNS pinning, redirect re-check | ARTEX ADR-002 (idea) | reimplemented in `pentest/ssrf.py` |
 | Per-host egress governor (bucket, jitter, backoff) | ARTEX `egress/` (behaviour) | reimplemented — `pentest/egress.py` |
 | Shell allowlist grammar (no wrapper/pipeline inheritance) | ARTEX `intercept` (behaviour) | reimplemented — `tools/harness.py` |
@@ -68,7 +69,7 @@ its own. This is the same rule we already apply to CVE verdicts, generalised to 
 | Compaction: snip / micro / collapse / auto, circuit breaker, reactive recovery | **Norma (Apache-2.0)** | adapted into `pentest/memory.py` — P4 |
 | Deferred tool schemas, on-demand discovery | **Norma (Apache-2.0)** | reimplemented over our registry — P8 |
 | Skills as `SKILL.md` packages injected on demand | **Norma (Apache-2.0)** | reimplemented — P8 |
-| Evidence-gated lessons, withdrawn on disposition reversal | ARTEX `docs/rsi-lessons.md` (behaviour) | reimplemented — P7 |
+| Evidence-gated lessons, withdrawn on disposition reversal | ARTEX `docs/rsi-lessons.md` (behaviour) | reimplemented — `pentest/lessons.py` |
 | Role separation: goals / planner / worker / re-tester, cheap model for planning | ARTEX architecture docs (behaviour) | reimplemented — `pentest/roles.py`, `pentest/goals.py` |
 | Adversarial gate on five axes, machine-answered where the machine knows | ARTEX prompts (behaviour) | reimplemented — `pentest/gate.py` |
 | Re-test by replaying the captured request; the responses decide | ARTEX `retester` (behaviour) | reimplemented — `pentest/retester.py` |
