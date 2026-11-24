@@ -29,3 +29,19 @@ def _facts_do_not_touch_the_database(monkeypatch):
 
     monkeypatch.setattr(facts_mod, "for_run", _empty)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _coverage_does_not_touch_the_database(monkeypatch):
+    """Same reason as `_facts_do_not_touch_the_database`: the ledger read belongs to the loop.
+
+    Tests that care about coverage call `classify_gaps` / `render_for_prompt` directly, which
+    are pure functions; nothing in a unit test needs the table.
+    """
+    from app.pentest import coverage as coverage_mod
+
+    async def _no_rows(_run_id):
+        return []
+
+    monkeypatch.setattr(coverage_mod, "rows", _no_rows)
+    yield
