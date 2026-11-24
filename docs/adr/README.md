@@ -42,3 +42,4 @@ marked superseded. ADR-029 is the authoritative description of the current engin
 - [ADR-030: Assessment memory — durable transcript with compaction](030-assessment-memory.md)
 - [ADR-031: Asset inventory and CVE applicability verdicts](031-cve-applicability.md)
 - [ADR-032: Plan-first assessment loop with stored evidence](032-plan-first-assessment-loop.md)
+- [ADR-033: Borrowed methodology, and the provenance of every claim](033-borrowed-methodology-and-provenance.md)
