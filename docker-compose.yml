@@ -266,6 +266,36 @@ services:
   # sqlmap, ffuf, hydra, whatweb, testssl, hashcat, Chromium) and the LLM loop.
   # It polls the shared database for queued runs and streams events/findings
   # straight into Postgres — no broker, no signing, no qualification, no limits.
+  # Recording proxy for the scanners' own traffic. The engine captures its HTTP calls itself;
+  # this sees what nuclei, sqlmap, whatweb and ZAP do, which is otherwise invisible.
+  # Opt-in: start it with `--profile traffic-proxy` and point the tools at it.
+  traffic-proxy:
+    restart: unless-stopped
+    profiles: ["traffic-proxy"]
+    image: mitmproxy/mitmproxy:11.0.2
+    container_name: sccap_traffic_proxy
+    command:
+      - mitmdump
+      - --mode
+      - regular
+      - --listen-port
+      - "8080"
+      - --set
+      - confdir=/data
+      - --scripts
+      - /opt/sccap/mitm_capture.py
+    environment:
+      SCCAP_CAPTURE_URL: ${SCCAP_CAPTURE_URL:-http://app:8000/api/v1/pentest/capture}
+      SCCAP_CAPTURE_TOKEN: ${SCCAP_CAPTURE_TOKEN:-}
+      SCCAP_RUN_ID: ${SCCAP_RUN_ID:-}
+    volumes:
+      - ./deploy/pentest-proxy:/opt/sccap:ro
+      - mitm_data:/data
+    networks:
+      - scpnetwork
+    expose:
+      - "8080"
+
   pentest-engine:
     restart: unless-stopped
     profiles: ["pentesting-v5"]
@@ -732,6 +762,7 @@ services:
 volumes:
   postgres_data:
   rabbitmq_data:
+  mitm_data:
   loki-data:
   grafana-data:
   langfuse_postgres_data:

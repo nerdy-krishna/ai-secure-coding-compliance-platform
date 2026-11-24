@@ -56,8 +56,13 @@ its own. This is the same rule we already apply to CVE verdicts, generalised to 
 | Coverage ledger: five outcomes, "unexamined is never clean", gap kinds | ARTEX `db/coverage_ledger.go` (behaviour) | reimplemented — P2 |
 | Adversarial gate on five axes; measured impact; dedupe by root cause | ARTEX prompts (behaviour) | reimplemented — P3 |
 | Evidence bound to captured traffic | ARTEX `docs/vulnerability-traffic-evidence.md` | reimplemented over a mitmproxy sidecar — P6 |
-| Nonce-framed untrusted tool output | ARTEX ADR-001 (idea) | reimplemented — P5 |
-| Dial-time DNS pinning, redirect re-check | ARTEX ADR-002 (idea) | reimplemented in `pentest/ssrf.py` — P5 |
+| Nonce-framed untrusted tool output | ARTEX ADR-001 (idea) | reimplemented — `pentest/untrusted.py` |
+| Deferred tool schemas, on-demand discovery | Norma (Apache-2.0) | pending (P8) |
+| Dial-time DNS pinning, redirect re-check | ARTEX ADR-002 (idea) | reimplemented in `pentest/ssrf.py` |
+| Per-host egress governor (bucket, jitter, backoff) | ARTEX `egress/` (behaviour) | reimplemented — `pentest/egress.py` |
+| Shell allowlist grammar (no wrapper/pipeline inheritance) | ARTEX `intercept` (behaviour) | reimplemented — `tools/harness.py` |
+| Deadline contract, wrap-up priority, stagnation detection | ARTEX prompts (behaviour) | reimplemented — `pentest/doctrine.py`, `pentest/stagnation.py` |
+| Findings bound to captured traffic; HAR export | ARTEX `docs/vulnerability-traffic-evidence.md` (behaviour) | reimplemented — `pentest/traffic.py`, `deploy/pentest-proxy/` |
 | Permission pipeline: allow/deny/ask, deny-priority, four stages | **Norma (Apache-2.0)** | translated to Python — P5 |
 | Lifecycle hooks (PreToolUse/PostToolUse/Stop) | **Norma (Apache-2.0)** | translated to Python — P5 |
 | Compaction: snip / micro / collapse / auto, circuit breaker, reactive recovery | **Norma (Apache-2.0)** | adapted into `pentest/memory.py` — P4 |
