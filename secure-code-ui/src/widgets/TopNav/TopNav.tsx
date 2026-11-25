@@ -262,8 +262,10 @@ const UserMenu: React.FC<UserMenuProps> = ({
     staleTime: 60_000,
     retry: false,
   });
-  // A UI one commit behind its API is the exact confusion this panel exists to remove: the
-  // badge reads the API, so it looks current while the bundle is old.
+  // The bundle is stale when it is older than the *deployment* — not older than the API image.
+  // A selectively rebuilt API image legitimately sits on the previous commit while the
+  // deployment is current, and comparing against the image would cry stale every time the
+  // update touched only the UI.
   const uiStale = Boolean(
     build?.commit && uiBuild.data?.commit && build.commit !== uiBuild.data.commit,
   );
@@ -485,18 +487,36 @@ const UserMenu: React.FC<UserMenuProps> = ({
             </dd>
             <dt>Release</dt>
             <dd>{build.version}</dd>
-            <dt>Commit</dt>
+            <dt>Deployed commit</dt>
             <dd>
               {build.commit ? (
                 <>
                   <code>{build.commit}</code> <CopyButton value={build.commit} title="Copy commit" />
                 </>
               ) : (
-                "not recorded — this image was built without provenance"
+                "not recorded — this deployment has no provenance"
               )}
             </dd>
-            <dt>Built at</dt>
-            <dd>{build.built_at ?? "unknown"}</dd>
+            <dt>API image</dt>
+            <dd>
+              {build.image_commit ? (
+                <>
+                  <code>{build.image_commit.slice(0, 8)}</code>
+                  {build.image_behind ? (
+                    <span className="asset-muted">
+                      {" "}
+                      — built before the deployed commit; this update did not touch backend source
+                    </span>
+                  ) : (
+                    <span className="asset-muted"> — matches the deployment</span>
+                  )}
+                </>
+              ) : (
+                <span className="asset-muted">not recorded</span>
+              )}
+            </dd>
+            <dt>Deployed at</dt>
+            <dd>{build.deployed_at ?? build.built_at ?? "unknown"}</dd>
             <dt>Database schema</dt>
             <dd>{build.migration_head ?? "not migrated"}</dd>
             <dt>Environment</dt>

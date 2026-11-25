@@ -58,6 +58,14 @@ _RELEASE_REPO = os.environ.get(
 _BUILD_COMMIT = os.environ.get("SCCAP_BUILD_COMMIT", "").strip()
 _BUILD_TIME = os.environ.get("SCCAP_BUILD_TIME", "").strip()
 _BUILD_VERSION = os.environ.get("SCCAP_BUILD_VERSION", "").strip()
+#: The commit the *host* deployed, written into .env by `./setup.sh --update`.
+#:
+#: The image stamp answers "what code is this container built from"; this answers "what version
+#: is deployed". They differ legitimately: an update that only touches the UI rebuilds the UI and
+#: leaves the API image alone, so the API's own stamp stays at the previous commit while the
+#: deployment is current. Reporting only the image stamp made that look like a failed update.
+_DEPLOYED_COMMIT = os.environ.get("SCCAP_DEPLOYED_COMMIT", "").strip()
+_DEPLOYED_AT = os.environ.get("SCCAP_DEPLOYED_AT", "").strip()
 
 
 def running_version() -> str:
@@ -91,9 +99,25 @@ def build_label(version: str, commit: str) -> str:
     return f"{version}+{short}"
 
 
-def running_commit() -> str:
-    """Commit the image was built from, else the checkout's HEAD."""
+def deployed_commit() -> str:
+    """The commit the host deployed, when the deployment recorded one."""
+    return _DEPLOYED_COMMIT
 
+
+def image_commit() -> str:
+    """The commit this image was built from."""
+    return _BUILD_COMMIT
+
+
+def running_commit() -> str:
+    """The effective commit: what the deployment is at, else what the image was built from.
+
+    Deployment first on purpose. "Am I running the update?" is a question about the host, and a
+    selectively rebuilt image is not evidence either way.
+    """
+
+    if _DEPLOYED_COMMIT:
+        return _DEPLOYED_COMMIT
     if _BUILD_COMMIT:
         return _BUILD_COMMIT
     for candidate in (".git/HEAD", "../.git/HEAD"):
@@ -135,6 +159,15 @@ async def get_version(
         "version": version,
         "commit": commit,
         "commit_short": commit[:8],
+        # The deployment and the image are reported separately: a selective rebuild leaves the
+        # image stamp behind, and hiding that made an incomplete update look complete (and, more
+        # often, a complete one look stale).
+        "deployed_commit": _DEPLOYED_COMMIT or None,
+        "deployed_at": _DEPLOYED_AT or None,
+        "image_commit": _BUILD_COMMIT or None,
+        "image_behind": bool(
+            _DEPLOYED_COMMIT and _BUILD_COMMIT and _DEPLOYED_COMMIT != _BUILD_COMMIT
+        ),
         # What the UI shows. It changes on every successful update because the
         # commit changes, so "did the update actually deploy?" is answerable from
         # the browser.

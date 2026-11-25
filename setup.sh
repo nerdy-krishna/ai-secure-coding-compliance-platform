@@ -757,6 +757,16 @@ _sccap_running_build_commit() {
         | grep -oE '^[0-9a-f]{7,40}' || true
 }
 
+_sccap_record_deployed_env() {
+    # The image stamp says what code a container was built from; this says what version the host
+    # deployed. They differ after a selective rebuild — an update that touches only the UI leaves
+    # the API image on the previous commit — and reporting only the image stamp made a finished
+    # update look stale, and an unfinished one look finished.
+    local target="$1"
+    _sccap_set_env_kv "SCCAP_DEPLOYED_COMMIT" "$target"
+    _sccap_set_env_kv "SCCAP_DEPLOYED_AT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
 _sccap_verify_built_commits() {
     # Every image the update rebuilt must carry the commit being deployed.
     #
@@ -773,14 +783,15 @@ _sccap_verify_built_commits() {
         fi
         stamp=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null \
             | sed -n 's/^SCCAP_BUILD_COMMIT=//p' | head -1)
-        if [ -z "$stamp" ]; then
-            echo "[!] $service carries no build stamp — its image predates stamping or was not rebuilt."
-            failed=1
-        elif [ "$stamp" != "$target" ]; then
-            echo "[!] $service is running ${stamp:0:8}, not ${target:0:8} — its image is stale."
+        if [ "$stamp" = "$target" ]; then
+            echo "[+] $service: ${stamp:0:8}"
+        elif [ -z "$stamp" ]; then
+            echo "[!] $service carries no build stamp — its image predates stamping."
             failed=1
         else
-            echo "[+] $service: ${stamp:0:8}"
+            # A service that was not rebuilt keeps its previous stamp, which is correct: its
+            # source did not change. The deploy itself is recorded separately in .env.
+            echo "[i] $service: unchanged image ${stamp:0:8} (no source change)"
         fi
     done
     return "$failed"
@@ -1018,6 +1029,7 @@ _sccap_run_update() {
             return 1
         fi
     fi
+    _sccap_record_deployed_env "$target"
     _sccap_align_certbot_ownership
     _sccap_align_fluentd_ownership
     docker compose up -d || { echo "[!] Start failed; run ./setup.sh --rollback"; return 1; }
@@ -1029,7 +1041,7 @@ _sccap_run_update() {
     # The version badge is the API's. Before this check, a deployment could run a UI one update
     # behind while the badge showed the newest commit — which is exactly what "the version looks
     # right but nothing changed" was. Every rebuilt image must carry the target commit.
-    if ! _sccap_verify_built_commits "$target" app "${build_targets[@]}"; then
+    if ! _sccap_verify_built_commits "$target" "${build_targets[@]}"; then
         echo "[!] One or more images do not carry ${target:0:8}. The update is incomplete."
         echo "    Rebuild the service named above: docker compose build <service>"
         echo "    Then: docker compose up -d <service>   (no deploy state was recorded)"

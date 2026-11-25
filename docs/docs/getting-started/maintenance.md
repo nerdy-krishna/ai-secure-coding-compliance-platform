@@ -20,6 +20,24 @@ action; `-y` skips the confirmation prompts.
 | `./setup.sh --repair-tls` | Re-create TLS material from `.env` and exit | The broken certificate | Everything else |
 | `./setup.sh -h` | Print the same table from the terminal | — | — |
 
+## Which version am I running?
+
+`GET /api/v1/system/version` reports three commits, because they can differ:
+
+| Field | Means |
+|---|---|
+| `commit` / `deployed_commit` | what the host deployed (`./setup.sh --update` writes it into `.env`) |
+| `image_commit` | what the API container was built from |
+| UI build (`/version.json`) | what the browser bundle was built from |
+
+A selective rebuild is why they differ: an update that touches only `secure-code-ui/` rebuilds the
+UI and leaves the API image on the previous commit. `image_behind: true` says exactly that, and the
+version dialog shows the UI build beside the deployed commit so a stale bundle is visible instead
+of plausible.
+
+The update also verifies itself: every image it rebuilt must carry the target commit, or the
+update stops before recording a deployment commit.
+
 ## Re-running the installer
 
 `./setup.sh` on an installation that has already been bootstrapped **keeps `.env`

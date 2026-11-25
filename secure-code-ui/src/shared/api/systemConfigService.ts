@@ -189,6 +189,13 @@ export interface BuildVersion {
   built_at: string | null;
   environment: string;
   migration_head: string | null;
+  /** The commit the host deployed (written by setup.sh), when known. */
+  deployed_commit?: string | null;
+  deployed_at?: string | null;
+  /** The commit the API image was built from. */
+  image_commit?: string | null;
+  /** True when the image predates the deployed commit (selective rebuild). */
+  image_behind?: boolean;
 }
 
 export async function getBuildVersion(): Promise<BuildVersion> {
