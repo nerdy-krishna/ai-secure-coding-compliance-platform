@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { Icon } from "../../shared/ui/Icon";
 import SemgrepReadinessBanner from "../../features/semgrep/SemgrepReadinessBanner";
+import { getPentestSummary } from "../../shared/api/pentestService";
 import UpdateAvailableBanner from "../../features/system/UpdateAvailableBanner";
 import { dashboardService } from "../../shared/api/dashboardService";
 import { scanService } from "../../shared/api/scanService";
@@ -69,6 +70,57 @@ function Section({
  * The page answers "what is the state of my estate" for code scanning and for
  * pentesting side by side, and links into the pages that hold the detail.
  */
+function PentestOverview() {
+  const summary = useQuery({
+    queryKey: ["pentest", "summary"],
+    queryFn: getPentestSummary,
+    refetchInterval: 20000,
+  });
+  const data = summary.data;
+  if (!data) return null;
+  const severity = data.findings.by_severity;
+  return (
+    <section className="sccap-card" style={{ marginBottom: "1rem" }}>
+      <div className="asset-toolbar">
+        <div>
+          <strong>Assessments</strong>
+          <span className="asset-muted">
+            {data.runs.active} running · {data.runs.completed} completed ·{" "}
+            {data.waiting.intercepts + data.waiting.questions} waiting on you ·{" "}
+            {data.lessons} lesson(s) learned
+          </span>
+        </div>
+        <Link className="sccap-btn" to="/pentesting">
+          Open pentesting
+        </Link>
+      </div>
+      <div className="asset-stats">
+        {(["critical", "high", "medium", "low"] as const).map((level) => (
+          <div key={level}>
+            <span>{severity[level] ?? 0}</span>
+            <label>{level}</label>
+          </div>
+        ))}
+        <div>
+          <span>{data.runs.failed}</span>
+          <label>failed runs</label>
+        </div>
+      </div>
+      {data.recent_runs.length > 0 && (
+        <ul className="asset-list asset-list-compact">
+          {data.recent_runs.slice(0, 3).map((run) => (
+            <li key={run.id}>
+              <Link to={`/pentesting/runs/${run.id}`}>{run.name}</Link>
+              <span className="asset-muted">{run.status}</span>
+              <span className="asset-muted">{run.target_url}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   // Semgrep sources and frameworks are admin surfaces: asking for them as a
@@ -230,6 +282,7 @@ const DashboardPage: React.FC = () => {
       />
 
       <UpdateAvailableBanner />
+      <PentestOverview />
       <SemgrepReadinessBanner />
 
       <Section

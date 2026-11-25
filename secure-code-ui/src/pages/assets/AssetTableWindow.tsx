@@ -10,6 +10,7 @@
 import { useMemo, useState } from "react";
 import type { Asset } from "../../shared/api/assetsService";
 import { Icon } from "../../shared/ui/Icon";
+import { QUERY_HINTS, parseAssetQuery } from "../../shared/lib/assetQuery";
 
 export type SortKey = "name" | "kind" | "environment" | "owner" | "reachable" | "last_probe_at";
 
@@ -123,12 +124,28 @@ export function AssetFiltersBar({
 
   return (
     <div className="asset-filters">
-      <input
-        className="asset-filter-input"
-        placeholder="Search name, owner, host, port, technology"
-        value={filters.query}
-        onChange={(event) => onChange({ ...filters, query: event.target.value })}
-      />
+      <div className="asset-query-wrap">
+        <input
+          className="asset-filter-input"
+          placeholder="Query: port=5432 env=production status=unreachable -kind=database"
+          value={filters.query}
+          onChange={(event) => onChange({ ...filters, query: event.target.value })}
+          list="asset-query-hints"
+          spellCheck={false}
+        />
+        <datalist id="asset-query-hints">
+          {QUERY_HINTS.map((hint) => (
+            <option key={hint} value={hint} />
+          ))}
+        </datalist>
+        {filters.query.trim() && (
+          <span className="asset-query-summary">
+            {parseAssetQuery(filters.query).terms
+              .map((term) => `${term.negated ? "not " : ""}${term.field}=${term.value}`)
+              .join(" · ") || "free text"}
+          </span>
+        )}
+      </div>
       <select value={filters.kind} onChange={(e) => onChange({ ...filters, kind: e.target.value })}>
         <option value="">All kinds</option>
         {kinds.map((kind) => (

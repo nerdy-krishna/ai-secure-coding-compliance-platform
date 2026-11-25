@@ -55,6 +55,7 @@ const TRAILS: Record<string, Crumb[]> = {
   "/account/history": [CODE_SCAN, { label: "Submission History" }],
   "/pentesting": [PENTEST, { label: "Projects & Scans" }],
   "/pentesting/new": [PENTEST, { label: "New Pentest" }],
+  "/pentesting/playbooks": [PENTEST, { label: "Playbooks" }],
   "/pentesting/history": [PENTEST, { label: "Submission History" }],
   "/advisor": [CODE_SCAN, { label: "Security Advisor" }],
   "/compliance": [ADMIN, { label: "Framework configuration" }, { label: "Security Standards" }],
