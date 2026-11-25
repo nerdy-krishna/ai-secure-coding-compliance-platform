@@ -50,6 +50,15 @@ const pentesting: Item[] = [
     feature: "pentesting",
     permission: Permission.pentestRead,
   },
+  {
+    // The playbooks the engine reads. Without a nav entry the page existed but was only
+    // reachable by typing the URL.
+    to: "/pentesting/playbooks",
+    label: "Playbooks",
+    icon: Icon.Book,
+    feature: "pentesting",
+    permission: Permission.pentestRead,
+  },
 ];
 // Standards live inside "Analysis config" for admins; a reader without authoring
 // rights still gets the read-only standards view.

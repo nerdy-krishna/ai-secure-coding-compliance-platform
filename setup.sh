@@ -757,6 +757,35 @@ _sccap_running_build_commit() {
         | grep -oE '^[0-9a-f]{7,40}' || true
 }
 
+_sccap_verify_built_commits() {
+    # Every image the update rebuilt must carry the commit being deployed.
+    #
+    # `docker compose build` reports success per target, but "success" means the build ran, not
+    # that the container that is now up came from it. This reads the stamp the Dockerfile writes
+    # into each stage and compares it with the target, so a half-applied update is caught here
+    # rather than inferred later from a version badge that only knows about the API.
+    local target="$1"; shift
+    local failed=0 service container stamp
+    for service in "$@"; do
+        container=$(docker compose ps -q "$service" 2>/dev/null | head -1)
+        if [ -z "$container" ]; then
+            continue
+        fi
+        stamp=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null \
+            | sed -n 's/^SCCAP_BUILD_COMMIT=//p' | head -1)
+        if [ -z "$stamp" ]; then
+            echo "[!] $service carries no build stamp — its image predates stamping or was not rebuilt."
+            failed=1
+        elif [ "$stamp" != "$target" ]; then
+            echo "[!] $service is running ${stamp:0:8}, not ${target:0:8} — its image is stale."
+            failed=1
+        else
+            echo "[+] $service: ${stamp:0:8}"
+        fi
+    done
+    return "$failed"
+}
+
 _sccap_deployed_commit() {
     # Prefer the running container; fall back to the last recorded deployment.
     local from_image from_state
@@ -970,14 +999,22 @@ _sccap_run_update() {
     _sccap_stamp_build_env
     build_log=".build-${target:0:8}.log"
     if [ "$_SCCAP_UPDATE_SCOPE" = "full" ] || [ ${#build_targets[@]} -gt 0 ]; then
-        if ! COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
+        # The status that matters is the build's, not tee's: with `set -e` and no pipefail a
+        # failed build used to print its error, get explained, and then be recorded as a
+        # successful update. PIPESTATUS is read before anything else runs.
+        set +e
+        COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
             --build-arg "SCCAP_BUILD_COMMIT=$target" \
             --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --build-arg "SCCAP_BUILD_VERSION=$(_sccap_build_version)" \
-            "${build_targets[@]}" 2>&1 | tee "$build_log"; then
+            "${build_targets[@]}" 2>&1 | tee "$build_log"
+        local build_status=${PIPESTATUS[0]}
+        set -e
+        if [ "$build_status" -ne 0 ]; then
             _sccap_explain_build_failure "$build_log"
-            echo "[!] Build failed; full log: $build_log"
-            echo "    Roll back with ./setup.sh --rollback"
+            echo "[!] Build failed (exit $build_status); full log: $build_log"
+            echo "    Nothing was restarted: the previous images are still running."
+            echo "    Fix the failure and re-run ./setup.sh --update, or ./setup.sh --rollback"
             return 1
         fi
     fi
@@ -989,6 +1026,16 @@ _sccap_run_update() {
     # those secrets, an untouched broker keeps the old ones and every pentest
     # consumer is refused with ACCESS_REFUSED - the controller then sits
     # "connected=false" and assessments never advance past decision.committed.
+    # The version badge is the API's. Before this check, a deployment could run a UI one update
+    # behind while the badge showed the newest commit — which is exactly what "the version looks
+    # right but nothing changed" was. Every rebuilt image must carry the target commit.
+    if ! _sccap_verify_built_commits "$target" app "${build_targets[@]}"; then
+        echo "[!] One or more images do not carry ${target:0:8}. The update is incomplete."
+        echo "    Rebuild the service named above: docker compose build <service>"
+        echo "    Then: docker compose up -d <service>   (no deploy state was recorded)"
+        return 1
+    fi
+
     echo "[*] Re-applying broker credentials..."
     docker compose up -d --no-build --force-recreate rabbitmq >/dev/null 2>&1 || true
 
@@ -2291,10 +2338,19 @@ echo "[*] Launching Docker containers (this may take a few minutes)..."
 # Sourcing .env is one way, but docker compose reads .env automatically
 # The Dockerfile declares the provenance build args at the end of each stage, so they
 # are passed as usual: cache stays intact, and the stamp cannot go stale.
+set +e
 COMPOSE_PARALLEL_LIMIT="$(_sccap_build_parallel_limit)" docker compose build \
     --build-arg "SCCAP_BUILD_COMMIT=$(_sccap_git_sha)" \
     --build-arg "SCCAP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --build-arg "SCCAP_BUILD_VERSION=$(_sccap_build_version)"
+_install_build_status=$?
+set -e
+if [ "$_install_build_status" -ne 0 ]; then
+    echo "[!] Image build failed (exit $_install_build_status). Nothing was started."
+    echo "    The usual cause is builder memory: add swap, or build one service at a time."
+    echo "    Then re-run ./setup.sh"
+    exit 1
+fi
 _sccap_align_certbot_ownership
 _sccap_align_fluentd_ownership
 docker compose up -d

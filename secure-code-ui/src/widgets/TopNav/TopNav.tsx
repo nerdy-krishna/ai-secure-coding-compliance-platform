@@ -252,6 +252,21 @@ const UserMenu: React.FC<UserMenuProps> = ({
     retry: false,
   });
   const build = versionQ.data;
+  const uiBuild = useQuery({
+    queryKey: ["ui-build"],
+    queryFn: async () => {
+      const response = await fetch("/version.json", { cache: "no-store" });
+      if (!response.ok) return null;
+      return (await response.json()) as { commit?: string; built_at?: string; version?: string };
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+  // A UI one commit behind its API is the exact confusion this panel exists to remove: the
+  // badge reads the API, so it looks current while the bundle is old.
+  const uiStale = Boolean(
+    build?.commit && uiBuild.data?.commit && build.commit !== uiBuild.data.commit,
+  );
 
   const label = isSuperuser ? "Admin" : "User";
   const initials = isSuperuser ? "AD" : "US";
@@ -486,6 +501,25 @@ const UserMenu: React.FC<UserMenuProps> = ({
             <dd>{build.migration_head ?? "not migrated"}</dd>
             <dt>Environment</dt>
             <dd>{build.environment}</dd>
+            <dt>UI build</dt>
+            <dd>
+              {uiBuild.data?.commit ? (
+                <>
+                  <code>{uiBuild.data.commit.slice(0, 8)}</code>
+                  {uiStale ? (
+                    <span className="version-stale">
+                      stale — rebuild it: <code>docker compose build ui</code>
+                    </span>
+                  ) : (
+                    <span className="asset-muted"> matches the API</span>
+                  )}
+                </>
+              ) : (
+                <span className="asset-muted">
+                  no stamp — this UI image was built before version.json existed
+                </span>
+              )}
+            </dd>
             <p className="version-hint">
               The commit changes on every successful <code>./setup.sh --update</code>. If
               it did not change, the update did not reach the running containers — check
