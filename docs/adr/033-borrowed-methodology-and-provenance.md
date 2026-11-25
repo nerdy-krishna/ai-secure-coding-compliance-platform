@@ -101,6 +101,23 @@ per role is attributable rather than one anonymous number.
 The judge is capped at 12 findings per run, because a scanner can report dozens and arguing each
 one costs more than the assessment.
 
+## Legacy gates reviewed against the borrowed methodology
+
+The engine predates this methodology and several of its gates encoded a different definition of
+"finished". Each was checked; three were changed because they outranked the new rules, and the rest
+were left alone.
+
+| Legacy behaviour | Verdict | Change |
+|---|---|---|
+| `done` refused while leads are open (up to 3 times) | **conflicted** — every observation queues a lead, so the gate was unreachable and outranked coverage | coverage decides; the queue is used to make progress only while coverage is open |
+| plan nudges, then coverage nudges, in that order | **conflicted** — coverage was checked last, so the weakest signal won | coverage is evaluated first; the total refusals are capped (4) so a stubborn model cannot hold a run open |
+| plan written once, never revisited | **conflicted** — the borrowed loop expects re-planning when new facts arrive | re-planning on stagnation, bounded to 2 |
+| scope ledger repeat suppression | kept — better than anything in either project | none |
+| harness/diagnose allowlist, three approval gates | kept | none |
+| three approval gates + `allow_shell` opt-in | kept; the approval queue (P9) extends rather than replaces it | approval is additive |
+| severity normalisation, unknown-CWE ceiling | kept | none |
+| `_finalise_findings` replay proof | kept — it corroborates, it does not override the fact rule | none |
+
 ## Consequences
 
 - Implementation is slower than copying, by a few days per phase, and every borrowed behaviour

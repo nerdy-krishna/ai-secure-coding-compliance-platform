@@ -1,0 +1,288 @@
+/* The list shell, shared by the inventory and the assessment pages.
+ *
+ * These rules used to live in the inventory stylesheet, which only the assets page imported.
+ * The run page reused the same class names for coverage and traffic and got none of the CSS —
+ * so those tables had no height, no scroll container and no border, and spilled over the cards
+ * below them. Shared layout belongs in one file both pages load.
+ */
+.asset-card {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.asset-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.asset-toolbar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.asset-toolbar-actions {
+  align-items: center;
+}
+
+.asset-muted {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--fg-muted);
+  line-height: 1.45;
+}
+
+.asset-empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+
+.asset-table-wrap {
+  overflow-x: auto;
+}
+
+.asset-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.asset-table th {
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.asset-table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.asset-table tbody tr {
+  cursor: pointer;
+}
+
+.asset-table tbody tr:hover {
+  background: var(--bg-soft);
+}
+
+.asset-table tbody tr.is-open {
+  background: var(--bg-soft);
+}
+
+.asset-table td strong {
+  display: block;
+}
+
+.asset-reason {
+  max-width: 380px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+.asset-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.asset-inline-form input,
+.asset-form input,
+
+.asset-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+
+.asset-stats > div {
+  padding: 0.7rem;
+  background: var(--bg-soft);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.asset-stats span {
+  display: block;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.asset-stats label {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+}
+
+.asset-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+
+.asset-filter-input {
+  flex: 1 1 240px;
+  min-width: 200px;
+  font: inherit;
+  font-size: .8rem;
+  padding: .35rem .55rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.asset-filters select,
+
+.asset-pager select {
+  font: inherit;
+  font-size: .78rem;
+  padding: .3rem .45rem;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.asset-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  font-size: .78rem;
+}
+
+.asset-pager label {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  white-space: nowrap;
+}
+
+.asset-pager-buttons {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+}
+
+/* A pulse on the probe button while the server reports work in flight. */
+
+.asset-check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .76rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+/* Reachability cell: the state, the rung that decided it, and the evidence underneath. */
+
+.asset-window {
+  height: 380px;
+  overflow: auto;
+  border: 1px solid var(--sccap-border, #e5e7eb);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.asset-window table { width: 100%; border-collapse: separate; border-spacing: 0; }
+
+.asset-window thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--sccap-border, #e5e7eb);
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  padding: 7px 10px;
+  font-weight: 700;
+}
+
+.asset-window tbody td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 12.5px;
+  vertical-align: top;
+}
+
+.asset-window tbody tr:hover { background: #f8fafc; }
+
+.asset-window tbody tr.is-selected { background: #eef2ff; }
+
+/* Reachability as a badge: colour and word, because a dot alone is a guess. */
+
+.asset-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.asset-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.asset-state.is-up { color: #15803d; background: #dcfce7; }
+
+.asset-state.is-filtered { color: #b45309; background: #fef3c7; }
+
+.asset-state.is-down { color: #b91c1c; background: #fee2e2; }
+
+.asset-state.is-unknown { color: #475569; background: #e2e8f0; }
+
+/* A window inside a card: the card clips, the window scrolls, the page never overlaps.
+ *
+ * The run page puts a fixed-height list inside a card that is followed by more cards. Without
+ * `overflow` on the container the list's height leaked out and painted over the sections below,
+ * which is exactly what an operator saw as "the findings list goes behind the lead queue".
+ */
+.sccap-card:has(> .asset-window) {
+  overflow: hidden;
+}
+.asset-window {
+  height: 380px;
+  overflow: auto;
+  border: 1px solid var(--sccap-border, #e5e7eb);
+  border-radius: 10px;
+  background: #fff;
+  position: relative;
+  contain: content;
+}
+.asset-window table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+}
+.asset-window tbody td,
+.asset-window thead th {
+  word-break: break-word;
+}
