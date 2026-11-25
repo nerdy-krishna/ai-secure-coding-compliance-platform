@@ -1,0 +1,111 @@
+/* Foldable cards and the back-to-top control.
+ *
+ * Both exist for the same reason: a page that holds a dozen long cards is read by scrolling, and
+ * scrolling past what you are not reading is the tax. The card remembers its fold per browser;
+ * the control appears only once there is something to scroll back from.
+ */
+
+.collapsible-card {
+  padding: 0;
+}
+.collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+}
+.collapsible-card.is-collapsed .collapsible-head {
+  padding-bottom: 10px;
+}
+.collapsible-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.collapsible-toggle:hover .collapsible-title {
+  color: var(--sccap-indigo, #4f46e5);
+}
+.collapsible-chevron {
+  display: inline-flex;
+  transition: transform 140ms ease;
+  color: var(--fg-muted);
+}
+.collapsible-chevron.is-collapsed {
+  transform: rotate(-90deg);
+}
+.collapsible-title {
+  font-weight: 700;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.collapsible-subtitle {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  background: #f1f5f9;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.collapsible-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.collapsible-body {
+  padding: 0 14px 14px;
+}
+
+/* The run page sets its own padding on some cards; keep the body aligned with the header. */
+.collapsible-card > .collapsible-body > .console {
+  margin-top: 4px;
+}
+
+.back-to-top {
+  position: fixed;
+  right: 20px;
+  bottom: 88px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--sccap-border, #e5e7eb);
+  background: #fff;
+  color: var(--fg, #0f172a);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.14);
+}
+.back-to-top:hover {
+  background: #f8fafc;
+}
+.back-to-top svg {
+  transform: rotate(180deg);
+}
+.back-to-top-label {
+  line-height: 1;
+}
+
+@media (max-width: 640px) {
+  .back-to-top {
+    right: 12px;
+    bottom: 76px;
+    padding: 8px 10px;
+  }
+  .back-to-top-label {
+    display: none;
+  }
+}

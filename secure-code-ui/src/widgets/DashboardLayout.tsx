@@ -10,6 +10,8 @@
 // (/account/settings/appearance).
 
 import React from "react";
+import { BackToTop } from "../shared/ui/BackToTop";
+import "../shared/ui/collapsible.css";
 import { TopNav } from "./TopNav/TopNav";
 import { ConnectivityStatus } from "../shared/ui/ConnectivityStatus";
 import { SidebarNav } from "./SidebarNav";
@@ -41,6 +43,7 @@ const DashboardLayout: React.FC<{ children?: React.ReactNode }> = ({
           {children}
         </main>
       </div>
+      <BackToTop />
       <AdvisorFab />
     </div>
     </BreadcrumbProvider>

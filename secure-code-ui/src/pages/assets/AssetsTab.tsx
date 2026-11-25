@@ -30,6 +30,7 @@ import { Icon } from "../../shared/ui/Icon";
 import { Modal } from "../../shared/ui/Modal";
 import TerminalConsole from "../../shared/ui/TerminalConsole";
 import { useToast } from "../../shared/ui/Toast";
+import CollapsibleCard from "../../shared/ui/CollapsibleCard";
 import AssetDetailPanel from "./AssetDetailPanel";
 import {
   AssetFiltersBar,
@@ -154,11 +155,16 @@ export default function AssetsTab() {
 
   return (
     <>
-      <section className="sccap-card asset-card">
+      <CollapsibleCard
+        title={`${assets.length} asset${assets.length === 1 ? "" : "s"}`}
+        subtitle={assets.length ? `${assets.filter((a) => a.reachable !== null).length} checked` : undefined}
+        storageKey="inventory-actions"
+        className="asset-card"
+      >
         <div className="asset-toolbar">
           <div>
             <strong>
-              {assets.length} asset{assets.length === 1 ? "" : "s"}
+              Scan, import and check reachability
             </strong>
             <span className="asset-muted">
               {assets.filter((a) => a.reachable === true).length} reachable ·{" "}
@@ -264,9 +270,14 @@ export default function AssetsTab() {
             {selected.size ? `${selected.size} selected` : "select rows to scan a subset"}
           </span>
         </div>
-      </section>
+      </CollapsibleCard>
 
-      <section className="sccap-card asset-card">
+      <CollapsibleCard
+        title="Inventory"
+        subtitle={filtered.length ? `${filtered.length} shown` : undefined}
+        storageKey="inventory-table"
+        className="asset-card"
+      >
         <AssetFiltersBar
           assets={assets}
           filters={filters}
@@ -438,7 +449,7 @@ export default function AssetsTab() {
             </div>
           </>
         )}
-      </section>
+      </CollapsibleCard>
 
       <Modal
         open={importSummary !== null}
