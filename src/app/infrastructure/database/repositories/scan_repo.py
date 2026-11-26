@@ -550,7 +550,13 @@ class ScanRepository:
             )
             cache_status_changed = bool(result.rowcount)
             if not cache_status_changed:
-                await self.db.rollback()
+                # The UPDATE matched no row, so the status cache did not move and
+                # there is nothing to undo - which is why there is no rollback
+                # here. A session rollback expires every ORM object the caller
+                # already holds, and the next attribute read on one of them
+                # (`scan.snapshots` in `retrieve_and_prepare_data`, say) tries to
+                # refresh outside the greenlet and raises
+                # "greenlet_spawn has not been called", failing the whole scan.
                 logger.info(
                     "scan_repo.record_scan_event.transition_rejected",
                     extra={

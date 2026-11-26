@@ -55,24 +55,50 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
             if not scan:
                 return {"error_message": f"Scan with ID {scan_id} not found."}
 
-            # Capture the status before updating the DB
+            # Read everything this node needs off the ORM row *before* any
+            # repository call. `record_scan_event` may reject a status
+            # transition, and a rollback expires the session's objects - reading
+            # `scan.snapshots` after that raises "greenlet_spawn has not been
+            # called" and fails the scan. Values are copied out while the row is
+            # certainly live.
             current_status = scan.status
+            original_snapshot = next(
+                (s for s in scan.snapshots if s.snapshot_type == "ORIGINAL_SUBMISSION"),
+                None,
+            )
+            snapshot_file_map = (
+                dict(original_snapshot.file_map) if original_snapshot else {}
+            )
+            scan_config = {
+                "scan_type": scan.scan_type,
+                "reasoning_llm_config_id": scan.reasoning_llm_config_id,
+                "utility_llm_config_id": scan.utility_llm_config_id,
+                "secondary_reasoning_llm_config_id": (
+                    scan.secondary_reasoning_llm_config_id
+                ),
+                "stage_temperatures": scan.stage_temperatures,
+                "disable_temperature": scan.disable_temperature,
+                "cross_file_validation": scan.cross_file_validation,
+                "deep_vendor_scan": scan.deep_vendor_scan,
+            }
+            # V02.2.1 / V02.3.2: cap framework list, reject garbage entries
+            frameworks = [
+                f
+                for f in (scan.frameworks or [])
+                if isinstance(f, str) and 1 <= len(f) <= 64
+            ][:MAX_FRAMEWORKS]
 
             # Stage STARTED — records the event and advances the
             # scans.status cache to ANALYZING_CONTEXT (#84).
             await repo.record_scan_event(scan_id, "ANALYZING_CONTEXT", EV_STARTED)
 
-            original_snapshot = next(
-                (s for s in scan.snapshots if s.snapshot_type == "ORIGINAL_SUBMISSION"),
-                None,
-            )
             if not original_snapshot:
                 return {
                     "error_message": f"Original code snapshot not found for scan {scan_id}."
                 }
 
             # V02.2.1 / V02.3.2: enforce per-scan file count cap
-            if len(original_snapshot.file_map) > MAX_FILES_PER_SCAN:
+            if len(snapshot_file_map) > MAX_FILES_PER_SCAN:
                 return {
                     "error_message": (
                         f"Scan {scan_id} exceeds MAX_FILES_PER_SCAN ({MAX_FILES_PER_SCAN})."
@@ -80,14 +106,12 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
                 }
 
             files_map = await repo.get_source_files_by_hashes(
-                list(original_snapshot.file_map.values())
+                list(snapshot_file_map.values())
             )
 
             # V02.2.3: enforce snapshot ↔ source-file consistency
             missing = [
-                path
-                for path, h in original_snapshot.file_map.items()
-                if h not in files_map
+                path for path, h in snapshot_file_map.items() if h not in files_map
             ]
             if missing:
                 return {
@@ -97,9 +121,7 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
                     )
                 }
 
-            files = {
-                path: files_map[h] for path, h in original_snapshot.file_map.items()
-            }
+            files = {path: files_map[h] for path, h in snapshot_file_map.items()}
 
             # Create Repo Map
             mapping_engine = RepositoryMappingEngine()
@@ -120,14 +142,7 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
                 dependency_graph.number_of_edges(),
             )
 
-            # Determine Relevant Agents
-            # V02.2.1 / V02.3.2: cap framework list, reject garbage entries
-            frameworks = [
-                f
-                for f in (scan.frameworks or [])
-                if isinstance(f, str) and 1 <= len(f) <= 64
-            ][:MAX_FRAMEWORKS]
-
+            # Determine Relevant Agents (frameworks copied above)
             framework_details = await db.execute(
                 select(db_models.Framework)
                 .options(selectinload(db_models.Framework.agents))
@@ -166,19 +181,10 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
             await repo.record_scan_event(scan_id, "ANALYZING_CONTEXT", EV_COMPLETED)
 
             return {
-                "scan_type": scan.scan_type,
+                **scan_config,
                 "current_scan_status": current_status,
-                "reasoning_llm_config_id": scan.reasoning_llm_config_id,
-                "utility_llm_config_id": scan.utility_llm_config_id,
-                "secondary_reasoning_llm_config_id": (
-                    scan.secondary_reasoning_llm_config_id
-                ),
-                "stage_temperatures": scan.stage_temperatures,
-                "disable_temperature": scan.disable_temperature,
-                "cross_file_validation": scan.cross_file_validation,
-                "deep_vendor_scan": scan.deep_vendor_scan,
                 "files": files,
-                "initial_file_map": original_snapshot.file_map,
+                "initial_file_map": snapshot_file_map,
                 "live_codebase": files.copy(),
                 "repository_map": repository_map,
                 "dependency_graph": nx.node_link_data(dependency_graph),
