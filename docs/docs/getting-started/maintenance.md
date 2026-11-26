@@ -193,19 +193,52 @@ them.
 ## Updating an existing installation
 
 ```bash
-./setup.sh --update          # rebuild only what changed
-./setup.sh --update --full   # rebuild every image (slow)
+./setup.sh --update                       # rebuild only what changed
+./setup.sh --update --only=app,worker     # rebuild exactly these services
+./setup.sh --update --no-build            # no build; recreate containers only
+./setup.sh --update --full                # rebuild every image (slow)
 ```
 
 `--update` fetches the branch, asks once, tags the running images for rollback,
 rebuilds **only the images whose content changed**, restarts, applies migrations and
 only reports success once the API answers.
 
+Plain `./setup.sh` is the **install** path: it configures, then builds every target
+regardless of what changed. On an existing installation always go through `--update`
+(the UI's update button and `scripts/host-update.sh` do).
+
 | What changed | What is rebuilt |
 |---|---|
-| `src/`, `alembic/`, `pyproject.toml`, `poetry.lock`, `Dockerfile`, `docker/`, `scripts/` | `app`, `worker`, and the pentest/patch images when they are part of the deployment |
+| `src/` outside the pentest closure, `alembic/`, `alembic.ini`, `scripts/` | `app`, `worker` |
+| `src/app/pentest/`, `src/app/infrastructure/pentesting|database|secrets|observability/`, `src/app/assets/`, `src/app/shared/`, `src/app/config/`, `pyproject.toml`, `poetry.lock`, `Dockerfile`, `docker/` | `app`, `worker`, and `pentest-engine` when it is deployed |
+| `src/app/shared/lib/validation_sandbox_runner.py` | `app`, `worker`, `patch-validator` |
 | `secure-code-ui/` | `ui` only |
 | `docker-compose.yml`, `.env`, nginx config | nothing — containers are recreated so the new settings apply |
+
+The mapping follows the **import closure of each image**, not the directory it happens to
+share:
+
+- `pentest-engine` runs `app.infrastructure.pentesting.tool_worker.main` and imports
+  `app.pentest`, `app.infrastructure.{database,llm_client,secrets}`, `app.shared.lib`,
+  `app.config` and `app.assets` — nothing from `app.api`, `app.core` or the scan
+  workflow. A scan-side change therefore cannot reach it.
+- `patch-validator` ships exactly one application file
+  (`validation_sandbox_runner.py`) plus the stock language toolchains; nothing else
+  under `src/` is in that image.
+
+Skipping those two is not cosmetic. A one-file scan-side change, warm cache, no rebuild
+of anything else:
+
+| Image | Time |
+|---|---|
+| `app` | 4.8 s |
+| `worker` | 2.1 s |
+| `pentest-engine` (not affected) | 85 s |
+| `patch-validator` (not affected) | 48 s |
+
+Dependency and `Dockerfile` changes stay broad on purpose: they can alter any layer, and
+a stale image is worse than a slow build. Use `--only` when you know better, `--full`
+when you do not trust the cache.
 
 The database dump is also skipped when no migration file changed *and* the database is
 already at head: on a large install `pg_dump` was minutes of the update for nothing.
@@ -232,7 +265,10 @@ The first update after these changes is still a full rebuild — the layers genu
 changed once. Every update after that is incremental.
 
 `--full` exists for the cases the path mapping cannot see: a changed base image, or a
-build whose cache you do not trust.
+build whose cache you do not trust. `--no-build` exists for the case where the images
+were already built by hand (`docker compose build app worker` followed by
+`docker compose up -d app worker` is the shortest loop when you are editing your own
+fork).
 
 The decision to deploy is based on **what is deployed**, not on what the checkout
 contains: the running API reports the commit it was built from

@@ -441,10 +441,40 @@ _sccap_changed_paths() {
 _sccap_services_for_changes() {
     # Map changed paths onto the images they affect. Empty output means "nothing to
     # rebuild" — a compose, nginx or .env change only needs the containers recreated.
-    local changed="$1" backend=0 frontend=0
+    #
+    # The scope is only as wide as it can be *proved* to be:
+    #
+    #   pentest-engine  runs `app.infrastructure.pentesting.tool_worker.main` and
+    #                   imports app.pentest, app.infrastructure.{database,
+    #                   llm_client, secrets}, app.shared.lib and app.config —
+    #                   nothing from app.api or app.core. A scan-side change
+    #                   therefore cannot affect it, and rebuilding it anyway costs
+    #                   ~85s of apt/tooling layers per update.
+    #   patch-validator ships exactly one application file
+    #                   (src/app/shared/lib/validation_sandbox_runner.py) plus the
+    #                   stock language toolchains. Rebuilding it for any other
+    #                   src/ change costs ~50s for nothing.
+    #
+    # Dependency and Dockerfile changes stay broad on purpose: they can alter any
+    # layer, and guessing wrong there produces a stale image rather than a slow one.
+    local changed="$1" backend=0 frontend=0 pentest=0 validator=0
     while IFS= read -r path; do
         case "$path" in
-            src/*|alembic/*|alembic.ini|pyproject.toml|poetry.lock|Dockerfile|docker/*|scripts/*)
+            src/app/shared/lib/validation_sandbox_runner.py)
+                backend=1; validator=1 ;;
+            Dockerfile|docker/*|pyproject.toml|poetry.lock)
+                backend=1; pentest=1; validator=1 ;;
+            # The engine's actual import closure: app.pentest, the tool-worker
+            # tree, app.shared, app.config, app.assets, and the infrastructure
+            # modules those pull in (database -> observability, llm_client,
+            # secrets). Anything else under src/ cannot reach that image.
+            src/app/pentest/*|src/app/infrastructure/pentesting/*|src/app/assets/*)
+                backend=1; pentest=1 ;;
+            src/app/infrastructure/database/*|src/app/infrastructure/secrets/*|src/app/infrastructure/observability/*|src/app/infrastructure/llm_client.py)
+                backend=1; pentest=1 ;;
+            src/app/shared/*|src/app/config/*)
+                backend=1; pentest=1 ;;
+            src/*|alembic/*|alembic.ini|scripts/*)
                 backend=1 ;;
             secure-code-ui/*)
                 frontend=1 ;;
@@ -454,11 +484,12 @@ _sccap_services_for_changes() {
     local services=""
     if [ "$backend" = "1" ]; then
         services="app worker"
-        # Only rebuild the tools image when it is actually part of this deployment.
-        if docker compose ps -a --services 2>/dev/null | grep -qx "pentest-engine"; then
+        # Only rebuild a tools image when it is part of this deployment and this
+        # change can actually reach it.
+        if [ "$pentest" = "1" ] && docker compose ps -a --services 2>/dev/null | grep -qx "pentest-engine"; then
             services="$services pentest-engine"
         fi
-        if docker compose ps -a --services 2>/dev/null | grep -qx "patch-validator"; then
+        if [ "$validator" = "1" ] && docker compose ps -a --services 2>/dev/null | grep -qx "patch-validator"; then
             services="$services patch-validator"
         fi
     fi
@@ -466,6 +497,29 @@ _sccap_services_for_changes() {
         services="$services ui"
     fi
     printf '%s' "$services" | xargs
+}
+
+_sccap_validate_only_services() {
+    # `--update --only=app,worker`: rebuild exactly what the operator named.
+    # Validated against the compose file so a typo fails here instead of producing
+    # an update that silently rebuilt nothing.
+    local wanted available out="" service
+    wanted=$(printf '%s' "$1" | tr ',' ' ')
+    [ -n "$wanted" ] || return 1
+    available=$(docker compose config --services 2>/dev/null)
+    if [ -z "$available" ]; then
+        echo "[!] Could not read the service list from docker compose." >&2
+        return 1
+    fi
+    for service in $wanted; do
+        if ! printf '%s\n' "$available" | grep -qx "$service"; then
+            echo "[!] Unknown service for --only: '$service'" >&2
+            echo "    available: $(printf '%s' "$available" | tr '\n' ' ')" >&2
+            return 1
+        fi
+        out="$out $service"
+    done
+    printf '%s' "$out" | xargs
 }
 
 _sccap_build_parallel_limit() {
@@ -709,6 +763,10 @@ _sccap_prepare_tls_material() {
 _SCCAP_DEPLOY_STATE=".scratch/deploy-state.json"
 #: `--update` rebuilds only the images whose content changed; `--full` rebuilds all.
 _SCCAP_UPDATE_SCOPE="auto"
+# Explicit rebuild scope for `--update` (`--only=app,worker`) and the escape hatch
+# for operators who already built the images themselves (`--no-build`).
+_SCCAP_UPDATE_ONLY=""
+_SCCAP_UPDATE_SKIP_BUILD="0"
 
 _sccap_git_sha() { git rev-parse HEAD 2>/dev/null || echo ""; }
 
@@ -993,7 +1051,15 @@ _sccap_run_update() {
     # re-running the dependency install for the API, the worker and the tool image.
     local services build_log
     local -a build_targets=()
-    if [ "$_SCCAP_UPDATE_SCOPE" = "full" ]; then
+    local skip_pentest=0
+    if [ "$_SCCAP_UPDATE_SKIP_BUILD" = "1" ]; then
+        echo "[*] --no-build: keeping the images that are already present."
+    elif [ -n "$_SCCAP_UPDATE_ONLY" ]; then
+        services=$(_sccap_validate_only_services "$_SCCAP_UPDATE_ONLY") || return 1
+        echo "[*] Rebuilding only what --only asked for: $services"
+        # shellcheck disable=SC2206
+        build_targets=($services)
+    elif [ "$_SCCAP_UPDATE_SCOPE" = "full" ]; then
         echo "[*] Full rebuild requested: every image will be rebuilt."
     else
         services=$(_sccap_services_for_changes "$changed")
@@ -1001,6 +1067,13 @@ _sccap_run_update() {
             echo "[*] Rebuilding: $services"
             # shellcheck disable=SC2206
             build_targets=($services)
+            case " $services " in
+                *" pentest-engine "*|*" patch-validator "*) : ;;
+                *)
+                    if docker compose ps -a --services 2>/dev/null | grep -qx "pentest-engine"; then
+                        skip_pentest=1
+                    fi ;;
+            esac
         else
             echo "[+] No image content changed — no rebuild needed."
             echo "    Recreating containers so the new .env and compose settings apply."
@@ -1009,7 +1082,9 @@ _sccap_run_update() {
 
     _sccap_stamp_build_env
     build_log=".build-${target:0:8}.log"
-    if [ "$_SCCAP_UPDATE_SCOPE" = "full" ] || [ ${#build_targets[@]} -gt 0 ]; then
+    if [ "$_SCCAP_UPDATE_SKIP_BUILD" = "1" ]; then
+        :  # nothing to build; the containers are recreated below from local images
+    elif [ "$_SCCAP_UPDATE_SCOPE" = "full" ] || [ ${#build_targets[@]} -gt 0 ]; then
         # The status that matters is the build's, not tee's: with `set -e` and no pipefail a
         # failed build used to print its error, get explained, and then be recorded as a
         # successful update. PIPESTATUS is read before anything else runs.
@@ -1021,6 +1096,11 @@ _sccap_run_update() {
             "${build_targets[@]}" 2>&1 | tee "$build_log"
         local build_status=${PIPESTATUS[0]}
         set -e
+        if [ "$skip_pentest" = "1" ]; then
+            echo "    (pentest-engine and patch-validator are untouched: nothing in this"
+            echo "     update reaches them. Force them with --only=pentest-engine,patch-validator"
+            echo "     or rebuild everything with --full.)"
+        fi
         if [ "$build_status" -ne 0 ]; then
             _sccap_explain_build_failure "$build_log"
             echo "[!] Build failed (exit $build_status); full log: $build_log"
@@ -1307,6 +1387,13 @@ SCCAP setup
   ./setup.sh --update            Pull the current branch, rebuild only what changed,
                                  rebuild, migrate and health-check in place.
   ./setup.sh --update --full     Rebuild every image (slow; for base-image changes)
+  ./setup.sh --update --only=app,worker
+                                 Rebuild exactly the named services and nothing else.
+  ./setup.sh --update --no-build Skip image builds entirely; just recreate the
+                                 containers from the images already on the host.
+                                 (Plain `./setup.sh` is the *install* path: it builds
+                                 every target, which is why an update should always
+                                 go through --update.)
   ./setup.sh --rollback          Return code + images to the previous --update.
   ./setup.sh --repair-tls        Re-create the TLS material from .env and exit.
                                  Use when the UI container reports
@@ -1327,6 +1414,12 @@ _sccap_parse_args() {
             --repair-tls)    _SCCAP_MODE="repair-tls" ;;
             --update)        _SCCAP_MODE="update" ;;
             --full|--rebuild-all) _SCCAP_UPDATE_SCOPE="full" ;;
+            --only=*)        _SCCAP_UPDATE_ONLY="${1#--only=}" ;;
+            --only)
+                shift
+                [ "$#" -gt 0 ] || { echo "[!] --only needs a service list." >&2; exit 2; }
+                _SCCAP_UPDATE_ONLY="$1" ;;
+            --no-build)      _SCCAP_UPDATE_SKIP_BUILD="1" ;;
             --rollback)      _SCCAP_MODE="rollback" ;;
             -y|--yes)        _SCCAP_ASSUME_YES=1 ;;
             -h|--help)       _sccap_usage; exit 0 ;;
