@@ -76,3 +76,22 @@ def test_unreadable_checkpoint_does_not_block_the_delivery() -> None:
     assert not asyncio.run(
         consumer._thread_is_parked_at_interrupt(_Workflow(raises=True), CONFIG)
     )
+
+
+def test_a_scan_interrupted_mid_workflow_is_recoverable() -> None:
+    """A deploy/restart leaves the scan in an in-progress status.
+
+    The delivery used to be ACKed as a "duplicate" (the status is not an entry
+    status), which orphaned the scan at ANALYZING_CONTEXT with no worker attached.
+    It is now let through so the checkpoint can decide.
+    """
+    for status in ("ANALYZING_CONTEXT", "RUNNING_AGENTS", "GENERATING_REPORTS"):
+        assert status in consumer._IN_PROGRESS_ENTRY_STATUSES, status
+    for status in ("COMPLETED", "CANCELLED", "FAILED", "BUDGET_EXHAUSTED"):
+        assert status not in consumer._IN_PROGRESS_ENTRY_STATUSES, status
+
+
+def test_checkpoint_reader_fails_open() -> None:
+    assert asyncio.run(
+        consumer._checkpoint_snapshot(_Workflow(raises=True), CONFIG)
+    ) is None

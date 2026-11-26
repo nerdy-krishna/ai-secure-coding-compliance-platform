@@ -79,6 +79,13 @@ def test_delete_scan_clears_hard_fk_dependents_itself() -> None:
         "UPDATE scans" in statements
     ), "dependent scans keep their rows and lose the parent link"
     assert "llm_interactions" in statements
+    # Evidence outlives the scan: it is detached (NULL), never deleted here, and the
+    # NULLing has to happen in this transaction or the SET NULL ordering inside the
+    # ORM flush produced `evidence_objects` FK violations on delete.
+    assert statements.count("UPDATE evidence_objects") >= 1
+    assert "UPDATE evidence_manifests" in statements
+    assert "UPDATE evidence_governance_events" in statements
+    assert "DELETE FROM evidence_objects" not in statements
     assert db.deleted, "the scan row itself is deleted through the ORM"
     assert db.commits == 1
 

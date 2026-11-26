@@ -73,7 +73,10 @@ from app.shared.lib.scan_status import (
     STATUS_BUDGET_EXHAUSTED,
     STATUS_CANCELLED,
     STATUS_COMPLETED,
+    STATUS_ANALYZING_CONTEXT,
     STATUS_FAILED,
+    STATUS_GENERATING_REPORTS,
+    STATUS_RUNNING_AGENTS,
     STATUS_PENDING_APPROVAL,
     STATUS_PENDING_PRESCAN_APPROVAL,
     STATUS_PENDING_PROFILING_APPROVAL,
@@ -211,6 +214,20 @@ _WORKFLOW_ENTRY_STATUSES = frozenset(
         STATUS_PENDING_APPROVAL,
         STATUS_PENDING_PRESCAN_APPROVAL,
         STATUS_PENDING_PROFILING_APPROVAL,
+    }
+)
+
+# Statuses that mean a worker *was* running this scan and stopped mid-workflow -
+# a deploy, a restart, an OOM kill, a dropped connection. The delivery for such a
+# scan used to be ACKed as a "duplicate" because the status was not an entry
+# status, which left the scan parked at ANALYZING_CONTEXT forever with no worker
+# attached. The checkpoint is the recovery authority: if it still has nodes to
+# run, the delivery continues from it instead of replaying the graph.
+_IN_PROGRESS_ENTRY_STATUSES = frozenset(
+    {
+        STATUS_ANALYZING_CONTEXT,
+        STATUS_RUNNING_AGENTS,
+        STATUS_GENERATING_REPORTS,
     }
 )
 
@@ -484,12 +501,28 @@ async def _run_workflow_for_scan(
                 if existing.status == STATUS_CANCELLED:
                     await record_cancellation_phase(scan_id_uuid, "OBSERVED")
                     await record_cancellation_phase(scan_id_uuid, "COMPLETED")
-                logger.info(
-                    "WORKFLOW: Scan %s already in status '%s' — treating as duplicate delivery.",
-                    scan_id_str_log,
-                    existing.status,
-                )
-                return True
+                    logger.info(
+                        "WORKFLOW: Scan %s is cancelled; ACKing delivery.",
+                        scan_id_str_log,
+                    )
+                    return True
+                if existing.status in _IN_PROGRESS_ENTRY_STATUSES:
+                    # A worker was running this scan and stopped. Let the delivery
+                    # through; the checkpoint decides below whether there is work
+                    # left to continue.
+                    logger.warning(
+                        "WORKFLOW: Scan %s was interrupted mid-workflow (status '%s'); "
+                        "recovering from its checkpoint.",
+                        scan_id_str_log,
+                        existing.status,
+                    )
+                else:
+                    logger.info(
+                        "WORKFLOW: Scan %s already in status '%s' — treating as duplicate delivery.",
+                        scan_id_str_log,
+                        existing.status,
+                    )
+                    return True
         except Exception as e:
             logger.warning(
                 "WORKFLOW: Idempotency precheck failed for %s: %s. Proceeding with workflow invocation.",
@@ -690,6 +723,23 @@ async def _run_workflow_for_scan(
             )
             return True
 
+        # A fresh start with a checkpoint that still has nodes to run is a recovery,
+        # not a new run: passing `None` continues from the checkpoint. Without this a
+        # scan interrupted mid-`retrieve_and_prepare_data` was replayed from the entry
+        # node (re-running retrieve/prescan) or, before the entry-status change above,
+        # dropped and left stuck at ANALYZING_CONTEXT with no worker attached.
+        continue_from_checkpoint = False
+        if resume_payload is None:
+            snapshot = await _checkpoint_snapshot(worker_workflow, config)
+            if snapshot is not None and getattr(snapshot, "next", None):
+                continue_from_checkpoint = True
+                logger.warning(
+                    "WORKFLOW: Scan %s has an interrupted checkpoint at %s; continuing "
+                    "from it instead of restarting the graph.",
+                    scan_id_str_log,
+                    list(snapshot.next)[:4],
+                )
+
         if (
             resume_payload is not None
             and resume_payload.get("kind") == "report_handoff"
@@ -759,7 +809,7 @@ async def _run_workflow_for_scan(
                 )
                 return True
         workflow_input: Any
-        if report_handoff_already_advanced:
+        if report_handoff_already_advanced or continue_from_checkpoint:
             # The prior delivery committed the node checkpoint but crashed
             # before terminal work/ACK. Continue pending nodes; never replay
             # the dynamic interrupt command.
@@ -931,6 +981,19 @@ async def _run_workflow_for_scan(
         await _maybe_cleanup_checkpointer_thread(scan_id_str_log)
 
     return success
+
+
+async def _checkpoint_snapshot(worker_workflow, config):
+    """The thread's newest StateSnapshot, or None when there is nothing to read."""
+    try:
+        return await worker_workflow.aget_state(config)
+    except Exception:
+        logger.warning(
+            "WORKFLOW: could not read checkpoint state for %s; assuming none.",
+            config.get("configurable", {}).get("thread_id"),
+            exc_info=True,
+        )
+        return None
 
 
 async def _thread_is_parked_at_interrupt(worker_workflow, config) -> bool:

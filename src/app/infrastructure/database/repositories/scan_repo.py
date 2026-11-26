@@ -1927,6 +1927,33 @@ class ScanRepository:
             .values(parent_scan_id=None)
         )
 
+    async def _detach_evidence_from_scan(self, scan_id: uuid.UUID) -> None:
+        """Point the scan's evidence rows at nothing before their owner goes away.
+
+        Evidence outlives the scan on purpose: `schedule_deletion` marks the payload
+        for the deletion outbox, and the row stays as the audit record. The FKs are
+        ``ON DELETE SET NULL``, but letting the RI action fire inside the same flush as
+        the ORM's row-by-row child deletes produced
+        ``insert or update on table "evidence_objects" violates foreign key
+        constraint`` - a 500 on the delete button. NULLing the columns first cannot
+        violate a FK, so the ordering stops mattering.
+        """
+        await self.db.execute(
+            update(db_models.EvidenceObject)
+            .where(db_models.EvidenceObject.scan_id == scan_id)
+            .values(scan_id=None, attempt_id=None, legacy_artifact_id=None)
+        )
+        await self.db.execute(
+            update(db_models.EvidenceManifest)
+            .where(db_models.EvidenceManifest.scan_id == scan_id)
+            .values(scan_id=None, attempt_id=None)
+        )
+        await self.db.execute(
+            update(db_models.EvidenceGovernanceEvent)
+            .where(db_models.EvidenceGovernanceEvent.scan_id == scan_id)
+            .values(scan_id=None, attempt_id=None)
+        )
+
     async def delete_scan(self, scan_id: uuid.UUID) -> bool:
         """Deletes a scan record from the database.
 
@@ -1965,6 +1992,7 @@ class ScanRepository:
                         reason="scan_deleted",
                         commit=False,
                     )
+            await self._detach_evidence_from_scan(scan_id)
             await self._purge_scan_dependents_without_cascade(scan_id)
             await self.db.execute(
                 delete(db_models.LLMInteraction).where(
@@ -2036,6 +2064,7 @@ class ScanRepository:
                     )
                 )
                 for scan_id in scan_ids:
+                    await self._detach_evidence_from_scan(scan_id)
                     await self._purge_scan_dependents_without_cascade(scan_id)
             await self.db.delete(project)
             try:

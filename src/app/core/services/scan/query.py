@@ -334,7 +334,11 @@ class ScanQueryService:
         ]
 
         active = scoreable_findings(scan.findings)
-        score = compute_cvss_aggregate(active, scan_id=str(scan.id)) if active else 0.0
+        score = (
+            compute_cvss_aggregate(active, scan_id=str(scan.id), verbose=False)
+            if active
+            else 0.0
+        )
 
         return api_models.SummaryReportResponse(
             submission_id=scan.id,
@@ -580,7 +584,7 @@ class ScanQueryService:
             active_findings = scoreable_findings(scan.findings)
             if active_findings:
                 fresh_score = compute_cvss_aggregate(
-                    active_findings, scan_id=str(scan_id)
+                    active_findings, scan_id=str(scan_id), verbose=False
                 )
                 risk_score_dict = dict(
                     risk_score_dict,

@@ -142,6 +142,7 @@ def compute_cvss_aggregate(
     findings: Sequence[Any],
     *,
     scan_id: Any = None,
+    verbose: bool = True,
 ) -> float:
     """Compute a single CVSS-weighted score for a list of findings.
 
@@ -193,7 +194,12 @@ def compute_cvss_aggregate(
             MAX_FINDINGS,
             MAX_FINDINGS,
         )
-    logger.info(
+    # Read paths recompute this on every results request (and every poll), which is
+    # cheap but used to log at INFO on each one - so a finished scan's activity view
+    # filled with "computed cvss aggregate" lines and looked like it was still
+    # working. Writing a scan's score logs; refreshing one for display does not.
+    log = logger.info if verbose else logger.debug
+    log(
         "computed cvss aggregate scan_id=%s score=%.1f n=%s n_unparseable=%s",
         scan_id,
         aggregate,

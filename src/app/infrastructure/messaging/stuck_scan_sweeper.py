@@ -21,6 +21,7 @@ from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.database import models as db_models
 from app.infrastructure.database.tenant_context import system_principal_task
 from app.shared.lib.scan_status import (
+    STATUS_CANCELLED,
     STATUS_FAILED,
     STATUS_QUEUED,
     STATUS_QUEUED_FOR_SCAN,
@@ -36,6 +37,13 @@ STUCK_SCAN_TIMEOUT_SECONDS = 600  # 10 min
 
 # Only these statuses indicate the scan was picked up but stalled.
 _STUCK_STATUSES = {STATUS_QUEUED_FOR_SCAN, STATUS_QUEUED}
+
+# A cancellation is acknowledged by the worker that is running the scan (250 ms poll
+# plus a 2 s SLO). When that worker is restarted or killed first - a deploy does
+# exactly that - nothing is left to append the acknowledgement, the scan stays
+# CANCELLED with an unfinished trail, and the UI keeps polling it every few seconds
+# as if it were still working. Ten times the SLO is a safe grace window.
+_CANCELLATION_RECONCILE_SECONDS = 120
 
 
 @system_principal_task("stuck-scan-sweeper")
@@ -102,6 +110,67 @@ async def _sweep_once() -> int:
         return count or 0
 
 
+@system_principal_task("stuck-scan-sweeper")
+async def _reconcile_incomplete_cancellations() -> int:
+    """Finish cancelling scans whose worker never acknowledged the stop.
+
+    Idempotent: `record_cancellation_phase` skips a phase that already exists, so a
+    scan that *did* acknowledge is never touched.
+    """
+    from app.infrastructure.workflows.cancellation import record_cancellation_phase
+
+    async with AsyncSessionLocal() as db:
+        cutoff = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() - _CANCELLATION_RECONCILE_SECONDS,
+            tz=timezone.utc,
+        )
+        acknowledged = (
+            select(db_models.ScanEvent.scan_id)
+            .where(
+                db_models.ScanEvent.stage_name == "CANCELLATION",
+                db_models.ScanEvent.status == "COMPLETED",
+            )
+            .scalar_subquery()
+        )
+        stale_ids = (
+            (
+                await db.execute(
+                    select(db_models.Scan.id)
+                    .where(
+                        db_models.Scan.status == STATUS_CANCELLED,
+                        db_models.Scan.id.notin_(acknowledged),
+                        func.coalesce(
+                            db_models.Scan.completed_at, db_models.Scan.created_at
+                        )
+                        < cutoff,
+                    )
+                    .limit(50)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    reconciled = 0
+    for scan_id in stale_ids:
+        try:
+            await record_cancellation_phase(scan_id, "OBSERVED")
+            await record_cancellation_phase(scan_id, "COMPLETED")
+            reconciled += 1
+        except Exception:  # noqa: BLE001 - a sweep must not die on one scan
+            logger.warning(
+                "stuck_scan_sweeper: could not reconcile cancellation for %s",
+                scan_id,
+                exc_info=True,
+            )
+    if reconciled:
+        logger.warning(
+            "stuck_scan_sweeper: reconciled %d incomplete cancellation(s)",
+            reconciled,
+        )
+    return reconciled
+
+
 async def run_stuck_scan_sweeper(stop_event: asyncio.Event) -> None:
     """Background loop — sweeps every 60 seconds."""
     logger.info(
@@ -120,4 +189,10 @@ async def run_stuck_scan_sweeper(stop_event: asyncio.Event) -> None:
             await _sweep_once()
         except Exception:
             logger.error("stuck_scan_sweeper: sweep failed", exc_info=True)
+        try:
+            await _reconcile_incomplete_cancellations()
+        except Exception:
+            logger.error(
+                "stuck_scan_sweeper: cancellation reconciliation failed", exc_info=True
+            )
     logger.info("stuck_scan_sweeper: stopped")
