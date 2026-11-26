@@ -57,6 +57,10 @@ from app.shared.lib.files import get_language_from_filename
 from app.shared.lib.ingest_manifest import IngestManifest, build_manifest
 from app.shared.lib.framework_validation import validate_framework_selection
 from app.shared.lib.git import clone_repo_and_get_files, fetch_github_selected_files
+from app.shared.lib.selected_files import (
+    normalize_entry_name,
+    rejection_reason,
+)
 from app.shared.lib.integration_contract import IntegrationSourceProvenance
 
 logger = logging.getLogger(__name__)
@@ -131,6 +135,7 @@ _VALID_SCAN_TYPES: frozenset[str] = frozenset({"AUDIT", "SUGGEST", "REMEDIATE"})
 _REPO_URL_RE = re.compile(
     r"^https://(github\.com|gitlab\.com|bitbucket\.org)" r"/[A-Za-z0-9._/-]+(?:\.git)?$"
 )
+
 
 # Magic bytes for common executable formats (V05.2.2)
 def _redact_repo_url(url: str) -> str:
@@ -250,7 +255,9 @@ class ScanSubmissionService:
         which surfaced as an unexplained zero-finding scan. The file count and the
         reason breakdown are far more useful than that.
         """
-        if manifest.scannable > 0 and (manifest.first_party > 0 or manifest.deep_vendor_scan):
+        if manifest.scannable > 0 and (
+            manifest.first_party > 0 or manifest.deep_vendor_scan
+        ):
             return
         logger.info(
             "scan-submission: rejected unscannable submission",
@@ -356,7 +363,9 @@ class ScanSubmissionService:
         # --- One manifest: caps, classification, and the "nothing is scannable"
         # guard, in a single place for every ingestion path (V02.1.3).
         manifest = self._build_manifest(
-            files_data, source=source_type or "upload", deep_vendor_scan=deep_vendor_scan
+            files_data,
+            source=source_type or "upload",
+            deep_vendor_scan=deep_vendor_scan,
         )
         self._reject_unscannable(manifest)
         files_data = manifest.files_for_persistence()
@@ -511,17 +520,20 @@ class ScanSubmissionService:
                 continue
 
             # --- Filename path-traversal guard (V05.3.2 / V02.2.1) ----------
-            fname = file.filename
-            if (
-                ".." in fname
-                or "\x00" in fname
-                or fname.startswith("/")
-                or fname.startswith("\\")
-                or len(fname) > MAX_PATH_LEN
-            ):
+            # Segment-aware on purpose: a browser filename is a basename, and a
+            # legitimate file such as a Next.js `[...slug].tsx` catch-all route
+            # contains "..". Only a `..` *path segment* is traversal. The name is
+            # normalised (`\` -> `/`) first, so the stored path, the archive
+            # preview and the `selected_files` filter all agree.
+            fname = normalize_entry_name(file.filename)
+            unsafe_reason = rejection_reason(fname)
+            if not fname or unsafe_reason is not None or len(fname) > MAX_PATH_LEN:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid filename: {fname!r}",
+                    detail=(
+                        f"Invalid filename: {file.filename!r}"
+                        + (f" ({unsafe_reason})" if unsafe_reason else "")
+                    ),
                 )
 
             if is_archive_filename(fname):

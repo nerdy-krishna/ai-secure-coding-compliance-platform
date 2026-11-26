@@ -126,7 +126,7 @@ def extract_archive_to_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
     raw_filename = archive_file.filename
     if (
         "\x00" in raw_filename
-        or ".." in raw_filename
+        or ".." in normalize_entry_name(raw_filename).split("/")
         or os.sep in raw_filename
         or (os.altsep and os.altsep in raw_filename)
     ):
@@ -467,7 +467,7 @@ def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
     raw_filename = archive_file.filename
     if (
         "\x00" in raw_filename
-        or ".." in raw_filename
+        or ".." in normalize_entry_name(raw_filename).split("/")
         or os.sep in raw_filename
         or (os.altsep and os.altsep in raw_filename)
     ):

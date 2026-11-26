@@ -305,8 +305,10 @@ class VulnerabilityFinding(BaseModel):
     @field_validator("file_path")
     @classmethod
     def validate_file_path(cls, v: str) -> str:
-        if ".." in v:
-            raise ValueError("file_path must not contain '..'")
+        # Segment-aware: a finding in `src/app/[...slug]/page.tsx` is real code,
+        # and a substring test for ".." rejected every finding on those files.
+        if ".." in v.replace("\\", "/").split("/"):
+            raise ValueError("file_path must not contain a '..' path segment")
         return v
 
     @model_validator(mode="after")
