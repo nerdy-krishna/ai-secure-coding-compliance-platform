@@ -1410,15 +1410,32 @@ const ResultsPage: React.FC = () => {
         )}
         </div>
 
-        {/* detail */}
+        {/* detail — sticky, because the findings list in the middle is what
+            scrolls. Selecting a row far down the list used to jump the detail
+            panel out of view, so the operator had to scroll back up to read it.
+            Capped to the viewport with its own scroll: a long finding (big
+            snippet, disposition history) stays readable instead of running off
+            the bottom of the screen. */}
         {selected ? (
-          <FindingDetail
-            f={selected}
-            scanId={scanId}
-            originalCodeMap={data?.original_code_map ?? undefined}
-            scanType={String(data.scan_type ?? report?.scan_type ?? "AUDIT")}
-            patchPlan={data.patch_plan}
-          />
+          <div
+            className="results-detail-sticky"
+            style={{
+              position: "sticky",
+              top: 16,
+              alignSelf: "start",
+              maxHeight: "calc(100vh - 32px)",
+              overflowY: "auto",
+              overscrollBehavior: "contain",
+            }}
+          >
+            <FindingDetail
+              f={selected}
+              scanId={scanId}
+              originalCodeMap={data?.original_code_map ?? undefined}
+              scanType={String(data.scan_type ?? report?.scan_type ?? "AUDIT")}
+              patchPlan={data.patch_plan}
+            />
+          </div>
         ) : (
           <div
             className="surface"

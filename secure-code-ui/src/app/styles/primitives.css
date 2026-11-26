@@ -356,6 +356,13 @@
   .results-workspace { grid-template-columns: minmax(0, 1fr) !important; }
   .diff { overflow-x: auto; }
   .diff-row { min-width: 520px; }
+  /* One column: a sticky detail panel would trail the findings list and
+     fight the page scroll. Let it flow normally on narrow screens. */
+  .results-detail-sticky {
+    position: static !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
 }
 
 /* ============ inputs ============ */
