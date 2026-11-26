@@ -13,7 +13,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.infrastructure.database import models as db_models
 from app.core import schemas as agent_schemas
-from app.shared.lib.scan_status import STATUS_QUEUED, scan_status_predecessors
+from app.shared.lib.scan_status import (
+    STATUS_CANCELLED,
+    STATUS_QUEUED,
+    scan_status_predecessors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -539,6 +543,27 @@ class ScanRepository:
         )
 
         cache_status = cache_status_for(stage_name, status)
+
+        # Cancellation is terminal: nothing may append to a cancelled scan's timeline.
+        # A stopped scan used to keep growing prescan rows (a graph or scanner that
+        # outlived the cancel), which made a finished scan look like it was still
+        # working and hid the real reason a newer scan was waiting for a worker slot.
+        # Cancellation's own acknowledgement phases are the only exceptions.
+        if cache_status is None and stage_name != "CANCELLATION":
+            current_status = await self.db.scalar(
+                select(db_models.Scan.status).where(db_models.Scan.id == scan_id)
+            )
+            if current_status == STATUS_CANCELLED:
+                logger.info(
+                    "scan_repo.record_scan_event.cancelled_scan_suppressed",
+                    extra={
+                        "scan_id": str(scan_id),
+                        "stage_name": stage_name,
+                        "event_status": status,
+                    },
+                )
+                return False
+
         if cache_status is not None:
             result = await self.db.execute(
                 update(db_models.Scan)

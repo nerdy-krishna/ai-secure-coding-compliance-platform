@@ -1235,18 +1235,53 @@ _analysis_semaphore = asyncio.Semaphore(settings.WORKER_ANALYSIS_SLOTS)
 _unified_submission_semaphore = asyncio.Semaphore(settings.WORKER_SUBMISSION_SLOTS)
 
 
+async def _acquire_slot(semaphore: asyncio.Semaphore, label: str, scan_id: Any) -> None:
+    """Take a worker slot, saying so when the wait is why a scan looks idle.
+
+    A scan queued behind a long-running prescan used to sit at "Analyzing context"
+    with nothing anywhere explaining it: the delivery was blocked on the submission
+    semaphore (`WORKER_SUBMISSION_SLOTS`, default 1) inside the worker, which is not
+    visible in the UI. One warning names the situation; the matching info line
+    records how long it lasted.
+    """
+    if not semaphore.locked():
+        await semaphore.acquire()
+        return
+    started = time.monotonic()
+    logger.warning(
+        "WORKFLOW: no free %s slot; scan %s is waiting for capacity. "
+        "Raise WORKER_SUBMISSION_SLOTS / WORKER_ANALYSIS_SLOTS, or stop the scan that "
+        "is holding it.",
+        label,
+        scan_id,
+    )
+    await semaphore.acquire()
+    logger.info(
+        "WORKFLOW: scan %s acquired a %s slot after %.1fs",
+        scan_id,
+        label,
+        time.monotonic() - started,
+    )
+
+
 @asynccontextmanager
-async def _workflow_slot(queue_name: str):
+async def _workflow_slot(queue_name: str, scan_id: Any = None):
     """Retain unified submission serialization while bounding all workflows."""
-    async with _analysis_semaphore:
+    await _acquire_slot(_analysis_semaphore, "analysis", scan_id)
+    try:
         if (
             settings.WORKER_POOL == "unified"
             and queue_name == settings.RABBITMQ_SUBMISSION_QUEUE
         ):
-            async with _unified_submission_semaphore:
+            await _acquire_slot(_unified_submission_semaphore, "submission", scan_id)
+            try:
                 yield
+            finally:
+                _unified_submission_semaphore.release()
             return
         yield
+    finally:
+        _analysis_semaphore.release()
 
 
 async def _run_workflow_task(
@@ -1280,7 +1315,7 @@ async def _run_workflow_task(
                 principal_kind="service_principal",
                 principal_id=f"scan-worker:{trusted_delivery.outbox_id}",
             ):
-                async with _workflow_slot(queue_name):
+                async with _workflow_slot(queue_name, initial_state["scan_id"]):
                     success = await _run_workflow_for_scan(
                         initial_state, resume_payload=resume_payload
                     )

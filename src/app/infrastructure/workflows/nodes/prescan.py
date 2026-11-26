@@ -65,6 +65,10 @@ from app.infrastructure.scanners.staging import stage_files
 from app.infrastructure.observability import mark_error, span
 from app.infrastructure.workflows.state import WorkerState
 from app.infrastructure.workflows.budget import release_scan_budget
+from app.infrastructure.workflows.cancellation import (
+    ScanCancellationRequested,
+    is_scan_cancelled,
+)
 from app.shared.lib.files import source_line_at
 from app.shared.lib.file_classification import (
     classify_file,
@@ -85,6 +89,19 @@ from app.shared.lib.scan_status import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _abort_if_cancelled(scan_id: Any) -> None:
+    """Stop a cancelled scan at the next scanner boundary.
+
+    `invoke_with_forceful_cancellation` cancels the graph task and terminates the
+    scanner process groups, but a step that is already inside the scanner can still
+    finish. Checking here bounds that to *one* scanner instead of the whole prescan,
+    and keeps a cancelled scan from persisting findings or emitting events it will
+    never be judged on.
+    """
+    if await is_scan_cancelled(scan_id):
+        raise ScanCancellationRequested(str(scan_id))
 
 
 async def _emit_scan_activity(
@@ -162,11 +179,20 @@ async def _skip_file(
     language = detail.get("language")
     role = detail.get("role")
     if role in {"runtime_artifact", "dependency_lockfile", "known_third_party_vendor"}:
-        reason_code, reason = "low_value_role", f"{role} files are not analysed by deterministic scanners."
+        reason_code, reason = (
+            "low_value_role",
+            f"{role} files are not analysed by deterministic scanners.",
+        )
     elif language is None:
-        reason_code, reason = "unsupported_file_type", "No deterministic scanner supports this input type."
+        reason_code, reason = (
+            "unsupported_file_type",
+            "No deterministic scanner supports this input type.",
+        )
     else:
-        reason_code, reason = "unsupported_language", f"No deterministic scanner covers {language}."
+        reason_code, reason = (
+            "unsupported_language",
+            f"No deterministic scanner covers {language}.",
+        )
     skipped_by_reason[reason_code] = skipped_by_reason.get(reason_code, 0) + 1
     coverage_plan[("registry", path)] = CoveragePlanItem(
         scanner_name="registry",
@@ -303,10 +329,18 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             await _skip_file(path, profile, coverage_plan, skipped_by_reason, detail)
             continue
         if not content.strip():
-            skip(planned_scanners, "empty_input", "The input was empty or whitespace only.")
+            skip(
+                planned_scanners,
+                "empty_input",
+                "The input was empty or whitespace only.",
+            )
             continue
         if profile.get("is_binary"):
-            skip(planned_scanners, "binary_input", "The input is a binary or compiled executable.")
+            skip(
+                planned_scanners,
+                "binary_input",
+                "The input is a binary or compiled executable.",
+            )
             continue
         size = int(profile.get("size_bytes") or len(content.encode("utf-8", "replace")))
         cap = (
@@ -315,7 +349,9 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             else PRESCAN_FILE_BYTE_LIMIT
         )
         if size > cap:
-            skipped_by_reason["input_size_limit"] = skipped_by_reason.get("input_size_limit", 0) + 1
+            skipped_by_reason["input_size_limit"] = (
+                skipped_by_reason.get("input_size_limit", 0) + 1
+            )
             for scanner_name in planned_scanners:
                 coverage_plan[(scanner_name, path)] = CoveragePlanItem(
                     scanner_name=scanner_name,
@@ -341,7 +377,9 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                 reason=f"{role.replace('_', ' ')} files are not analysed by {scanner_name}.",
                 details=detail,
             )
-            skipped_by_reason["low_value_role"] = skipped_by_reason.get("low_value_role", 0) + 1
+            skipped_by_reason["low_value_role"] = (
+                skipped_by_reason.get("low_value_role", 0) + 1
+            )
 
         if not allowed:
             continue
@@ -384,7 +422,9 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
 
     top_reasons = ", ".join(
         f"{reason.replace('_', ' ')} {count}"
-        for reason, count in sorted(skipped_by_reason.items(), key=lambda kv: -kv[1])[:4]
+        for reason, count in sorted(skipped_by_reason.items(), key=lambda kv: -kv[1])[
+            :4
+        ]
     )
     manifest_summary = {
         "files_total": len(files),
@@ -624,6 +664,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     except Exception:
         pass
     semaphore = asyncio.Semaphore(scanner_limit)
+    await _abort_if_cancelled(scan_id)
     prescan_findings: List[VulnerabilityFinding] = []
     bom_cyclonedx: Optional[Dict[str, Any]] = None
     try:
@@ -636,6 +677,7 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             async def _with_activity(
                 scanner_name, coro_factory, *, expected_to_run: bool = True
             ):
+                await _abort_if_cancelled(scan_id)
                 started_at = time.perf_counter()
                 await _emit_scan_activity(
                     scan_id,
@@ -864,9 +906,10 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
                     isinstance(report, dict)
                     and (report.get("truncated") or report.get("available") is False)
                 )
-                if scanner_name == "osv" and scanner_statuses.get("osv", {}).get(
-                    "status"
-                ) == "skipped":
+                if (
+                    scanner_name == "osv"
+                    and scanner_statuses.get("osv", {}).get("status") == "skipped"
+                ):
                     # Nothing to analyse: record the skip once, with the reason,
                     # instead of settling per-input rows as "clean".
                     coverage_outcomes.append(
@@ -1181,6 +1224,11 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
             len(prescan_findings),
             "present" if bom_cyclonedx else "absent",
         )
+    except ScanCancellationRequested:
+        # A cancelled scan is finished. Falling through to the prescan-failure path
+        # would keep emitting events and persist findings for a scan nobody will read.
+        logger.info("deterministic_prescan: scan_id=%s cancelled mid-prescan", scan_id)
+        raise
     except Exception as exc:  # noqa: BLE001
         # N15: prescan-fail policy — never block the LLM analysis on a
         # prescan crash. Log and continue with whatever we collected.
@@ -1353,6 +1401,8 @@ async def deterministic_prescan_node(state: WorkerState) -> Dict[str, Any]:
     # it has no `interrupt()`, fixes the lot. `save_findings` also
     # hydrates `id` back onto each schema so the downstream nodes can
     # detect "already persisted" rows and skip re-inserting them.
+    await _abort_if_cancelled(scan_id)
+
     if prescan_findings:
         async with AsyncSessionLocal() as db:
             repo = ScanRepository(db)
