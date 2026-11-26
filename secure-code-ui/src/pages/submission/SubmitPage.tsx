@@ -379,6 +379,20 @@ function frameworkSuggestionKey(framework: string, languages: string[]): string 
   );
 }
 
+/**
+ * Paths the server will accept in `selected_files`.
+ *
+ * `/scans/preview-archive` marks a row `selectable: false` when the server
+ * would refuse its path (e.g. a `..` segment). Those rows are never part of the
+ * selection, so "everything selectable is ticked" correctly omits the field
+ * instead of always sending a subset.
+ */
+function pickablePaths(files: RepoFile[]): string[] {
+  return files
+    .filter((f) => f.supported !== false && f.selectable !== false)
+    .map((f) => f.path);
+}
+
 const SubmitPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -521,7 +535,7 @@ const SubmitPage: React.FC = () => {
     try {
       const list = await scanService.previewGitRepo(v);
       setPreviewFiles(list);
-      setSelectedFiles(new Set(list.map((f) => f.path)));
+      setSelectedFiles(new Set(pickablePaths(list)));
     } finally {
       setPreviewLoading(false);
     }
@@ -533,7 +547,7 @@ const SubmitPage: React.FC = () => {
     try {
       const list = await scanService.previewArchive(f);
       setPreviewFiles(list);
-      setSelectedFiles(new Set(list.map((f) => f.path)));
+      setSelectedFiles(new Set(pickablePaths(list)));
     } catch (err) {
       const e = err as {
         response?: { data?: { detail?: string } };
@@ -836,7 +850,7 @@ const SubmitPage: React.FC = () => {
         (mode === "git" || mode === "archive") &&
         previewFiles &&
         selectedFiles.size > 0 &&
-        selectedFiles.size < previewFiles.length
+        selectedFiles.size < pickablePaths(previewFiles).length
       ) {
         appendScanField(
           payload,

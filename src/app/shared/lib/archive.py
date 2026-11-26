@@ -15,6 +15,7 @@ from fastapi import UploadFile, HTTPException
 # it should be moved to a more general location.
 from app.shared.lib import ingest_limits
 from app.shared.lib.files import get_language_from_filename, looks_binary
+from app.shared.lib.selected_files import normalize_entry_name, rejection_reason
 
 logger = logging.getLogger(__name__)
 
@@ -214,8 +215,19 @@ def extract_archive_to_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                                 detail=f"Archive uncompressed size exceeds limit ({MAX_UNCOMPRESSED_SIZE_BYTES // (1024 * 1024)} MB).",
                             )
 
-                        # V15.4.2: Normalise path and reject absolute or traversal paths.
-                        normalised_name = os.path.normpath(member_info.filename)
+                        # V15.4.2: Normalise separators first, then reject absolute
+                        # or traversal paths. Normalising before the check matters:
+                        # a Windows-built zip stores `..\\..\\x` as one name, which a
+                        # '/'-only traversal check would not see.
+                        normalised_name = normalize_entry_name(member_info.filename)
+                        unsafe = rejection_reason(normalised_name)
+                        if unsafe is not None:
+                            logger.warning(
+                                "archive.unsafe_zip_path path=%s reason=%s",
+                                _safe(member_info.filename),
+                                unsafe,
+                            )
+                            continue
                         if os.path.isabs(normalised_name) or normalised_name.startswith(
                             ".."
                         ):
@@ -259,10 +271,10 @@ def extract_archive_to_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                             )
                             continue
                         content_str = _sanitize_extracted_content(content_bytes)
-                        language = get_language_from_filename(member_info.filename)
+                        language = get_language_from_filename(normalised_name)
                         extracted_files_data.append(
                             {
-                                "path": member_info.filename,
+                                "path": normalised_name,
                                 "content": content_str,
                                 "language": language or "unknown",
                             }
@@ -309,7 +321,21 @@ def extract_archive_to_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                                 detail=f"Archive uncompressed size exceeds limit ({MAX_UNCOMPRESSED_SIZE_BYTES // (1024 * 1024)} MB).",
                             )
 
-                        if not _is_path_safe(extraction_target_dir, member_info.name):
+                        # V15.4.2: Normalise separators before the containment
+                        # check so a Windows-built entry cannot sneak a traversal
+                        # past it, then verify the target stays inside the dir.
+                        normalised_tar_name = normalize_entry_name(member_info.name)
+                        unsafe = rejection_reason(normalised_tar_name)
+                        if unsafe is not None:
+                            logger.warning(
+                                "archive.unsafe_tar_path path=%s reason=%s",
+                                _safe(member_info.name),
+                                unsafe,
+                            )
+                            continue
+                        if not _is_path_safe(
+                            extraction_target_dir, normalised_tar_name
+                        ):
                             logger.warning(
                                 "archive.unsafe_tar_path path=%s",
                                 _safe(member_info.name),
@@ -346,14 +372,15 @@ def extract_archive_to_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                             continue
                         if looks_binary(content_bytes):
                             logger.info(
-                                "archive.binary_skipped path=%s", _safe(member_info.name)
+                                "archive.binary_skipped path=%s",
+                                _safe(member_info.name),
                             )
                             continue
                         content_str = _sanitize_extracted_content(content_bytes)
-                        language = get_language_from_filename(member_info.name)
+                        language = get_language_from_filename(normalised_tar_name)
                         extracted_files_data.append(
                             {
-                                "path": member_info.name,
+                                "path": normalised_tar_name,
                                 "content": content_str,
                                 "language": language or "unknown",
                             }
@@ -404,6 +431,25 @@ def _is_supported_source_extension(filename: str) -> bool:
     from app.shared.lib.files import LANGUAGE_EXTENSIONS
 
     return f".{ext}" in LANGUAGE_EXTENSIONS
+
+
+def _preview_entry(path: str, *, inside_root: bool) -> Dict[str, Any]:
+    """One preview row: what the file is, and whether the operator may pick it.
+
+    Unselectable rows are still listed. Dropping them silently is what made the
+    old flow confusing: the file vanished from the tree and the submission was
+    refused later by a ``selected_files`` 400 that named nothing.
+    """
+    reason = rejection_reason(path)
+    if reason is None and not inside_root:
+        reason = "resolves outside the archive root"
+    return {
+        "path": path,
+        "language": get_language_from_filename(path) or "unknown",
+        "supported": _is_supported_source_extension(path),
+        "selectable": reason is None,
+        "reason": reason,
+    }
 
 
 def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
@@ -481,10 +527,11 @@ def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                             continue
                         if (mi.external_attr >> 16) & 0o170000 == 0o120000:
                             continue
-                        normalised = os.path.normpath(mi.filename)
-                        if os.path.isabs(normalised) or normalised.startswith(".."):
-                            continue
-                        if not _is_path_safe(extraction_dir, normalised):
+                        # V05.3.2: one normal form for preview, extraction and
+                        # the `selected_files` filter, so a Windows-built entry
+                        # cannot appear as one name here and another there.
+                        path = normalize_entry_name(mi.filename)
+                        if not path:
                             continue
 
                         file_count += 1
@@ -500,14 +547,11 @@ def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                                 detail=f"Archive uncompressed size exceeds limit ({MAX_UNCOMPRESSED_SIZE_BYTES // (1024 * 1024)} MB).",
                             )
 
-                        language = get_language_from_filename(mi.filename) or "unknown"
-                        supported = _is_supported_source_extension(mi.filename)
                         entries.append(
-                            {
-                                "path": mi.filename,
-                                "language": language,
-                                "supported": supported,
-                            }
+                            _preview_entry(
+                                path,
+                                inside_root=_is_path_safe(extraction_dir, path),
+                            )
                         )
 
             elif file_extension.startswith(".tar") or file_extension in (
@@ -537,17 +581,28 @@ def list_archive_files(archive_file: UploadFile) -> List[Dict[str, Any]]:
                                 status_code=400,
                                 detail=f"Archive uncompressed size exceeds limit ({MAX_UNCOMPRESSED_SIZE_BYTES // (1024 * 1024)} MB).",
                             )
-                        if not _is_path_safe(extraction_dir, mi.name):
+                        path = normalize_entry_name(mi.name)
+                        if not path:
                             continue
 
-                        language = get_language_from_filename(mi.name) or "unknown"
-                        supported = _is_supported_source_extension(mi.name)
+                        file_count += 1
+                        if file_count > MAX_FILES_IN_ARCHIVE:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Archive contains too many files (limit: {MAX_FILES_IN_ARCHIVE}).",
+                            )
+                        total_size += mi.size
+                        if total_size > MAX_UNCOMPRESSED_SIZE_BYTES:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Archive uncompressed size exceeds limit ({MAX_UNCOMPRESSED_SIZE_BYTES // (1024 * 1024)} MB).",
+                            )
+
                         entries.append(
-                            {
-                                "path": mi.name,
-                                "language": language,
-                                "supported": supported,
-                            }
+                            _preview_entry(
+                                path,
+                                inside_root=_is_path_safe(extraction_dir, path),
+                            )
                         )
             else:
                 raise HTTPException(

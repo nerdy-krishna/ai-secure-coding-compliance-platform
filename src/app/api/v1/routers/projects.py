@@ -7,7 +7,9 @@ Upload policy (V05.1.1):
       ``ALLOWED_ARCHIVE_EXTENSIONS`` in ``app.shared.lib.archive``.
     - Per-file size: enforced by downstream service / archive extractor.
     - Maximum number of files: 5000 per submission (router cap).
-    - Maximum number of selected_files entries: 5000.
+    - Maximum number of selected_files entries: 5000. Each entry is validated
+      per path segment (``app.shared.lib.selected_files``); rejections name the
+      offending entry. A ``..`` inside a filename is not traversal.
     - Pasted code is accepted as one UTF-8 source file, capped at 10 MiB;
       ``pasted_filename`` must be a safe relative path and ``pasted_language``
       selects a supported language or server-side auto-detection.
@@ -81,6 +83,11 @@ from app.api.v1.routers.authorization import (
 )
 from app.shared.lib.git import list_repo_files
 from app.shared.lib.archive import is_archive_filename, list_archive_files
+from app.shared.lib.selected_files import (
+    MAX_SELECTED_FILES_CHARS,
+    SelectedFilesError,
+    split_selected_files,
+)
 from app.shared.lib.permissions import (
     FINDING_TRIAGE,
     SCAN_APPROVE,
@@ -323,33 +330,16 @@ async def create_scan(
     pasted_code: Optional[str] = Form(None, max_length=10 * 1024 * 1024),
     pasted_filename: Optional[str] = Form(None, min_length=1, max_length=1024),
     pasted_language: Optional[str] = Form(None, min_length=1, max_length=64),
-    selected_files: Optional[str] = Form(None, max_length=200000),
+    selected_files: Optional[str] = Form(None, max_length=MAX_SELECTED_FILES_CHARS),
 ):
-    # V05.3.2: reject selected_files entries containing traversal/null/backslash.
-    if selected_files and any(ch in selected_files for ch in ("..", "\x00", "\\")):
-        raise HTTPException(
-            status_code=400,
-            detail="selected_files contains invalid characters or path traversal sequences.",
-        )
-    selected_files_list = (
-        [p.strip() for p in selected_files.split(",") if p.strip()]
-        if selected_files
-        else None
-    )
-    # V02.2.1 / V02.3.2: cap selected_files entries.
-    if selected_files_list is not None and len(selected_files_list) >= 5000:
-        raise HTTPException(
-            status_code=413,
-            detail="Too many entries in selected_files (max 5000).",
-        )
-    # Reject any selected entries with absolute path or traversal segments.
-    if selected_files_list:
-        for p in selected_files_list:
-            if p.startswith("/") or ".." in p.split("/"):
-                raise HTTPException(
-                    status_code=400,
-                    detail="selected_files contains an invalid path entry.",
-                )
+    # V05.3.2 / V02.2.1 / V02.3.2: per-entry validation (traversal segments,
+    # absolute paths, NULs, backslash separators) plus the entry cap. The
+    # rejected entry is named in the detail so the operator knows which file
+    # in the preview tree is at fault. See app.shared.lib.selected_files.
+    try:
+        selected_files_list = split_selected_files(selected_files)
+    except SelectedFilesError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     # V01.3.6 / V05.3.2: SSRF allowlist for repo_url before any clone.
     if repo_url:

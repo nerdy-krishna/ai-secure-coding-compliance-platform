@@ -26,6 +26,16 @@ export interface RepoFile {
   language?: string;
   /** Whether this file can be scanned (has a supported extension) */
   supported?: boolean;
+  /**
+   * Whether the server would accept this path in `selected_files`.
+   * `/scans/preview-archive` sets it: a row with `selectable: false`
+   * cannot be submitted at all (e.g. a `..` path segment), so the tree
+   * greys it out instead of letting the operator pick it and eat a 400
+   * at submit time. Absent ⇒ selectable (git previews never set it).
+   */
+  selectable?: boolean;
+  /** Why the row is not selectable, for the inline label. */
+  reason?: string | null;
 }
 
 export interface RepoFileTreeProps {
@@ -107,6 +117,7 @@ interface RowProps {
   expanded: Set<string>;
   query: string;
   supportedMap: Map<string, boolean>;
+  reasonMap: Map<string, string>;
   toggleSelect: (paths: string[], select: boolean) => void;
   toggleExpand: (path: string) => void;
 }
@@ -118,6 +129,7 @@ const TreeRow: React.FC<RowProps> = ({
   expanded,
   query,
   supportedMap,
+  reasonMap,
   toggleSelect,
   toggleExpand,
 }) => {
@@ -127,6 +139,8 @@ const TreeRow: React.FC<RowProps> = ({
     [node, isFolder],
   );
   const isUnsupported = !isFolder && supportedMap.get(node.path) === false;
+  const blockedReason = !isFolder ? reasonMap.get(node.path) : undefined;
+  const isUnpickable = isUnsupported || !!blockedReason;
   const selectedCount = filesUnder.filter((p) => selected.has(p)).length;
   const isChecked = selectedCount > 0 && selectedCount === filesUnder.length;
   const isOpen = expanded.has(node.path) || query.length > 0;
@@ -173,17 +187,18 @@ const TreeRow: React.FC<RowProps> = ({
         <input
           type="checkbox"
           checked={isChecked}
-          disabled={isUnsupported}
+          disabled={isUnpickable}
           onChange={(e) => {
             e.stopPropagation();
             toggleSelect(filesUnder, e.target.checked);
           }}
           onClick={(e) => e.stopPropagation()}
           style={{
-            cursor: isUnsupported ? "not-allowed" : "pointer",
+            cursor: isUnpickable ? "not-allowed" : "pointer",
             accentColor: "var(--primary)",
-            opacity: isUnsupported ? 0.4 : 1,
+            opacity: isUnpickable ? 0.4 : 1,
           }}
+          title={blockedReason ? `Cannot be scanned: ${blockedReason}` : undefined}
         />
         <span style={{ color: "var(--fg-muted)" }}>
           {isFolder ? <Icon.Folder size={12} /> : <Icon.File size={12} />}
@@ -195,8 +210,8 @@ const TreeRow: React.FC<RowProps> = ({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            color: isUnsupported ? "var(--fg-subtle)" : "var(--fg)",
-            opacity: isUnsupported ? 0.6 : 1,
+            color: isUnpickable ? "var(--fg-subtle)" : "var(--fg)",
+            opacity: isUnpickable ? 0.6 : 1,
           }}
         >
           {node.name}
@@ -210,6 +225,18 @@ const TreeRow: React.FC<RowProps> = ({
               }}
             >
               unsupported
+            </span>
+          )}
+          {blockedReason && (
+            <span
+              style={{
+                fontSize: 10,
+                color: "var(--critical)",
+                marginLeft: 6,
+                fontWeight: 400,
+              }}
+            >
+              cannot be submitted — {blockedReason}
             </span>
           )}
         </span>
@@ -245,6 +272,7 @@ const TreeRow: React.FC<RowProps> = ({
                 expanded={expanded}
                 query={query}
                 supportedMap={supportedMap}
+                reasonMap={reasonMap}
                 toggleSelect={toggleSelect}
                 toggleExpand={toggleExpand}
               />
@@ -267,16 +295,30 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
     () => new Map(normalised.map((f) => [f.path, f.supported ?? true])),
     [normalised],
   );
+  // Rows the server would refuse in `selected_files` (e.g. a `..` path
+  // segment). They stay visible with the reason attached; they just cannot be
+  // ticked, so the 400 never has to happen.
+  const reasonMap = useMemo(
+    () =>
+      new Map(
+        normalised
+          .filter((f) => f.selectable === false)
+          .map((f) => [f.path, (f.reason || "not submittable").trim()]),
+      ),
+    [normalised],
+  );
+  const isPickable = (path: string) =>
+    supportedMap.get(path) !== false && !reasonMap.has(path);
   const root = useMemo(() => buildTree(paths), [paths]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set([""]));
   const [query, setQuery] = useState("");
 
-  // Default-select only supported files
+  // Default-select only the files that can actually be scanned.
   useEffect(() => {
-    const supportedPaths = normalised
-      .filter((f) => f.supported !== false)
+    const pickablePaths = normalised
+      .filter((f) => f.supported !== false && f.selectable !== false)
       .map((f) => f.path);
-    onChange(new Set(supportedPaths));
+    onChange(new Set(pickablePaths));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
 
@@ -292,8 +334,8 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   const toggleSelect = (paths: string[], select: boolean) => {
     const next = new Set(selected);
     for (const p of paths) {
-      // Cannot select unsupported files
-      if (select && supportedMap.get(p) === false) continue;
+      // Unsupported or unsubmittable rows can never be selected.
+      if (select && !isPickable(p)) continue;
       if (select) next.add(p);
       else next.delete(p);
     }
@@ -301,8 +343,9 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   };
 
   const totalCount = paths.length;
-  const supportedCount = paths.filter((p) => supportedMap.get(p) !== false).length;
-  const unsupportedCount = totalCount - supportedCount;
+  const pickableCount = paths.filter(isPickable).length;
+  const unpickableCount = totalCount - pickableCount;
+  const blockedCount = paths.filter((p) => reasonMap.has(p)).length;
   const selectedCount = paths.filter((f) => selected.has(f)).length;
 
   return (
@@ -328,7 +371,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
         <button
           type="button"
           className="sccap-btn sccap-btn-sm sccap-btn-ghost"
-          onClick={() => onChange(new Set(paths.filter((p) => supportedMap.get(p) !== false)))}
+          onClick={() => onChange(new Set(paths.filter(isPickable)))}
         >
           Select all
         </button>
@@ -347,10 +390,11 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {selectedCount} / {supportedCount}
-          {unsupportedCount > 0 && (
+          {selectedCount} / {pickableCount}
+          {unpickableCount > 0 && (
             <span style={{ color: "var(--fg-subtle)", marginLeft: 4 }}>
-              ({unsupportedCount} unsupported)
+              ({unpickableCount} cannot be scanned
+              {blockedCount > 0 ? `, ${blockedCount} with an invalid path` : ""})
             </span>
           )}
         </span>
@@ -383,6 +427,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
                 expanded={expanded}
                 query={query}
                 supportedMap={supportedMap}
+                reasonMap={reasonMap}
                 toggleSelect={toggleSelect}
                 toggleExpand={toggleExpand}
               />

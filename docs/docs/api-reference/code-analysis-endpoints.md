@@ -75,7 +75,11 @@ Exactly one submission method:
   language-specific scanners. Pasted code is limited to one 10 MiB file.
 
 Optional: `selected_files` is a comma-separated list of paths —
-submitted files outside this list are excluded from the scan.
+submitted files outside this list are excluded from the scan. Each entry is
+validated per path segment: `..` segments, absolute paths, NUL bytes, and
+Windows `\` separators are rejected (`400`), and the error names the offending
+entries. A `..` *inside* a filename is not traversal — Next.js catch-all routes
+such as `[...slug].tsx` are accepted.
 
 Response: `{ scan_id, project_id, message }`. The scan enters the
 `QUEUED` state; poll status via SSE or `GET /scans/{id}`.
