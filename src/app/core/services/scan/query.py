@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1 import models as api_models
 from app.infrastructure.database import models as db_models
@@ -1662,6 +1663,95 @@ class ScanQueryService:
             )
         return result
 
+    async def _delete_scan_rows(self, scan_id: uuid.UUID) -> None:
+        """Delete one scan, turning row-level refusals into an actionable 409.
+
+        A delete can be refused for reasons the operator can act on - evidence
+        under legal hold, or child rows committed by a scan that was still being
+        processed - and those used to surface as a bare 500 on the results page.
+        """
+        try:
+            await self.repo.delete_scan(scan_id)
+        except PermissionError as exc:
+            await self.repo.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+            ) from exc
+        except SQLAlchemyError as exc:
+            await self.repo.db.rollback()
+            logger.error(
+                "scan-query: scan delete failed",
+                extra={"scan_id": str(scan_id), "error_class": exc.__class__.__name__},
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This scan could not be deleted: it still has dependent rows. "
+                    "If it is running, stop it and retry; the worker log names any "
+                    "constraint that refused the delete."
+                ),
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - evidence store / storage faults
+            await self.repo.db.rollback()
+            logger.error(
+                "scan-query: scan delete failed",
+                extra={"scan_id": str(scan_id), "error_class": exc.__class__.__name__},
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This scan could not be deleted because one of its dependent "
+                    "records (evidence or findings) refused the delete. The server "
+                    "log names the component; retry once it is reachable."
+                ),
+            ) from exc
+
+    async def _delete_project_rows(self, project_id: uuid.UUID) -> None:
+        """Same contract as `_delete_scan_rows`, for a whole project."""
+        try:
+            await self.repo.delete_project(project_id)
+        except PermissionError as exc:
+            await self.repo.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+            ) from exc
+        except SQLAlchemyError as exc:
+            await self.repo.db.rollback()
+            logger.error(
+                "scan-query: project delete failed",
+                extra={
+                    "project_id": str(project_id),
+                    "error_class": exc.__class__.__name__,
+                },
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This project could not be deleted: one of its scans still has "
+                    "dependent rows. Stop any running scan and retry."
+                ),
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - evidence store / storage faults
+            await self.repo.db.rollback()
+            logger.error(
+                "scan-query: project delete failed",
+                extra={
+                    "project_id": str(project_id),
+                    "error_class": exc.__class__.__name__,
+                },
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This project could not be deleted because one of its dependent "
+                    "records refused the delete. The server log names the component."
+                ),
+            ) from exc
+
     async def delete_scan_by_id(
         self,
         scan_id: uuid.UUID,
@@ -1683,13 +1773,7 @@ class ScanQueryService:
                 detail="Scan not found or not authorized.",
             )
 
-        try:
-            await self.repo.delete_scan(scan_id)
-        except PermissionError as exc:
-            await self.repo.db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-            ) from exc
+        await self._delete_scan_rows(scan_id)
         logger.info(
             "scan-query: scan deleted",
             extra={"actor_user_id": str(user.id), "scan_id": str(scan_id)},
@@ -1716,13 +1800,7 @@ class ScanQueryService:
                 detail="Project not found or not authorized.",
             )
 
-        try:
-            await self.repo.delete_project(project_id)
-        except PermissionError as exc:
-            await self.repo.db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
-            ) from exc
+        await self._delete_project_rows(project_id)
         logger.info(
             "scan-query: project deleted",
             extra={"actor_user_id": str(user.id), "project_id": str(project_id)},

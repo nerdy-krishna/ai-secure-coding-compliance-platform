@@ -150,7 +150,20 @@ DELETE /projects/{project_id}               # superuser only
 ```
 
 Deletes the scan (or the project + all child scans) including every
-finding, snapshot, and LLM-interaction row.
+finding, snapshot, LLM-interaction, coverage, artifact, log-capture row and the
+rule-foundry shadow observations that reference it. Dependent scans are kept and
+merely lose their `parent_scan_id`.
+
+A delete that cannot proceed answers `409` with the reason instead of `500`:
+
+| Cause | Message |
+|---|---|
+| evidence under legal hold | the hold, verbatim |
+| child rows committed while the scan was still running | "still has dependent rows … stop it and retry" |
+| evidence/storage component unreachable | "a dependent record refused the delete" |
+
+The server log line (`scan-query: scan delete failed`, with `exc_info`) carries the
+constraint or component that refused it.
 
 ## Error shapes
 

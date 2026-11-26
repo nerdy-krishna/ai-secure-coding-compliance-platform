@@ -1899,12 +1899,41 @@ class ScanRepository:
         result = await self.db.execute(stmt)
         return {file.hash: file.content for file in result.scalars().all()}
 
+    async def _purge_scan_dependents_without_cascade(self, scan_id: uuid.UUID) -> None:
+        """Clear the child rows whose FK to ``scans`` is RESTRICT / NO ACTION.
+
+        `session.delete(scan)` cascades through the ORM relationships (events,
+        findings, snapshots, tasks, gates, attempts), but two references are not
+        ORM relationships at all:
+
+        * ``rule_foundry_shadow_observations.scan_id`` is ``ON DELETE RESTRICT``.
+          A tenant that ran foundry shadow rules during the prescan has a row here
+          for every scan, and the DELETE failed with
+          ``violates foreign key constraint`` - which surfaced to the operator as
+          a bare 500 on the results page. The rows are an append-only aggregate
+          owned by the foundry, so they go with the scan they describe.
+        * ``scans.parent_scan_id`` is ``NO ACTION``: a scan with dependent scans
+          blocked the delete. The dependents are independent scans, so they keep
+          their rows and simply lose the link.
+        """
+        await self.db.execute(
+            delete(db_models.RuleFoundryShadowObservation).where(
+                db_models.RuleFoundryShadowObservation.scan_id == scan_id
+            )
+        )
+        await self.db.execute(
+            update(db_models.Scan)
+            .where(db_models.Scan.parent_scan_id == scan_id)
+            .values(parent_scan_id=None)
+        )
+
     async def delete_scan(self, scan_id: uuid.UUID) -> bool:
         """Deletes a scan record from the database.
 
         Explicitly purges orphaned LLMInteraction rows before deleting the
         scan to avoid FK violations when ondelete=CASCADE is absent on
-        LLMInteraction.scan_id (V14.2.7).
+        LLMInteraction.scan_id (V14.2.7), and the non-ORM dependents listed in
+        `_purge_scan_dependents_without_cascade`.
         """
         scan = await self.db.get(db_models.Scan, scan_id)
         if scan:
@@ -1936,6 +1965,7 @@ class ScanRepository:
                         reason="scan_deleted",
                         commit=False,
                     )
+            await self._purge_scan_dependents_without_cascade(scan_id)
             await self.db.execute(
                 delete(db_models.LLMInteraction).where(
                     db_models.LLMInteraction.scan_id == scan_id
@@ -2005,6 +2035,8 @@ class ScanRepository:
                         db_models.LLMInteraction.scan_id.in_(scan_ids)
                     )
                 )
+                for scan_id in scan_ids:
+                    await self._purge_scan_dependents_without_cascade(scan_id)
             await self.db.delete(project)
             try:
                 await self.db.commit()
