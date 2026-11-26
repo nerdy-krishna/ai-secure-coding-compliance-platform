@@ -262,9 +262,7 @@ async def close_workflow_resources() -> None:
 def queues_for_pool(pool: str) -> tuple[str, ...]:
     """Return the exact queue subscription contract for one worker pool."""
     mapping = {
-        "scanner": (
-            settings.RABBITMQ_SUBMISSION_QUEUE,
-        ),
+        "scanner": (settings.RABBITMQ_SUBMISSION_QUEUE,),
         "llm": (settings.RABBITMQ_APPROVAL_QUEUE,),
         "report": (settings.RABBITMQ_REPORT_QUEUE,),
         "unified": (
@@ -950,6 +948,12 @@ async def _build_initial_state(
     corr_id = message.correlation_id or body.get("correlation_id") or str(uuid.uuid4())
     correlation_id_var.set(corr_id)
 
+    # Attribute every log record emitted while this delivery runs to the scan,
+    # so `GET /scans/{id}/logs` can serve it to the run page.
+    from app.infrastructure.observability.scan_logs import set_scan_log_scan_id
+
+    set_scan_log_scan_id(scan_uuid)
+
     initial_state: WorkerState = {
         "scan_id": scan_uuid,
         "attempt_id": attempt_uuid,
@@ -1450,6 +1454,16 @@ async def _async_main() -> None:
     except Exception as e:
         logger.error("WORKER: feature flag load failed: %s", e, exc_info=True)
 
+    # Per-scan application-log capture. The worker is where scans actually run,
+    # so this is the stream an operator needs when a node fails: the live event
+    # log only carries stage transitions. Fail-open by construction.
+    from app.infrastructure.observability.scan_logs import scan_log_capture
+
+    try:
+        scan_log_capture.start()
+    except Exception as e:  # noqa: BLE001 - observability must not block work
+        logger.warning("WORKER: scan log capture failed to start: %s", e)
+
     runner = WorkerRunner()
 
     loop = asyncio.get_running_loop()
@@ -1473,6 +1487,11 @@ async def _async_main() -> None:
             flush_langfuse()
         except Exception as e:
             logger.warning("WORKER: Error during Langfuse flush: %s", e)
+        # Flush the last captured scan log lines so the run page keeps them.
+        try:
+            await scan_log_capture.stop()
+        except Exception as e:
+            logger.warning("WORKER: Error during scan log capture shutdown: %s", e)
         shutdown_otel()
         logger.info("WORKER: Consumer has fully shut down.")
 

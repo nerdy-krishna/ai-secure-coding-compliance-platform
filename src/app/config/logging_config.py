@@ -36,6 +36,17 @@ _REDACT_PATTERNS = [
 ]
 
 
+def scrub_text(value: str) -> str:
+    """Scrub known secret patterns from one string (V14.1.2).
+
+    Module-level so a second sink (the per-scan log capture) can redact without
+    mutating the shared ``LogRecord`` that the stdout handler also emits.
+    """
+    for pattern in _REDACT_PATTERNS:
+        value = pattern.sub("***REDACTED***", value)
+    return value
+
+
 class RedactionFilter(logging.Filter):
     """
     Logging filter that scrubs known secret patterns from log records before emission.
@@ -44,8 +55,7 @@ class RedactionFilter(logging.Filter):
 
     def _scrub(self, value: Any) -> Any:
         if isinstance(value, str):
-            for pattern in _REDACT_PATTERNS:
-                value = pattern.sub("***REDACTED***", value)
+            return scrub_text(value)
         return value
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -333,8 +343,8 @@ def update_logging_level(level: str):
         # as too much noise from libraries can be overwhelming.
 
         for name, floor in _NOISY_LIBRARY_LEVELS.items():
-            logging.getLogger(name).setLevel(max(
-                logging.getLevelName(level), logging.getLevelName(floor)
-            ))
+            logging.getLogger(name).setLevel(
+                max(logging.getLevelName(level), logging.getLevelName(floor))
+            )
 
         logger.info("logging.level.updated", extra={"level": level})

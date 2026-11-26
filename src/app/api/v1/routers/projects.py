@@ -1002,6 +1002,39 @@ async def get_scan_result_details(
 
 
 @router.get(
+    "/scans/{scan_id}/logs",
+    dependencies=[Depends(require_permission(SCAN_READ))],
+)
+async def get_scan_logs(
+    scan_id: uuid.UUID,
+    after: int = Query(0, ge=0, le=2**62),
+    limit: int = Query(200, ge=1, le=500),
+    user: db_models.User = Depends(current_active_user),
+    service: ScanQueryService = Depends(get_scan_query_service),
+    visible_user_ids: Optional[List[int]] = Depends(get_visible_user_ids),
+    tenant_id=Depends(get_current_user_tenant_id),
+):
+    """Captured backend log lines for this scan, oldest first.
+
+    Backs the optional "backend logs" view on the scan page: the live event log
+    only carries stage transitions, so a failure deep inside a node was
+    invisible without shelling into the box. Cursor by row id means the page can
+    poll with `after=<last id>` and never re-render a line.
+
+    Lines are redacted and length-capped before they are stored, and each scan is
+    pruned to its newest `SCAN_LOG_MAX_LINES_PER_SCAN` rows.
+    """
+    return await service.get_scan_logs(
+        scan_id,
+        user,
+        after=after,
+        limit=limit,
+        visible_user_ids=visible_user_ids,
+        tenant_id=tenant_id,
+    )
+
+
+@router.get(
     "/scans/{scan_id}/report",
     dependencies=[Depends(require_permission(SCAN_READ))],
 )

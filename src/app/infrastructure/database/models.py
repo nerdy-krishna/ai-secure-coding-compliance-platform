@@ -736,6 +736,30 @@ class ScanEvent(Base):
     scan: Mapped["Scan"] = relationship(back_populates="events")
 
 
+class ScanLogLine(Base):
+    """One captured application log line, attributed to a scan.
+
+    Deliberately separate from ``scan_events``: that table is the audit trail
+    and must stay interpretable. These rows are a bounded, redacted debug view
+    for the scan page -- see ``app.infrastructure.observability.scan_logs`` --
+    and are pruned to the newest ``SCAN_LOG_MAX_LINES_PER_SCAN`` rows per scan.
+    """
+
+    __tablename__ = "scan_log_lines"
+    __table_args__ = (sa.Index("ix_scan_log_lines_scan_id_id", "scan_id", "id"),)
+
+    id: Mapped[int] = mapped_column(BIGINT, sa.Identity(always=True), primary_key=True)
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scans.id", ondelete="CASCADE"), nullable=False
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    level: Mapped[str] = mapped_column(String(10), nullable=False)
+    logger_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class ApprovalGate(Base):
     """Durable identity and one-shot state for one LangGraph HITL pause."""
 

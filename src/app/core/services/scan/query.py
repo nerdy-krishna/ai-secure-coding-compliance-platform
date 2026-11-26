@@ -186,6 +186,60 @@ class ScanQueryService:
             ],
         )
 
+    async def get_scan_logs(
+        self,
+        scan_id: uuid.UUID,
+        user: db_models.User,
+        *,
+        after: int = 0,
+        limit: int = 200,
+        visible_user_ids: Optional[List[int]] = None,
+        tenant_id: Optional[uuid.UUID] = None,
+    ) -> Dict[str, Any]:
+        """Captured application log lines for one scan, oldest first.
+
+        Cursor is the monotonic row id, so the scan page can poll with
+        ``after=<last id>`` and never re-render a line it already showed. Same
+        authorization as every other scan read: two different callers must not
+        be able to tell "not yours" from "does not exist".
+        """
+        await self.get_scan_status(
+            scan_id,
+            user,
+            visible_user_ids=visible_user_ids,
+            tenant_id=tenant_id,
+        )
+        from app.infrastructure.database.models import ScanLogLine
+
+        capped = max(1, min(int(limit), 500))
+        rows = (
+            (
+                await self.repo.db.execute(
+                    select(ScanLogLine)
+                    .where(ScanLogLine.scan_id == scan_id)
+                    .where(ScanLogLine.id > max(0, int(after)))
+                    .order_by(ScanLogLine.id.asc())
+                    .limit(capped)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return {
+            "scan_id": str(scan_id),
+            "lines": [
+                {
+                    "id": row.id,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "level": row.level,
+                    "logger": row.logger_name,
+                    "message": row.message,
+                }
+                for row in rows
+            ],
+            "next_after": rows[-1].id if rows else max(0, int(after)),
+        }
+
     async def get_scanner_reports(
         self,
         scan_id: uuid.UUID,
@@ -254,7 +308,9 @@ class ScanQueryService:
                 key = "INFORMATIONAL"
             severity_counts[key] = severity_counts.get(key, 0) + 1
 
-        def _payload(finding: db_models.Finding) -> api_models.VulnerabilityFindingResponse:
+        def _payload(
+            finding: db_models.Finding,
+        ) -> api_models.VulnerabilityFindingResponse:
             payload = api_models.VulnerabilityFindingResponse.from_orm(finding)
             if not payload.vulnerable_snippet:
                 # Rows persisted before scanners carried snippets still deserve a
@@ -1469,7 +1525,9 @@ class ScanQueryService:
             [
                 row.id
                 for project in projects
-                for row in (await self.repo.get_paginated_scans_for_project(project.id, 0, 5))
+                for row in (
+                    await self.repo.get_paginated_scans_for_project(project.id, 0, 5)
+                )
             ]
         )
         for project in projects:

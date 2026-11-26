@@ -700,6 +700,19 @@ async def lifespan(app: FastAPI):
         )
         progress_bus = None
 
+    # --- Per-scan application-log capture ---
+    # Backs the optional "backend logs" view on the scan page: the live event
+    # log only carries stage transitions, so a failure inside a node was
+    # invisible without shelling into the box. Attributes records to the scan
+    # bound by `scan_log_context_middleware` (below) and flushes them in
+    # batches. Fail-open: capture never breaks a request.
+    from app.infrastructure.observability.scan_logs import scan_log_capture
+
+    try:
+        scan_log_capture.start()
+    except Exception as e:  # noqa: BLE001 - observability must not block boot
+        logger.warning("scan_log_capture: failed to start: %s", e)
+
     yield
 
     # This code runs on shutdown
@@ -812,6 +825,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Error during Langfuse flush: {e}")
 
+    # Flush any buffered scan log lines so the last seconds before shutdown
+    # still reach the scan page.
+    from app.infrastructure.observability.scan_logs import scan_log_capture
+
+    try:
+        await scan_log_capture.stop()
+    except Exception as e:
+        logger.warning(f"Error during scan log capture shutdown: {e}")
+
 
 # --- FastMCP sub-app (Phase I.4) ---
 # FastMCP requires its own lifespan for session initialisation. Compose it
@@ -864,6 +886,12 @@ else:
 
 _CORR_ID_RE = __import__("re").compile(r"[A-Za-z0-9._:\-]{1,128}")
 
+# Scan-scoped request paths, so log records emitted while serving them can be
+# attributed to the scan and shown on the scan page.
+_SCAN_PATH_RE = __import__("re").compile(
+    r"^/api/v1/scans/(?P<scan_id>[0-9a-fA-F\-]{36})(?:/|$)"
+)
+
 
 # Paths that are polled by health checks, load balancers and the UI shell. They
 # are answered thousands of times a day and say nothing about the application,
@@ -905,6 +933,23 @@ def _route_template(request: Request) -> str:
 
 
 @app.middleware("http")
+async def scan_log_context_middleware(request: Request, call_next):
+    """Attribute this request's log records to the scan it is about.
+
+    Only scan-scoped API paths match, and the captured id is validated as a
+    UUID before anything is stored (a malformed path segment is ignored, not
+    written). See `app.infrastructure.observability.scan_logs`.
+    """
+    match = _SCAN_PATH_RE.match(request.url.path)
+    if match is None:
+        return await call_next(request)
+    from app.infrastructure.observability.scan_logs import bind_scan_logging
+
+    with bind_scan_logging(match.group("scan_id")):
+        return await call_next(request)
+
+
+@app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
     # V02.2.1 / V04.2.4 / V04.2.5 / V14.2.4 / V16.4.1: validate the inbound
     # X-Correlation-ID against a positive allow-list (length-capped, no CRLF,
@@ -933,7 +978,9 @@ async def correlation_id_middleware(request: Request, call_next):
     path = request.url.path
     route = _route_template(request)
     status = response.status_code
-    quiet = path.startswith(_QUIET_ACCESS_PATHS) or route.startswith(_QUIET_ACCESS_PATHS)
+    quiet = path.startswith(_QUIET_ACCESS_PATHS) or route.startswith(
+        _QUIET_ACCESS_PATHS
+    )
 
     if status >= 500:
         level = logging.ERROR

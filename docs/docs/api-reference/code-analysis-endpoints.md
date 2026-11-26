@@ -138,6 +138,47 @@ Because browsers can't set arbitrary headers on an `EventSource`,
 the endpoint reads the access token from the `token` query param via
 `current_active_user_sse`.
 
+## Captured backend logs for a scan
+
+```http
+GET /scans/{scan_id}/logs?after=0&limit=200
+```
+
+The event stream above carries stage transitions only, so a failure inside a
+worker node used to be invisible without reading the process log. This endpoint
+returns the application log lines attributed to the scan — API and worker alike
+— oldest first:
+
+```json
+{
+  "scan_id": "…",
+  "lines": [
+    {"id": 41, "timestamp": "…", "level": "ERROR",
+     "logger": "app.workers.consumer",
+     "message": "WORKFLOW: Exception during worker_workflow invocation — RuntimeError: …"}
+  ],
+  "next_after": 41
+}
+```
+
+`id` is the cursor: send it back as `after` and the response contains only newer
+lines, so the scan page can poll without re-rendering history. `limit` is capped
+at 500.
+
+Capture rules (they are why this is safe to expose):
+
+- a line is only stored when it is attributable to a scan — bound from the queue
+  delivery or from a `/scans/{id}/…` request path, or carried as a `scan_id` log
+  extra;
+- lines pass the same secret redaction as the process log, are flattened to one
+  row, and are capped in length;
+- each scan keeps only its newest `SCAN_LOG_MAX_LINES_PER_SCAN` rows (default
+  2000). `SCAN_LOG_CAPTURE_LEVEL` (default `INFO`) sets the floor.
+
+This is a debug view, not the audit trail: `scan_events` remains the record of
+what the scan decided. The UI shows these lines only when the operator turns on
+**backend logs** in the activity log.
+
 ## Applying fixes
 
 There is no separate apply-fixes endpoint. To have fixes applied to

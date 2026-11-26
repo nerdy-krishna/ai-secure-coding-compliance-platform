@@ -50,6 +50,22 @@ function clampPagination(
 // V15.2.2: In-flight guard so concurrent createScan calls share one request.
 let createScanInFlight: Promise<CreateScanResponse> | null = null;
 
+/** One captured application log line for a scan (`GET /scans/{id}/logs`). */
+export interface ScanLogLine {
+  id: number;
+  timestamp: string | null;
+  level: string;
+  logger: string;
+  message: string;
+}
+
+export interface ScanLogResponse {
+  scan_id: string;
+  lines: ScanLogLine[];
+  /** Pass back as `after` to fetch only newer lines. */
+  next_after: number;
+}
+
 export const scanService = {
   /**
    * Submits code for a new scan under a project.
@@ -122,6 +138,25 @@ export const scanService = {
       formData
     );
     return response.data.files;
+  },
+
+  /**
+   * Captured backend log lines for a scan, oldest first, cursor by row id.
+   *
+   * Backs the optional "backend logs" view in the activity log: the event
+   * stream only carries stage transitions, so a failure deep inside a worker
+   * node used to be invisible without shelling into the box.
+   */
+  getScanLogs: async (
+    scanId: string,
+    after = 0,
+    limit = 300,
+  ): Promise<ScanLogResponse> => {
+    const response = await apiClient.get<ScanLogResponse>(
+      `/scans/${encodeURIComponent(scanId)}/logs`,
+      { params: { after, limit } },
+    );
+    return response.data;
   },
 
   /**

@@ -13,7 +13,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { CriticalSecretOverrideModal } from "../../features/prescan-approval/CriticalSecretOverrideModal";
 import { PrescanReviewCard } from "../../features/prescan-approval/PrescanReviewCard";
-import { scanService } from "../../shared/api/scanService";
+import {
+  scanService,
+  type ScanLogLine,
+} from "../../shared/api/scanService";
 import { useAuth } from "../../shared/hooks/useAuth";
 import {
   displayStatus,
@@ -51,7 +54,10 @@ interface ScanEventMsg {
     | "degradation"
     | "decision"
     | "cancellation"
-    | "terminal";
+    | "terminal"
+    // Captured application log line (opt-in "backend logs" view). Not a
+    // `scan_events` row: it comes from GET /scans/{id}/logs.
+    | "log";
   stage_name: string;
   status: string; // "COMPLETED" / "STARTED" / "FAILED" for the event itself
   timestamp: string | null;
@@ -326,7 +332,12 @@ type ActivityTone = "error" | "warn" | "ok" | "info";
 // stream instead of looking like every other line.
 const activityTone = (event: ScanEventMsg): ActivityTone => {
   const status = (event.status || "").toUpperCase();
-  if (status === "FAILED" || status === "ERROR" || status === "BLOCKED") {
+  if (
+    status === "FAILED" ||
+    status === "ERROR" ||
+    status === "CRITICAL" ||
+    status === "BLOCKED"
+  ) {
     return "error";
   }
   if (
@@ -439,6 +450,19 @@ const ScanRunningPage: React.FC = () => {
     Record<string, FileProgressItem>
   >({});
   const [streamError, setStreamError] = useState<string | null>(null);
+  // Opt-in backend log stream. The event log only carries stage transitions, so
+  // a node-level failure used to require shelling into the worker. Off by
+  // default (the stage view is what most operators want) and remembered per
+  // browser.
+  const [showBackendLogs, setShowBackendLogs] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem("sccap_show_backend_logs") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [backendLogLines, setBackendLogLines] = useState<ScanLogLine[]>([]);
+  const backendLogCursor = useRef(0);
   const [costDetails, setCostDetails] = useState<CostDetails | null>(null);
   const [activeApprovalGate, setActiveApprovalGate] =
     useState<ApprovalGate | null>(null);
@@ -918,24 +942,91 @@ const ScanRunningPage: React.FC = () => {
     status !== null &&
     TERMINAL_STATUSES.has(status) &&
     (status !== "CANCELLED" || cancellationComplete);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "sccap_show_backend_logs",
+        showBackendLogs ? "1" : "0",
+      );
+    } catch {
+      // Private-mode / disabled storage: the toggle still works for this visit.
+    }
+  }, [showBackendLogs]);
+
+  // Poll the captured backend log for this scan while the operator has the view
+  // on. Cursor by row id, so nothing renders twice; the whole tail is kept in
+  // sync (2 s) which reads as live next to the event stream.
+  useEffect(() => {
+    if (!scanId || !showBackendLogs) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const page = await scanService.getScanLogs(
+          scanId,
+          backendLogCursor.current,
+        );
+        if (cancelled || page.lines.length === 0) return;
+        backendLogCursor.current = page.next_after;
+        setBackendLogLines((prev) => [...prev, ...page.lines].slice(-1500));
+      } catch {
+        // Best-effort: the next tick recovers, and the stage view is unaffected.
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [scanId, showBackendLogs]);
+
+  // Backend log lines rendered as activity rows. `event_id` stays 0 so they can
+  // never collide with a `scan_events` row id in a React key or a dedupe.
+  const backendLogEvents = useMemo<ScanEventMsg[]>(
+    () =>
+      backendLogLines.map((line) => ({
+        schema_version: 1,
+        cursor: String(line.id),
+        scan_id: scanId ?? "",
+        event_id: 0,
+        attempt_id: null,
+        activity_kind: "log" as const,
+        stage_name: line.logger,
+        status: (line.level || "INFO").toUpperCase(),
+        timestamp: line.timestamp,
+        details: { message: line.message },
+      })),
+    [backendLogLines, scanId],
+  );
+
+  // Everything the activity log renders: the audit stream, plus the captured
+  // backend log when the operator asked for it, interleaved by timestamp.
+  const activityEvents = useMemo<ScanEventMsg[]>(() => {
+    if (!showBackendLogs || backendLogEvents.length === 0) return events;
+    const at = (e: ScanEventMsg) =>
+      e.timestamp ? new Date(e.timestamp).getTime() : 0;
+    return [...events, ...backendLogEvents].sort((a, b) => at(a) - at(b));
+  }, [events, backendLogEvents, showBackendLogs]);
+
   const filteredEvents = useMemo(
     () =>
-      events.filter(
+      activityEvents.filter(
         (event) =>
           (activityKindFilter === "all" ||
             event.activity_kind === activityKindFilter) &&
           (activityStageFilter === "all" ||
             event.stage_name === activityStageFilter),
       ),
-    [events, activityKindFilter, activityStageFilter],
+    [activityEvents, activityKindFilter, activityStageFilter],
   );
   const activityStages = useMemo(
-    () => Array.from(new Set(events.map((event) => event.stage_name))).sort(),
-    [events],
+    () =>
+      Array.from(new Set(activityEvents.map((event) => event.stage_name))).sort(),
+    [activityEvents],
   );
   const activityErrorCount = useMemo(
-    () => events.filter((event) => activityTone(event) === "error").length,
-    [events],
+    () => activityEvents.filter((event) => activityTone(event) === "error").length,
+    [activityEvents],
   );
   const activityVisible = useMemo(
     () =>
@@ -2139,6 +2230,7 @@ const ScanRunningPage: React.FC = () => {
                 <option value="decision">Decisions</option>
                 <option value="cancellation">Cancellation</option>
                 <option value="terminal">Terminal</option>
+                <option value="log">Backend logs</option>
               </select>
             </label>
             <label style={{ fontSize: 11, color: "var(--fg-muted)" }}>
@@ -2237,6 +2329,24 @@ const ScanRunningPage: React.FC = () => {
               />
               errors only
             </label>
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 11,
+                color: showBackendLogs ? "var(--fg)" : "var(--fg-muted)",
+                cursor: "pointer",
+              }}
+              title="Stream this scan's captured backend log lines alongside the stage events"
+            >
+              <input
+                type="checkbox"
+                checked={showBackendLogs}
+                onChange={(event) => setShowBackendLogs(event.target.checked)}
+              />
+              backend logs
+            </label>
             {activityShowJump && (
               <button
                 className="sccap-btn sccap-btn-sm"
@@ -2293,7 +2403,7 @@ const ScanRunningPage: React.FC = () => {
                     key={
                       event.event_id > 0
                         ? `id:${event.event_id}`
-                        : `fp:${event.stage_name}|${event.timestamp ?? ""}|${event.status}`
+                        : `fp:${event.stage_name}|${event.timestamp ?? ""}|${event.status}|${event.cursor}`
                     }
                     className="scan-activity-row"
                     style={{ color: TONE_COLOR[tone] }}
@@ -2308,7 +2418,9 @@ const ScanRunningPage: React.FC = () => {
                     </span>
                     <span style={{ wordBreak: "break-word" }}>
                       <b style={{ fontWeight: tone === "info" ? 500 : 600 }}>
-                        {eventDisplayName(event.stage_name)}
+                        {event.activity_kind === "log"
+                          ? event.stage_name
+                          : eventDisplayName(event.stage_name)}
                       </b>{" "}
                       {event.status}
                       {formatActivityDetails(event.details)}
