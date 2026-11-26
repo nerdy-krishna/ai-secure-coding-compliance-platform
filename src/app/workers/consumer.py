@@ -674,6 +674,22 @@ async def _run_workflow_for_scan(
         if lc_handler is not None:
             config["callbacks"] = [lc_handler]
 
+        # A fresh-start delivery must not re-run a graph that is parked at a
+        # gate. `_WORKFLOW_ENTRY_STATUSES` deliberately includes the pending_*
+        # statuses, so the entry-status precheck above cannot catch this on its
+        # own; the checkpoint can. Gate decisions arrive on the approval queue
+        # with a resume payload and are unaffected.
+        if resume_payload is None and await _thread_is_parked_at_interrupt(
+            worker_workflow, config
+        ):
+            logger.warning(
+                "WORKFLOW: Scan %s is parked at a human approval gate; ACKing this "
+                "fresh-start delivery instead of re-running the graph from the entry "
+                "node. Approve or decline the gate to continue it.",
+                scan_id_str_log,
+            )
+            return True
+
         if (
             resume_payload is not None
             and resume_payload.get("kind") == "report_handoff"
@@ -915,6 +931,30 @@ async def _run_workflow_for_scan(
         await _maybe_cleanup_checkpointer_thread(scan_id_str_log)
 
     return success
+
+
+async def _thread_is_parked_at_interrupt(worker_workflow, config) -> bool:
+    """True when the thread's newest checkpoint is waiting on ``interrupt()``.
+
+    A graph parked at a human gate must only be advanced by a gate decision
+    (`Command(resume=...)` from the approval queue). Starting it again with
+    `initial_state` re-runs every node from the entry point - which is how a
+    scan could re-run its deterministic prescan and re-park at the same gate,
+    producing duplicate findings and a modal that kept coming back.
+    """
+    try:
+        snapshot = await worker_workflow.aget_state(config)
+    except Exception:
+        logger.warning(
+            "WORKFLOW: could not read checkpoint state for %s; assuming not parked.",
+            config.get("configurable", {}).get("thread_id"),
+            exc_info=True,
+        )
+        return False
+    for task in getattr(snapshot, "tasks", ()) or ():
+        if getattr(task, "interrupts", ()):
+            return True
+    return False
 
 
 async def _build_initial_state(

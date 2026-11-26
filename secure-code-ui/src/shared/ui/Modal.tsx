@@ -28,6 +28,13 @@ export const Modal: React.FC<ModalProps> = ({
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  // `onClose` is almost always an inline arrow, so it changes identity on every
+  // render. Holding it in a ref keeps the focus/trap effect keyed on `open`
+  // alone: otherwise each keystroke in a modal input re-ran the effect, whose
+  // cleanup restored focus to the invoker and whose body focused the first
+  // focusable element — the X button — yanking the caret out of the field.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -39,9 +46,19 @@ export const Modal: React.FC<ModalProps> = ({
           'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ) ?? [],
       ).filter((element) => !element.hasAttribute("hidden"));
-    window.requestAnimationFrame(() => (focusable()[0] ?? panel)?.focus());
+    window.requestAnimationFrame(() => {
+      // Never steal focus that is already inside the dialog: a re-render (a
+      // keystroke, a submit spinner) must not move the caret.
+      if (panel?.contains(document.activeElement)) return;
+      // `[data-modal-autofocus]` lets a consumer say what to focus — a
+      // confirmation field, not the close button that happens to be first.
+      const preferred = panel?.querySelector<HTMLElement>(
+        "[data-modal-autofocus]",
+      );
+      (preferred ?? focusable()[0] ?? panel)?.focus();
+    });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
       if (e.key !== "Tab") return;
       const elements = focusable();
       if (elements.length === 0) {

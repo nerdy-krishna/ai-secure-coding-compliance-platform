@@ -742,6 +742,41 @@ class ScanRepository:
         if not new_findings:
             return
 
+        # ...and defend against a *whole second run* of the same scan. The
+        # deterministic prescan derives `raw_finding_id` from
+        # (scan, producer, occurrence), so a re-run reproduces exactly the same
+        # ids on brand-new objects — where the in-memory `id` skip above cannot
+        # see them. Without this, re-running the prescan (restart, or a graph
+        # re-entry) doubles every semgrep/gitleaks row on the results page.
+        raw_ids = [f.raw_finding_id for f in new_findings if f.raw_finding_id]
+        if raw_ids:
+            already_stored = set(
+                (
+                    await self.db.execute(
+                        select(db_models.Finding.raw_finding_id).where(
+                            db_models.Finding.scan_id == scan_id,
+                            db_models.Finding.raw_finding_id.in_(raw_ids),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if already_stored:
+                new_findings = [
+                    f for f in new_findings if f.raw_finding_id not in already_stored
+                ]
+                logger.info(
+                    "scan_repo.save_findings.skipped_already_persisted",
+                    extra={
+                        "scan_id": str(scan_id),
+                        "skipped": len(already_stored),
+                        "remaining": len(new_findings),
+                    },
+                )
+            if not new_findings:
+                return
+
         # Resolve the parent scan's tenant once (Chunk 9). Stamped on every
         # inserted Finding so per-tenant filters on /admin/findings + the
         # dashboard work without joining back to scans.

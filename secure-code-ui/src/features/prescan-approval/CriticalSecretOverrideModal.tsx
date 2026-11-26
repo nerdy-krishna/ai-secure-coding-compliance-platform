@@ -38,6 +38,8 @@ export const CriticalSecretOverrideModal: React.FC<Props> = ({
 }) => {
   const [typed, setTyped] = useState("");
 
+  // Reset only when the dialog closes, so reopening a *new* gate does not carry
+  // the previous confirmation phrase across.
   useEffect(() => {
     if (!open) setTyped("");
   }, [open]);
@@ -112,6 +114,9 @@ export const CriticalSecretOverrideModal: React.FC<Props> = ({
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
           placeholder={CONFIRM_PHRASE}
+          // The dialog's own opener focuses this, not the close button that
+          // happens to be first in the panel.
+          data-modal-autofocus
           autoFocus
           disabled={submitting}
           aria-label="Type OVERRIDE to confirm"
