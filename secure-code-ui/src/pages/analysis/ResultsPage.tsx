@@ -1023,7 +1023,7 @@ const ResultsPage: React.FC = () => {
           treeCollapsed ? (
             <div
               className="surface"
-              style={{ padding: 0, display: "flex", flexDirection: "column", alignItems: "center", overflow: "hidden", position: "sticky", top: 16 }}
+              style={{ padding: 0, display: "flex", flexDirection: "column", alignItems: "center", overflow: "hidden", position: "sticky", top: "calc(var(--app-header-h) + 16px)" }}
             >
               <button
                 className="sccap-btn sccap-btn-ghost sccap-btn-icon"
@@ -1421,9 +1421,11 @@ const ResultsPage: React.FC = () => {
             className="results-detail-sticky"
             style={{
               position: "sticky",
-              top: 16,
+              // Offset by the sticky top bar, otherwise the panel's first
+              // line (severity / confidence chips) hides underneath it.
+              top: "calc(var(--app-header-h) + 16px)",
               alignSelf: "start",
-              maxHeight: "calc(100vh - 32px)",
+              maxHeight: "calc(100vh - var(--app-header-h) - 32px)",
               overflowY: "auto",
               overscrollBehavior: "contain",
             }}
@@ -3007,7 +3009,7 @@ const FileTree: React.FC<{
   return (
     <div
       className="surface"
-      style={{ padding: 0, overflow: "auto", alignSelf: "start", position: "sticky", top: 16 }}
+      style={{ padding: 0, overflow: "auto", alignSelf: "start", position: "sticky", top: "calc(var(--app-header-h) + 16px)", maxHeight: "calc(100vh - var(--app-header-h) - 32px)" }}
     >
       {/* All files row */}
       <div

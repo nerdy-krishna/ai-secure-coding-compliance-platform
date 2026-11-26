@@ -27,6 +27,11 @@
   /* motion */
   --ease: cubic-bezier(.2,.8,.2,1);
 
+  /* Height of the sticky top bar (`TopNav`). Sticky panels that live inside a
+     page must offset by this or they slide underneath the header -- the
+     results-page detail column and file tree both do. */
+  --app-header-h: 58px;
+
   /* Form controls follow the app theme, not the operating system. */
   color-scheme: light;
 }
