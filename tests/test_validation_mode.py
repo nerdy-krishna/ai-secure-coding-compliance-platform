@@ -212,3 +212,51 @@ def test_the_code_tools_are_registered():
 
     for name in ("list_code_files", "search_code", "read_code"):
         assert registry.spec(name) is not None, name
+
+
+def test_the_findings_list_is_filtered_and_counted_on_the_server():
+    """Why only critical and high appeared: the endpoint returned the first page by severity.
+
+    A 2,400-finding report has hundreds of criticals; sorting by severity and taking 200 rows
+    shows only those, and the picker had no way to say so or to reach the rest.
+    """
+    import inspect
+
+    from app.pentest import validation as validation_mod
+
+    source = inspect.getsource(validation_mod.load_code_findings)
+    assert "offset" in source and "severity" in source and "klass" in source and "query" in source
+
+    counts_source = inspect.getsource(validation_mod.code_finding_counts)
+    assert "by_severity" in counts_source and "by_class" in counts_source
+
+
+def test_the_severity_filter_matches_any_capitalisation():
+    from app.pentest.validation import _severity_filter
+
+    values = _severity_filter("Critical")
+    assert "critical" in values and "CRITICAL" in values and "Critical" in values
+
+
+def test_a_validation_run_does_not_run_the_fixed_recon_pass():
+    """Recon tools are chosen per finding; the automated pass would bury the thing being tested."""
+    import inspect
+
+    from app.pentest import engine
+
+    source = inspect.getsource(engine.RunExecutor)
+    assert "_validation_preflight" in source
+    assert 'mode", "assessment") == "validation"' in source
+    # The fixed pass is still there for ordinary assessments.
+    assert "run_recon(ctx, registry)" in source
+
+
+def test_the_status_view_names_what_it_is_working_on():
+    import inspect
+
+    from app.pentest import validation as validation_mod
+
+    source = inspect.getsource(validation_mod.current_focus)
+    assert "last_action" in source and "planned_method" in source
+    # A run with nothing pending has no current focus.
+    assert asyncio.run(validation_mod.current_focus("run", [])) is None
