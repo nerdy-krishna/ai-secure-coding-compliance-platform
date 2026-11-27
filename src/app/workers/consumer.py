@@ -1309,8 +1309,28 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
 # agent calls; these semaphores bound concurrent scans to protect memory and
 # DB connections, and they are configurable (WORKER_ANALYSIS_SLOTS /
 # WORKER_SUBMISSION_SLOTS) so an operator can trade memory for throughput.
+# Created at import (environment values) and re-created once the admin-managed
+# overrides have been read at startup: a semaphore cannot be resized under live
+# waiters, so `system.worker.*` applies when the worker starts.
 _analysis_semaphore = asyncio.Semaphore(settings.WORKER_ANALYSIS_SLOTS)
 _unified_submission_semaphore = asyncio.Semaphore(settings.WORKER_SUBMISSION_SLOTS)
+
+
+def _init_workflow_semaphores() -> None:
+    """Size the workflow slots from the effective (DB-overridable) settings."""
+    global _analysis_semaphore, _unified_submission_semaphore
+    from app.shared.lib.runtime_settings import effective
+
+    analysis_slots = effective("WORKER_ANALYSIS_SLOTS")
+    submission_slots = effective("WORKER_SUBMISSION_SLOTS")
+    _analysis_semaphore = asyncio.Semaphore(analysis_slots)
+    _unified_submission_semaphore = asyncio.Semaphore(submission_slots)
+    logger.info(
+        "WORKER: capacity analysis_slots=%d submission_slots=%d prefetch=%d",
+        analysis_slots,
+        submission_slots,
+        effective("WORKER_PREFETCH_COUNT"),
+    )
 
 
 async def _acquire_slot(semaphore: asyncio.Semaphore, label: str, scan_id: Any) -> None:
@@ -1510,7 +1530,9 @@ class WorkerRunner:
 
         try:
             channel = await self._connection.channel()
-            await channel.set_qos(prefetch_count=settings.WORKER_PREFETCH_COUNT)
+            from app.shared.lib.runtime_settings import effective
+
+            await channel.set_qos(prefetch_count=effective("WORKER_PREFETCH_COUNT"))
 
             queues = []
             consumers = []
@@ -1571,7 +1593,21 @@ async def _async_main() -> None:
     # the analyze step blew up with `LLM rate limiters not initialized`
     # and the silent gather upstream let the scan complete with 0
     # findings. (2026-05-04)
+    from app.shared.lib import runtime_settings
+
+    try:
+        await runtime_settings.refresh()
+        _init_workflow_semaphores()
+    except Exception as e:  # noqa: BLE001 - a limits read must not stop the worker
+        logger.warning("WORKER: runtime settings load failed: %s", e)
+
     initialize_rate_limiters()
+
+    # Keep admin-managed limits live: provider rate limits are re-applied in this
+    # process every refresh interval, so raising them takes effect mid-scan.
+    _runtime_settings_task = asyncio.create_task(
+        runtime_settings.run_refresh_loop(), name="runtime-settings-refresh"
+    )
 
     # Build the graph before accepting deliveries. Imports remain lazy so the
     # API-only test/runtime image can inspect pool contracts, while a real
@@ -1640,6 +1676,11 @@ async def _async_main() -> None:
             flush_langfuse()
         except Exception as e:
             logger.warning("WORKER: Error during Langfuse flush: %s", e)
+        try:
+            _runtime_settings_task.cancel()
+            await _runtime_settings_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
         # Flush the last captured scan log lines so the run page keeps them.
         try:
             await scan_log_capture.stop()

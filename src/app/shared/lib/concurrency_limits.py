@@ -63,7 +63,7 @@ async def get_concurrency_limit(
                 # `le=`, which is all of them. The broad `except` below then fell
                 # back to the environment default, so the admin "Concurrency limits"
                 # panel silently changed nothing.
-                field = settings.model_fields[setting_name]
+                field = type(settings).model_fields[setting_name]
                 lower = next((m.ge for m in field.metadata if hasattr(m, "ge")), None)
                 upper = next((m.le for m in field.metadata if hasattr(m, "le")), None)
                 lo = lower if lower is not None else 1

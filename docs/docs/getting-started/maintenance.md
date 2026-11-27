@@ -300,17 +300,24 @@ docker compose --profile pentesting-v5 ps pentest-engine   # should be Up
 
 ## Throughput knobs
 
-| Setting | Default | Takes effect | Effect |
+Every number that bounds scan speed is managed from **Admin → System Config**;
+`system_config` rows win over `.env`, and on first boot each key is seeded at its
+maximum so nothing is throttled by default.
+
+| Admin panel | `system_config` key | Takes effect | Effect |
 |---|---|---|---|
-| `WORKER_ANALYSIS_SLOTS` | 3 | worker restart | Scans one worker container runs at once (LLM phase) |
-| `WORKER_SUBMISSION_SLOTS` | 1 | worker restart | Pre-LLM pipelines at once |
-| `WORKER_PREFETCH_COUNT` | 5 | worker restart | Messages held in flight per worker |
-| `CONCURRENT_LLM_LIMIT` | 50 | next node / next scan | Concurrent model calls per reasoning lane, inside one scan |
-| `CONCURRENT_PROFILER_LIMIT` | 5 | next node / next scan | Concurrent per-file profiling calls — the slowest stage on a large repo |
-| `CONCURRENT_SCANNER_LIMIT` | 10 | next node / next scan | Concurrent scanner processes per scan |
-| `CONCURRENT_CONSOLIDATION_LIMIT` | 10 | next node / next scan | Concurrent consolidation calls |
-| `CONCURRENT_VALIDATION_LIMIT` | 10 | next node / next scan | Concurrent cross-file validation calls |
-| `DEEPSEEK_REQUESTS_PER_MINUTE` / `_TOKENS_PER_MINUTE` (and the same pair per provider) | 120 RPM / 400k TPM | worker restart | The provider rate limiter. This, not socket count, is what bounds throughput |
+| Worker capacity → Concurrent scans | `system.worker.analysis_slots` | worker restart | Scans one worker container runs at once (LLM phase) |
+| Worker capacity → Concurrent pre-LLM pipelines | `system.worker.submission_slots` | worker restart | Pre-LLM pipelines at once |
+| Worker capacity → Queue prefetch | `system.worker.prefetch_count` | worker restart | Messages held in flight per worker |
+| Concurrency limits → LLM agents | `system.concurrency.llm_limit` | next node / next scan | Concurrent model calls per reasoning lane |
+| Concurrency limits → File profiling | `system.concurrency.profiler_limit` | next node / next scan | Concurrent per-file profiling calls — the slowest stage on a large repo |
+| Concurrency limits → SAST scanners | `system.concurrency.scanner_limit` | next node / next scan | Concurrent scanner processes per scan |
+| Concurrency limits → Consolidation | `system.concurrency.consolidation_limit` | next node / next scan | Concurrent consolidation calls |
+| Concurrency limits → Cross-file validation | `system.concurrency.validation_limit` | next node / next scan | Concurrent cross-file validation calls |
+| Provider rate limits → per provider | `system.ratelimit.<provider>.rpm` / `.tpm` | **live** (≤ 30 s) | The provider rate limiter. This, not socket count, bounds throughput |
+
+`.env` still works as the initial value for a fresh install, but once a row exists the
+database is authoritative — changing `.env` afterwards has no effect on these keys.
 
 The `CONCURRENT_*` limits are read from `system_config` (`system.concurrency.*`)
 when the node that uses them starts, so they are changeable from **Admin → System

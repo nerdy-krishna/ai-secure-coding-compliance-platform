@@ -2,7 +2,6 @@
 import logging
 from typing import Dict, Tuple
 
-from app.config.config import settings
 from app.shared.lib.rate_limiter import AsyncRateLimiter
 
 logger = logging.getLogger(__name__)
@@ -24,33 +23,57 @@ def _provider_settings() -> Dict[str, Tuple[int, int]]:
     Every provider `llm_client._build_model` can construct MUST appear
     here, otherwise its scans fall back to conservative limits. Keep in
     sync with the `provider` Literal on `LLMConfigurationBase`.
+
+    Values resolve through `runtime_settings`, so an admin can raise them from the
+    UI: `system.ratelimit.<provider>.rpm|tpm` beats the environment, and the worker
+    applies a change to the running limiter within one refresh interval.
     """
+    from app.shared.lib.runtime_settings import effective
+
     return {
         "openai": (
-            settings.OPENAI_REQUESTS_PER_MINUTE,
-            settings.OPENAI_TOKENS_PER_MINUTE,
+            effective("OPENAI_REQUESTS_PER_MINUTE"),
+            effective("OPENAI_TOKENS_PER_MINUTE"),
         ),
         "google": (
-            settings.GOOGLE_REQUESTS_PER_MINUTE,
-            settings.GOOGLE_TOKENS_PER_MINUTE,
+            effective("GOOGLE_REQUESTS_PER_MINUTE"),
+            effective("GOOGLE_TOKENS_PER_MINUTE"),
         ),
         "anthropic": (
-            settings.ANTHROPIC_REQUESTS_PER_MINUTE,
-            settings.ANTHROPIC_TOKENS_PER_MINUTE,
+            effective("ANTHROPIC_REQUESTS_PER_MINUTE"),
+            effective("ANTHROPIC_TOKENS_PER_MINUTE"),
         ),
         "deepseek": (
-            settings.DEEPSEEK_REQUESTS_PER_MINUTE,
-            settings.DEEPSEEK_TOKENS_PER_MINUTE,
+            effective("DEEPSEEK_REQUESTS_PER_MINUTE"),
+            effective("DEEPSEEK_TOKENS_PER_MINUTE"),
         ),
         "xai": (
-            settings.XAI_REQUESTS_PER_MINUTE,
-            settings.XAI_TOKENS_PER_MINUTE,
+            effective("XAI_REQUESTS_PER_MINUTE"),
+            effective("XAI_TOKENS_PER_MINUTE"),
         ),
         "custom_openai": (
-            settings.CUSTOM_OPENAI_REQUESTS_PER_MINUTE,
-            settings.CUSTOM_OPENAI_TOKENS_PER_MINUTE,
+            effective("CUSTOM_OPENAI_REQUESTS_PER_MINUTE"),
+            effective("CUSTOM_OPENAI_TOKENS_PER_MINUTE"),
         ),
     }
+
+
+def set_provider_limits(provider: str, *, rpm: int, tpm: int) -> bool:
+    """Re-point a live limiter at new limits.
+
+    Mutating the existing object keeps the shared registry intact: every caller
+    already holds a reference to it, so a rebuild would leave stale limiters in
+    flight. Returns True when a limiter actually changed.
+    """
+    limiter = provider_rate_limiters.get(provider)
+    if limiter is None:
+        return False
+    if rpm <= 0 or tpm <= 0:
+        return False
+    changed = limiter.rpm_limit != rpm or limiter.tpm_limit != tpm
+    limiter.rpm_limit = rpm
+    limiter.tpm_limit = tpm
+    return changed
 
 
 def initialize_rate_limiters():

@@ -713,6 +713,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001 - observability must not block boot
         logger.warning("scan_log_capture: failed to start: %s", e)
 
+    # --- Admin-managed runtime limits ---
+    # Seed the limits that gate scan speed at their maximum on first boot (an
+    # operator can lower them from Admin → System Config), then keep the live ones
+    # fresh so a change applies without a restart.
+    from app.shared.lib import runtime_settings
+
+    runtime_settings_task = None
+    try:
+        await runtime_settings.seed_missing_maximums()
+        await runtime_settings.refresh()
+        runtime_settings_task = asyncio.create_task(
+            runtime_settings.run_refresh_loop(), name="runtime-settings-refresh"
+        )
+        logger.info(
+            "runtime_settings: effective limits %s",
+            runtime_settings.resolved_snapshot(),
+        )
+    except Exception as e:  # noqa: BLE001 - never block boot on a limits read
+        logger.warning("runtime_settings: startup failed: %s", e)
+
     yield
 
     # This code runs on shutdown
@@ -824,6 +844,13 @@ async def lifespan(app: FastAPI):
         flush_langfuse()
     except Exception as e:
         logger.warning(f"Error during Langfuse flush: {e}")
+
+    if runtime_settings_task is not None:
+        runtime_settings_task.cancel()
+        try:
+            await runtime_settings_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
 
     # Flush any buffered scan log lines so the last seconds before shutdown
     # still reach the scan page.

@@ -73,13 +73,30 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
   const [pendingSessionHours, setPendingSessionHours] = useState<string>("24");
   const [savingSession, setSavingSession] = useState(false);
 
-  // Concurrency limits
-  const [llmLimit, setLlmLimit] = useState<string>("50");
-  const [profilerLimit, setProfilerLimit] = useState<string>("5");
-  const [scannerLimit, setScannerLimit] = useState<string>("10");
-  const [consolidationLimit, setConsolidationLimit] = useState<string>("10");
-  const [validationLimit, setValidationLimit] = useState<string>("10");
+  // Concurrency limits (seeded at their maximum; lower them for a small provider plan)
+  const [llmLimit, setLlmLimit] = useState<string>("500");
+  const [profilerLimit, setProfilerLimit] = useState<string>("500");
+  const [scannerLimit, setScannerLimit] = useState<string>("50");
+  const [consolidationLimit, setConsolidationLimit] = useState<string>("100");
+  const [validationLimit, setValidationLimit] = useState<string>("50");
   const [savingConcurrency, setSavingConcurrency] = useState(false);
+
+  // Provider rate limits — the local throttle, not a provider requirement.
+  const [rateLimits, setRateLimits] = useState<Record<string, { rpm: string; tpm: string }>>(
+    () =>
+      Object.fromEntries(
+        RATE_LIMIT_PROVIDERS.map((p) => [p.id, { rpm: p.defaultRpm, tpm: p.defaultTpm }]),
+      ),
+  );
+  const [savingRateLimits, setSavingRateLimits] = useState(false);
+
+  // Worker capacity — applies when the worker container starts.
+  const [workerSlots, setWorkerSlots] = useState<{ analysis: string; submission: string; prefetch: string }>({
+    analysis: "32",
+    submission: "16",
+    prefetch: "20",
+  });
+  const [savingWorkerSlots, setSavingWorkerSlots] = useState(false);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -188,11 +205,42 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
           setter(fallback);
         }
       };
-      loadConc("system.concurrency.llm_limit", setLlmLimit, "50");
-      loadConc("system.concurrency.profiler_limit", setProfilerLimit, "5");
-      loadConc("system.concurrency.scanner_limit", setScannerLimit, "10");
-      loadConc("system.concurrency.consolidation_limit", setConsolidationLimit, "10");
-      loadConc("system.concurrency.validation_limit", setValidationLimit, "10");
+      loadConc("system.concurrency.llm_limit", setLlmLimit, "500");
+      loadConc("system.concurrency.profiler_limit", setProfilerLimit, "500");
+      loadConc("system.concurrency.scanner_limit", setScannerLimit, "50");
+      loadConc("system.concurrency.consolidation_limit", setConsolidationLimit, "100");
+      loadConc("system.concurrency.validation_limit", setValidationLimit, "50");
+
+      // Provider rate limits: one row per provider, falling back to the shipped max.
+      const readLimit = (key: string, fallback: string): string => {
+        const c = all.find((x) => x.key === key);
+        if (!c?.value) return fallback;
+        const v =
+          typeof c.value === "number"
+            ? c.value
+            : typeof c.value === "object" && c.value !== null
+              ? ((c.value as Record<string, unknown>).value ??
+                (c.value as Record<string, unknown>).limit ??
+                fallback)
+              : fallback;
+        return String(v);
+      };
+      setRateLimits(
+        Object.fromEntries(
+          RATE_LIMIT_PROVIDERS.map((p) => [
+            p.id,
+            {
+              rpm: readLimit(`system.ratelimit.${p.id}.rpm`, p.defaultRpm),
+              tpm: readLimit(`system.ratelimit.${p.id}.tpm`, p.defaultTpm),
+            },
+          ]),
+        ),
+      );
+      setWorkerSlots({
+        analysis: readLimit("system.worker.analysis_slots", "32"),
+        submission: readLimit("system.worker.submission_slots", "16"),
+        prefetch: readLimit("system.worker.prefetch_count", "20"),
+      });
     } finally {
       setLoadingMeta(false);
     }
@@ -266,6 +314,70 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
       toast.error("Failed to update session lifetime.");
     } finally {
       setSavingSession(false);
+    }
+  };
+
+  const handleSaveRateLimits = async () => {
+    for (const p of RATE_LIMIT_PROVIDERS) {
+      const { rpm, tpm } = rateLimits[p.id] ?? { rpm: "", tpm: "" };
+      const r = parseInt(rpm, 10);
+      const t = parseInt(tpm, 10);
+      if (Number.isNaN(r) || r < 1 || Number.isNaN(t) || t < 1) {
+        toast.error(`${p.label}: requests/min and tokens/min must be at least 1.`);
+        return;
+      }
+    }
+    setSavingRateLimits(true);
+    try {
+      await Promise.all(
+        RATE_LIMIT_PROVIDERS.flatMap((p) => [
+          systemConfigService.update(`system.ratelimit.${p.id}.rpm`, {
+            value: parseInt(rateLimits[p.id].rpm, 10),
+          }),
+          systemConfigService.update(`system.ratelimit.${p.id}.tpm`, {
+            value: parseInt(rateLimits[p.id].tpm, 10),
+          }),
+        ]),
+      );
+      toast.success(
+        "Provider rate limits saved. The worker applies them within 30 seconds.",
+      );
+      queryClient.invalidateQueries({ queryKey: ["system-configs"] });
+    } catch {
+      toast.error("Failed to save provider rate limits.");
+    } finally {
+      setSavingRateLimits(false);
+    }
+  };
+
+  const handleSaveWorkerSlots = async () => {
+    const pairs: [string, string][] = [
+      ["system.worker.analysis_slots", workerSlots.analysis],
+      ["system.worker.submission_slots", workerSlots.submission],
+      ["system.worker.prefetch_count", workerSlots.prefetch],
+    ];
+    for (const [, v] of pairs) {
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n) || n < 1) {
+        toast.error("All worker capacity values must be at least 1.");
+        return;
+      }
+    }
+    setSavingWorkerSlots(true);
+    try {
+      await Promise.all(
+        pairs.map(([k, v]) =>
+          systemConfigService.update(k, { value: parseInt(v, 10) }),
+        ),
+      );
+      toast.success(
+        "Worker capacity saved. Restart the worker to apply it: docker compose restart worker",
+      );
+      queryClient.invalidateQueries({ queryKey: ["system-configs"] });
+    } catch {
+      toast.error("Failed to save worker capacity.");
+    } finally {
+      setSavingWorkerSlots(false);
     }
   };
 
@@ -798,6 +910,103 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
         </div>
       </SettingsCard>
 
+      <SettingsCard
+        title="Provider rate limits"
+        description="What this platform is allowed to send a provider per minute. These are local guards, not provider requirements: the shipped values are the maximum, so nothing is throttled here. Lower them below your provider tier's quota if you start seeing 429s — the worker applies a change within 30 seconds, no restart needed."
+      >
+        <div style={{ display: "grid", gap: 12 }}>
+          {RATE_LIMIT_PROVIDERS.map((p) => (
+            <div
+              key={p.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(140px, 1fr) 140px 160px",
+                gap: 12,
+                alignItems: "end",
+              }}
+            >
+              <span style={{ fontSize: 12.5, color: "var(--fg)" }}>{p.label}</span>
+              <LabeledNumber
+                label="Requests / min"
+                value={rateLimits[p.id]?.rpm ?? p.defaultRpm}
+                onChange={(v) =>
+                  setRateLimits((prev) => ({
+                    ...prev,
+                    [p.id]: { ...prev[p.id], rpm: v },
+                  }))
+                }
+                min={1}
+                max={100000}
+                disabled={savingRateLimits || loadingMeta}
+              />
+              <LabeledNumber
+                label="Tokens / min"
+                value={rateLimits[p.id]?.tpm ?? p.defaultTpm}
+                onChange={(v) =>
+                  setRateLimits((prev) => ({
+                    ...prev,
+                    [p.id]: { ...prev[p.id], tpm: v },
+                  }))
+                }
+                min={1}
+                max={1000000000}
+                disabled={savingRateLimits || loadingMeta}
+              />
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button
+            className="sccap-btn sccap-btn-primary sccap-btn-sm"
+            onClick={handleSaveRateLimits}
+            disabled={savingRateLimits || loadingMeta}
+          >
+            {savingRateLimits ? "Saving…" : "Save rate limits"}
+          </button>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Worker capacity"
+        description="How many scans and pre-LLM pipelines one worker container runs at once, and how many queue messages it holds in flight. Saved to the database and applied when the worker starts: docker compose restart worker. Lower them on a small VM — each analysis slot keeps its own scan state in memory."
+      >
+        <div className="settings-two-column" style={{ display: "grid", gap: 14 }}>
+          <LabeledNumber
+            label="Concurrent scans (analysis slots)"
+            value={workerSlots.analysis}
+            onChange={(v) => setWorkerSlots((prev) => ({ ...prev, analysis: v }))}
+            min={1}
+            max={32}
+            disabled={savingWorkerSlots || loadingMeta}
+          />
+          <LabeledNumber
+            label="Concurrent pre-LLM pipelines"
+            value={workerSlots.submission}
+            onChange={(v) => setWorkerSlots((prev) => ({ ...prev, submission: v }))}
+            min={1}
+            max={16}
+            disabled={savingWorkerSlots || loadingMeta}
+          />
+          <LabeledNumber
+            label="Queue prefetch per worker"
+            value={workerSlots.prefetch}
+            onChange={(v) => setWorkerSlots((prev) => ({ ...prev, prefetch: v }))}
+            min={1}
+            max={20}
+            disabled={savingWorkerSlots || loadingMeta}
+          />
+        </div>
+        <div style={{ marginTop: 14 }}>
+          <button
+            className="sccap-btn sccap-btn-primary sccap-btn-sm"
+            onClick={handleSaveWorkerSlots}
+            disabled={savingWorkerSlots || loadingMeta}
+          >
+            {savingWorkerSlots ? "Saving…" : "Save worker capacity"}
+          </button>
+        </div>
+      </SettingsCard>
+
       <div className="surface" style={{ padding: 0 }}>
         <div
           className="section-head"
@@ -1077,6 +1286,21 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
     </div>
   );
 };
+
+/** Providers with their own rate-limit pair, and the shipped maximums. */
+const RATE_LIMIT_PROVIDERS = [
+  { id: "deepseek", label: "DeepSeek", defaultRpm: "5000", defaultTpm: "20000000" },
+  { id: "openai", label: "OpenAI", defaultRpm: "5000", defaultTpm: "20000000" },
+  { id: "anthropic", label: "Anthropic", defaultRpm: "5000", defaultTpm: "20000000" },
+  { id: "google", label: "Google", defaultRpm: "5000", defaultTpm: "20000000" },
+  { id: "xai", label: "xAI", defaultRpm: "5000", defaultTpm: "20000000" },
+  {
+    id: "custom_openai",
+    label: "Custom OpenAI-compatible",
+    defaultRpm: "10000",
+    defaultTpm: "100000000",
+  },
+] as const;
 
 const LabeledNumber: React.FC<{
   label: string;

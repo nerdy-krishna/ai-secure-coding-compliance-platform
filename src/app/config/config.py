@@ -256,34 +256,34 @@ class Settings(BaseSettings):
     # Requests Per Minute (RPM) for each LLM provider.
     # Use Optional[int] = None to disable rate limiting for a provider instead of 0.
     OPENAI_REQUESTS_PER_MINUTE: int = Field(
-        default=120, ge=1, description="Max RPM for OpenAI models."
+        default=5000, ge=1, description="Max RPM for OpenAI models."
     )
     OPENAI_TOKENS_PER_MINUTE: int = Field(
-        default=400000, ge=1, description="Max TPM for OpenAI models."
+        default=20000000, ge=1, description="Max TPM for OpenAI models."
     )
     GOOGLE_REQUESTS_PER_MINUTE: int = Field(
-        default=120, ge=1, description="Max RPM for Google models."
+        default=5000, ge=1, description="Max RPM for Google models."
     )
     GOOGLE_TOKENS_PER_MINUTE: int = Field(
-        default=500000, ge=1, description="Max TPM for Google models."
+        default=20000000, ge=1, description="Max TPM for Google models."
     )
     ANTHROPIC_REQUESTS_PER_MINUTE: int = Field(
-        default=60, ge=1, description="Max RPM for Anthropic models."
+        default=5000, ge=1, description="Max RPM for Anthropic models."
     )
     ANTHROPIC_TOKENS_PER_MINUTE: int = Field(
-        default=200000, ge=1, description="Max TPM for Anthropic models."
+        default=20000000, ge=1, description="Max TPM for Anthropic models."
     )
     DEEPSEEK_REQUESTS_PER_MINUTE: int = Field(
-        default=120, ge=1, description="Max RPM for DeepSeek models."
+        default=5000, ge=1, description="Max RPM for DeepSeek models."
     )
     DEEPSEEK_TOKENS_PER_MINUTE: int = Field(
-        default=400000, ge=1, description="Max TPM for DeepSeek models."
+        default=20000000, ge=1, description="Max TPM for DeepSeek models."
     )
     XAI_REQUESTS_PER_MINUTE: int = Field(
-        default=120, ge=1, description="Max RPM for xAI (Grok) models."
+        default=5000, ge=1, description="Max RPM for xAI (Grok) models."
     )
     XAI_TOKENS_PER_MINUTE: int = Field(
-        default=400000, ge=1, description="Max TPM for xAI (Grok) models."
+        default=20000000, ge=1, description="Max TPM for xAI (Grok) models."
     )
     CUSTOM_OPENAI_REQUESTS_PER_MINUTE: int = Field(
         default=10_000,
@@ -353,18 +353,18 @@ class Settings(BaseSettings):
         description="Most recent transcript entries always kept verbatim.",
     )
     WORKER_ANALYSIS_SLOTS: int = Field(
-        default=3,
+        default=32,
         ge=1,
         le=32,
         description="Concurrent scan analyses per worker container.",
     )
     WORKER_SUBMISSION_SLOTS: int = Field(
-        default=1,
+        default=16,
         ge=1,
         le=16,
         description="Concurrent pre-LLM scan pipelines per worker container.",
     )
-    WORKER_PREFETCH_COUNT: int = Field(default=5, ge=1, le=20)
+    WORKER_PREFETCH_COUNT: int = Field(default=20, ge=1, le=20)
     WORKER_DRAIN_TIMEOUT_SECONDS: int = Field(default=570, ge=1, le=570)
     WORKER_DRAIN_FILE: str = str(_WORKER_RUNTIME_ROOT / "drain-requested")
     WORKER_DRAINED_FILE: str = str(_WORKER_RUNTIME_ROOT / "drained")
@@ -385,13 +385,13 @@ class Settings(BaseSettings):
     # Defaults target generous but safe values for the typical tier.
     # Override via .env for high-tier accounts or self-hosted models.
     CONCURRENT_LLM_LIMIT: int = Field(
-        default=50,
+        default=500,
         ge=1,
         le=500,
         description="Max concurrent LLM calls per reasoning lane.",
     )
     CONCURRENT_SCANNER_LIMIT: int = Field(
-        default=10,
+        default=50,
         ge=1,
         le=50,
         description="Max concurrent SAST scanner subprocesses (prescan).",
@@ -401,19 +401,19 @@ class Settings(BaseSettings):
     # capacity an operator had. It is a first-class limit now: setting here,
     # `system.concurrency.profiler_limit` override in the admin UI.
     CONCURRENT_PROFILER_LIMIT: int = Field(
-        default=5,
+        default=500,
         ge=1,
         le=500,
         description="Max concurrent per-file profiling LLM calls.",
     )
     CONCURRENT_CONSOLIDATION_LIMIT: int = Field(
-        default=10,
+        default=100,
         ge=1,
         le=100,
         description="Max concurrent file-consolidation LLM calls.",
     )
     CONCURRENT_VALIDATION_LIMIT: int = Field(
-        default=10,
+        default=50,
         ge=1,
         le=50,
         description="Max concurrent cross-file validation LLM calls.",
