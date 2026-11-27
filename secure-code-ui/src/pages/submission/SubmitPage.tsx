@@ -439,6 +439,11 @@ const SubmitPage: React.FC = () => {
   const [deepVendorScan, setDeepVendorScan] = useState(false);
   const [selectedFrameworks, setSelectedFrameworks] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
+  // Which of the uploaded files are ticked. Kept apart from `files` on purpose:
+  // the tree used to drive selection by *removing* rows from `files`, so unticking a
+  // file made it vanish from the list with no way to tick it again.
+  const [selectedUpload, setSelectedUpload] = useState<Set<string>>(new Set());
+  const uploadKey = (f: File): string => f.webkitRelativePath || f.name;
   const [pastedCode, setPastedCode] = useState("");
   const [pastedFilename, setPastedFilename] = useState("snippet");
   const [pastedLanguage, setPastedLanguage] = useState("auto");
@@ -516,6 +521,27 @@ const SubmitPage: React.FC = () => {
     setSelectedFiles(new Set());
     setPreviewError(null);
   }, [mode, repoUrl, archiveFile]);
+
+  // Keys that have already been offered to the operator. Only *newly added* files are
+  // auto-ticked, so unticking a file is never undone by adding another one.
+  const knownUploadKeys = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const present = new Set(files.map((f) => f.webkitRelativePath || f.name));
+    const added = files.filter((f) => !knownUploadKeys.current.has(uploadKey(f)));
+    for (const key of present) knownUploadKeys.current.add(key);
+    setSelectedUpload((prev) => {
+      // Drop keys whose file is gone (mode switch, cleared list) ...
+      const next = new Set(Array.from(prev).filter((k) => present.has(k)));
+      // ... and tick only what was just added.
+      for (const f of added) {
+        const ext = "." + (f.name.split(".").pop()?.toLowerCase() ?? "");
+        if (ALLOWED_UPLOAD_EXTENSIONS.has(ext)) next.add(uploadKey(f));
+      }
+      const unchanged =
+        next.size === prev.size && Array.from(next).every((k) => prev.has(k));
+      return unchanged ? prev : next;
+    });
+  }, [files]);
 
   const handlePreviewGit = async () => {
     const v = repoUrl.trim();
@@ -597,7 +623,7 @@ const SubmitPage: React.FC = () => {
     ];
     if (mode === "upload") {
       checks.push({
-        ok: files.length > 0,
+        ok: files.length > 0 && selectedUpload.size > 0,
         message: "Add at least one file to scan.",
         fieldId: "field-source",
       });
@@ -835,7 +861,11 @@ const SubmitPage: React.FC = () => {
       const safeFrameworks = selectedFrameworks.filter((n) => frameworks?.some((f) => f.name === n));
       appendScanField(payload, "frameworks", safeFrameworks.join(","));
       if (mode === "upload") {
-        for (const f of files) appendScanField(payload, "files", f);
+        for (const f of files) {
+          // A file the operator unticked stays in the list but is not submitted.
+          if (selectedUpload.size > 0 && !selectedUpload.has(uploadKey(f))) continue;
+          appendScanField(payload, "files", f);
+        }
       } else if (mode === "paste") {
         appendScanField(payload, "pasted_code", pastedCode);
         appendScanField(payload, "pasted_filename", pastedFilename.trim());
@@ -1074,25 +1104,8 @@ const SubmitPage: React.FC = () => {
                           supported: ALLOWED_UPLOAD_EXTENSIONS.has(ext),
                         };
                       })}
-                      selected={
-                        new Set(
-                          files
-                            .filter((f) =>
-                              ALLOWED_UPLOAD_EXTENSIONS.has(
-                                "." + (f.name.split(".").pop()?.toLowerCase() ?? ""),
-                              ),
-                            )
-                            .map((f) => f.webkitRelativePath || f.name),
-                        )
-                      }
-                      onChange={(next) => {
-                        const nextSet = new Set(next);
-                        setFiles((prev) =>
-                          prev.filter(
-                            (f) => nextSet.has(f.webkitRelativePath || f.name),
-                          ),
-                        );
-                      }}
+                      selected={selectedUpload}
+                      onChange={(next) => setSelectedUpload(next)}
                     />
                   </div>
                 )}
