@@ -125,10 +125,23 @@ async def get_settings_catalog(
     from app.shared.lib import runtime_settings
     from app.shared.lib.settings_catalog import sections_payload
 
+    from app.shared.lib.concurrency_limits import db_bound_concurrency
+
     sections = sections_payload()
     for section in sections:
         for entry in section["settings"]:
             entry["current"] = runtime_settings.effective_key(entry["key"])
+            if entry["key"].startswith("system.concurrency."):
+                # A stage cannot fan out wider than the connections this process may
+                # hold, so report the ceiling that will actually be applied rather than
+                # letting the panel show a number the worker silently ignores.
+                effective, clamped = db_bound_concurrency(int(entry["current"] or 1))
+                entry["effective_maximum"] = effective
+                if clamped:
+                    entry["description"] = (
+                        f"{entry['description']} Capped at {effective} by the database "
+                        "pool (DB_POOL_SIZE + DB_MAX_OVERFLOW) - raise that first."
+                    )
     return {"sections": sections}
 
 
