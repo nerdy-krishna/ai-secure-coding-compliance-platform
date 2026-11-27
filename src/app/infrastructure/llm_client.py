@@ -182,6 +182,11 @@ def _is_temperature_unsupported(err: Exception) -> bool:
     return "temperature" in str(err).lower()
 
 
+# A single provider call slower than this is worth one WARNING line: it explains a
+# stage that looks stalled, without paying a database row for every call.
+SLOW_LLM_CALL_WARNING_MS = 60_000
+
+
 class LLMClient:
     """A client for a specific LLM configuration.
 
@@ -499,7 +504,11 @@ class LLMClient:
         if usage_context.file_path:
             activity_identity["file_path"] = usage_context.file_path
 
-        await _emit_llm_activity("LLM_CALL", "STARTED", dict(activity_identity))
+        # One row per call, not two. `LLM_CALL STARTED` said nothing the COMPLETED row
+        # does not (it carries elapsed_ms, tokens, the file and any error) and it
+        # doubled the event count of a scan: 500 files x ~17 calls wrote ~17 000 rows
+        # where ~8 500 carry the same information. In-flight visibility comes from the
+        # single slow-call WARNING below instead of a row per call.
 
         async def _on_retry(
             attempt: int, max_retries: int, delay: float, exc: Exception
@@ -764,6 +773,17 @@ class LLMClient:
                 span_ctx.__exit__(None, None, None)
             except Exception as e:
                 logger.warning("Langfuse span exit failed: %s", e)
+
+        if latency_ms >= SLOW_LLM_CALL_WARNING_MS:
+            logger.warning(
+                "llm_client: slow provider call elapsed_ms=%d provider=%s model=%s "
+                "stage=%s file=%s",
+                latency_ms,
+                self.provider_name,
+                self.db_llm_config.model_name,
+                usage_context.stage,
+                usage_context.file_path or "-",
+            )
 
         await _emit_llm_activity(
             "LLM_CALL",
