@@ -123,8 +123,18 @@ def test_seeding_fills_missing_keys_at_their_maximum() -> None:
 
     by_key = {row.key: row.value for row in db.added}  # type: ignore[attr-defined]
     assert "system.concurrency.llm_limit" not in by_key, "existing row must be kept"
-    assert by_key["system.concurrency.profiler_limit"] == {"value": 500}
-    assert by_key["system.concurrency.scanner_limit"] == {"value": 50}
+    # Concurrency seeds at the top of its range *bounded by what the connection pool can serve*,
+    # which depends on the deployment's pool size — so the invariant is the bound, not the
+    # literal 500. Asserting 500 made this test pass only under one pool configuration.
+    from app.shared.lib.concurrency_limits import db_bound_concurrency
+
+    expected_profiler, _reason = db_bound_concurrency(500)
+    assert by_key["system.concurrency.profiler_limit"] == {"value": expected_profiler}
+    # Every `system.concurrency.*` key is bounded by the pool; only the bound is invariant.
+    # Worker slots are not in that namespace, so they seed at their own maximum.
+    assert by_key["system.concurrency.scanner_limit"] == {
+        "value": db_bound_concurrency(50)[0]
+    }
     assert by_key["system.worker.analysis_slots"] == {"value": 32}
     # integers seed at their maximum; booleans/enums at the configured value
     assert by_key["system.evidence.enabled"] == {

@@ -1,6 +1,5 @@
 """A display refresh must not log like a write."""
 import logging
-import time
 
 from app.shared.lib.risk_score import compute_cvss_aggregate
 
@@ -15,7 +14,10 @@ class _Finding:
 
 def test_read_path_recompute_is_debug_not_info(caplog) -> None:
     findings = [_Finding() for _ in range(3)]
-    with caplog.at_level(logging.DEBUG):
+    # Pin the logger under test, not the root: an import earlier in the suite may set a level on
+    # `app` (INFO), which makes a root-level DEBUG capture see nothing and turns this into an
+    # order-dependent failure.
+    with caplog.at_level(logging.DEBUG, logger="app.shared.lib.risk_score"):
         compute_cvss_aggregate(findings, scan_id="scan", verbose=False)
     assert not [r for r in caplog.records if r.levelno == logging.INFO
                 and "cvss aggregate" in r.getMessage()]

@@ -68,3 +68,25 @@ def _goals_do_not_touch_the_database_or_the_model(monkeypatch):
     monkeypatch.setattr(goals_mod, "render_for_prompt", _no_block)
     monkeypatch.setattr(goals_mod, "decompose", _no_decompose)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_runtime_settings_overlay():
+    """Undo any `apply_to_settings` overlay after each test.
+
+    `runtime_settings.apply_to_settings` writes into the frozen `settings` singleton on purpose —
+    it is the one place the overlay is allowed through. A test that exercises it therefore leaves
+    the process-wide object mutated, and the next test asserting a *default* fails depending on
+    file order. That was a real, order-dependent failure (`CONCURRENT_PROFILER_LIMIT` arriving as
+    26 in a test that expects the catalog maximum), so the restoration is global rather than
+    local to one file.
+    """
+    from app.config.config import settings
+    from app.shared.lib import runtime_settings
+
+    snapshot = {spec.name: getattr(settings, spec.name, None) for spec in runtime_settings.SPECS}
+    yield
+    for name, value in snapshot.items():
+        if value is not None:
+            object.__setattr__(settings, name, value)
+    runtime_settings._cache.clear() if hasattr(runtime_settings, "_cache") else None
