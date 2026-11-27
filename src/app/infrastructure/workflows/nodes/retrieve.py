@@ -9,6 +9,7 @@ is part of the LangGraph checkpointer's on-disk contract — do not rename.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, Dict
@@ -123,9 +124,15 @@ async def retrieve_and_prepare_data_node(state: WorkerState) -> Dict[str, Any]:
 
             files = {path: files_map[h] for path, h in snapshot_file_map.items()}
 
-            # Create Repo Map
+            # Create Repo Map.
+            #
+            # Tree-sitter parsing is CPU-bound and synchronous. Run inline it blocked the
+            # worker's event loop for the whole of it - on a 500-file frontend that was
+            # minutes of silence: no activity events, no cancellation watcher, no log
+            # flush (which is why those lines appeared *after* the stage completed, with
+            # the wrong timestamp), and every other slot in the container frozen.
             mapping_engine = RepositoryMappingEngine()
-            repository_map = mapping_engine.create_map(files)
+            repository_map = await asyncio.to_thread(mapping_engine.create_map, files)
             logger.debug(
                 "repository_map_built scan_id=%s file_count=%d",
                 scan_id,

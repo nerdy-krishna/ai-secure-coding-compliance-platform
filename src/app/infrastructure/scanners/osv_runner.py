@@ -64,7 +64,11 @@ def _osv_output_flag(binary: str) -> str:
     """
     try:
         proc = run_owned_subprocess(
-            [binary, "--version"], capture_output=True, text=True, timeout=10, check=False
+            [binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
     except Exception:  # noqa: BLE001 - fall back to the old flag
         return "--output"
@@ -394,11 +398,19 @@ def _run_osv_subprocess(
         env=subprocess_env,
     )
     if bom_proc.returncode not in (0, 1):  # 1 = vulns found, expected
-        logger.warning(
-            "OSV BOM run exited with %d; stderr=%s",
-            bom_proc.returncode,
-            _redact_stderr((bom_proc.stderr or "")[:500]),
-        )
+        bom_stderr = bom_proc.stderr or ""
+        if _NO_PACKAGE_SOURCES_MARKER in bom_stderr.lower():
+            # Exit 128 with this marker means the submission has no lockfile or
+            # manifest. That is a fact about the repository, not a scanner fault - it
+            # used to log the raw stderr (a /tmp path and a plugin notice) at WARNING,
+            # immediately above the info line saying dependency scanning did not apply.
+            logger.debug("scanner=osv BOM export skipped: no package sources")
+        else:
+            logger.warning(
+                "scanner=osv BOM export exited with %d; stderr=%s",
+                bom_proc.returncode,
+                _redact_stderr(bom_stderr[:500]),
+            )
 
     findings_proc = run_owned_subprocess(
         [

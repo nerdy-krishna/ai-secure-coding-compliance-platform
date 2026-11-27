@@ -32,6 +32,13 @@ def _cached_language(lang_name: str):
 
 
 # --- ADD a global ignore list ---
+# Parsing is per file with tree-sitter. A generated or minified bundle can be
+# hundreds of kilobytes on one line: it costs seconds of CPU and its symbol map is
+# worthless. Skip it and say so in the file summary instead of stalling the stage.
+MAX_PARSE_BYTES = 512 * 1024
+_MINIFIED_MIN_LINES = 20
+_MINIFIED_MAX_AVERAGE_LINE = 400
+
 IGNORE_PATTERNS = {
     # Lock files
     "*.lock",
@@ -464,6 +471,9 @@ class RepositoryMappingEngine:
             )
 
         repo_map = RepositoryMap()
+        unmapped: Dict[str, int] = {}
+        oversized: list[tuple[str, int]] = []
+        minified: list[str] = []
         for file_path, content in files.items():
             # V02.2.1: skip paths that exceed the length cap
             if len(file_path) > MAX_PATH_LEN:
@@ -489,13 +499,49 @@ class RepositoryMappingEngine:
                 )
                 continue
 
+            encoded_size = len(content.encode("utf-8", errors="ignore"))
+            if encoded_size > MAX_PARSE_BYTES:
+                oversized.append((file_path, encoded_size))
+                repo_map.files[file_path] = FileSummary(
+                    path=file_path,
+                    errors=[
+                        f"Skipped: {encoded_size // 1024} KiB is above the "
+                        f"{MAX_PARSE_BYTES // 1024} KiB AST-mapping cap."
+                    ],
+                )
+                continue
+            lines = content.count("\n") + 1
+            if (
+                lines >= _MINIFIED_MIN_LINES
+                and encoded_size / lines > _MINIFIED_MAX_AVERAGE_LINE
+            ):
+                minified.append(file_path)
+                repo_map.files[file_path] = FileSummary(
+                    path=file_path,
+                    errors=["Skipped: file looks minified or generated."],
+                )
+                continue
+
             self.logger.debug("repo_map.parse path_hash=%s", path_hash)
             try:
                 file_summary = self._parse_file(file_path, content)
                 repo_map.files[file_path] = file_summary
             except GrammarLoadingError as e:
-                # Instead of halting, log a warning and create a placeholder summary.
-                self.logger.warning("repo_map.no_grammar path_hash=%s", path_hash)
+                # A file type with no tree-sitter grammar (markdown, scss, yaml,
+                # generated configs, …) is an ordinary fact about the repository, not a
+                # fault: it used to log one WARNING per file, which on a 500-file
+                # frontend meant a wall of `repo_map.no_grammar path_hash=…` with no
+                # filename and nothing an operator could act on. Count them and report
+                # the file types once.
+                extension = (
+                    Path(file_path).suffix.lower().lstrip(".") or "(no extension)"
+                )
+                unmapped[extension] = unmapped.get(extension, 0) + 1
+                self.logger.debug(
+                    "repo_map.no_grammar extension=%s path_hash=%s",
+                    extension,
+                    path_hash,
+                )
                 repo_map.files[file_path] = FileSummary(
                     path=file_path,
                     errors=[
@@ -513,7 +559,30 @@ class RepositoryMappingEngine:
                 repo_map.files[file_path] = summary
                 # Continue with other files for non-GrammarLoadingError issues
 
-        self.logger.info("Repository mapping complete.")
+        if oversized:
+            self.logger.warning(
+                "repo_map.oversized_skipped files=%d largest=%s (%d KiB)",
+                len(oversized),
+                sorted(oversized, key=lambda item: item[1], reverse=True)[0][0],
+                sorted(oversized, key=lambda item: item[1], reverse=True)[0][1] // 1024,
+            )
+        if minified:
+            self.logger.info("repo_map.minified_skipped files=%d", len(minified))
+        if unmapped:
+            summary = ", ".join(
+                f"{extension} x{count}"
+                for extension, count in sorted(
+                    unmapped.items(), key=lambda item: item[1], reverse=True
+                )[:8]
+            )
+            self.logger.info(
+                "repo_map.complete mapped=%d without_grammar=%d types=%s",
+                len(files) - sum(unmapped.values()),
+                sum(unmapped.values()),
+                summary or "none",
+            )
+        else:
+            self.logger.info("repo_map.complete mapped=%d", len(files))
         return repo_map
 
 

@@ -254,7 +254,7 @@ async def run_semgrep(
     if os.getenv("SEMGREP_OFFLINE_RULE_ROOT", "").strip():
         config_path = Path(os.environ["SEMGREP_OFFLINE_RULE_ROOT"])
     if config_path is None:
-        logger.info("scanner=semgrep skipped — no config_path (0 ingested rules)")
+        logger.debug("scanner=semgrep skipped — no config_path (0 ingested rules)")
         return []
 
     loop = asyncio.get_running_loop()
@@ -281,7 +281,7 @@ async def run_semgrep(
         return []
 
     duration_ms = int((loop.time() - started_at) * 1000)
-    logger.info(
+    logger.debug(
         "scanner=semgrep staged_dir=%s rc=%d duration_ms=%d stdout_bytes=%d",
         staged_dir,
         completed.returncode,

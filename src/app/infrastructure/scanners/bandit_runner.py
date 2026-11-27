@@ -267,7 +267,7 @@ async def run_bandit(
     # Bandit returns rc=0 with empty results, rc=1 when it found issues,
     # rc>=2 on hard error. Either way the JSON is on stdout when Bandit
     # got far enough to format it.
-    logger.info(
+    logger.debug(
         "scanner=bandit staged_dir=%s rc=%d duration_ms=%d stdout_bytes=%d",
         staged_dir,
         completed.returncode,

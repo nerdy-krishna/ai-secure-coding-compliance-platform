@@ -41,6 +41,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Iterator
@@ -150,6 +151,11 @@ class ScanLogHandler(logging.Handler):
                 return
             row = {
                 "scan_id": scan_id,
+                # The record's own time, not the flush time. Batches are written once a
+                # second (and, before the event-loop fix, could be written minutes
+                # later), so a server-side default stamped every line of a batch with
+                # the moment it was persisted and the timeline read out of order.
+                "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc),
                 "level": record.levelname[:10],
                 "logger_name": (record.name or "unknown")[:120],
                 "message": format_scan_log_message(record),

@@ -170,3 +170,23 @@ def test_level_is_preserved_verbatim(level: str) -> None:
         handler.emit(_record("x", level=getattr(logging, level)))
 
     assert handler.drain()[0]["level"] == level
+
+
+def test_captured_rows_carry_the_record_timestamp() -> None:
+    """A batched flush must not re-stamp every line with the flush time."""
+    import time as _time
+    from datetime import datetime, timezone
+
+    handler = ScanLogHandler(level=logging.INFO)
+    with bind_scan_logging(SCAN_ID):
+        emitted_at = _time.time()
+        handler.emit(_record("stamped at emit time"))
+    rows = handler.drain()
+
+    assert len(rows) == 1
+    stamp = rows[0]["timestamp"]
+    assert isinstance(stamp, datetime)
+    assert stamp.tzinfo is not None
+    assert abs(stamp.timestamp() - emitted_at) < 1.0, (
+        "the row must carry when the line was logged, not when the batch flushed"
+    )

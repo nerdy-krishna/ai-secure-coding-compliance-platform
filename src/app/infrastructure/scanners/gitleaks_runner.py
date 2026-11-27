@@ -277,7 +277,7 @@ async def run_gitleaks(
         # carry redacted but still suspicious tokens (RuleID, file
         # path, partial line number) and operators should opt into
         # seeing them.
-        logger.info(
+        logger.debug(
             "scanner=gitleaks staged_dir=%s rc=%d duration_ms=%d report_bytes=%d",
             staged_dir,
             completed.returncode,

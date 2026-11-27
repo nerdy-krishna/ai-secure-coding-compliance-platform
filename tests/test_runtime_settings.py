@@ -209,3 +209,26 @@ def test_a_refresh_repoints_a_live_provider_limiter() -> None:
     assert limiter.tpm_limit == 987654
     # the registry was mutated, not replaced: callers hold this reference
     assert provider_rate_limiters["deepseek"] is limiter
+
+
+def test_repository_mapping_skips_oversized_and_minified_files() -> None:
+    """Mapping must not stall on a generated bundle, and must say why it skipped."""
+    pytest.importorskip(
+        "tree_sitter",
+        reason="AST mapping is worker-image only; run the suite in Docker",
+    )
+    from app.shared.analysis_tools.repository_map import (
+        MAX_PARSE_BYTES,
+        RepositoryMappingEngine,
+    )
+
+    files = {
+        "src/App.tsx": "export const A = 1;\n",
+        "public/bundle.js": "x" * (MAX_PARSE_BYTES + 1024),
+        "public/min.js": ("a" * 2000 + "\n") * 30,
+    }
+    repo_map = RepositoryMappingEngine().create_map(files)
+
+    assert "AST-mapping cap" in repo_map.files["public/bundle.js"].errors[0]
+    assert "minified" in repo_map.files["public/min.js"].errors[0]
+    assert repo_map.files["src/App.tsx"].errors == []
