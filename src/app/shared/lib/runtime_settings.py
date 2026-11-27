@@ -337,6 +337,16 @@ async def seed_missing_maximums(db=None) -> list[str]:
                         if descriptor.maximum is not None
                         else int(getattr(settings, descriptor.env, 0))
                     )
+                    if descriptor.key.startswith("system.concurrency."):
+                        # A stage's concurrency cannot exceed the connections this
+                        # process may hold: seeding 500 there is what produced hundreds
+                        # of "QueuePool limit ... connection timed out" warnings. Seed
+                        # what the pool can serve, so the UI shows an honest ceiling.
+                        from app.shared.lib.concurrency_limits import (
+                            db_bound_concurrency,
+                        )
+
+                        value, _ = db_bound_concurrency(value)
                 else:
                     value = getattr(settings, descriptor.env, descriptor.default)
                     if isinstance(value, bool):

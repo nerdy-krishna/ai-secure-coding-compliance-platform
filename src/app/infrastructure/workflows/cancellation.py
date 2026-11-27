@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Awaitable, Callable
@@ -21,6 +22,8 @@ from app.infrastructure.workflows.budget import (
     mark_scan_budget_exhausted,
 )
 from app.infrastructure.observability import mark_error, record_metric, span
+
+logger = logging.getLogger(__name__)
 
 
 class ScanCancellationRequested(Exception):
@@ -134,7 +137,17 @@ async def invoke_with_forceful_cancellation(
         done, _ = await asyncio.wait(
             {invocation, watcher}, return_when=asyncio.FIRST_COMPLETED
         )
-        if watcher in done:
+        if watcher in done and watcher.exception() is not None:
+            # The poll failed — a connection-pool timeout, a database blip. That is not
+            # a cancellation request, and treating it as one (which is what happened
+            # under pool pressure) cancels a perfectly healthy scan and marks it
+            # stopped. Log it and let the graph finish.
+            logger.warning(
+                "cancellation: watcher failed for scan %s; continuing the run: %s",
+                scan_id,
+                watcher.exception(),
+            )
+        elif watcher in done:
             await record_cancellation_phase(scan_id, "OBSERVED")
             terminated = terminate_owned_processes(scan_id)
             invocation.cancel()
@@ -168,6 +181,8 @@ async def invoke_with_forceful_cancellation(
         try:
             await watcher
         except asyncio.CancelledError:
+            pass
+        except Exception:  # noqa: BLE001 - already logged; it must not mask the result
             pass
 
 

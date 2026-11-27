@@ -114,7 +114,10 @@ async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
 
     validation_limit = CONCURRENT_VALIDATION_LIMIT
     try:
-        from app.shared.lib.concurrency_limits import get_concurrency_limit
+        from app.shared.lib.concurrency_limits import (
+            db_bound_concurrency,
+            get_concurrency_limit,
+        )
 
         async with AsyncSessionLocal() as _db:
             validation_limit = await get_concurrency_limit(
@@ -122,6 +125,15 @@ async def validate_cross_file_node(state: WorkerState) -> Dict[str, Any]:
             )
     except Exception:
         pass
+    configured_limit = validation_limit
+    validation_limit, clamped = db_bound_concurrency(validation_limit)
+    if clamped:
+        logger.warning(
+            "validate_cross_file: concurrency capped at %d (configured %d) by the "
+            "database pool",
+            validation_limit,
+            configured_limit,
+        )
     semaphore = asyncio.Semaphore(validation_limit)
 
     async def _validate(idx: int, slices: CrossFileSlices):

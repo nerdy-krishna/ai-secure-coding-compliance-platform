@@ -172,7 +172,10 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
 
     consolidation_limit = CONCURRENT_CONSOLIDATION_LIMIT
     try:
-        from app.shared.lib.concurrency_limits import get_concurrency_limit
+        from app.shared.lib.concurrency_limits import (
+            db_bound_concurrency,
+            get_concurrency_limit,
+        )
 
         async with AsyncSessionLocal() as _db:
             consolidation_limit = await get_concurrency_limit(
@@ -180,6 +183,15 @@ async def consolidate_findings_node(state: WorkerState) -> Dict[str, Any]:
             )
     except Exception:
         pass
+    configured_limit = consolidation_limit
+    consolidation_limit, clamped = db_bound_concurrency(consolidation_limit)
+    if clamped:
+        logger.warning(
+            "consolidate_findings: concurrency capped at %d (configured %d) by the "
+            "database pool",
+            consolidation_limit,
+            configured_limit,
+        )
     semaphore = asyncio.Semaphore(consolidation_limit)
     stats = {"reused": 0, "rerun": 0, "failed": 0, "completed": 0}
 

@@ -309,7 +309,10 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"error_message": f"Could not start file profiler: {exc}"}
 
-    from app.shared.lib.concurrency_limits import get_concurrency_limit
+    from app.shared.lib.concurrency_limits import (
+        db_bound_concurrency,
+        get_concurrency_limit,
+    )
 
     try:
         async with AsyncSessionLocal() as _db_limits:
@@ -318,6 +321,20 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
             )
     except Exception:  # noqa: BLE001 - a limits lookup must not stop profiling
         profiler_limit = CONCURRENT_PROFILER_LIMIT
+    configured_limit = profiler_limit
+    profiler_limit, clamped = db_bound_concurrency(profiler_limit)
+    if clamped:
+        # Fanning out wider than the connection pool can serve only adds waiters: every
+        # one of them needs a session for usage accounting, and they time out together.
+        logger.warning(
+            "profile_files: scan_id=%s concurrency capped at %d (configured %d) by the "
+            "database pool (%d connections). Raise DB_POOL_SIZE/DB_MAX_OVERFLOW to go "
+            "wider.",
+            scan_id,
+            profiler_limit,
+            configured_limit,
+            profiler_limit,
+        )
     logger.info(
         "profile_files: scan_id=%s profiling %d file(s) at concurrency %d",
         scan_id,

@@ -175,6 +175,18 @@ async def analyze_files_parallel_node(state: WorkerState) -> Dict[str, Any]:
     # Read concurrency limit from system_config (dynamic, no restart needed)
     async with AsyncSessionLocal() as _db:
         llm_limit = await get_concurrency_limit(_db, "CONCURRENT_LLM_LIMIT")
+    from app.shared.lib.concurrency_limits import db_bound_concurrency
+
+    configured_llm_limit = llm_limit
+    llm_limit, llm_clamped = db_bound_concurrency(llm_limit)
+    if llm_clamped:
+        logger.warning(
+            "analyze: scan_id=%s agent concurrency capped at %d (configured %d) by the "
+            "database pool. Raise DB_POOL_SIZE/DB_MAX_OVERFLOW to go wider.",
+            scan_id,
+            llm_limit,
+            configured_llm_limit,
+        )
     # One concurrency pool per distinct reasoning-LLM config. Two lanes
     # on different configs (different providers, independent rate
     # limits) each get a pool; two lanes on the same config share one.

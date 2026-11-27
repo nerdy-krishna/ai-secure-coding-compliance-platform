@@ -162,3 +162,50 @@ def test_candidates_without_an_id_are_not_persisted() -> None:
 
     deduped, duplicates = scan_repo.dedupe_fix_candidates([])
     assert deduped == [] and duplicates == 0
+
+
+def test_stage_concurrency_is_bounded_by_the_connection_pool() -> None:
+    """A fan-out wider than the pool only adds waiters that time out together."""
+    from app.shared.lib import concurrency_limits as limits
+
+    capacity = limits.db_pool_capacity()
+    assert capacity >= 2
+
+    effective, clamped = limits.db_bound_concurrency(capacity * 20)
+    assert clamped is True
+    assert effective < capacity, "must leave room for the workflow's own writes"
+
+    unchanged, not_clamped = limits.db_bound_concurrency(2)
+    assert (unchanged, not_clamped) == (2, False)
+
+
+def test_a_failing_cancellation_watcher_does_not_cancel_the_run(monkeypatch) -> None:
+    """A pool timeout in the poll used to look like "the operator cancelled"."""
+    import asyncio
+
+    from app.infrastructure.workflows import cancellation as cancel_mod
+
+    async def _boom(_scan_id):
+        raise RuntimeError("QueuePool limit of size 5 overflow 10 reached")
+
+    observed = {"phases": []}
+
+    async def _record(_scan_id, phase, **_kwargs):
+        observed["phases"].append(phase)
+
+    monkeypatch.setattr(cancel_mod, "wait_for_scan_cancellation", _boom)
+    monkeypatch.setattr(cancel_mod, "record_cancellation_phase", _record)
+
+    class _Workflow:
+        async def ainvoke(self, _input, _config):
+            await asyncio.sleep(0.05)
+            return {"findings": []}
+
+    result = asyncio.run(
+        cancel_mod.invoke_with_forceful_cancellation(
+            _Workflow(), {}, {"configurable": {"thread_id": "t"}}, "scan"
+        )
+    )
+
+    assert result == {"findings": []}
+    assert observed["phases"] == [], "no cancellation may be recorded"

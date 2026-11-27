@@ -38,6 +38,28 @@ class Settings(BaseSettings):
     POSTGRES_HOST_ALEMBIC: str
     DB_ECHO: bool = False
 
+    # Connection pool per process. The previous implicit pool (5 + 10 overflow) was
+    # exhausted by a single profiling stage: hundreds of concurrent LLM calls each open
+    # a short session for usage accounting, and every waiting caller then failed after
+    # 30 s with "QueuePool limit of size 5 overflow 10 reached, connection timed out".
+    # Runtime concurrency is clamped to what the pool can serve
+    # (`db_bound_concurrency`), so these two numbers are a stage's real ceiling.
+    DB_POOL_SIZE: int = Field(
+        default=10, ge=1, le=100, description="Pooled database connections per process."
+    )
+    DB_MAX_OVERFLOW: int = Field(
+        default=20,
+        ge=0,
+        le=200,
+        description="Extra database connections allowed above the pool size.",
+    )
+    DB_POOL_TIMEOUT_SECONDS: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description="How long a caller waits for a pooled connection before failing.",
+    )
+
     # Derived database URLs
     ASYNC_DATABASE_URL: Optional[str] = None
     ALEMBIC_DATABASE_URL: Optional[str] = None

@@ -45,6 +45,20 @@ engine = create_async_engine(
     settings.ASYNC_DATABASE_URL,
     echo=_db_echo,
     hide_parameters=True,
+    # Explicit, configurable pool. The old implicit 5 + 10 was reached by a single
+    # profiling stage, and every waiting caller then failed after 30 s with
+    # "QueuePool limit of size 5 overflow 10 reached, connection timed out".
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
+logger.info(
+    "database.pool size=%d overflow=%d timeout=%ds",
+    settings.DB_POOL_SIZE,
+    settings.DB_MAX_OVERFLOW,
+    settings.DB_POOL_TIMEOUT_SECONDS,
 )
 
 # Operational telemetry records only the SQL operation verb; SQL text and

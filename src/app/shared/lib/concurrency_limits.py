@@ -30,6 +30,31 @@ _KEYS: Dict[str, str] = {
 }
 
 
+def db_pool_capacity() -> int:
+    """Connections this process may hold open at once."""
+    return int(getattr(settings, "DB_POOL_SIZE", 10)) + int(
+        getattr(settings, "DB_MAX_OVERFLOW", 20)
+    )
+
+
+# A stage needs a connection for the call itself (usage accounting reads/writes, task
+# ledger, events), so its concurrency cannot exceed the pool: beyond that, every extra
+# task merely waits for a connection. Leave headroom for the workflow's own writes.
+_DB_POOL_RESERVE = 4
+
+
+def db_bound_concurrency(configured: int) -> tuple[int, bool]:
+    """Cap a stage's concurrency at what the connection pool can actually serve.
+
+    Returns ``(effective, clamped)``. A 500-way profiling fan-out against a 5+10 pool is
+    what produced hundreds of `QueuePool limit ... connection timed out` warnings and
+    failed the scan; the fan-out is bounded by capacity rather than by hope.
+    """
+    capacity = max(1, db_pool_capacity() - _DB_POOL_RESERVE)
+    effective = max(1, min(int(configured), capacity))
+    return effective, effective < int(configured)
+
+
 async def get_concurrency_limit(
     db,
     setting_name: str,

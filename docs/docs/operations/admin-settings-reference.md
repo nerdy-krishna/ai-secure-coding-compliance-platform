@@ -107,6 +107,22 @@ listed here so nothing the admin UI can change is undocumented.
 | Feature flags | `features.<name>` | true / false | Enable or disable a gated capability (scan, pentest, chat, sso, scim, …). | immediately |
 | Setup wizard state | `setup.*` | managed by the wizard | Whether first-run configuration is complete. Changing it re-opens the wizard. | immediately |
 
+## Database connection pool (`.env` only)
+
+| Setting | Default | Effect |
+|---|---|---|
+| `DB_POOL_SIZE` | 10 | Pooled connections per process (API and worker each have one) |
+| `DB_MAX_OVERFLOW` | 20 | Extra connections above the pool size |
+| `DB_POOL_TIMEOUT_SECONDS` | 30 | How long a caller waits for a connection before failing |
+
+These are read when the engine is created, so they need a container restart — a reload
+cannot resize a live pool. Every stage's concurrency is **clamped to what the pool can
+serve** (`pool size + overflow − 4`): a fan-out wider than that only adds callers that
+time out together, which is exactly what produced hundreds of
+`QueuePool limit of size 5 overflow 10 reached` warnings on a profiling stage. Raise the
+pool before raising a concurrency limit past it; the worker logs
+`concurrency capped at N (configured M) by the database pool` when it applies the clamp.
+
 ## Not configurable, by design
 
 - **Credentials** — `SECRET_KEY`, `ENCRYPTION_KEY`, provider API keys, SMTP and
