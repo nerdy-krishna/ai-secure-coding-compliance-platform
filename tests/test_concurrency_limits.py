@@ -109,3 +109,56 @@ def test_override_shapes(value) -> None:
         )
         == 12
     )
+
+
+def test_fix_candidates_are_deduped_on_their_primary_key() -> None:
+    """A repeated candidate_id must not reach the INSERT (finding_fix_candidates_pkey)."""
+    import uuid
+
+    from app.core.schemas import FixResult, FixSuggestion, VulnerabilityFinding
+    from app.infrastructure.database.repositories import scan_repo
+
+    def candidate(cid, disposition="selected"):
+        finding = VulnerabilityFinding(
+            raw_finding_id=uuid.uuid4(),
+            title="t",
+            severity="High",
+            confidence="High",
+            file_path="src/App.ts",
+            line_number=1,
+            description="d",
+            remediation="r",
+            source="semgrep",
+            scanner_rule_id="r1",
+        )
+        return FixResult(
+            finding=finding,
+            suggestion=FixSuggestion(
+                description="fix", original_snippet="eval(x)", code="safe(x)"
+            ),
+            candidate_id=cid,
+            disposition=disposition,
+        )
+
+    keep = uuid.uuid4()
+    other = uuid.uuid4()
+    deduped, duplicates = scan_repo.dedupe_fix_candidates(
+        [
+            candidate(keep, "pending"),
+            candidate(other),
+            candidate(keep, "selected"),  # same id, newest verdict wins
+        ]
+    )
+
+    assert duplicates == 1
+    assert len(deduped) == 2
+    assert {c.candidate_id for c in deduped} == {keep, other}
+    by_id = {c.candidate_id: c for c in deduped}
+    assert by_id[keep].disposition == "selected"
+
+
+def test_candidates_without_an_id_are_not_persisted() -> None:
+    from app.infrastructure.database.repositories import scan_repo
+
+    deduped, duplicates = scan_repo.dedupe_fix_candidates([])
+    assert deduped == [] and duplicates == 0

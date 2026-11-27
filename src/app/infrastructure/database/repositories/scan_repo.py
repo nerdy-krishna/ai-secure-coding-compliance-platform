@@ -24,6 +24,28 @@ logger = logging.getLogger(__name__)
 _MAX_PAGE_LIMIT = 100
 
 
+def dedupe_fix_candidates(
+    candidates: List[agent_schemas.FixResult],
+) -> tuple[List[agent_schemas.FixResult], int]:
+    """Collapse candidates that share a ``candidate_id``, keeping the last.
+
+    The id is the table's primary key, so a repeated candidate - the same one
+    reported by two reasoning lanes, or a planner re-run after a resume - made the
+    insert die on ``finding_fix_candidates_pkey`` and failed the scan *after* the
+    expensive work was already done. The last occurrence wins: it carries the newest
+    disposition and validation verdict.
+    """
+    unique: dict[uuid.UUID, agent_schemas.FixResult] = {}
+    duplicates = 0
+    for candidate in candidates:
+        if candidate.candidate_id is None:
+            continue
+        if candidate.candidate_id in unique:
+            duplicates += 1
+        unique[candidate.candidate_id] = candidate
+    return list(unique.values()), duplicates
+
+
 class ScanRepository:
     """
     Handles all database operations related to projects, scans, code snapshots,
@@ -873,7 +895,16 @@ class ScanRepository:
             )
         )
         db_findings: List[db_models.Finding] = []
+        # The consolidator can emit the same raw identity twice (two lanes, or a
+        # planner re-run after a resume); storing both doubles the results page.
+        seen_raw_ids: set = set()
+        skipped_duplicates = 0
         for finding in findings:
+            if finding.raw_finding_id is not None:
+                if finding.raw_finding_id in seen_raw_ids:
+                    skipped_duplicates += 1
+                    continue
+                seen_raw_ids.add(finding.raw_finding_id)
             finding_dict = finding.model_dump(exclude_unset=True, exclude={"id"})
             agent_name = finding_dict.pop("agent_name", None)
             if agent_name and not finding_dict.get("corroborating_agents"):
@@ -886,6 +917,11 @@ class ScanRepository:
                     batch=batch,
                     **finding_dict,
                 )
+            )
+        if skipped_duplicates:
+            logger.info(
+                "scan_repo.findings.skipped_duplicate_raw_ids",
+                extra={"scan_id": str(scan_id), "skipped": skipped_duplicates},
             )
         if db_findings:
             self.db.add_all(db_findings)
@@ -916,8 +952,15 @@ class ScanRepository:
                 db_models.FindingFixCandidate.batch == batch,
             )
         )
+        unique_candidates, duplicated = dedupe_fix_candidates(candidates)
+        if duplicated:
+            logger.info(
+                "scan_repo.fix_candidate.deduplicated",
+                extra={"scan_id": str(scan_id), "duplicates": duplicated},
+            )
+
         rows: list[db_models.FindingFixCandidate] = []
-        for candidate in candidates:
+        for candidate in unique_candidates:
             if not all(
                 (
                     candidate.candidate_id,
@@ -969,7 +1012,31 @@ class ScanRepository:
                 )
             )
         if rows:
-            self.db.add_all(rows)
+            # `ON CONFLICT DO NOTHING` covers the remaining race: two deliveries for
+            # the same scan (a resume plus a redelivery) can both reach this insert,
+            # and a duplicate-key error there failed the whole scan after the work was
+            # already done.
+            table = db_models.FindingFixCandidate.__table__
+            now = datetime.datetime.now(datetime.timezone.utc)
+            payload = [
+                {
+                    # `created_at`/`updated_at` carry Python-side defaults that a
+                    # Core insert does not run, and both are NOT NULL.
+                    **{
+                        column.name: getattr(row, column.name)
+                        for column in table.columns
+                        if column.name not in {"created_at", "updated_at"}
+                    },
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for row in rows
+            ]
+            await self.db.execute(
+                pg_insert(table)
+                .values(payload)
+                .on_conflict_do_nothing(index_elements=[table.c.candidate_id])
+            )
         try:
             await self.db.commit()
         except SQLAlchemyError as exc:

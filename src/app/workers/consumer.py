@@ -1363,6 +1363,49 @@ async def _acquire_slot(semaphore: asyncio.Semaphore, label: str, scan_id: Any) 
 
 
 @asynccontextmanager
+async def _scan_execution_lock(scan_id: Any):
+    """Hold a Postgres advisory lock for one scan, or report that it is taken.
+
+    Two deliveries for the same scan (an approval resume plus a redelivered
+    submission, or a restart racing a redelivery) both continued from the same
+    checkpoint and ran the tail of the graph concurrently: the log shows two
+    `patch_planner`/`Saving final results` lines in the same second, and the second
+    `save_results` died on `finding_fix_candidates_pkey`. Persistence is idempotent
+    now, but running the whole tail twice is still wasted spend, so only one
+    invocation per scan may proceed - across worker processes, not just in-process.
+    """
+    from sqlalchemy import text
+
+    from app.infrastructure.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        acquired = bool(
+            (
+                await db.execute(
+                    text("select pg_try_advisory_lock(hashtext(:key))"),
+                    {"key": str(scan_id)},
+                )
+            ).scalar()
+        )
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                try:
+                    await db.execute(
+                        text("select pg_advisory_unlock(hashtext(:key))"),
+                        {"key": str(scan_id)},
+                    )
+                    await db.commit()
+                except Exception:  # noqa: BLE001 - released on connection close anyway
+                    logger.debug(
+                        "WORKFLOW: advisory unlock failed for %s",
+                        scan_id,
+                        exc_info=True,
+                    )
+
+
+@asynccontextmanager
 async def _workflow_slot(queue_name: str, scan_id: Any = None):
     """Retain unified submission serialization while bounding all workflows."""
     await _acquire_slot(_analysis_semaphore, "analysis", scan_id)
@@ -1413,14 +1456,23 @@ async def _run_workflow_task(
                 principal_kind="service_principal",
                 principal_id=f"scan-worker:{trusted_delivery.outbox_id}",
             ):
-                async with _workflow_slot(queue_name, initial_state["scan_id"]):
-                    success = await _run_workflow_for_scan(
-                        initial_state, resume_payload=resume_payload
-                    )
-                    if not success:
-                        await message.reject(requeue=True)
-                    else:
+                async with _scan_execution_lock(initial_state["scan_id"]) as owns_scan:
+                    if not owns_scan:
+                        logger.warning(
+                            "WORKFLOW: scan %s is already being executed by another "
+                            "delivery; ACKing this duplicate.",
+                            initial_state["scan_id"],
+                        )
                         await message.ack()
+                        return
+                    async with _workflow_slot(queue_name, initial_state["scan_id"]):
+                        success = await _run_workflow_for_scan(
+                            initial_state, resume_payload=resume_payload
+                        )
+                        if not success:
+                            await message.reject(requeue=True)
+                        else:
+                            await message.ack()
         except asyncio.CancelledError:
             raise
         except Exception as exc:

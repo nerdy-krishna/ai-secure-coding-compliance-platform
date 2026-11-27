@@ -31,6 +31,7 @@ from app.infrastructure.database.repositories.scan_artifact_repo import (
     ScanArtifactRepository,
 )
 from app.infrastructure.database.repositories.scan_repo import ScanRepository
+from app.shared.lib.scan_progress import EV_STARTED
 from app.infrastructure.scanners.bandit_runner import _bandit_binary, run_bandit
 from app.infrastructure.scanners.gitleaks_runner import _gitleaks_binary, run_gitleaks
 from app.infrastructure.scanners.osv_offline_replay import run_offline_osv_replay
@@ -546,8 +547,27 @@ async def _run_llm_evidence_reanalysis(
     )
 
 
+async def _emit_patch_verification(
+    scan_id: Any,
+    status: str,
+    details: Dict[str, Any] | None = None,
+) -> None:
+    """Timeline event for the replay phase; never fails the node."""
+    try:
+        async with AsyncSessionLocal() as db:
+            await ScanRepository(db).record_scan_event(
+                scan_id,
+                "PATCH_VERIFICATION",
+                status,
+                details=details,
+            )
+    except Exception as exc:  # noqa: BLE001 - observability only
+        logger.warning("PATCH_VERIFICATION event emit failed: %s", exc)
+
+
 async def verify_patches_node(state: WorkerState) -> Dict[str, Any]:
     """Replay security checks and promote only passing REMEDIATE files."""
+    scan_id = state["scan_id"]
     scan_type = state["scan_type"]
     if scan_type not in {"SUGGEST", "REMEDIATE"}:
         return {}
@@ -572,6 +592,26 @@ async def verify_patches_node(state: WorkerState) -> Dict[str, Any]:
     evidence_validator_initialised = False
     evidence_validator_error: PatchValidationCheck | None = None
 
+    await _emit_patch_verification(
+        scan_id,
+        EV_STARTED,
+        {
+            "files_planned": len(patched_files),
+            "message": "Replaying the deterministic scanners against the patched tree.",
+        },
+    )
+
+    # ------------------------------------------------------------------
+    # Replay once per scanner, not once per file.
+    #
+    # This loop used to run a whole-repository semgrep + gitleaks pass inside
+    # every iteration, so a 254-file remediation meant 254 full semgrep runs -
+    # hours of CPU during which the scan page showed nothing at all (the reason
+    # "Generating reports" looked stuck). Both matchers below compare
+    # `file_path`, so one pass over the fully patched tree yields the same
+    # per-file verdicts, and it also catches two patches that only fail together.
+    # ------------------------------------------------------------------
+    replay_scope: dict[str, str] = {}
     for file_path, patched_content in sorted(patched_files.items()):
         plan = plans_by_path[file_path]
         plan_candidates = [
@@ -603,31 +643,72 @@ async def verify_patches_node(state: WorkerState) -> Dict[str, Any]:
                 check=replay_check,
             )
             continue
+        replay_scope[file_path] = patched_content
 
-        validation_tree = dict(live_codebase)
-        validation_tree[file_path] = patched_content
-        replay_results = [
-            (
-                "semgrep",
-                await _run_semgrep_replay(
-                    validation_tree,
-                    scan_id=state["scan_id"],
-                ),
-            ),
-            (
-                "gitleaks",
-                await _run_builtin_scanner_replay(validation_tree, "gitleaks"),
-            ),
-        ]
-        if any(path.lower().endswith(".py") for path in validation_tree):
-            replay_results.append(
-                (
-                    "bandit",
-                    await _run_builtin_scanner_replay(validation_tree, "bandit"),
-                )
+    shared_replays: dict[str, tuple[PatchValidationCheck, list]] = {}
+    osv_replay_ran = False
+    replays_started_at = time.monotonic()
+    if replay_scope:
+        replay_tree = dict(live_codebase)
+        replay_tree.update(replay_scope)
+        shared_replays["semgrep"] = await _run_semgrep_replay(
+            replay_tree, scan_id=scan_id
+        )
+        shared_replays["gitleaks"] = await _run_builtin_scanner_replay(
+            replay_tree, "gitleaks"
+        )
+        if any(path.lower().endswith(".py") for path in replay_tree):
+            shared_replays["bandit"] = await _run_builtin_scanner_replay(
+                replay_tree, "bandit"
             )
+
+    for file_path, patched_content in sorted(replay_scope.items()):
+        plan = plans_by_path[file_path]
+        plan_candidates = [
+            candidates_by_id[candidate_id]
+            for candidate_id in _candidate_ids(plan)
+            if candidate_id in candidates_by_id
+        ]
+        unsupported_origins = sorted(
+            {
+                candidate.finding.source
+                for candidate in plan_candidates
+                if candidate.finding.source in DETERMINISTIC_SOURCES
+                and candidate.finding.source not in REPLAYABLE_SOURCES
+            }
+        )
+        if unsupported_origins:
+            replay_check = PatchValidationCheck(
+                stage="originating_tool_replay",
+                status="not_run",
+                tool=", ".join(unsupported_origins),
+                detail="Stable pre-promotion replay is not implemented for this originating scanner.",
+            )
+            plan.validation_checks.append(replay_check)
+            promotable.pop(file_path, None)
+            _block_file(
+                plan=plan,
+                candidates=plan_candidates,
+                decisions=artifact.candidate_decisions,
+                check=replay_check,
+            )
+            continue
+
+        replay_results = [
+            (source, (check.model_copy(deep=True), findings))
+            for source, (check, findings) in shared_replays.items()
+            if source != "osv"
+        ]
         if _requires_osv_replay(file_path, plan_candidates):
-            replay_results.append(("osv", await _run_osv_replay(validation_tree)))
+            # OSV reads dependency manifests, so it only matters when this file's
+            # candidates came from it - and then one pass covers the whole tree.
+            if not osv_replay_ran:
+                osv_tree = dict(live_codebase)
+                osv_tree.update(replay_scope)
+                shared_replays["osv"] = await _run_osv_replay(osv_tree)
+                osv_replay_ran = True
+            check, findings = shared_replays["osv"]
+            replay_results.append(("osv", (check.model_copy(deep=True), findings)))
 
         blocking_checks: list[PatchValidationCheck] = []
         for source, (replay_check, post_findings) in replay_results:
@@ -879,6 +960,13 @@ async def verify_patches_node(state: WorkerState) -> Dict[str, Any]:
                 "validated_files": len(promotable),
                 "manual_review_files": len(artifact.files) - len(promotable),
                 "applied_candidates": len(applied_candidate_ids),
+                # What the replay phase actually did: the counts that used to be
+                # invisible while this node churned through N whole-repository scans.
+                "files_replayed": len(replay_scope),
+                "replay_scanners": sorted(shared_replays),
+                "replay_elapsed_ms": int(
+                    (time.monotonic() - replays_started_at) * 1000
+                ),
             },
         )
     return result
