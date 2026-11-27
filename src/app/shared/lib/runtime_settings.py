@@ -1,20 +1,18 @@
-"""Runtime settings an admin can change from the UI, without editing `.env`.
+"""Resolve, cache, and apply the settings an admin manages from the UI.
 
-Everything that gates scan *speed* used to live in the environment, which meant an
-operator had to ssh in, edit `.env` and restart the worker to change a number. This
-module gives those settings a `system_config` row each, resolves them once per
-process into a small in-memory cache, and republishes the live ones:
+`settings_catalog` says *which* settings are admin-managed, what their bounds are and
+when a change takes effect. This module does the mechanical part:
 
-* per-stage concurrency (`system.concurrency.*`) — read by the node that uses them;
-* provider rate limits (`system.ratelimit.<provider>.rpm|tpm`) — pushed into the
-  in-process limiter registry on every refresh, so raising them takes effect while a
-  scan is running (the worker refreshes every `REFRESH_SECONDS`);
-* worker capacity (`system.worker.*`) — applied when the worker starts, because
-  semaphores and prefetch cannot be resized under a live consumer.
-
-Resolution order is always: `system_config` row → environment/`.env` → the field's
-declared default. Values are clamped to the field's own bounds, so a typo in the
-admin UI cannot push a limit to zero or past what the code can handle.
+* resolve each key as `system_config` row -> `.env`/defaults, clamped to the catalog
+  range, into a small in-process cache;
+* republish the live ones on a refresh loop (provider rate limits, applied to the
+  existing limiter objects in place);
+* overlay the rest onto the `settings` singleton at process start
+  (`apply_to_settings`), so every existing `settings.X` reader honours the database
+  value without touching each call site - the catalog's `applies` field tells the
+  operator that this lands on the next restart;
+* seed a fresh install with every managed key at its maximum, so nothing is throttled
+  out of the box and the admin UI shows real numbers instead of empty fields.
 """
 
 from __future__ import annotations
@@ -22,129 +20,203 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
 
 from sqlalchemy import select
 
 from app.config.config import settings
+from app.shared.lib.settings_catalog import BY_ENV, BY_KEY, DESCRIPTORS
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_CONFIG_PREFIX = "system."
-
-# How often a process re-reads the rows. Thirty seconds is fast enough that an
-# operator sees the effect during a scan, slow enough to be a rounding error.
+# How often a process re-reads the rows. Thirty seconds is fast enough that an operator
+# sees the effect during a scan, slow enough to be a rounding error.
 REFRESH_SECONDS = 30
 
 
 @dataclass(frozen=True)
 class SettingSpec:
-    """One admin-managed number."""
-
     name: str  # attribute on `settings`
     key: str  # `system_config` key
-    kind: str = "int"  # "int" only for now; the reader validates the shape
-    live: bool = False  # True when a refresh applies it to a running process
+    kind: str = "int"  # int | bool | enum
+    minimum: float | None = None
+    maximum: float | None = None
+    applies: str = "next-scan"
+
+    @property
+    def live(self) -> bool:
+        return self.applies == "live"
 
 
-def _spec(name: str, key: str, *, live: bool = False) -> SettingSpec:
-    return SettingSpec(name=name, key=key, live=live)
-
-
-# Provider rate limits: local guards, not provider requirements. Raising them tells
-# the platform to stop throttling itself and let the provider answer (the HTTP client
-# still backs off on 429).
-_PROVIDER_FIELDS: Dict[str, tuple[str, str]] = {
-    "openai": ("OPENAI_REQUESTS_PER_MINUTE", "OPENAI_TOKENS_PER_MINUTE"),
-    "google": ("GOOGLE_REQUESTS_PER_MINUTE", "GOOGLE_TOKENS_PER_MINUTE"),
-    "anthropic": ("ANTHROPIC_REQUESTS_PER_MINUTE", "ANTHROPIC_TOKENS_PER_MINUTE"),
-    "deepseek": ("DEEPSEEK_REQUESTS_PER_MINUTE", "DEEPSEEK_TOKENS_PER_MINUTE"),
-    "xai": ("XAI_REQUESTS_PER_MINUTE", "XAI_TOKENS_PER_MINUTE"),
-    "custom_openai": (
-        "CUSTOM_OPENAI_REQUESTS_PER_MINUTE",
-        "CUSTOM_OPENAI_TOKENS_PER_MINUTE",
-    ),
-}
-
-_PROVIDER_LIMIT_SPECS: tuple[SettingSpec, ...] = tuple(
-    spec
-    for provider, (rpm_name, tpm_name) in _PROVIDER_FIELDS.items()
-    for spec in (
-        _spec(rpm_name, f"system.ratelimit.{provider}.rpm", live=True),
-        _spec(tpm_name, f"system.ratelimit.{provider}.tpm", live=True),
+SPECS: tuple[SettingSpec, ...] = tuple(
+    SettingSpec(
+        name=descriptor.env,
+        key=descriptor.key,
+        kind=descriptor.kind,
+        minimum=descriptor.minimum,
+        maximum=descriptor.maximum,
+        applies=descriptor.applies,
     )
-)
-
-SPECS: tuple[SettingSpec, ...] = (
-    # per-stage concurrency (read by the node on entry)
-    _spec("CONCURRENT_LLM_LIMIT", "system.concurrency.llm_limit"),
-    _spec("CONCURRENT_PROFILER_LIMIT", "system.concurrency.profiler_limit"),
-    _spec("CONCURRENT_SCANNER_LIMIT", "system.concurrency.scanner_limit"),
-    _spec("CONCURRENT_CONSOLIDATION_LIMIT", "system.concurrency.consolidation_limit"),
-    _spec("CONCURRENT_VALIDATION_LIMIT", "system.concurrency.validation_limit"),
-    # worker capacity (applied at worker start)
-    _spec("WORKER_ANALYSIS_SLOTS", "system.worker.analysis_slots"),
-    _spec("WORKER_SUBMISSION_SLOTS", "system.worker.submission_slots"),
-    _spec("WORKER_PREFETCH_COUNT", "system.worker.prefetch_count"),
-    # provider rate limits (applied live)
-    *_PROVIDER_LIMIT_SPECS,
+    for descriptor in DESCRIPTORS
+    if descriptor.env is not None
 )
 
 _BY_NAME: Dict[str, SettingSpec] = {spec.name: spec for spec in SPECS}
-_BY_KEY: Dict[str, SettingSpec] = {spec.key: spec for spec in SPECS}
 
-# Resolved values, keyed by settings attribute. Empty until the first refresh.
-_cache: Dict[str, int] = {}
+# Resolved values: by env name (what most consumers ask for) and by system key.
+_cache: Dict[str, Any] = {}
+_cache_by_key: Dict[str, Any] = {}
 _cache_lock = asyncio.Lock()
 
 
-def _bounds(spec: SettingSpec) -> tuple[int, int]:
-    """The field's declared range, used to clamp an admin-supplied value."""
-    field = type(settings).model_fields[spec.name]
-    lower = next((m.ge for m in field.metadata if hasattr(m, "ge")), 1)
-    upper = next((m.le for m in field.metadata if hasattr(m, "le")), 10_000_000)
-    return int(lower or 1), int(upper if upper is not None else 10_000_000)
-
-
-def _extract_int(raw: Any) -> int | None:
-    """A `system_config` JSONB value is `{"value": n}` (or a bare number)."""
+# ----------------------------------------------------------------------
+# coercion / validation
+# ----------------------------------------------------------------------
+def _extract_raw(raw: Any) -> Any:
+    """A `system_config` value is `{"value": n}` (other shapes exist for legacy keys)."""
     if isinstance(raw, bool):
-        return None
-    if isinstance(raw, (int, float)):
-        return int(raw)
+        return raw
+    if isinstance(raw, (int, float, str)):
+        return raw
     if isinstance(raw, dict):
-        for key in ("value", "limit", "enabled", "count", "slots"):
-            candidate = raw.get(key)
-            if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
-                return int(candidate)
+        for key in ("value", "limit", "enabled", "count", "slots", "level"):
+            if key in raw:
+                return raw[key]
     return None
 
 
-def effective(name: str) -> int:
-    """The current value for `name`: refreshed override, else the environment."""
+def _coerce(spec: SettingSpec, raw: Any) -> Any:
+    """Turn a stored value into the type the consumer expects, or None when unusable."""
+    value = _extract_raw(raw)
+    if value is None:
+        return None
+    if spec.kind == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes", "on"}:
+                return True
+            if lowered in {"false", "0", "no", "off"}:
+                return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return None
+    if spec.kind == "enum":
+        return str(value) if isinstance(value, str) else None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    low = int(spec.minimum) if spec.minimum is not None else None
+    high = int(spec.maximum) if spec.maximum is not None else None
+    if low is not None:
+        number = max(low, number)
+    if high is not None:
+        number = min(high, number)
+    return number
+
+
+def _declared_default(spec: SettingSpec) -> Any:
+    value = getattr(settings, spec.name, None)
+    return value
+
+
+def validate_write(key: str, value: Any) -> Any:
+    """Validate an admin-supplied value against the catalog.
+
+    Raises `ValueError` with an operator-facing message; returns the normalised value.
+    """
+    descriptor = BY_KEY.get(key)
+    if descriptor is None:
+        return value
+    if descriptor.kind == "int":
+        try:
+            number = int(_extract_raw(value))
+        except (TypeError, ValueError):
+            raise ValueError(f"{descriptor.label} must be a whole number.") from None
+        if descriptor.minimum is not None and number < descriptor.minimum:
+            raise ValueError(
+                f"{descriptor.label} must be at least {int(descriptor.minimum)}."
+            )
+        if descriptor.maximum is not None and number > descriptor.maximum:
+            raise ValueError(
+                f"{descriptor.label} must be at most {int(descriptor.maximum)}."
+            )
+        return number
+    if descriptor.kind == "bool":
+        raw = _extract_raw(value)
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str):
+            lowered = raw.strip().lower()
+            if lowered in {"true", "1", "yes", "on"}:
+                return True
+            if lowered in {"false", "0", "no", "off"}:
+                return False
+        raise ValueError(f"{descriptor.label} must be true or false.")
+    if descriptor.kind == "enum":
+        text = str(_extract_raw(value)).strip()
+        if descriptor.choices and text not in descriptor.choices:
+            raise ValueError(
+                f"{descriptor.label} must be one of: {', '.join(descriptor.choices)}."
+            )
+        return text
+    return value
+
+
+# ----------------------------------------------------------------------
+# resolution
+# ----------------------------------------------------------------------
+def effective(name: str) -> Any:
+    """The current value of a `settings` attribute, honouring the admin override."""
     if name in _cache:
         return _cache[name]
-    spec = _BY_NAME.get(name)
+    return _declared_default(
+        _BY_NAME.get(name) or SettingSpec(name=name, key="", kind="raw")
+    )
+
+
+def effective_key(key: str) -> Any:
+    """The current value of a `system_config` key, honouring the admin override."""
+    if key in _cache_by_key:
+        return _cache_by_key[key]
+    spec = next((s for s in SPECS if s.key == key), None)
     if spec is None:
-        return int(getattr(settings, name))
-    lower, upper = _bounds(spec)
-    return max(lower, min(int(getattr(settings, name)), upper))
+        return None
+    return _declared_default(spec)
 
 
-def resolved_snapshot() -> Dict[str, int]:
+def resolved_snapshot() -> Dict[str, Any]:
     """Every managed setting as this process currently sees it (for logs/diagnostics)."""
     return {spec.name: effective(spec.name) for spec in SPECS}
 
 
-def _apply_live(snapshot: Dict[str, int]) -> None:
-    """Push the live settings into the running rate-limit registry."""
+def _apply_live(snapshot: Dict[str, Any]) -> None:
+    """Push the live settings into the running subsystems."""
     from app.infrastructure.llm_client_rate_limiter import set_provider_limits
 
-    for provider, (rpm_name, tpm_name) in _PROVIDER_FIELDS.items():
-        rpm = snapshot.get(rpm_name, effective(rpm_name))
-        tpm = snapshot.get(tpm_name, effective(tpm_name))
+    for spec in SPECS:
+        if not spec.live:
+            continue
+        descriptor = BY_KEY.get(spec.key) or BY_ENV.get(spec.name)
+        if descriptor is None or not spec.key.startswith("system.ratelimit."):
+            continue
+        provider = spec.key.split(".")[2]
+        rpm_key = f"system.ratelimit.{provider}.rpm"
+        tpm_key = f"system.ratelimit.{provider}.tpm"
         try:
-            changed = set_provider_limits(provider, rpm=int(rpm), tpm=int(tpm))
+            changed = set_provider_limits(
+                provider,
+                rpm=int(
+                    _cache_by_key.get(rpm_key)
+                    or effective(next(s.name for s in SPECS if s.key == rpm_key))
+                ),
+                tpm=int(
+                    _cache_by_key.get(tpm_key)
+                    or effective(next(s.name for s in SPECS if s.key == tpm_key))
+                ),
+            )
         except Exception:  # noqa: BLE001 - a limiter refresh must never break work
             logger.debug("runtime_settings: limiter refresh failed", exc_info=True)
             continue
@@ -152,22 +224,88 @@ def _apply_live(snapshot: Dict[str, int]) -> None:
             logger.info(
                 "runtime_settings.applied provider=%s rpm=%s tpm=%s",
                 provider,
-                rpm,
-                tpm,
+                _cache_by_key.get(rpm_key),
+                _cache_by_key.get(tpm_key),
             )
 
 
+def apply_to_settings(snapshot: Dict[str, Any]) -> None:
+    """Overlay the resolved values onto the `settings` singleton.
+
+    Call this once, at process start, before the code that reads them runs. It is what
+    makes an admin change effective for a setting whose consumer still says
+    `settings.SOMETHING` - the catalog's `applies: app-restart` / `worker-restart` is the
+    operator-facing promise that this lands on the next start rather than immediately.
+    """
+    applied = 0
+    for spec in SPECS:
+        value = snapshot.get(spec.name)
+        if value is None:
+            continue
+        try:
+            # `Settings` is a frozen pydantic model, so plain assignment raises
+            # `frozen_instance`. The overlay is the one place that must write into it:
+            # it runs once, before the services read these values, and bypassing the
+            # model's `__setattr__` is what makes a restart-scoped key effective for
+            # consumers that still say `settings.X`.
+            object.__setattr__(settings, spec.name, value)
+            applied += 1
+        except Exception:  # noqa: BLE001 - a field that refuses the value is not fatal
+            logger.debug(
+                "runtime_settings: cannot overlay %s", spec.name, exc_info=True
+            )
+    if applied:
+        logger.info("runtime_settings.applied_to_settings count=%d", applied)
+
+
+async def refresh(db=None) -> Dict[str, Any]:
+    """Re-read the rows, refresh the cache, and publish the live ones."""
+    from app.infrastructure.database import AsyncSessionLocal
+
+    async with _cache_lock:
+        own_session = db is None
+        if own_session:
+            db = AsyncSessionLocal()
+        try:
+            from app.infrastructure.database import models as db_models
+
+            result = await db.execute(
+                select(
+                    db_models.SystemConfiguration.key,
+                    db_models.SystemConfiguration.value,
+                ).where(db_models.SystemConfiguration.key.in_(tuple(BY_KEY)))
+            )
+            rows = result.all()
+        except Exception:  # noqa: BLE001 - fall back to the environment silently
+            logger.debug("runtime_settings: read failed", exc_info=True)
+            rows = []
+        finally:
+            if own_session:
+                await db.close()
+
+        _cache.clear()
+        _cache_by_key.clear()
+        for key, raw in rows:
+            spec = next((s for s in SPECS if s.key == key), None)
+            if spec is None:
+                continue
+            value = _coerce(spec, raw)
+            if value is None:
+                continue
+            _cache[spec.name] = value
+            _cache_by_key[key] = value
+
+        resolved = resolved_snapshot()
+        _apply_live(resolved)
+        return resolved
+
+
 async def seed_missing_maximums(db=None) -> list[str]:
-    """Fill in any managed key that has no row yet, at its maximum.
+    """Fill in any managed key that has no row yet.
 
-    An operator should not have to discover which numbers gate scan speed and type
-    them in one by one: the limits this platform applies to itself are seeded at the
-    top of their declared range, and the admin UI exists to lower them for a provider
-    tier that cannot take it. Concurrency and worker capacity seed at the field
-    maximum; provider rate limits seed at the configured (environment or default)
-    value, because "no local throttle" is a provider-quota decision, not ours.
-
-    Idempotent: an existing row is never touched.
+    Concurrency and worker capacity seed at the top of their range ("do not throttle
+    yourself"); booleans and enums seed at the configured value, because "on" is a
+    policy decision, not a performance one. Idempotent: an existing row is never touched.
     """
     from app.infrastructure.database import AsyncSessionLocal
 
@@ -183,28 +321,38 @@ async def seed_missing_maximums(db=None) -> list[str]:
                 (
                     await db.execute(
                         select(db_models.SystemConfiguration.key).where(
-                            db_models.SystemConfiguration.key.in_(tuple(_BY_KEY))
+                            db_models.SystemConfiguration.key.in_(tuple(BY_KEY))
                         )
                     )
                 )
                 .scalars()
                 .all()
             )
-            for spec in SPECS:
-                if spec.key in existing:
+            for descriptor in DESCRIPTORS:
+                if descriptor.env is None or descriptor.key in existing:
                     continue
-                lower, upper = _bounds(spec)
-                from_env = int(getattr(settings, spec.name))
-                value = from_env if spec.key.startswith("system.ratelimit.") else upper
-                value = max(lower, min(value, upper))
+                if descriptor.kind == "int":
+                    value = (
+                        int(descriptor.maximum)
+                        if descriptor.maximum is not None
+                        else int(getattr(settings, descriptor.env, 0))
+                    )
+                else:
+                    value = getattr(settings, descriptor.env, descriptor.default)
+                    if isinstance(value, bool):
+                        value = bool(value)
+                    elif value is not None:
+                        value = str(value)
                 db.add(
-                    db_models.SystemConfiguration(key=spec.key, value={"value": value})
+                    db_models.SystemConfiguration(
+                        key=descriptor.key, value={"value": value}
+                    )
                 )
-                seeded.append(f"{spec.key}={value}")
+                seeded.append(f"{descriptor.key}={value}")
             if seeded:
                 await db.commit()
                 logger.warning(
-                    "runtime_settings.seeded %d limit(s) at their maximum: %s",
+                    "runtime_settings.seeded %d limit(s): %s",
                     len(seeded),
                     ", ".join(seeded),
                 )
@@ -216,49 +364,6 @@ async def seed_missing_maximums(db=None) -> list[str]:
             if own_session and db is not None:
                 await db.close()
         return seeded
-
-
-async def refresh(db=None) -> Dict[str, int]:
-    """Re-read the rows and publish the live ones. Returns the new snapshot."""
-    from app.infrastructure.database import AsyncSessionLocal
-
-    async with _cache_lock:
-        own_session = db is None
-        if own_session:
-            db = AsyncSessionLocal()
-        try:
-            from app.infrastructure.database import models as db_models
-
-            result = await db.execute(
-                select(
-                    db_models.SystemConfiguration.key,
-                    db_models.SystemConfiguration.value,
-                ).where(db_models.SystemConfiguration.key.in_(tuple(_BY_KEY)))
-            )
-            rows = result.all()
-        except Exception:  # noqa: BLE001 - fall back to the environment silently
-            logger.debug("runtime_settings: read failed", exc_info=True)
-            rows = []
-        finally:
-            if own_session:
-                await db.close()
-
-        snapshot: Dict[str, int] = {}
-        for key, raw in rows:
-            spec = _BY_KEY.get(key)
-            if spec is None:
-                continue
-            value = _extract_int(raw)
-            if value is None:
-                continue
-            lower, upper = _bounds(spec)
-            snapshot[spec.name] = max(lower, min(value, upper))
-
-        _cache.clear()
-        _cache.update(snapshot)
-        resolved = resolved_snapshot()
-        _apply_live(resolved)
-        return resolved
 
 
 async def run_refresh_loop(stop_event: asyncio.Event | None = None) -> None:
@@ -284,6 +389,6 @@ async def run_refresh_loop(stop_event: asyncio.Event | None = None) -> None:
             continue
 
 
-def managed_keys() -> Iterable[str]:
+def managed_keys() -> tuple[str, ...]:
     """The `system_config` keys this module owns (for docs/tests)."""
-    return tuple(_BY_KEY)
+    return tuple(BY_KEY)

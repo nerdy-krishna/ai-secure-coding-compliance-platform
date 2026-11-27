@@ -107,7 +107,38 @@ async function fetchAll(): Promise<SystemConfiguration[]> {
     return response.data;
 }
 
+/** One admin-managed setting as described by the backend catalog. */
+export interface CatalogSetting {
+  key: string;
+  label: string;
+  description: string;
+  kind: "int" | "bool" | "enum";
+  unit?: string | null;
+  minimum?: number | null;
+  maximum?: number | null;
+  default?: unknown;
+  /** live | next-scan | worker-restart | app-restart */
+  applies: string;
+  choices: string[];
+  advanced: boolean;
+  current?: unknown;
+}
+
+export interface CatalogSection {
+  name: string;
+  description: string;
+  settings: CatalogSetting[];
+}
+
 export const systemConfigService = {
+    /** The catalog drives the admin UI: labels, help text, bounds and apply timing. */
+    getCatalog: async (): Promise<CatalogSection[]> => {
+      const response = await apiClient.get<{ sections: CatalogSection[] }>(
+        "/admin/system-config/catalog",
+      );
+      return response.data.sections;
+    },
+
     getAll: async (): Promise<SystemConfiguration[]> => {
         return fetchAll();
     },

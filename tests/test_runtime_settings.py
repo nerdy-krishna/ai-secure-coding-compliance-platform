@@ -126,12 +126,67 @@ def test_seeding_fills_missing_keys_at_their_maximum() -> None:
     assert by_key["system.concurrency.profiler_limit"] == {"value": 500}
     assert by_key["system.concurrency.scanner_limit"] == {"value": 50}
     assert by_key["system.worker.analysis_slots"] == {"value": 32}
-    # provider limits seed at the configured value, not an invented ceiling
-    assert by_key["system.ratelimit.deepseek.rpm"] == {
-        "value": settings.DEEPSEEK_REQUESTS_PER_MINUTE
+    # integers seed at their maximum; booleans/enums at the configured value
+    assert by_key["system.evidence.enabled"] == {
+        "value": settings.EVIDENCE_STORE_ENABLED
     }
+    assert by_key["system.scan.workflow_timeout_seconds"] == {"value": 172_800}
     assert len(seeded) == len(runtime_settings.SPECS) - 1
     assert db.commits == 1
+
+
+def test_catalog_is_the_single_source_for_the_admin_ui() -> None:
+    """Every spec comes from the catalog, and every catalog row is renderable."""
+    from app.shared.lib.settings_catalog import BY_ENV, DESCRIPTORS, sections_payload
+
+    for spec in runtime_settings.SPECS:
+        assert spec.key in BY_ENV[spec.name].key
+    for descriptor in DESCRIPTORS:
+        assert descriptor.label, descriptor.key
+        assert descriptor.description, descriptor.key
+        assert descriptor.section, descriptor.key
+        if descriptor.kind == "int":
+            assert descriptor.minimum is not None and descriptor.maximum is not None
+            assert descriptor.minimum < descriptor.maximum, descriptor.key
+        if descriptor.kind == "enum":
+            assert descriptor.choices, descriptor.key
+        assert descriptor.applies in {
+            "live",
+            "next-scan",
+            "worker-restart",
+            "app-restart",
+        }, descriptor.key
+
+    sections = sections_payload()
+    assert sections, "the UI would render nothing"
+    rendered = [entry["key"] for section in sections for entry in section["settings"]]
+    assert set(rendered) == {d.key for d in DESCRIPTORS}
+
+
+def test_write_validation_rejects_out_of_range_and_bad_types() -> None:
+    from app.shared.lib.runtime_settings import validate_write
+
+    assert validate_write("system.concurrency.llm_limit", {"value": 200}) == 200
+    for bad in (0, 501, "lots"):
+        with pytest.raises(ValueError):
+            validate_write("system.concurrency.llm_limit", bad)
+    assert validate_write("system.worker.analysis_slots", {"value": 2}) == 2
+    with pytest.raises(ValueError):
+        validate_write("system.worker.analysis_slots", 33)
+    assert validate_write("system.evidence.enabled", {"value": "true"}) is True
+    with pytest.raises(ValueError):
+        validate_write("system.pentest.unknown_cwe_ceiling", "catastrophic")
+
+
+def test_overlay_applies_resolved_values_to_settings() -> None:
+    """`apply_to_settings` is what makes a restart-scoped key effective."""
+    original = settings.WORKER_ANALYSIS_SLOTS
+    try:
+        runtime_settings.apply_to_settings({"WORKER_ANALYSIS_SLOTS": 7})
+        assert settings.WORKER_ANALYSIS_SLOTS == 7
+    finally:
+        # `Settings` is frozen; the overlay itself bypasses that on purpose.
+        object.__setattr__(settings, "WORKER_ANALYSIS_SLOTS", original)
 
 
 def test_a_refresh_repoints_a_live_provider_limiter() -> None:

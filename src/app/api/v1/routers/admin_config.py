@@ -112,6 +112,26 @@ async def get_all_system_configs(
     return out
 
 
+@router.get("/catalog")
+async def get_settings_catalog(
+    current_user: db_models.User = Depends(get_admin_user),
+):
+    """The admin-managed settings: sections, help text, bounds, and when each applies.
+
+    The UI renders from this instead of a hand-maintained field list, so a new setting
+    appears (with its explanation and range) as soon as it is added to
+    `app.shared.lib.settings_catalog`.
+    """
+    from app.shared.lib import runtime_settings
+    from app.shared.lib.settings_catalog import sections_payload
+
+    sections = sections_payload()
+    for section in sections:
+        for entry in section["settings"]:
+            entry["current"] = runtime_settings.effective_key(entry["key"])
+    return {"sections": sections}
+
+
 @router.put("/{key}", response_model=api_models.SystemConfigurationRead)
 async def set_system_config(
     key: str = Path(..., min_length=1, max_length=200, pattern=r"^[a-zA-Z0-9_.\-]+$"),
@@ -122,6 +142,20 @@ async def set_system_config(
     """
     Create or update a system configuration.
     """
+    # A catalog key is validated against its declared type and range: a typo must not
+    # be able to set a concurrency limit to zero or a timeout past what the code handles.
+    from app.shared.lib.runtime_settings import validate_write
+
+    if config.value is not None:
+        try:
+            normalised = validate_write(key, config.value)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+            ) from exc
+        if normalised != config.value:
+            config = config.model_copy(update={"value": normalised})
+
     # Check if exists
     existing = await repo.get_by_key(key)
 

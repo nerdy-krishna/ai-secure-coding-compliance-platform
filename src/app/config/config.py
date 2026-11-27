@@ -539,6 +539,15 @@ class Settings(BaseSettings):
     OTEL_ENABLED: bool = False
     OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://otel-collector:4318"
     OTEL_SERVICE_NAME: str = "sccap"
+    # A request slower than this is logged at WARNING so it shows up in the logs
+    # dashboard without charting latency. Admin-managed (`system.observability.
+    # slow_request_ms`): the API applies it at start.
+    SLOW_REQUEST_MS: int = Field(
+        default=2500,
+        ge=50,
+        le=60_000,
+        description="Requests slower than this are logged at WARNING.",
+    )
     OTEL_METRIC_EXPORT_INTERVAL_MILLIS: int = Field(
         default=15_000, ge=5_000, le=300_000
     )

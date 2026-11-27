@@ -722,7 +722,10 @@ async def lifespan(app: FastAPI):
     runtime_settings_task = None
     try:
         await runtime_settings.seed_missing_maximums()
-        await runtime_settings.refresh()
+        # Overlay the resolved values onto `settings` before the services read them:
+        # this is what makes an admin-managed key effective for a consumer that still
+        # reads `settings.X` (catalog `applies: app-restart`).
+        runtime_settings.apply_to_settings(await runtime_settings.refresh())
         runtime_settings_task = asyncio.create_task(
             runtime_settings.run_refresh_loop(), name="runtime-settings-refresh"
         )
@@ -934,7 +937,9 @@ _QUIET_ACCESS_PATHS = (
 # A request slower than this is logged at WARNING so it is visible in the
 # dashboard without having to chart latency: the value is a pager-grade signal,
 # not a performance budget.
-_SLOW_REQUEST_MS = float(os.getenv("SLOW_REQUEST_MS", "2500"))
+# Admin-managed (`system.observability.slow_request_ms`); the value is resolved and
+# overlaid onto `settings` at startup, so read it from there rather than the raw env.
+_SLOW_REQUEST_MS = float(settings.SLOW_REQUEST_MS)
 
 
 def _route_template(request: Request) -> str:

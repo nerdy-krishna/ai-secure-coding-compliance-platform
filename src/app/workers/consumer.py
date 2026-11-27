@@ -1648,7 +1648,7 @@ async def _async_main() -> None:
     from app.shared.lib import runtime_settings
 
     try:
-        await runtime_settings.refresh()
+        runtime_settings.apply_to_settings(await runtime_settings.refresh())
         _init_workflow_semaphores()
     except Exception as e:  # noqa: BLE001 - a limits read must not stop the worker
         logger.warning("WORKER: runtime settings load failed: %s", e)
