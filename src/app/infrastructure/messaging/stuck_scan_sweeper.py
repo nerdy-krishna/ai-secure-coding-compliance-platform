@@ -91,10 +91,28 @@ async def _sweep_once() -> int:
             scan_status_predecessors(STATUS_FAILED)
         )
 
+        # Capture the ids first: the scan needs a visible reason on its own timeline,
+        # not just a silent status flip. "Queued for 10 minutes" with no explanation is
+        # exactly what made a worker that never consumed look like a stuck scan.
+        doomed_ids = (
+            (
+                await db.execute(
+                    select(db_models.Scan.id)
+                    .where(
+                        db_models.Scan.id.in_(stuck_ids),
+                        db_models.Scan.status.in_(tuple(sorted(allowed_sources))),
+                    )
+                    .limit(50)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
         result = await db.execute(
             update(db_models.Scan)
             .where(
-                db_models.Scan.id.in_(stuck_ids),
+                db_models.Scan.id.in_(doomed_ids),
                 db_models.Scan.status.in_(tuple(sorted(allowed_sources))),
             )
             .values(status=STATUS_FAILED)
@@ -107,6 +125,41 @@ async def _sweep_once() -> int:
                 count,
                 STUCK_SCAN_TIMEOUT_SECONDS,
             )
+            from app.infrastructure.database.repositories.scan_repo import (
+                ScanRepository,
+            )
+
+            for scan_id in doomed_ids:
+                try:
+                    await ScanRepository(db).set_error_message(
+                        scan_id,
+                        "No worker picked this scan up within "
+                        f"{STUCK_SCAN_TIMEOUT_SECONDS}s; it was marked FAILED. "
+                        "Check that the worker container is running and consuming "
+                        "code_submission_queue.",
+                    )
+                    await ScanRepository(db).create_scan_event(
+                        scan_id=scan_id,
+                        stage_name="WORKER_DELIVERY_TIMEOUT",
+                        status="FAILED",
+                        details={
+                            "message": (
+                                "No worker consumed this scan's queue message within "
+                                f"{STUCK_SCAN_TIMEOUT_SECONDS}s. The scan never started."
+                            ),
+                            "timeout_seconds": STUCK_SCAN_TIMEOUT_SECONDS,
+                            "queue": "code_submission_queue",
+                        },
+                        activity_kind="warning",
+                        commit=False,
+                    )
+                except Exception:  # noqa: BLE001 - one scan must not stop the sweep
+                    logger.warning(
+                        "stuck_scan_sweeper: could not annotate scan %s",
+                        scan_id,
+                        exc_info=True,
+                    )
+            await db.commit()
         return count or 0
 
 

@@ -1122,10 +1122,25 @@ async def _handle_message(message: AbstractIncomingMessage) -> None:
         if _CORRELATION_ID_RE.fullmatch(raw_correlation_id)
         else str(uuid.uuid4())
     )
+
+    # Attribute the delivery to its scan *before* the first log line. These lines
+    # used to be emitted before the scan context existed, so a scan whose delivery
+    # was rejected, dropped or never parsed showed an empty activity log - the
+    # operator could not tell "the worker never got it" from "the worker refused it".
+    from app.infrastructure.observability.scan_logs import set_scan_log_scan_id
+
+    try:
+        _body_probe = json.loads(message.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        _body_probe = {}
+    if isinstance(_body_probe, dict) and _body_probe.get("scan_id"):
+        set_scan_log_scan_id(_body_probe["scan_id"])
+
     logger.info(
-        "MSG: Received from queue '%s' (delivery_tag=%s).",
+        "MSG: Received from queue '%s' (delivery_tag=%s, scan_id=%s).",
         _safe(message.routing_key),
         message.delivery_tag,
+        _body_probe.get("scan_id") if isinstance(_body_probe, dict) else None,
     )
 
     initial_state = await _build_initial_state(message)
