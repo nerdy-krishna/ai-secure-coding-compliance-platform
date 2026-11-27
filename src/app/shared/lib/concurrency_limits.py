@@ -23,6 +23,7 @@ _PREFIX = "system.concurrency."
 # Mapping of env var field name → system_config suffix
 _KEYS: Dict[str, str] = {
     "CONCURRENT_LLM_LIMIT": "llm_limit",
+    "CONCURRENT_PROFILER_LIMIT": "profiler_limit",
     "CONCURRENT_SCANNER_LIMIT": "scanner_limit",
     "CONCURRENT_CONSOLIDATION_LIMIT": "consolidation_limit",
     "CONCURRENT_VALIDATION_LIMIT": "validation_limit",
@@ -55,10 +56,18 @@ async def get_concurrency_limit(
             # value is a JSONB dict: {"enabled": 50} or {"value": 50}
             val = _extract_int(row)
             if val is not None:
-                # Clamp to the settings field range
+                # Clamp to the settings field range. The bounds live in
+                # `field.metadata` as separate Ge/Le constraint objects, in
+                # declaration order - reading `metadata[0].le` assumed Le came first
+                # and raised AttributeError for every field declared `ge=` before
+                # `le=`, which is all of them. The broad `except` below then fell
+                # back to the environment default, so the admin "Concurrency limits"
+                # panel silently changed nothing.
                 field = settings.model_fields[setting_name]
-                lo = field.metadata[0].ge if field.metadata else 1
-                hi = field.metadata[0].le if field.metadata else 500
+                lower = next((m.ge for m in field.metadata if hasattr(m, "ge")), None)
+                upper = next((m.le for m in field.metadata if hasattr(m, "le")), None)
+                lo = lower if lower is not None else 1
+                hi = upper if upper is not None else 10_000
                 return max(lo, min(val, hi))
     except Exception:
         logger.debug(

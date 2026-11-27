@@ -25,6 +25,7 @@ from typing import Any, Dict
 
 from langgraph.types import interrupt
 
+from app.config.config import settings
 from app.infrastructure.agents.file_profiler import (
     create_file_profiler,
     file_profile_response_schema_text,
@@ -69,7 +70,10 @@ logger = logging.getLogger(__name__)
 
 # Bounds concurrent utility-LLM profiling calls so a large scan can't
 # saturate the provider rate limit. Mirrors the analysis-side cap.
-CONCURRENT_PROFILER_LIMIT = 5
+# Fallback only: the live value comes from `system.concurrency.profiler_limit`
+# (admin UI) or `CONCURRENT_PROFILER_LIMIT` in the environment, read when the node
+# starts. Pinned at 5 it made profiling the slowest stage by far on large repos.
+CONCURRENT_PROFILER_LIMIT = settings.CONCURRENT_PROFILER_LIMIT
 
 
 async def estimate_profiling_cost_node(state: WorkerState) -> Dict[str, Any]:
@@ -304,7 +308,22 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"error_message": f"Could not start file profiler: {exc}"}
 
-    semaphore = asyncio.Semaphore(CONCURRENT_PROFILER_LIMIT)
+    from app.shared.lib.concurrency_limits import get_concurrency_limit
+
+    try:
+        async with AsyncSessionLocal() as _db_limits:
+            profiler_limit = await get_concurrency_limit(
+                _db_limits, "CONCURRENT_PROFILER_LIMIT"
+            )
+    except Exception:  # noqa: BLE001 - a limits lookup must not stop profiling
+        profiler_limit = CONCURRENT_PROFILER_LIMIT
+    logger.info(
+        "profile_files: scan_id=%s profiling %d file(s) at concurrency %d",
+        scan_id,
+        len(files),
+        profiler_limit,
+    )
+    semaphore = asyncio.Semaphore(profiler_limit)
 
     async def _profile(path: str, content: str):
         if should_skip_llm_profile(

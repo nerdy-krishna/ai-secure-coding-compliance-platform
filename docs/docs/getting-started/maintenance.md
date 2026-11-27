@@ -300,13 +300,37 @@ docker compose --profile pentesting-v5 ps pentest-engine   # should be Up
 
 ## Throughput knobs
 
-| Setting | Default | Effect |
-|---|---|---|
-| `WORKER_ANALYSIS_SLOTS` | 3 | Scans one worker container runs at once (LLM phase) |
-| `WORKER_SUBMISSION_SLOTS` | 1 | Pre-LLM pipelines at once |
-| `WORKER_PREFETCH_COUNT` | 5 | Messages held in flight per worker |
-| `CONCURRENT_LLM_LIMIT` | 50 | Concurrent model calls per reasoning lane, inside one scan |
-| `CONCURRENT_SCANNER_LIMIT` | 10 | Concurrent scanner processes per scan |
+| Setting | Default | Takes effect | Effect |
+|---|---|---|---|
+| `WORKER_ANALYSIS_SLOTS` | 3 | worker restart | Scans one worker container runs at once (LLM phase) |
+| `WORKER_SUBMISSION_SLOTS` | 1 | worker restart | Pre-LLM pipelines at once |
+| `WORKER_PREFETCH_COUNT` | 5 | worker restart | Messages held in flight per worker |
+| `CONCURRENT_LLM_LIMIT` | 50 | next node / next scan | Concurrent model calls per reasoning lane, inside one scan |
+| `CONCURRENT_PROFILER_LIMIT` | 5 | next node / next scan | Concurrent per-file profiling calls — the slowest stage on a large repo |
+| `CONCURRENT_SCANNER_LIMIT` | 10 | next node / next scan | Concurrent scanner processes per scan |
+| `CONCURRENT_CONSOLIDATION_LIMIT` | 10 | next node / next scan | Concurrent consolidation calls |
+| `CONCURRENT_VALIDATION_LIMIT` | 10 | next node / next scan | Concurrent cross-file validation calls |
+| `DEEPSEEK_REQUESTS_PER_MINUTE` / `_TOKENS_PER_MINUTE` (and the same pair per provider) | 120 RPM / 400k TPM | worker restart | The provider rate limiter. This, not socket count, is what bounds throughput |
+
+The `CONCURRENT_*` limits are read from `system_config` (`system.concurrency.*`)
+when the node that uses them starts, so they are changeable from **Admin → System
+Config → Concurrency limits** with no restart — the change lands on the node that
+runs next, not one already in flight. Provider RPM/TPM are read once at process
+start, so they need `docker compose restart worker`; a scan in flight resumes from
+its checkpoint when the worker comes back.
+
+Provider *connections* are never the ceiling: the platform caps requests/tokens per
+minute and calls in flight per stage long before it runs out of sockets. Raising the
+in-flight limits past the provider's RPM/TPM only queues work inside the rate
+limiter — the log line `rate_limiter.throttled wait=… tpm_limit=…` says so directly.
+
+To find the real brake on a running scan, group its LLM calls by stage:
+
+```sql
+select stage, count(*) calls, sum(total_tokens) tokens,
+       round(sum(total_tokens) / greatest(extract(epoch from max(created_at) - min(created_at)) / 60, 1)) as tokens_per_min
+from llm_usage_events where scan_id = '<uuid>' group by 1 order by 2 desc;
+```
 
 `docker compose restart worker` applies them. Each analysis slot keeps a full scan
 state in memory, so raise it against measured headroom, not hope. Pentests are

@@ -75,6 +75,7 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
 
   // Concurrency limits
   const [llmLimit, setLlmLimit] = useState<string>("50");
+  const [profilerLimit, setProfilerLimit] = useState<string>("5");
   const [scannerLimit, setScannerLimit] = useState<string>("10");
   const [consolidationLimit, setConsolidationLimit] = useState<string>("10");
   const [validationLimit, setValidationLimit] = useState<string>("10");
@@ -188,6 +189,7 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
         }
       };
       loadConc("system.concurrency.llm_limit", setLlmLimit, "50");
+      loadConc("system.concurrency.profiler_limit", setProfilerLimit, "5");
       loadConc("system.concurrency.scanner_limit", setScannerLimit, "10");
       loadConc("system.concurrency.consolidation_limit", setConsolidationLimit, "10");
       loadConc("system.concurrency.validation_limit", setValidationLimit, "10");
@@ -270,6 +272,7 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
   const handleSaveConcurrency = async () => {
     const pairs: [string, string][] = [
       ["system.concurrency.llm_limit", llmLimit],
+      ["system.concurrency.profiler_limit", profilerLimit],
       ["system.concurrency.scanner_limit", scannerLimit],
       ["system.concurrency.consolidation_limit", consolidationLimit],
       ["system.concurrency.validation_limit", validationLimit],
@@ -740,13 +743,21 @@ const SystemConfigTab: React.FC<{ embedded?: boolean }> = ({ embedded = false })
 
       <SettingsCard
         title="Concurrency limits"
-        description="Max in-flight LLM and scanner calls. Changes take effect on the next scan — no restart needed. Increase for faster scans on high-RPM providers (DeepSeek, OpenAI T4). Decrease if you hit rate-limit errors."
+        description="Max in-flight LLM and scanner calls. Changes take effect on the next scan — no restart needed. File profiling is the slowest stage on a large repo: it ran five files at a time before this setting existed. Increase these for faster scans on high-RPM providers (DeepSeek, OpenAI T4), and keep them below your provider's requests/tokens-per-minute or every extra call just waits in the rate limiter. Decrease if you hit rate-limit errors."
       >
         <div className="settings-two-column" style={{ display: "grid", gap: 14 }}>
           <LabeledNumber
             label="LLM agents"
             value={llmLimit}
             onChange={setLlmLimit}
+            min={1}
+            max={500}
+            disabled={savingConcurrency || loadingMeta}
+          />
+          <LabeledNumber
+            label="File profiling"
+            value={profilerLimit}
+            onChange={setProfilerLimit}
             min={1}
             max={500}
             disabled={savingConcurrency || loadingMeta}

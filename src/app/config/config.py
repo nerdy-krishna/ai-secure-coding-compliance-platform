@@ -322,7 +322,9 @@ class Settings(BaseSettings):
     # The highest severity a finding may carry when its CWE has no impact model. An
     # unrecognised weakness has no evidence of critical impact, and defaulting it to
     # critical is how a missing CSP header ranked alongside SQL injection.
-    PENTEST_UNKNOWN_CWE_CEILING: Literal["info", "low", "medium", "high", "critical"] = Field(
+    PENTEST_UNKNOWN_CWE_CEILING: Literal[
+        "info", "low", "medium", "high", "critical"
+    ] = Field(
         default="medium",
         description="Severity ceiling for findings whose CWE has no impact model.",
     )
@@ -393,6 +395,16 @@ class Settings(BaseSettings):
         ge=1,
         le=50,
         description="Max concurrent SAST scanner subprocesses (prescan).",
+    )
+    # Per-file profiling used to be pinned at 5 by a module constant, so a 500-file
+    # submission moved in waves of five LLM calls no matter how much provider
+    # capacity an operator had. It is a first-class limit now: setting here,
+    # `system.concurrency.profiler_limit` override in the admin UI.
+    CONCURRENT_PROFILER_LIMIT: int = Field(
+        default=5,
+        ge=1,
+        le=500,
+        description="Max concurrent per-file profiling LLM calls.",
     )
     CONCURRENT_CONSOLIDATION_LIMIT: int = Field(
         default=10,
