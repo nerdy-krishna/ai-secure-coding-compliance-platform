@@ -260,3 +260,58 @@ def test_the_status_view_names_what_it_is_working_on():
     assert "last_action" in source and "planned_method" in source
     # A run with nothing pending has no current focus.
     assert asyncio.run(validation_mod.current_focus("run", [])) is None
+
+
+def test_only_the_findings_the_operator_sees_are_validated():
+    """The list must be the consolidated bucket, not the raw SAST/LLM rows behind it.
+
+    Validating a raw row would test a duplicate of a finding that consolidation merged,
+    reworded or dropped — and the operator never sees it in the report.
+    """
+    import inspect
+
+    from app.pentest import validation as validation_mod
+
+    source = inspect.getsource(validation_mod.load_code_findings)
+    assert 'finding_bucket == "consolidated"' in source
+
+    counts_source = inspect.getsource(validation_mod.code_finding_counts)
+    assert 'finding_bucket == "consolidated"' in counts_source
+
+
+def test_the_pentest_sees_the_whole_finding_not_just_its_title():
+    """Root cause, remediation and the flagged code are what make a finding testable."""
+    from app.pentest import validation as validation_mod
+
+    finding = validation_mod.CodeFinding(
+        id=7,
+        title="SQL injection in order lookup",
+        cwe="89",
+        file_path="app/orders.py",
+        line=118,
+        severity="Critical",
+        snippet="db.execute(f'SELECT * FROM orders WHERE id={order_id}')",
+        klass="sqli",
+        description="User input is interpolated into the query.",
+        remediation="Use a parameterised query.",
+        confidence="high",
+        source="semgrep",
+    )
+
+    rendered = validation_mod.render_findings([finding])
+
+    assert "root cause: User input is interpolated" in rendered
+    assert "remediation: Use a parameterised query." in rendered
+    assert "db.execute(" in rendered
+    assert "semgrep" in rendered
+
+
+def test_the_scan_list_names_the_project():
+    import inspect
+
+    from app.api.v1.routers import pentest as pentest_router
+
+    source = inspect.getsource(pentest_router.list_whitebox_scans)
+    assert "project_name" in source
+    # And the finding count is drawn from the consolidated bucket only.
+    assert 'finding_bucket == "consolidated"' in source
