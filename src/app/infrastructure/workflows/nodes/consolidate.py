@@ -8,6 +8,8 @@ from collections import Counter
 from typing import Any, Dict, List
 
 from app.core.schemas import FixResult
+from app.infrastructure.database import AsyncSessionLocal
+from app.infrastructure.database.repositories.scan_repo import ScanRepository
 from app.infrastructure.validation.sandbox_client import (
     run_sandbox_validation,
     select_validation_profiles,
@@ -21,6 +23,7 @@ from app.shared.lib.import_requirements import (
     build_static_import_inventory,
     validate_candidate_imports,
 )
+from app.shared.lib.scan_progress import EV_COMPLETED, EV_STARTED
 from app.shared.lib.patch_planner import (
     CandidatePatchDecision,
     PatchPlanBudget,
@@ -209,6 +212,28 @@ def _verify_syntax_with_treesitter(
         )
 
 
+# Compiling/testing the tree once per planned file is the single most expensive step of
+# a SUGGEST scan: 282 planned files meant 282 sandbox runs, and the stage reported
+# nothing for the whole of it. Syntax and dependency validity are already checked
+# per file by the planner; the sandbox is the expensive end-to-end gate, so it runs for
+# the first N files and the remainder is recorded as explicitly skipped rather than
+# silently trusted.
+MAX_SANDBOX_VALIDATED_FILES = 10
+
+
+async def _emit_patch_planning(
+    scan_id: Any, status: str, details: Dict[str, Any] | None = None
+) -> None:
+    """Timeline event for the planning phase; never fails the node."""
+    try:
+        async with AsyncSessionLocal() as db:
+            await ScanRepository(db).record_scan_event(
+                scan_id, "PATCH_PLANNING", status, details=details
+            )
+    except Exception as exc:  # noqa: BLE001 - observability only
+        logger.debug("PATCH_PLANNING event emit failed: %s", exc)
+
+
 async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
     """Plan SUGGEST/REMEDIATE patches; promote only REMEDIATE outputs.
 
@@ -251,6 +276,16 @@ async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
     candidates_by_file: Dict[str, List[FixResult]] = {}
     for candidate in fix_candidates:
         candidates_by_file.setdefault(candidate.finding.file_path, []).append(candidate)
+
+    await _emit_patch_planning(
+        scan_id,
+        EV_STARTED,
+        {
+            "files_with_candidates": len(candidates_by_file),
+            "candidates": len(fix_candidates),
+            "message": "Resolving candidate anchors against the original snapshot.",
+        },
+    )
 
     file_plans = []
     decisions: list[CandidatePatchDecision] = []
@@ -302,9 +337,27 @@ async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
         str(candidate.candidate_id): candidate for candidate in fix_candidates
     }
     decisions_by_id = {str(decision.candidate_id): decision for decision in decisions}
+    sandbox_validated = 0
+    sandbox_skipped = 0
     for file_path, patched_content in list(planned_outputs.items()):
         validation_tree = dict(live_codebase)
         validation_tree[file_path] = patched_content
+        if sandbox_validated >= MAX_SANDBOX_VALIDATED_FILES:
+            sandbox_skipped += 1
+            plans_by_path[file_path].validation_checks.append(
+                PatchValidationCheck(
+                    stage="sandbox_profile",
+                    status="skipped",
+                    blocking=False,
+                    tool="sccap-patch-validator",
+                    detail=(
+                        "Sandbox validation budget reached "
+                        f"({MAX_SANDBOX_VALIDATED_FILES} files per scan); syntax and "
+                        "dependency validity were still checked for this file."
+                    ),
+                )
+            )
+            continue
         profiles = select_validation_profiles(validation_tree)
         if profiles:
             sandbox_checks = await run_sandbox_validation(
@@ -320,6 +373,7 @@ async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
                     detail="No allowlisted compiler/test profile matches this repository.",
                 )
             ]
+        sandbox_validated += 1
         plan = plans_by_path[file_path]
         plan.validation_checks.extend(sandbox_checks)
         blocking_failures = [
@@ -357,6 +411,19 @@ async def consolidate_and_patch_node(state: WorkerState) -> Dict[str, Any]:
         files=file_plans,
         candidate_decisions=decisions,
     ).model_dump(mode="json")
+    await _emit_patch_planning(
+        scan_id,
+        EV_COMPLETED,
+        {
+            "files_with_candidates": len(candidates_by_file),
+            "files_planned": len(planned_outputs),
+            "candidates": len(fix_candidates),
+            "sandbox_validated": sandbox_validated,
+            "sandbox_skipped": sandbox_skipped,
+            "decisions": len(decisions),
+        },
+    )
+
     validation_summary = build_validation_summary(
         scan_type=scan_type,
         all_candidates=all_candidates,

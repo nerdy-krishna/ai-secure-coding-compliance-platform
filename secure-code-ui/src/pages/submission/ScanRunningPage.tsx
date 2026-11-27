@@ -1559,13 +1559,19 @@ const ScanRunningPage: React.FC = () => {
 
           <button
             className="sccap-btn sccap-btn-primary"
-            onClick={() => navigate(`/analysis/results/${scanId}`)}
-            disabled={!isTerminal}
-            style={{ opacity: !isTerminal ? 0.6 : 1 }}
+            onClick={() =>
+              // `preview=1` tells the results page to render what exists instead of
+              // bouncing back here: findings are persisted as they are consolidated,
+              // so the operator can read them while the tail (patch planning, report
+              // generation) is still running.
+              navigate(
+                `/analysis/results/${scanId}${isTerminal ? "" : "?preview=1"}`,
+              )
+            }
             title={
               isTerminal
                 ? "Open the scan results"
-                : "Available once the scan finishes"
+                : "Open the findings recorded so far — the scan is still running"
             }
           >
             {!isTerminal ? (

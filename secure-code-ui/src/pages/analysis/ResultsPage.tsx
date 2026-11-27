@@ -15,7 +15,12 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { scanService } from "../../shared/api/scanService";
 import { debugService } from "../../shared/api/debugService";
 import { useAuth } from "../../shared/hooks/useAuth";
@@ -324,12 +329,21 @@ const ResultsPage: React.FC = () => {
   // If the scan isn't terminal yet (queued, running, or awaiting approval)
   // the live progress + approval UI lives on /analysis/scanning/:id. Bounce
   // there so deep-links from search/admin/back-button always end up where
-  // the user can act on the scan.
+  // the user can act on the scan — unless the operator asked for the partial
+  // results explicitly (`?preview=1` from the scan page), in which case the
+  // findings recorded so far are exactly what they want to read.
+  const [searchParams] = useSearchParams();
+  const previewRequested = searchParams.get("preview") === "1";
   useEffect(() => {
-    if (data?.status && scanId && !isTerminalStatus(data.status)) {
+    if (
+      data?.status &&
+      scanId &&
+      !isTerminalStatus(data.status) &&
+      !previewRequested
+    ) {
       navigate(`/analysis/scanning/${scanId}`, { replace: true });
     }
-  }, [data?.status, scanId, navigate]);
+  }, [data?.status, scanId, navigate, previewRequested]);
 
   const allFindings = useMemo(() => {
     const llmFindings = flattenFindings(data?.summary_report);
@@ -551,8 +565,28 @@ const ResultsPage: React.FC = () => {
   const displayProjectName =
     projectName ?? report?.project_name ?? null;
 
+  const showingPartialResults =
+    previewRequested && data?.status && !isTerminalStatus(data.status);
+
   return (
     <div className="fade-in" style={{ display: "grid", gap: 16 }}>
+      {showingPartialResults && (
+        <div
+          className="sccap-card"
+          style={{
+            padding: "10px 14px",
+            borderColor: "var(--warning)",
+            background: "var(--warning-weak, var(--bg-soft))",
+            fontSize: 12.5,
+            color: "var(--fg)",
+          }}
+        >
+          <strong>Partial results.</strong> This scan is still{" "}
+          {String(data.status).toLowerCase().replace(/_/g, " ")} — the findings
+          below are what has been consolidated so far, and more may be added when it
+          finishes. Reload to refresh.
+        </div>
+      )}
       {/* header */}
       <PageHeader
         crumbs={(() => {
