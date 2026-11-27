@@ -228,7 +228,7 @@ class LLMClient:
         # Per-stage LLM temperature (#78). None ⇒ provider default.
         self.temperature = temperature
         self._frozen = True  # V15.4.1: freeze instance; no further attribute writes.
-        logger.info(
+        logger.debug(
             "LLMClient initialized for provider=%s model=%s temperature=%s",
             self.provider_name,
             llm_config.model_name,
@@ -337,7 +337,8 @@ class LLMClient:
                     exc_info=True,
                 )
 
-        logger.info(
+        # Per call, twice per call (structured retry) - DEBUG, not a scan milestone.
+        logger.debug(
             "Entering LLM structured output generation.",
             extra={
                 "model_name": self.db_llm_config.model_name,
@@ -486,16 +487,19 @@ class LLMClient:
                 logger.warning("Langfuse span open failed: %s", e)
                 span_ctx = None
 
-        await _emit_llm_activity(
-            "LLM_CALL",
-            "STARTED",
-            {
-                "stage": usage_context.stage,
-                "agent_name": usage_context.agent_name,
-                "provider": self.provider_name,
-                "model": self.db_llm_config.model_name,
-            },
-        )
+        # `file_path` is what makes a row identifiable: profiling and analysis run
+        # one call per file per agent, so without it the log is a wall of identical
+        # "LLM call COMPLETED" lines.
+        activity_identity = {
+            "stage": usage_context.stage,
+            "agent_name": usage_context.agent_name,
+            "provider": self.provider_name,
+            "model": self.db_llm_config.model_name,
+        }
+        if usage_context.file_path:
+            activity_identity["file_path"] = usage_context.file_path
+
+        await _emit_llm_activity("LLM_CALL", "STARTED", dict(activity_identity))
 
         async def _on_retry(
             attempt: int, max_retries: int, delay: float, exc: Exception
@@ -765,10 +769,7 @@ class LLMClient:
             "LLM_CALL",
             "FAILED" if error_message else "COMPLETED",
             {
-                "stage": usage_context.stage,
-                "agent_name": usage_context.agent_name,
-                "provider": self.provider_name,
-                "model": self.db_llm_config.model_name,
+                **activity_identity,
                 "elapsed_ms": latency_ms,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -806,7 +807,7 @@ async def get_llm_client(
     key to the ORM instance as a dynamic attribute — LLMClient reads it
     from there. `temperature` (#78) is the per-stage LLM temperature;
     ``None`` leaves the provider default."""
-    logger.info(
+    logger.debug(
         "Attempting to get LLM client for config ID.",
         extra={"llm_config_id": str(llm_config_id)},
     )
@@ -820,7 +821,7 @@ async def get_llm_client(
         logger.error("Failed to decrypt API key for LLM config %s.", llm_config_id)
         return None
 
-    logger.info(
+    logger.debug(
         "Successfully retrieved LLM config and returning new LLMClient instance."
     )
     return LLMClient(config, temperature=temperature)

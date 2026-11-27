@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from typing import Any, Dict
 
@@ -325,17 +326,50 @@ async def profile_files_node(state: WorkerState) -> Dict[str, Any]:
     )
     semaphore = asyncio.Semaphore(profiler_limit)
 
+    async def _emit_file_profiled(path: str, *, elapsed_ms: int, profile) -> None:
+        """One row per file, so the page names the file being worked on.
+
+        Profiling is the stage where a large repo spends most of its wall clock, and
+        it emitted nothing per file: the operator could only see "Profiling files"
+        and a stalled counter.
+        """
+        try:
+            async with AsyncSessionLocal() as _db:
+                await ScanRepository(_db).record_scan_event(
+                    scan_id,
+                    "FILE_PROFILED",
+                    EV_COMPLETED,
+                    details={
+                        "file_path": path,
+                        "elapsed_ms": elapsed_ms,
+                        "classification": (
+                            getattr(profile, "classification", None)
+                            if profile
+                            else "skipped"
+                        ),
+                    },
+                )
+        except Exception as _e:  # noqa: BLE001 - progress must never break profiling
+            logger.debug("profile_files: FILE_PROFILED emit failed: %s", _e)
+
     async def _profile(path: str, content: str):
         if should_skip_llm_profile(
             existing_profiles.get(path) or {}, deep_vendor_scan=deep_vendor_scan
         ):
+            await _emit_file_profiled(path, elapsed_ms=0, profile=None)
             return path, None
         async with semaphore:
+            started = time.perf_counter()
             profile = await profiler.profile_file(
                 path,
                 content,
                 domain_vocabulary,
                 repo_summary=repo_files.get(path),
+            )
+            await _emit_file_profiled(
+                path,
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                profile=profile,
             )
             return path, profile
 

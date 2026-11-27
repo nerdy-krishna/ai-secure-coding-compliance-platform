@@ -4,7 +4,7 @@ import concurrent.futures
 import hashlib
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 import fnmatch
 
 from pydantic import BaseModel, Field
@@ -15,6 +15,20 @@ from tree_sitter_languages import get_language
 # Custom exception for grammar loading issues
 class GrammarLoadingError(Exception):
     pass
+
+
+# `tree_sitter_languages.get_language` logs on every call and re-resolves the shared
+# object each time. The map is built per file, so a 500-file repository printed 500
+# `grammar.load lang=…` lines at INFO. Resolve once per language here.
+_GRAMMAR_CACHE: Dict[str, Any] = {}
+
+
+def _cached_language(lang_name: str):
+    cached = _GRAMMAR_CACHE.get(lang_name)
+    if cached is None:
+        cached = get_language(lang_name)
+        _GRAMMAR_CACHE[lang_name] = cached
+    return cached
 
 
 # --- ADD a global ignore list ---
@@ -310,10 +324,9 @@ class RepositoryMappingEngine:
             raise GrammarLoadingError(f"No language configured for file: {file_path}")
 
         try:
-            self.logger.info("grammar.load lang=%s", lang_name)
-            language = get_language(
-                lang_name
-            )  # This is where the original error occurs
+            if lang_name not in _GRAMMAR_CACHE:
+                self.logger.debug("grammar.load lang=%s", lang_name)
+            language = _cached_language(lang_name)
             if (
                 language is None
             ):  # Defensive check, get_language usually raises on failure

@@ -199,6 +199,7 @@ class FindingConsolidator:
                         llm_config_id=self._llm_config_id,
                     ),
                     scan_id=self._scan_id,
+                    file_path=file_path,
                 ),
             )
         except BudgetExceededError:

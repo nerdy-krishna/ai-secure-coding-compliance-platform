@@ -203,10 +203,12 @@ const eventDisplayName = (stageName: string): string => {
 };
 
 const ACTIVITY_DETAIL_KEYS = [
+  // file_path leads: profiling and analysis log one call per file per agent, so the
+  // file is the only thing that distinguishes two otherwise identical rows.
+  "file_path",
   "message",
   "scanner",
   "scanner_status",
-  "file_path",
   "classification",
   "progress_category",
   "findings_count",
@@ -327,6 +329,35 @@ const formatActivityDetails = (
 };
 
 type ActivityTone = "error" | "warn" | "ok" | "info";
+
+// A backend log line carries its level in `status` (INFO / WARNING / ERROR), while a
+// stage event carries a scan status there (COMPLETED / FAILED / WAITING). The Type
+// filter has to speak both languages or the "Warnings" view shows an empty panel while
+// warnings sit in the stream as `log` rows.
+const LOG_LEVELS = new Set(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]);
+
+const isLogRow = (event: ScanEventMsg): boolean =>
+  event.activity_kind === "log" || LOG_LEVELS.has((event.status || "").toUpperCase());
+
+const isWarningLog = (event: ScanEventMsg): boolean => {
+  const level = (event.status || "").toUpperCase();
+  return isLogRow(event) && (level === "WARNING" || level === "ERROR" || level === "CRITICAL");
+};
+
+const matchesActivityKind = (event: ScanEventMsg, kind: string): boolean => {
+  if (kind === "all") return true;
+  if (kind === "warning") {
+    // stage events classified as warnings, plus everything WARNING-or-worse that the
+    // application logged for this scan
+    return (
+      event.activity_kind === "warning" ||
+      event.activity_kind === "degradation" ||
+      isWarningLog(event)
+    );
+  }
+  if (kind === "log") return event.activity_kind === "log";
+  return event.activity_kind === kind;
+};
 
 // Colour a log line by what it actually says, so a failure is visible in the
 // stream instead of looking like every other line.
@@ -695,7 +726,11 @@ const ScanRunningPage: React.FC = () => {
           // mergeScanEvents dedupes by event_id, so a replay on
           // reconnect or an overlap with the seed/poll feed is a no-op.
           setEvents((prev) => mergeScanEvents(prev, [msg]));
-          if (msg.stage_name === "FILE_ANALYZED" && msg.details?.file_path) {
+          if (
+            (msg.stage_name === "FILE_ANALYZED" ||
+              msg.stage_name === "FILE_PROFILED") &&
+            msg.details?.file_path
+          ) {
             const filePath = String(msg.details.file_path).slice(0, 512);
             if (!filePath) return;
             const findingsCount = Math.max(
@@ -1012,8 +1047,7 @@ const ScanRunningPage: React.FC = () => {
     () =>
       activityEvents.filter(
         (event) =>
-          (activityKindFilter === "all" ||
-            event.activity_kind === activityKindFilter) &&
+          matchesActivityKind(event, activityKindFilter) &&
           (activityStageFilter === "all" ||
             event.stage_name === activityStageFilter),
       ),
@@ -2114,7 +2148,7 @@ const ScanRunningPage: React.FC = () => {
             <SectionHead
               title={
                 <>
-                  <Icon.File size={14} /> Files analyzed{isTerminal ? "" : " (live)"}
+                  <Icon.File size={14} /> Files processed{isTerminal ? "" : " (live)"}
                 </>
               }
             />
@@ -2225,7 +2259,7 @@ const ScanRunningPage: React.FC = () => {
                 <option value="scanner">Scanners</option>
                 <option value="llm_call">LLM calls</option>
                 <option value="retry">Retries</option>
-                <option value="warning">Warnings</option>
+                <option value="warning">Warnings &amp; errors</option>
                 <option value="degradation">Degraded</option>
                 <option value="decision">Decisions</option>
                 <option value="cancellation">Cancellation</option>

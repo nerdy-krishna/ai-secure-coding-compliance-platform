@@ -113,7 +113,11 @@ def activity_kind_for(stage_name: str, event_status: str) -> str:
         "PATCH_VERIFICATION",
     }:
         return "scanner"
-    if "LLM" in stage or stage in {"FILE_ANALYZED", "PROFILING_FILES"}:
+    if "LLM" in stage or stage in {
+        "FILE_ANALYZED",
+        "FILE_PROFILED",
+        "PROFILING_FILES",
+    }:
         return "llm_call"
     if status == EV_WAITING or "REVIEW" in stage or "APPROVAL" in stage:
         return "decision"

@@ -72,6 +72,9 @@ class LLMUsageContext:
     rag_job_id: uuid.UUID | None = None
     pentest_attempt_id: uuid.UUID | None = None
     scan_task_id: uuid.UUID | None = None
+    # Which file this call is about. Profiling/analysis are per file, so without
+    # this every LLM row in the activity log looks identical.
+    file_path: str | None = None
     # CVE applicability work is attributed to the asset it is about.
     asset_id: uuid.UUID | None = None
     actor_user_id: int | None = None

@@ -109,8 +109,22 @@ class AsyncRateLimiter:
                         self.tpm_limit,
                         current_tokens,
                     )
+                elif time_to_wait >= 30.0:
+                    # A half-minute wait means the limits are wrong for this plan,
+                    # not that a call happened to queue: that is worth a warning.
+                    logger.warning(
+                        "rate_limiter.long_wait wait=%.1fs current_requests=%d "
+                        "current_tokens=%d rpm_limit=%d tpm_limit=%d - raise the "
+                        "provider limits under Admin -> System Config, or lower the "
+                        "in-flight concurrency",
+                        time_to_wait,
+                        current_requests,
+                        current_tokens,
+                        self.rpm_limit,
+                        self.tpm_limit,
+                    )
                 else:
-                    logger.info(
+                    logger.debug(
                         "rate_limiter.throttled wait=%.3fs current_requests=%d "
                         "current_tokens=%d rpm_limit=%d tpm_limit=%d",
                         time_to_wait,

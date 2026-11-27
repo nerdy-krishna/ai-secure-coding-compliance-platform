@@ -385,7 +385,7 @@ def _build_rag_context(
     # with the empty pattern strings.
     raw_documents = retrieved_guidelines.get("documents") or []
     documents = raw_documents[0] if raw_documents else []
-    logger.info(
+    logger.debug(
         "agent: RAG retrieval done",
         extra={"agent": agent_name, "doc_count": len(documents)},
     )
@@ -650,7 +650,7 @@ async def analysis_node(
     # invisible, which let scans complete with 0 LLM calls go unnoticed
     # for weeks. Each guard now logs why it skipped so the failure
     # mode is grep-able.
-    logger.info(
+    logger.debug(
         "agent: invocation entered",
         extra={
             "agent": agent_name,
@@ -723,7 +723,7 @@ async def analysis_node(
     )
     response_model = InitialAnalysisResponse
 
-    logger.info(
+    logger.debug(
         "agent: assessing file",
         extra={
             "agent": agent_name,
@@ -791,6 +791,7 @@ async def analysis_node(
                 llm_config_id=llm_config_id,
             ),
             scan_id=scan_id,
+            file_path=filename,
         ),
     )
 
@@ -935,9 +936,20 @@ async def analysis_node(
                     )
                 )
             else:
+                # Actionable form: the operator needs to know *which* file and why,
+                # not just that something was dropped.
+                _offered = (initial_finding.fix.original_snippet or "").strip()
                 logger.warning(
-                    "agent: discarding fix due to snippet verification failure",
-                    extra={"agent": agent_name},
+                    "agent: fix discarded - suggested snippet not found in the file",
+                    extra={
+                        "agent": agent_name,
+                        "source_file_path": filename,
+                        "snippet_lines": len(_offered.splitlines()),
+                        "snippet_preview": (
+                            _offered.splitlines()[0][:120] if _offered else ""
+                        ),
+                        "reason": "original_snippet_absent_after_llm_correction",
+                    },
                 )
 
         final_findings.append(finding_obj)
@@ -947,7 +959,7 @@ async def analysis_node(
     # raises `KeyError: "Attempt to overwrite 'filename' in LogRecord"`
     # before the line is ever emitted. Use `source_file_path` here to
     # match the convention the rest of this module uses.
-    logger.info(
+    logger.debug(
         "agent: analysis complete",
         extra={
             "agent": agent_name,
@@ -982,8 +994,18 @@ async def _verify_and_correct_snippet(
             break  # Failed last attempt
 
         logger.warning(
-            "agent: snippet not found, retrying with LLM correction",
-            extra={"attempt": attempt + 1},
+            "agent: snippet not found in file, asking the model to correct it",
+            extra={
+                "agent": agent_name,
+                "source_file_path": unit_key,
+                "attempt": attempt + 1,
+                "attempts_max": 4,
+                "snippet_preview": (
+                    original_snippet.strip().splitlines()[0][:120]
+                    if original_snippet.strip()
+                    else ""
+                ),
+            },
         )
         correction_prompt = f"""
         The following 'original_snippet' was not found in the 'source_code'.
@@ -1024,7 +1046,7 @@ async def _verify_and_correct_snippet(
                 original_snippet = (
                     correction_result.parsed_output.corrected_original_snippet
                 )
-                logger.info("agent: received corrected snippet from LLM")
+                logger.debug("agent: received corrected snippet from LLM")
             else:
                 logger.warning(
                     "agent: LLM failed to provide corrected snippet on this attempt"
